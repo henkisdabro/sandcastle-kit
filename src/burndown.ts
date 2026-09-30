@@ -27,7 +27,7 @@ import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, record
 import { ensureImage, sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockWorktree } from "./worktree-lock.ts";
 
-type Issue = { number: number; title: string };
+type Issue = { number: number; title: string; body?: string };
 type Gate = { name: string; pass: boolean };
 type GateRun = { gates: Gate[]; failure?: { name: string; command: string; exitCode: number; output: string } };
 type Outcome = {
@@ -41,6 +41,9 @@ type Outcome = {
   repairs: number;
   gates: Gate[];
 };
+
+// "Blocked by #12", "Depends on: #12" and the like, in an issue body.
+const DEPENDENCY = /(?:blocked by|depends on):?\s+#(\d+)/gi;
 
 // What a spent plan allowance leaves at the end of an agent's log.
 const LIMIT = /out of usage credits|usage limit|limit reached/i;
@@ -75,17 +78,45 @@ export const burndown = async (project: Project) => {
   // The work list lives in GitHub labels, never in an agent's context. Named
   // issues are checked on the host, so a typo or a closed issue fails here and
   // not inside a sandbox that has already installed its dependencies.
-  const issues: Issue[] = process.env.ISSUES
+  const queued: Issue[] = process.env.ISSUES
     ? process.env.ISSUES.split(",").map((n) => {
-        const i = JSON.parse(sh("gh", ["issue", "view", n.trim(), "--json", "number,title,state"]));
+        const i = JSON.parse(sh("gh", ["issue", "view", n.trim(), "--json", "number,title,state,body"]));
         if (i.state !== "OPEN") throw new Error(`#${i.number} is ${i.state.toLowerCase()}.`);
-        return { number: i.number, title: i.title };
+        return { number: i.number, title: i.title, body: i.body };
       })
     : JSON.parse(
-        sh("gh", ["issue", "list", "--state", "open", "--label", project.label, "--limit", "100", "--json", "number,title"]),
+        sh("gh", ["issue", "list", "--state", "open", "--label", project.label, "--limit", "100", "--json", "number,title,body"]),
       );
-  if (issues.length === 0) {
+  if (queued.length === 0) {
     console.log(`No ${project.label} issues. Queue drained.`);
+    return;
+  }
+
+  // An issue whose dependency is still open waits - including a dependency
+  // in this same run, which cannot be on base before landing, so the
+  // dependent would branch without it. The next run picks it up. A
+  // dependency that cannot be read counts as open: guessing wrong there
+  // starts work on a missing foundation.
+  const depState = new Map<number, string>();
+  const openDependencies = (issue: Issue) =>
+    [...new Set([...(issue.body ?? "").matchAll(DEPENDENCY)].map((m) => Number(m[1])))].filter((d) => {
+      if (!depState.has(d)) {
+        try {
+          depState.set(d, JSON.parse(sh("gh", ["issue", "view", String(d), "--json", "state"])).state);
+        } catch {
+          depState.set(d, "UNREADABLE");
+        }
+      }
+      return depState.get(d) !== "CLOSED";
+    });
+  const waiting = queued.flatMap((i) => {
+    const on = openDependencies(i);
+    return on.length ? [{ issue: i.number, on }] : [];
+  });
+  for (const w of waiting) console.log(`  #${w.issue} waits for ${w.on.map((d) => `#${d}`).join(", ")} to close`);
+  const issues = queued.filter((i) => !waiting.some((w) => w.issue === i.number));
+  if (issues.length === 0) {
+    console.log("Every queued issue is waiting on another. Nothing to start.");
     return;
   }
 
@@ -489,5 +520,6 @@ export const burndown = async (project: Project) => {
     const skipped = issues.length - results.length;
     console.log(`\nSTOPPED EARLY: #${limitHit} hit the plan's usage limit; ${skipped} queued issue(s) were not started.`);
   }
+  for (const w of waiting) console.log(`waiting, not started: #${w.issue} - on ${w.on.map((d) => `#${d}`).join(", ")}`);
   console.log("Branches left standing for review are not deleted. Nothing is pushed.");
 };

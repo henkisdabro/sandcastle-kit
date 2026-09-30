@@ -102,7 +102,7 @@ comments, and the gates can prove it.
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the issue is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the repo's human label (e.g. `needs-human`), with a comment saying why |
-   | Blocked by another issue | no label; comment "blocked by #N" so no run starts it early |
+   | Blocked by another issue | label it, with a `Blocked by #N` line in the issue *body* (`gh issue edit`): a run skips it until #N is closed |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child issues; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |

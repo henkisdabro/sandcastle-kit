@@ -211,6 +211,10 @@ and your gates could prove it. The `/sandcastle queue` skill action walks every 
 gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
 labels it.
 
+An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
+A run skips it while #12 is open - even when #12 is in the same run, because the dependent
+would branch before #12 lands - and the next run picks it up.
+
 ```mermaid
 flowchart LR
     O["📥 Open issues"] --> T{"🧐 Could an agent finish it<br/>with no chat context,<br/>and could the gates prove it?"}
