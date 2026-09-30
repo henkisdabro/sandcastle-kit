@@ -164,9 +164,11 @@ comments, and the gates can prove it.
    (`DRY_RUN=1`) merges and closes nothing, and its agents are told to write nothing to the tracker.
 2. **Start it in a tab of its own, never beside yourself** - it takes hours. In a terminal
    multiplexer you can drive (for example Herdr: `test "${HERDR_ENV:-}" = 1`):
-   1. Create a tab without taking focus, at the repo root: `herdr tab create --label "sandcastle
-      <project>" --cwd <root> --no-focus`. Its root pane is the run pane: name it `herdr pane
-      rename <pane> "sandcastle run <project>"`.
+   1. Create a tab without taking focus, at the repo root, in your own workspace: `herdr tab
+      create --workspace "$HERDR_WORKSPACE_ID" --label "sandcastle <project>" --cwd <root>
+      --no-focus`. Without `--workspace` Herdr uses the focused one, and the user may have moved
+      to another workspace by then. Its root pane is the run pane: name it `herdr pane rename
+      <pane> "sandcastle run <project>"`.
    2. Run `<env vars> sandcastle run` in that pane (`herdr pane run <pane> "..."`). Alone in its
       tab, the run adopts it: the status view opens beside it at once - before the image check,
       preflight and base gates - and one pane per sandbox follows, each reported to the agent

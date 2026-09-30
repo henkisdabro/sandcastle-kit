@@ -90,8 +90,9 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   };
 
   const mine = process.env.HERDR_PANE_ID;
-  const myTab = safe(() => (mine ? (herdrJson(["pane", "get", mine]).result.pane.tab_id as string) : undefined));
+  const me = safe(() => (mine ? (herdrJson(["pane", "get", mine]).result.pane as { tab_id: string; workspace_id: string }) : undefined));
   if (failed) return NONE;
+  const myTab = me?.tab_id;
 
   // A previous run's view is replaced, not stacked. Only ids from our own
   // record are closed, and never the pane this run is typed in: a tab the
@@ -133,9 +134,12 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
       herdr(["pane", "rename", mine, `sandcastle run ${project.name}`]);
     });
   } else {
+    // The run's own workspace, never Herdr's default (the focused one): the
+    // user has often moved elsewhere by the time the view opens.
+    const workspace = me?.workspace_id ?? process.env.HERDR_WORKSPACE_ID;
     const created = safe(() =>
       herdrJson([
-        "tab", "create", "--workspace", process.env.HERDR_WORKSPACE_ID ?? "", "--label", `sandcastle ${project.name}`,
+        "tab", "create", ...(workspace ? ["--workspace", workspace] : []), "--label", `sandcastle ${project.name}`,
         "--cwd", project.root, "--no-focus",
       ]),
     );

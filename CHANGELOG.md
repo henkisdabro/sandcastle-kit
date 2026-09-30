@@ -14,6 +14,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A run that will not start on a dirty tree or the wrong branch now says so without a stack
   trace, and lists the uncommitted files (the first ten) that are in its way.
 
+### Fixed
+
+- Inside Herdr, a run's tab opens in the workspace the run was started from, not in whichever
+  workspace had focus when the tab was created. Both the skill's run tab and the kit's own view
+  tab name their workspace now.
+
 ## [0.2.0] - 2026-09-30
 
 ### Upgrading
