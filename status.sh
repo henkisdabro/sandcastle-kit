@@ -165,6 +165,8 @@ load_waiting() {
   return 0
 }
 
+label() { printf '%s%s%s %s│%s ' "$accent" "$(pad "$1" 7)" "$off" "$rule" "$off"; }
+
 run_line() {
   local f=logs/run.json orch pid started finished code models
   [ -f "$f" ] || { printf '%s' "${mute}no run recorded yet${off}"; return 0; }
@@ -174,7 +176,7 @@ run_line() {
     '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models] | join("\u001f")' "$f")
   started=$(epoch_fmt "$(utc_to_epoch "${started%%.*}")" '+%d %b %H:%M')
   if [ -n "$finished" ]; then
-    printf '%s' "${mute}last run from ${started}, ended (exit ${code})${off}"
+    printf '%s' "${mute}last one from ${started}, ended (exit ${code})${off}"
   elif kill -0 "$pid" 2>/dev/null; then
     printf '%s' "${ylw}running${off} ${mute}since ${started}${off}"
   else
@@ -345,10 +347,12 @@ render() {
 
   printf '%s\n' "$line"
   printf '%s\n' " ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off} · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}  ${rule}│${off}  ${accent}${now}${off}"
-  printf '%s\n' " $(run_line)"
+  # Label, then a dim pipe, then the value: the label column reads as the
+  # row's title at a glance.
+  printf '%s\n' " $(label run)$(run_line)"
   models=$(models_line)
-  [ -n "$models" ] && printf '%s\n' " ${mute}models  ${models}${off}"
-  printf '%s\n' " ${mute}machine  $(pool_line)${off}"
+  [ -n "$models" ] && printf '%s\n' " $(label models)${mute}${models}${off}"
+  printf '%s\n' " $(label machine)${mute}$(pool_line)${off}"
   printf '%s\n' "$line"
   printf '%s%s %s %s %s %s %s %s%s\n' "$head" \
     "$(pad ISSUE $W_ISSUE)" "  $(pad STATE $W_STATE)" "$(pad AGE $W_AGE)" \
