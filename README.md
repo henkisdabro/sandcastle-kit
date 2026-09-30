@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -62,8 +62,8 @@ sandcastle init              # or ask your agent: /sandcastle init
 sandcastle build
 ```
 
-Fill in the gate commands (`lint`, `test`, ...) in `.sandcastle/config.ts` - see
-[Set up a project](#-set-up-a-project).
+`init` fills in the gate commands (`lint`, `test`, ...) from your stack; check them against CI in
+`.sandcastle/config.ts` - see [Set up a project](#-set-up-a-project).
 
 **3. Label some issues `ready-for-agent` and try a dry run:**
 
@@ -123,6 +123,7 @@ flowchart LR
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again. |
+| 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -130,8 +131,8 @@ flowchart LR
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
-| 📺 | **A live status view** | Opened automatically in a sibling pane if you use the Herdr terminal multiplexer. |
-| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage and starting runs. |
+| 📺 | **A live status view** | Opened automatically in a sibling pane if you use the Herdr terminal multiplexer; flags a sandbox gone quiet. Phase timings are logged per issue. |
+| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage, starting runs and updating. |
 
 ## 🔄 How it works
 
@@ -256,6 +257,13 @@ with it.
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
 
+## 📥 Updating
+
+In each project, ask your agent for `/sandcastle update`. It pulls the kit, rebuilds the images,
+re-runs the hook check, and walks you through anything in [`CHANGELOG.md`](CHANGELOG.md)'s
+**Upgrading** notes that affects that project. Existing configs keep working: a new field is
+always optional. [By hand](docs/INSTALL.md#-updating).
+
 ## 🧰 Commands
 
 | Command | What it does | Calls the model? |
@@ -343,6 +351,9 @@ and the kit narrows what can cross it:
   run it on your machine when it lands.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/info/` and the base branch are fingerprinted; if a
   sandbox changes them, the run stops before the host runs another git command there.
+- 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
+  labelled `needs-human` during the run means no merge - and the merge takes the exact commit
+  the gates passed on. A run that dies between merging and closing is finished by the next one.
 - 🛡️ **Protected paths.** A green branch that changes hooks, CI, `.claude/` settings, `.sandcastle/`,
   package-manager config or install scripts is labelled `needs-human` and left for you to merge.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
@@ -359,7 +370,8 @@ pool caps live sandboxes (default 6) and gate runs (default 2) across all projec
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. The status header
 shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
-first issue that hits the usage limit stops that run's queue.
+first issue that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
+starting issues before that, once a usage window passes `USAGE_STOP` percent.
 
 ## 🩺 Troubleshooting
 
@@ -374,6 +386,9 @@ first issue that hits the usage limit stops that run's queue.
 | `STOPPED ... .git/config ... changed` | Inspect `git config --local --list`, `.git/info/` and `git reflog <base>` before any other git command in that repo. |
 | An issue `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
+| `waits for #N to close` / `waiting, not started` | The issue body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to issues named in `ISSUES=`. |
+| `gated green but not merged` | The issue was closed or labelled `needs-human` during the run, or its branch gained a commit after the gates passed. The branch is left standing. |
+| `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
 ## 🤖 If you are an AI coding agent reading this
 
@@ -400,6 +415,7 @@ The `sandcastle` command is run **from inside a project**, never from inside the
 | "which issues can the agents do?", "triage for sandcastle" | `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. |
 | "start a run", "burn down the queue" | [Run](#-run). A run takes hours: start it in a separate terminal or pane, not in your own shell. |
 | "is it working?", "what is it doing?" | `sandcastle status 0` for a snapshot; logs are in the project's `.sandcastle/logs/`. |
+| "update sandcastle", "get the latest kit" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating) by hand. It pulls the kit and brings the current project up to date; `CHANGELOG.md` says what changed. |
 | Anything fails | `sandcastle doctor`, then [Troubleshooting](#-troubleshooting). |
 
 **Rules for you:**
