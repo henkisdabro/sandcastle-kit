@@ -31,6 +31,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/burndown.ts` | The orchestrator: fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
+| `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |

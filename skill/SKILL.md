@@ -134,7 +134,8 @@ comments, and the gates can prove it.
 2. Start it outside your own shell - it takes hours. In a terminal multiplexer you can drive (for
    example Herdr: `test "${HERDR_ENV:-}" = 1`), open a sibling pane at the repo root without
    taking focus and run `<env vars> sandcastle run` there; inside Herdr the run opens its own
-   status pane. Otherwise give the user the command to run in a second terminal, plus
+   status pane and a `sandcastle <project>` tab with one pane per sandbox, each reported to the
+   agent sidebar as working, blocked or done. Otherwise give the user the command to run in a second terminal, plus
    `sandcastle status` for a third.
 3. A run pushes nothing. Pushing the merged base branch afterwards follows the repo's own
    shipping rules. When reading the report: `needs-human` branches were green but change hooks,

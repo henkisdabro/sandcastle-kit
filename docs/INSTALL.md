@@ -34,8 +34,8 @@ the same by hand.
 > Whichever runtime you choose, `docker info` must succeed in the same shell you run `sandcastle`
 > from. `sandcastle doctor` checks this for you.
 
-**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), Herdr (automatic status
-pane), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
+**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) (status pane and a pane per
+sandbox, opened automatically), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
 
 ## 🧙 What `sandcastle setup` does
 

@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -131,7 +131,8 @@ flowchart LR
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
-| 📺 | **A live status view** | Opened automatically in a sibling pane if you use the Herdr terminal multiplexer; flags a sandbox gone quiet. Phase timings are logged per issue. |
+| 📺 | **A live status view** | `sandcastle status` in any terminal; flags a sandbox gone quiet. Phase timings are logged per issue. |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The status view opens itself, every sandbox gets a pane, and Herdr's agent sidebar shows each one as working, blocked or done - see [Works best in Herdr](#-works-best-in-herdr). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage, starting runs and updating. |
 
 ## 🔄 How it works
@@ -257,6 +258,37 @@ with it.
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
 
+## 🪟 Works best in Herdr
+
+sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
+terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
+out its own view:
+
+- 📊 **Status pane.** `sandcastle status` opens in a sibling pane, and a later run reuses it.
+- 🐳 **A pane per sandbox.** A `sandcastle <project>` tab gets one pane per concurrent sandbox,
+  named after its issue and following that sandbox's agent log as it moves through implement,
+  review and repair.
+- 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
+  reports each sandbox's phase to Herdr itself: *working* while it implements, reviews or gates,
+  *done* when it ships, *blocked* on a red gate, a merge conflict or a branch held for a human.
+  The tab and workspace badges roll the states up, so a glance at the sidebar says whether a run
+  needs you.
+- 🔔 **A notification** with the run's summary when it ends.
+
+The next run replaces the previous run's tab rather than stacking another. Outside Herdr none of
+this happens and nothing else changes - watch with `sandcastle status` in a second terminal.
+`SANDCASTLE_HERDR_VIEW=0` keeps the status pane but skips the per-sandbox tab.
+
+```
+┌ you ─────────────────┬ sandcastle run ──────────────┐   tab "sandcastle my-app"
+│ your agent / shell   │ 2 issue(s), 2 at a time ...  │   ┌ #12 Add rate limiter ───────┐
+│                      │ [impl-12] Started ...        │   │ Bash(pnpm test)             │
+│                      ├ sandcastle my-app ───────────┤   ├ #15 Fix date parsing ───────┤
+│                      │ #12 ● review   3m  2 ...     │   │ Edit(src/date.ts)           │
+│                      │ #15 ● impl     1m  0 ...     │   └─────────────────────────────┘
+└──────────────────────┴──────────────────────────────┘   sidebar: #12 review ● · #15 implement ●
+```
+
 ## 📥 Updating
 
 In each project, ask your agent for `/sandcastle update`. It pulls the kit, rebuilds the images,
@@ -310,6 +342,7 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
+| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens) |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 

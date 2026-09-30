@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
+import { herdr, herdrJson, IN_HERDR } from "./herdr.ts";
 import { credentials, KIT, sh } from "./sandbox.ts";
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
@@ -173,15 +174,8 @@ export const archiveFinishedLogs = (project: Project) => {
 // .sandcastle/logs/status-pane; a closed pane is simply replaced.
 // ---------------------------------------------------------------------------
 
-// stderr is captured, not inherited: a closed pane makes herdr print
-// `{"error":{"code":"pane_not_found",...}}` there, which leaked into the run's
-// output although the catch below already handles it.
-const herdr = (args: string[]) =>
-  execFileSync("herdr", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-const herdrJson = (args: string[]) => JSON.parse(herdr(args));
-
 export const openStatusPane = (project: Project) => {
-  if (process.env.HERDR_ENV !== "1") {
+  if (!IN_HERDR) {
     console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
     return;
   }

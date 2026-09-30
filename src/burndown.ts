@@ -22,6 +22,7 @@ import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback }
 import type { Project } from "./config.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, plan as leanPlan, reportHookCheck } from "./lean.ts";
+import { openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
 import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, recordRun, renderPrompts } from "./run.ts";
 import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
@@ -152,6 +153,8 @@ export const burndown = async (project: Project) => {
   // `waiting` lets the status view show a held-back issue as blocked, not queued.
   recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN, waiting });
   openStatusPane(project);
+  // One Herdr pane per concurrent sandbox, reporting each one's phase.
+  const view = openSandboxView(project, Math.min(CONCURRENCY, issues.length));
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.
   let tampered: string | undefined;
@@ -181,6 +184,7 @@ export const burndown = async (project: Project) => {
   const timed = async <T>(issue: number, phase: string, fn: () => Promise<T>): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
+    view.phase(issue, phase);
     let ok = false;
     try {
       const result = await fn();
@@ -236,6 +240,7 @@ export const burndown = async (project: Project) => {
     if (merge) {
       return { issue: issue.number, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
     }
+    view.claim(issue.number, issue.title);
 
     const started = Date.now();
     releaseBranchWorktree(branch);
@@ -391,8 +396,12 @@ export const burndown = async (project: Project) => {
         }
         results.push(
           await withSlot("sandboxes", `${project.name} #${issue.number}`, () => pipeline(issue)).then(
-            (value) => ({ status: "fulfilled", value }) as const,
+            (value) => {
+              view.finish(issue.number, value.status);
+              return { status: "fulfilled", value } as const;
+            },
             (reason) => {
+              view.finish(issue.number, "crashed");
               if (hitLimit(issue.number)) limitHit = issue.number;
               return { status: "rejected", reason } as const;
             },
@@ -510,6 +519,13 @@ export const burndown = async (project: Project) => {
     }
   }
 
+  for (const n of merged) view.landed(n, true, "merged");
+  for (const n of closedEarlier) view.landed(n, true, "closed");
+  for (const n of conflicted) view.landed(n, false, "merge conflict");
+  for (const f of failedToLand) view.landed(f.issue, false, "failed to land");
+  for (const k of skipped) view.landed(k.issue, false, "not merged");
+  for (const h of heldBack) view.landed(h.issue, false, "needs a human");
+
   // -------------------------------------------------------------------------
   // Phase 4: the gates on the merged base branch. Each branch was gated on its
   // own; together they can still be red.
@@ -574,4 +590,10 @@ export const burndown = async (project: Project) => {
     console.log(`worktree kept with uncommitted files: #${k.issue} - ${k.path} (inspect, then \`git worktree remove --force\` it)`);
   }
   console.log("Branches left standing for review are not deleted. Nothing is pushed.");
+  view.close(
+    `merged ${merged.length}` +
+      (conflicted.length + failedToLand.length + skipped.length ? `, not landed ${conflicted.length + failedToLand.length + skipped.length}` : "") +
+      (heldBack.length ? `, needs a human ${heldBack.length}` : "") +
+      ` of ${issues.length}`,
+  );
 };
