@@ -33,6 +33,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle init` detects the stack (Node, Python with uv, Go, Rust) and writes gates, setup
   and, where needed, a project Dockerfile.
 - `/sandcastle update` skill action.
+- `sandcastle lean` and every run warn when a hidden skill, agent or MCP file is named by a
+  tracked non-Markdown file, such as a test that reads it and would fail on every branch.
 - Herdr sandbox view: inside Herdr, a run opens a tab with a pane per concurrent sandbox, each
   following its agent's log, and reports every sandbox to Herdr's agent sidebar as working,
   blocked or done, landing outcome included. `SANDCASTLE_HERDR_VIEW=0` turns it off.
