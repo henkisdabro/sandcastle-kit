@@ -28,7 +28,10 @@ bug no gate would fail"), never as an incident from a named project.
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
 | `src/cli.ts` | Commands: setup, doctor, init, build, lean, lean-apply (internal hook), preflight, run, status |
-| `src/burndown.ts` | The orchestrator: fan out, implement, review, gate, land, verify, report |
+| `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
+| `src/burndown.ts` | The orchestrator: fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
+| `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
+| `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
@@ -39,13 +42,14 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/config.ts` | The `ProjectConfig` type and loader |
-| `prompts/` | Implement and review templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
+| `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux |
 | `skill/SKILL.md` | The `sandcastle` agent skill - one file shared by Claude Code, Codex and OpenCode |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
-| `docs/INSTALL.md` | Requirements, what `setup` does, the manual install |
+| `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
+| `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
 `@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in
 `node_modules/@ai-hero/sandcastle/dist` - read the source there when unsure.
@@ -89,3 +93,8 @@ directory, never in a real project.
   as an array; an interpolated string is only for a script run inside the container.
 - British English in prose; hyphens with spaces ( - ) rather than em dashes.
 - Commit messages: `type: subject` (Conventional Commits), imperative, body says why.
+- Every user-facing change gets a `CHANGELOG.md` line under `[Unreleased]`. One an existing
+  project may need to act on - a new default that changes what a run does or spends, a new
+  convention, anything `sandcastle init` now writes differently - also gets an **Upgrading**
+  note, and if a project needs a check or a fix, a step in the skill's `update` action. Write
+  that step as a check that is safe to repeat, never as "since version X".

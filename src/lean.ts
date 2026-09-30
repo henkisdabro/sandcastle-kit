@@ -206,6 +206,23 @@ const instructionsTokens = (root: string) => {
   return walk("CLAUDE.md") || walk("AGENTS.md");
 };
 
+// Tracked files, outside what lean hides, that name a hidden path. Hiding a
+// skill a test reads (a guard over agent docs, say) turns the test gate red
+// on every branch - and on the base branch - for a reason no agent can fix.
+// Markdown is skipped: docs mention these paths all the time and never run.
+export const hiddenReferences = (root: string, p: Plan) =>
+  p.hide.flatMap((path) => {
+    let hits: string[] = [];
+    try {
+      hits = sh("git", ["grep", "-l", "-F", path, "--", ".", ":(exclude)*.md", ...p.hide.map((h) => `:(exclude)${h}`)], root)
+        .split("\n")
+        .filter(Boolean);
+    } catch {
+      /* git grep exits 1 when nothing matches */
+    }
+    return hits.length ? [{ path, by: hits }] : [];
+  });
+
 export const report = (project: Project, p: Plan) => {
   const rows = p.items.map((i) => [
     i.kept ? "keep" : i.kind === "hook" ? "drop" : "hide",
@@ -229,6 +246,12 @@ export const report = (project: Project, p: Plan) => {
   );
   const kept = p.items.filter((i) => i.kept && i.kind !== "hook");
   if (kept.length) console.log(`  Kept on purpose (lean.keep): ${kept.map((i) => `${i.kind}:${i.id}`).join(", ")}`);
+
+  const refs = hiddenReferences(project.root, p);
+  if (refs.length) {
+    console.log("\n  Hidden, but named by files a sandbox keeps - if a gate, test or hook reads one, keep it:");
+    for (const r of refs) console.log(`    ${r.path}  <- ${r.by.slice(0, 3).join(", ")}${r.by.length > 3 ? ` (+${r.by.length - 3})` : ""}`);
+  }
 
   // Enforcement that lives outside the repo never reaches a sandbox.
   const local = readJson(join(project.root, ".claude/settings.local.json"));

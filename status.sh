@@ -151,6 +151,22 @@ pool_line() {
   printf '%s' "$out"
 }
 
+# Whether the recorded run is alive (RUN_LIVE=1), and while it is, its
+# "issue|#dep, #dep" lines from run.json's `waiting`.
+WAITING=""; RUN_LIVE=0
+load_waiting() {
+  WAITING=""; RUN_LIVE=0
+  local f=logs/run.json pid
+  [ -f "$f" ] || return 0
+  pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  RUN_LIVE=1
+  WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
+  return 0
+}
+
+label() { printf '%s%s%s %s│%s ' "$accent" "$(pad "$1" 7)" "$off" "$rule" "$off"; }
+
 run_line() {
   local f=logs/run.json orch pid started finished code models
   [ -f "$f" ] || { printf '%s' "${mute}no run recorded yet${off}"; return 0; }
@@ -160,18 +176,23 @@ run_line() {
     '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models] | join("\u001f")' "$f")
   started=$(epoch_fmt "$(utc_to_epoch "${started%%.*}")" '+%d %b %H:%M')
   if [ -n "$finished" ]; then
-    printf '%s' "${mute}last run ${head}${orch}${mute} from ${started}, ended (exit ${code}) · ${models}${off}"
+    printf '%s' "${mute}last one from ${started}, ended (exit ${code})${off}"
   elif kill -0 "$pid" 2>/dev/null; then
-    printf '%s' "${ylw}running${off} ${head}${orch}${off} ${mute}since ${started} · ${models}${off}"
+    printf '%s' "${ylw}running${off} ${mute}since ${started}${off}"
   else
-    printf '%s' "${hot}killed${off} ${head}${orch}${off} ${mute}from ${started}, no clean exit · ${models}${off}"
+    printf '%s' "${hot}killed${off} ${mute}from ${started}, no clean exit${off}"
   fi
+}
+
+models_line() {
+  [ -f logs/run.json ] || return 0
+  jq -r '.models // empty' logs/run.json 2>/dev/null
 }
 
 render() {
   local now issues n phase log age commits state glyph colour activity rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
-  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q
+  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
   local -a out=()
   local n_out=0
 
@@ -186,6 +207,7 @@ render() {
 
   now=$(date +%H:%M:%S)
   load_container_stats
+  load_waiting
   merged_list=$(git branch --merged "$BASE" --list 'agent/issue-*' 2>/dev/null)
 
   line="${rule}$(printf "%${cols}s" '' | tr ' ' '─')${off}"
@@ -194,26 +216,34 @@ render() {
   # runs on agent/issue-1086-closeout while agent/issue-1086 is long merged, and
   # keying both on 1086 hid the live sandbox under the merged row.
   issues=$(ls logs/agent-issue-*.log 2>/dev/null \
-    | sed -nE 's#.*agent-issue-([0-9]+(-[a-z]+)*)-(impl|review)-.*#\1#p' | sort -u)
+    | sed -nE 's#.*agent-issue-([0-9]+(-[a-z]+)*)-(impl|review|repair)-.*#\1#p' | sort -u)
 
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
     grep -qx "$q" <<<"$issues" && continue
+    # Held back by an open dependency (run.json's `waiting`), not waiting for
+    # a sandbox - only while the run that decided it is live.
+    on=$(printf '%s\n' "$WAITING" | awk -F'|' -v k="$q" '$1==k{print $2; exit}')
+    if [ -n "$on" ]; then
+      qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"
+    else
+      qstate="queued"; qglyph="○"; qtext="waiting for a sandbox"
+    fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
       "$head" "$(pad "#$q" $W_ISSUE)" "$off" \
-      "$blu" "○" "$(pad queued $W_STATE)" "$off" \
+      "$blu" "$qglyph" "$(pad "$qstate" $W_STATE)" "$off" \
       "$gry" "$(pad - $W_AGE)" "$off" \
       "$gry" "$(pad - $W_COMMITS)" "$off" \
       "$gry" "$(pad - $W_CPU)" "$off" \
       "$gry" "$(pad - $W_MEM)" "$off" \
-      "$mute" "waiting for a sandbox" "$off")
+      "$mute" "$qtext" "$off")
     out[n_out]="2	0	$q	$rendered"; n_out=$((n_out+1)); c_queue=$((c_queue+1))
   done
 
   for n in $issues; do
-    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log 2>/dev/null | head -1)
+    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log 2>/dev/null | head -1)
     [ -z "$log" ] && continue
-    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *) phase="impl";; esac
+    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
     age=$(( $(date +%s) - mtime ))
@@ -226,12 +256,22 @@ render() {
     # Order matters: a branch with no commits yet is trivially "merged",
     # so an in-flight worktree has to win over the merged check.
     stat_for "$n"
-    if [ -d "worktrees/agent-issue-$n" ] && [ -z "$S_CPU" ] && [ $(( $(date +%s) - mtime )) -ge 1800 ]; then
+    quiet=0; act_col="$mute"
+    # A worktree is live work only while a container holds it or its run is
+    # alive. Sandcastle keeps a closed sandbox's worktree when it has
+    # uncommitted files (a setup step's lockfile, say); that one is shown by
+    # its branch's state, with a note, not as working forever.
+    live_wt=0; kept_wt=0
+    if [ -d "worktrees/agent-issue-$n" ]; then
+      if [ -n "$S_CPU" ] || [ "$RUN_LIVE" = 1 ]; then live_wt=1; else kept_wt=1; fi
+    fi
+    if [ "$live_wt" = 1 ] && [ -z "$S_CPU" ] && [ $(( $(date +%s) - mtime )) -ge 1800 ]; then
       # A worktree with no container and a log quiet for 30 minutes is a run
       # that died or was killed, not one in flight.
       state="stalled"; glyph='!'; colour="$hot"; prio=1; c_stand=$((c_stand+1))
-    elif [ -d "worktrees/agent-issue-$n" ]; then
+    elif [ "$live_wt" = 1 ]; then
       state="$phase"; glyph='●'; colour="$ylw"; prio=0; c_work=$((c_work+1))
+      quiet=$(( $(date +%s) - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
       state="no branch"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1))
     elif [ "$commits" -gt 0 ] && ! git cherry "$BASE" "agent/issue-$n" 2>/dev/null | grep -q '^+'; then
@@ -276,6 +316,14 @@ render() {
         -e 's#\*\*##g' -e 's#`##g' \
         -e 's#[[:space:]]+# #g' -e 's#^ ##' \
       | cut -c1-"$w_act")
+    [ "$kept_wt" = 1 ] && activity=$(printf 'worktree kept (uncommitted files) - %s' "$activity" | cut -c1-"$w_act")
+    # A live sandbox whose log has been silent for ten minutes may be thinking
+    # or may be hung; either way it is worth a look before the 30-minute
+    # stalled mark or the agent's own idle timeout.
+    if [ "$quiet" -ge 600 ]; then
+      activity=$(printf 'quiet %sm - %s' "$((quiet/60))" "$activity" | cut -c1-"$w_act")
+      act_col="$hot"
+    fi
     # A spent Max plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
     # Only on an unfinished row: a merged branch's old log keeps the line.
@@ -293,13 +341,18 @@ render() {
       "$head" "$(pad "$commits" $W_COMMITS)" "$off" \
       "$cpu_col" "$(pad "$cpu" $W_CPU)" "$off" \
       "$head" "$(pad "$mem" $W_MEM)" "$off" \
-      "$mute" "$activity" "$off")
+      "$act_col" "$activity" "$off")
     out[n_out]="$prio	$mtime	$n	$rendered"; n_out=$((n_out+1))
   done
 
   printf '%s\n' "$line"
   printf '%s\n' " ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off} · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}  ${rule}│${off}  ${accent}${now}${off}"
-  printf '%s\n' " $(run_line)  ${rule}│${off}  ${mute}machine: $(pool_line)${off}"
+  # Label, then a dim pipe, then the value: the label column reads as the
+  # row's title at a glance.
+  printf '%s\n' " $(label run)$(run_line)"
+  models=$(models_line)
+  [ -n "$models" ] && printf '%s\n' " $(label models)${mute}${models}${off}"
+  printf '%s\n' " $(label machine)${mute}$(pool_line)${off}"
   printf '%s\n' "$line"
   printf '%s%s %s %s %s %s %s %s%s\n' "$head" \
     "$(pad ISSUE $W_ISSUE)" "  $(pad STATE $W_STATE)" "$(pad AGE $W_AGE)" \
@@ -311,10 +364,10 @@ render() {
     # Working, waiting, then queued - everything not finished - and within a
     # group the most recent log first. The merged and idle tail is what makes
     # the list outgrow the screen, so it gets cut, oldest first.
-    # Frame overhead is 8 rows: rule, title, run, rule, headings, rule,
-    # legend, note. Every other row is a table row, and the "+N hidden" line only
-    # takes one when something is actually hidden.
-    budget=$(( rows - 8 )); shown=0; hidden=0
+    # Frame overhead is 10 rows: rule, title, run, models, machine, rule,
+    # headings, rule, legend, note. Every other row is a table row, and the
+    # "+N hidden" line only takes one when something is actually hidden.
+    budget=$(( rows - 10 )); shown=0; hidden=0
     [ "$SHOW_ALL" = "all" ] && budget="$n_out"
     [ "$budget" -lt 3 ] && budget=3
     [ "$n_out" -gt "$budget" ] && budget=$(( budget - 1 ))
@@ -329,7 +382,7 @@ render() {
   fi
 
   printf '%s\n' "$line"
-  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}· idle${off}"
+  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}· idle${off}"
   printf '%s\n' " ${mute}◆ finished, not merged: dry run or red gate · age = since last log write · CPU in cores of ${NCPU}${off}"
 }
 

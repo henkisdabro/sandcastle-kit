@@ -34,8 +34,8 @@ the same by hand.
 > Whichever runtime you choose, `docker info` must succeed in the same shell you run `sandcastle`
 > from. `sandcastle doctor` checks this for you.
 
-**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), Herdr (automatic status
-pane), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
+**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) (status pane and a pane per
+sandbox, opened automatically), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
 
 ## 🧙 What `sandcastle setup` does
 
@@ -96,8 +96,15 @@ Run `sandcastle doctor` until it reports no `FIX` lines.
 
 ## 🔄 Updating
 
+In a project, ask your agent for `/sandcastle update`: it pulls the kit, rebuilds the images,
+re-runs the hook check, and walks you through anything in [`CHANGELOG.md`](../CHANGELOG.md)'s
+**Upgrading** notes that affects that project. By hand:
+
 ```bash
-cd ~/sandcastle-kit && git pull && pnpm install && sandcastle doctor
+cd ~/sandcastle-kit && git pull --ff-only && pnpm install && sandcastle doctor
+cd ~/code/your-project && sandcastle build && sandcastle lean
 ```
 
-The next run rebuilds the Docker images if their Dockerfiles changed.
+Then read the Upgrading notes in `CHANGELOG.md`. Existing `.sandcastle/config.ts` files keep
+working - a new field is always optional, with a default - but a new default can change what a
+run does or spends. The skill updates with the pull, since it is a link into the kit.

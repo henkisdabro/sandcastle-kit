@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
+import { herdr, herdrJson, IN_HERDR } from "./herdr.ts";
 import { credentials, KIT, sh } from "./sandbox.ts";
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
@@ -89,8 +90,8 @@ export const renderPrompts = (project: Project) => {
     : "";
   const out = join(project.root, ".sandcastle/.run");
   mkdirSync(out, { recursive: true });
-  const paths = { implement: "", review: "" };
-  for (const kind of ["implement", "review"] as const) {
+  const paths = { implement: "", review: "", repair: "" };
+  for (const kind of ["implement", "review", "repair"] as const) {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind}.md`), "utf8")
@@ -101,6 +102,9 @@ export const renderPrompts = (project: Project) => {
     // the sandbox, after the install. Refuse it here instead. (A literal
     // {{...}} in rules.md, e.g. a template variable, has to be reworded.)
     const allowed = new Set(["ISSUE_NUMBER", "SOURCE_BRANCH", "TARGET_BRANCH"]);
+    // The orchestrator fills these for a repair pass. Sandcastle substitutes
+    // in one pass, so gate output holding `{{...}}` or a shell block stays text.
+    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
@@ -150,7 +154,7 @@ export const archiveFinishedLogs = (project: Project) => {
   };
   let moved = 0;
   for (const name of readdirSync(logs)) {
-    const slug = name.match(/^agent-issue-(\d+(?:-[a-z]+)*)-(?:impl|review)-/)?.[1];
+    const slug = name.match(/^agent-issue-(\d+(?:-[a-z]+)*)-(?:impl|review|repair)-/)?.[1];
     if (!slug) continue;
     // A live sandbox is still appending to its log, whatever its branch says.
     if (existsSync(join(project.root, `.sandcastle/worktrees/agent-issue-${slug}`))) continue;
@@ -170,10 +174,8 @@ export const archiveFinishedLogs = (project: Project) => {
 // .sandcastle/logs/status-pane; a closed pane is simply replaced.
 // ---------------------------------------------------------------------------
 
-const herdr = (args: string[]) => JSON.parse(sh("herdr", args));
-
 export const openStatusPane = (project: Project) => {
-  if (process.env.HERDR_ENV !== "1") {
+  if (!IN_HERDR) {
     console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
     return;
   }
@@ -181,23 +183,26 @@ export const openStatusPane = (project: Project) => {
   const previous = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
   if (previous) {
     try {
-      const info = herdr(["pane", "process-info", "--pane", previous]).result.process_info;
+      const info = herdrJson(["pane", "process-info", "--pane", previous]).result.process_info;
       const running = (info.foreground_processes as { cmdline: string }[]).some((p) => p.cmdline.includes("status.sh"));
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
-      if (!running) sh("herdr", ["pane", "run", previous, "sandcastle status"]);
+      if (!running) herdr(["pane", "run", previous, "sandcastle status"]);
       return;
-    } catch {
-      /* closed - open a new one */
+    } catch (error) {
+      // Replace only a pane that is really gone. After a transient herdr
+      // error the pane may be alive: opening another would show two views.
+      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return;
+      unlinkSync(record);
     }
   }
   try {
     const wide = (process.stdout.columns ?? 0) >= 160;
-    const pane = herdr([
+    const pane = herdrJson([
       "pane", "split", "--current", "--direction", wide ? "right" : "down",
       "--cwd", project.root, "--no-focus",
     ]).result.pane.pane_id as string;
-    sh("herdr", ["pane", "rename", pane, `sandcastle ${project.name}`]);
-    sh("herdr", ["pane", "run", pane, "sandcastle status"]);
+    herdr(["pane", "rename", pane, `sandcastle ${project.name}`]);
+    herdr(["pane", "run", pane, "sandcastle status"]);
     writeFileSync(record, pane + "\n");
   } catch (error) {
     // A status view is a convenience; it never stops a run.

@@ -53,25 +53,26 @@ export const releaseBranchWorktree = (branch: string) => {
 // on 20260923 until it was killed by hand, with Docker itself unresponsive.
 // Two bounds: `timeout` in the container catches a hung test run, and the host
 // race catches a Docker that never answers. Either reads as a red gate (124),
-// never as a pass.
+// never as a pass. The output is returned so a red gate can be repaired.
 const GATE_TIMEOUT_SECONDS = 45 * 60;
 const HOST_GRACE_MS = 5 * 60 * 1000;
 
+type ExecResult = { exitCode: number; stdout: string; stderr: string };
 type Execs = {
-  exec(cmd: string, options?: { onLine?: (line: string) => void }): Promise<{ exitCode: number }>;
+  exec(cmd: string, options?: { onLine?: (line: string) => void }): Promise<ExecResult>;
 };
 
 export const execGate = async (
   sandbox: Execs,
   cmd: string,
   options?: { onLine?: (line: string) => void },
-): Promise<{ exitCode: number }> => {
+): Promise<ExecResult> => {
   const bounded = `timeout ${GATE_TIMEOUT_SECONDS} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
   let timer: NodeJS.Timeout | undefined;
-  const hostBound = new Promise<{ exitCode: number }>((resolve) => {
+  const hostBound = new Promise<ExecResult>((resolve) => {
     timer = setTimeout(() => {
       console.log(`  gate "${cmd}" did not return within ${GATE_TIMEOUT_SECONDS / 60} min - counted as red`);
-      resolve({ exitCode: 124 });
+      resolve({ exitCode: 124, stdout: "", stderr: "timed out" });
     }, GATE_TIMEOUT_SECONDS * 1000 + HOST_GRACE_MS);
   });
   try {

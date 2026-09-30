@@ -13,22 +13,23 @@
 //                    would cost each sandbox, which hooks are kept and whether
 //                    they can run in the image; --measure runs one real turn
 //                    with and without the extras
-//   init             scaffold .sandcastle/config.ts and rules.md, then the lean check
+//   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //
-// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT:
+// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, USAGE_CHECK:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { burndown } from "./burndown.ts";
-import { CONFIG_PATH, loadProject } from "./config.ts";
+import { loadProject } from "./config.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { preflight } from "./run.ts";
 import { ensureImage, KIT, sh } from "./sandbox.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
+import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
@@ -108,17 +109,7 @@ switch (command) {
     break;
   }
   case "init": {
-    if (existsSync(CONFIG_PATH)) throw new Error(`${CONFIG_PATH} already exists.`);
-    mkdirSync(".sandcastle", { recursive: true });
-    copyFileSync(join(KIT, "templates/config.ts"), CONFIG_PATH);
-    if (!existsSync(".sandcastle/rules.md")) copyFileSync(join(KIT, "templates/rules.md"), ".sandcastle/rules.md");
-    // Sandcastle's working files never belong in the repo.
-    const ignore = ".sandcastle/.gitignore";
-    const want = [".env", "logs/", "worktrees/", ".run/"];
-    const have = existsSync(ignore) ? readFileSync(ignore, "utf8").split("\n") : [];
-    const add = want.filter((w) => !have.includes(w));
-    if (add.length) appendFileSync(ignore, add.join("\n") + "\n");
-    writeFileSync(1, `Wrote ${CONFIG_PATH} and .sandcastle/rules.md - fill in the gates and setup, then \`sandcastle build\`.\n\n`);
+    init(root);
     // The lean check belongs to setup: what the repo would load into every
     // sandbox agent, all hidden until lean.keep names it.
     const project = await loadProject(root);

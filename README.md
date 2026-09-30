@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -62,8 +62,8 @@ sandcastle init              # or ask your agent: /sandcastle init
 sandcastle build
 ```
 
-Fill in the gate commands (`lint`, `test`, ...) in `.sandcastle/config.ts` - see
-[Set up a project](#-set-up-a-project).
+`init` fills in the gate commands (`lint`, `test`, ...) from your stack; check them against CI in
+`.sandcastle/config.ts` - see [Set up a project](#-set-up-a-project).
 
 **3. Label some issues `ready-for-agent` and try a dry run:**
 
@@ -122,6 +122,8 @@ flowchart LR
 | | Feature | What you get |
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
+| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again. |
+| 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -129,8 +131,9 @@ flowchart LR
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
-| 📺 | **A live status view** | Opened automatically in a sibling pane if you use the Herdr terminal multiplexer. |
-| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage and starting runs. |
+| 📺 | **A live status view** | `sandcastle status` in any terminal; flags a sandbox gone quiet. Phase timings are logged per issue. |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The status view opens itself, every sandbox gets a pane, and Herdr's agent sidebar shows each one as working, blocked or done - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage, starting runs and updating. |
 
 ## 🔄 How it works
 
@@ -150,10 +153,12 @@ flowchart TD
         R -.-> X["🤖 Codex review<br/>optional, non-blocking"]
         R --> G{"🚦 Gates<br/>run by the orchestrator"}
         X -.-> G
+        G -- "red" --> FX["🩹 Repair agent<br/>fed the gate output<br/>(bounded)"]
+        FX --> G
     end
 
     G -- "green" --> PP{"🛡️ Touches hooks, CI,<br/>install scripts?"}
-    G -- "red" --> RED["🔴 Reported red"]
+    G -- "still red" --> RED["🔴 Reported red"]
     PP -- "no" --> M["✅ Merge --no-ff into base<br/>close issue with a comment"]
     PP -- "yes" --> NH["🙋 Labelled needs-human<br/>not merged"]
     M --> V["🔁 Verify: gates once more<br/>on the merged base branch"]
@@ -167,7 +172,7 @@ flowchart TD
     classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f
     class M,V ok
     class RED,NH bad
-    class I,R,X agent
+    class I,R,X,FX agent
     class G,PP,P gate
 ```
 
@@ -178,6 +183,11 @@ From the project's root, on its base branch:
 ```bash
 sandcastle init      # writes .sandcastle/config.ts, rules.md, .gitignore; prints the lean check
 ```
+
+`init` reads the stack from the repo root - `package.json` (with its lockfile and scripts),
+`pyproject.toml` + `uv.lock`, `go.mod` or `Cargo.toml` - and fills in the gates and setup from it.
+Where the base image lacks the toolchain (uv, Go, Rust, Bun) it also writes
+`.sandcastle/Dockerfile`. Treat what it writes as a starting point.
 
 Then edit, in this order:
 
@@ -208,6 +218,10 @@ and your gates could prove it. The `/sandcastle queue` skill action walks every 
 gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
 labels it.
 
+An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
+A run skips it while #12 is open - even when #12 is in the same run, because the dependent
+would branch before #12 lands - and the next run picks it up.
+
 ```mermaid
 flowchart LR
     O["📥 Open issues"] --> T{"🧐 Could an agent finish it<br/>with no chat context,<br/>and could the gates prove it?"}
@@ -234,12 +248,53 @@ CROSS_REVIEW=1 sandcastle run         # add the Codex review
 
 A run refuses to start on a dirty tree, off the base branch, while another run of the same
 project is live, or while any check fails. Inside Herdr it opens `sandcastle status` in a sibling
-pane; elsewhere run `sandcastle status` in a second terminal. Afterwards, push the base branch
-yourself when you are happy with it.
+pane; elsewhere run `sandcastle status` in a second terminal. While agents work, the run prints a
+heartbeat line every five minutes, and the status view flags a sandbox whose log has been quiet
+for ten. Every agent pass and gate run is timed into `.sandcastle/logs/timings.jsonl`, and the
+report gives each issue's wall time. Afterwards, push the base branch yourself when you are happy
+with it.
 
 > [!TIP]
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
+
+## 🪟 Works best in Herdr
+
+sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
+terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
+out its own view:
+
+- 📊 **Status pane.** `sandcastle status` opens in a sibling pane, and a later run reuses it.
+- 🐳 **A pane per sandbox.** A `sandcastle <project>` tab gets one pane per concurrent sandbox,
+  named after its issue and following that sandbox's agent log as it moves through implement,
+  review and repair.
+- 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
+  reports each sandbox's phase to Herdr itself: *working* while it implements, reviews or gates,
+  *done* when it ships, *blocked* on a red gate, a merge conflict or a branch held for a human.
+  The tab and workspace badges roll the states up, so a glance at the sidebar says whether a run
+  needs you.
+- 🔔 **A notification** with the run's summary when it ends.
+
+The next run replaces the previous run's tab rather than stacking another. Outside Herdr none of
+this happens and nothing else changes - watch with `sandcastle status` in a second terminal.
+`SANDCASTLE_HERDR_VIEW=0` keeps the status pane but skips the per-sandbox tab.
+
+```
+┌ you ─────────────────┬ sandcastle run ──────────────┐   tab "sandcastle my-app"
+│ your agent / shell   │ 2 issue(s), 2 at a time ...  │   ┌ #12 Add rate limiter ───────┐
+│                      │ [impl-12] Started ...        │   │ Bash(pnpm test)             │
+│                      ├ sandcastle my-app ───────────┤   ├ #15 Fix date parsing ───────┤
+│                      │ #12 ● review   3m  2 ...     │   │ Edit(src/date.ts)           │
+│                      │ #15 ● impl     1m  0 ...     │   └─────────────────────────────┘
+└──────────────────────┴──────────────────────────────┘   sidebar: #12 review ● · #15 implement ●
+```
+
+## 📥 Updating
+
+In each project, ask your agent for `/sandcastle update`. It pulls the kit, rebuilds the images,
+re-runs the hook check, and walks you through anything in [`CHANGELOG.md`](CHANGELOG.md)'s
+**Upgrading** notes that affects that project. Existing configs keep working: a new field is
+always optional. [By hand](docs/INSTALL.md#-updating).
 
 ## 🧰 Commands
 
@@ -247,7 +302,7 @@ yourself when you are happy with it.
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
 | `sandcastle doctor` | Checks machine and project setup; prints the fix for each problem | ➖ no |
-| `sandcastle init` | Scaffolds `.sandcastle/` in the current project, then the lean check | ➖ no |
+| `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
@@ -273,6 +328,7 @@ yourself when you are happy with it.
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
 | `implement` / `review` | 8 / 3 iterations, 2400 s idle | `{ maxIterations, idleTimeoutSeconds }` per agent |
+| `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; `attempts: 0` turns it off. A gate that timed out is never repaired |
 
 Examples: [`examples/`](examples/).
 
@@ -286,6 +342,8 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
+| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens) |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 
 Effort levels are `low`, `medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a
@@ -302,7 +360,8 @@ agent starts, each worktree loses `.claude/skills`, `.claude/agents`, `.claude/c
 `.agents/skills` (read by Codex), `.mcp.json`, `.codex/config.toml`, and the plugin, marketplace,
 MCP-enable and status-line keys of `.claude/settings.json`. Permissions and `env` stay. The
 changes are marked skip-worktree, so an agent can never commit them. `lean.keep` brings items
-back. On a real project this saved ~2,500 input tokens per agent turn.
+back. `sandcastle lean` (and every run) warns when a hidden item is named by a file the sandbox
+keeps - a test that reads a skill file, say, would fail on every branch until the item is kept. On a real project this saved ~2,500 input tokens per agent turn.
 
 **Hooks are the opposite: kept.** They cost no context and are how a repo enforces its rules -
 guards, linters, test gates, audit logs. `lean.dropHooks` removes host-only conveniences (a token
@@ -326,6 +385,9 @@ and the kit narrows what can cross it:
   run it on your machine when it lands.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/info/` and the base branch are fingerprinted; if a
   sandbox changes them, the run stops before the host runs another git command there.
+- 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
+  labelled `needs-human` during the run means no merge - and the merge takes the exact commit
+  the gates passed on. A run that dies between merging and closing is finished by the next one.
 - 🛡️ **Protected paths.** A green branch that changes hooks, CI, `.claude/` settings, `.sandcastle/`,
   package-manager config or install scripts is labelled `needs-human` and left for you to merge.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
@@ -342,7 +404,8 @@ pool caps live sandboxes (default 6) and gate runs (default 2) across all projec
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. The status header
 shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
-first issue that hits the usage limit stops that run's queue.
+first issue that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
+starting issues before that, once a usage window passes `USAGE_STOP` percent.
 
 ## 🩺 Troubleshooting
 
@@ -357,6 +420,9 @@ first issue that hits the usage limit stops that run's queue.
 | `STOPPED ... .git/config ... changed` | Inspect `git config --local --list`, `.git/info/` and `git reflog <base>` before any other git command in that repo. |
 | An issue `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
+| `waits for #N to close` / `waiting, not started` | The issue body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to issues named in `ISSUES=`. |
+| `gated green but not merged` | The issue was closed or labelled `needs-human` during the run, or its branch gained a commit after the gates passed. The branch is left standing. |
+| `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
 ## 🤖 If you are an AI coding agent reading this
 
@@ -383,6 +449,7 @@ The `sandcastle` command is run **from inside a project**, never from inside the
 | "which issues can the agents do?", "triage for sandcastle" | `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. |
 | "start a run", "burn down the queue" | [Run](#-run). A run takes hours: start it in a separate terminal or pane, not in your own shell. |
 | "is it working?", "what is it doing?" | `sandcastle status 0` for a snapshot; logs are in the project's `.sandcastle/logs/`. |
+| "update sandcastle", "get the latest kit" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating) by hand. It pulls the kit and brings the current project up to date; `CHANGELOG.md` says what changed. |
 | Anything fails | `sandcastle doctor`, then [Troubleshooting](#-troubleshooting). |
 
 **Rules for you:**
