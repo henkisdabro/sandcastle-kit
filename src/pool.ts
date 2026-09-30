@@ -19,15 +19,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { USER_CONFIG } from "./sandbox.ts";
+import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
 
 const DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "slots");
 
 const settings = (() => {
-  const file = join(USER_CONFIG, "config.json");
-  const json = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const json = machineSettings();
   return {
     sandboxes: Number(process.env.SANDCASTLE_MAX_SANDBOXES ?? json.maxSandboxes ?? 6),
     gates: Number(process.env.SANDCASTLE_MAX_GATES ?? json.maxGates ?? 2),

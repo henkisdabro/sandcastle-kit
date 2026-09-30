@@ -1,7 +1,7 @@
 // Everything around a run that is not the pipeline itself: preconditions,
 // preflight, prompts, the run record, the log archive and the status pane.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,31 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import type { Project } from "./config.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { credentials, KIT, sh } from "./sandbox.ts";
+import { credentials, KIT, machineSettings, sh } from "./sandbox.ts";
+
+// ---------------------------------------------------------------------------
+// Keep awake - a machine that idles to sleep freezes every sandbox mid-turn,
+// and an unattended run is the one nobody is there to wake. On by default;
+// KEEP_AWAKE=0 for one run, or "keepAwake": false in the machine's
+// config.json, leaves it to the energy settings. It is a machine setting, not
+// a project one: a committed config.ts would decide it for every teammate's
+// laptop. The helper is tied to this process's pid, so it ends with the run
+// even when the run is killed. A closed laptop lid still sleeps.
+// ---------------------------------------------------------------------------
+
+export const keepAwake = (): string => {
+  if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
+    return "off - the machine's energy settings apply";
+  }
+  const pid = String(process.pid);
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? ["caffeinate", ["-i", "-w", pid]]
+      : ["systemd-inhibit", ["--what=idle:sleep", "--who=sandcastle", "--why=sandcastle run", "tail", `--pid=${pid}`, "-f", "/dev/null"]];
+  if (spawnSync(cmd, ["-h"], { stdio: "ignore" }).error) return `off - ${cmd} not found`;
+  spawn(cmd, args, { stdio: "ignore" }).on("error", () => {}).unref();
+  return `on (${cmd})`;
+};
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 export const assertCleanBase = (project: Project) => {

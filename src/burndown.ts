@@ -30,7 +30,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
 import {
-  addTokens, archiveFinishedLogs, assertCleanBase, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  addTokens, archiveFinishedLogs, assertCleanBase, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
   recordRun, renderPrompts, runTokens, type Tokens, tokenLine, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
@@ -50,6 +50,10 @@ type Outcome = {
   repairs: number;
   gates: Gate[];
 };
+
+// A branch's outcome as the status view's row shows it, before landing.
+const outcomeText = (o: Outcome) =>
+  o.status === "gate-failed" ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}` : o.status === "shipped" ? "green - lands when the run ends" : o.status;
 
 // What a spent plan allowance leaves at the end of an agent's log.
 const LIMIT = /out of usage credits|usage limit|limit reached/i;
@@ -124,6 +128,7 @@ export const burndown = async (project: Project) => {
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) console.log(`  ${ref(i.id)} ${i.title}`);
   console.log(`Machine-wide: ${usage()}`);
+  console.log(`Keep awake: ${keepAwake()}`);
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass. " +
@@ -491,7 +496,12 @@ export const burndown = async (project: Project) => {
         results.push(
           await withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)).then(
             (value) => {
-              view.finish(issue.id, value.status);
+              // "shipped" is only the pipeline's word: nothing lands until the run ends.
+              view.finish(issue.id, value.status === "shipped" ? "gated green" : value.status === "gate-failed" ? "gate red" : value.status);
+              // Recorded now, not only at the report: a branch waiting for
+              // landing had no outcome for this run, and its row read as an
+              // earlier run's leftover. Landing overwrites it.
+              recordOutcomes(project, runId, { [issue.id]: outcomeText(value) });
               return { status: "fulfilled", value } as const;
             },
             (reason) => {
@@ -653,15 +663,14 @@ export const burndown = async (project: Project) => {
   const outcome = new Map<string, string>();
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
-    const o = r.value;
-    outcome.set(o.issue, o.status === "gate-failed" ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}` : o.status);
+    outcome.set(r.value.issue, outcomeText(r.value));
   }
   for (const n of merged) outcome.set(n, "merged");
   for (const n of conflicted) outcome.set(n, "merge conflict");
   for (const f of failedToLand) outcome.set(f.issue, "failed to land");
   for (const k of skipped) outcome.set(k.issue, `not merged: ${k.reason}`);
   for (const h of heldBack) outcome.set(h.issue, "needs a human merge");
-  if (DRY_RUN) for (const o of green) if (outcome.get(o.issue) === "shipped") outcome.set(o.issue, "dry run: gated green, would merge");
+  if (DRY_RUN) for (const o of green) if (o.status === "shipped") outcome.set(o.issue, "dry run: gated green, would merge");
   for (const [n] of crashed) outcome.set(n, "crashed");
   recordOutcomes(project, runId, Object.fromEntries(outcome));
 

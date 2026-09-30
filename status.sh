@@ -72,6 +72,19 @@ fit() {
   printf '%s…%s' "$out" "$off"
 }
 
+# Items joined by a separator, as many lines as the width needs. The legend's
+# last clause was cut off in any pane narrower than the whole legend.
+wrap() {
+  local w="$1" sep="$2" line="" item
+  shift 2
+  for item in "$@"; do
+    if [ -z "$line" ]; then line=" $item"
+    elif [ $(( $(vis "$line") + $(vis "$sep") + $(vis "$item") )) -le "$w" ]; then line="${line}${sep}${item}"
+    else printf '%s\n' "$line"; line=" $item"; fi
+  done
+  printf '%s\n' "$line"
+}
+
 # The one place the widths are declared. ACTIVITY takes whatever is left.
 W_ISSUE=6; W_STATE=10; W_AGE=5; W_COMMITS=7; W_CPU=6; W_MEM=7
 W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 8 ))
@@ -295,7 +308,7 @@ render() {
   local now issues n phase log age commits state glyph colour activity activity_note rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
   local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 c_left=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
-  local grp qsort oc oc_run oc_text hidden_list group summary c_block=0 act since title counts overhead
+  local grp qsort oc oc_run oc_text hidden_list group summary c_block=0 act since title counts overhead legend
   local -a out=()
   local n_out=0
 
@@ -497,10 +510,16 @@ render() {
 
   title=" ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}"
   counts="${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off}$([ "$c_block" -gt 0 ] && printf ' · %s%s blocked%s' "$blu" "$c_block" "$off") · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}$([ "$c_left" -gt 0 ] && printf ' · %s%s left over%s' "$gry" "$c_left" "$off")  ${rule}│${off}  ${accent}${now}${off}"
+  legend=$(wrap "$cols" "  " "${ylw}● working${off}" "${cyn}◆ waiting${off}" "${hot}! stalled${off}" "${blu}○ queued${off}" "${blu}◌ blocked${off}" \
+    "${grn}✓ merged${off}" "${sea}✓ shipped (rebased)${off}" "${gry}◇ left over${off}" "${gry}· idle${off}")
+  legend="${legend}
+$(wrap "$cols" "${mute} · ${off}" "${mute}◆ this run's branch, not merged (dry run, red gate, held)${off}" \
+    "${mute}age = time in phase while working, else since last log write${off}" "${mute}CPU in cores of ${NCPU}${off}")"
+
   printf '%s\n' "$line"
   # One line when it fits; in a narrow pane the counts get a line of their
   # own rather than being cut off - they are what the header is for.
-  overhead=10
+  overhead=$(( 8 + $(printf '%s\n' "$legend" | wc -l) ))
   if [ $(( $(vis "$title") + 5 + $(vis "$counts") )) -le "$cols" ]; then
     printf '%s\n' "${title}  ${rule}│${off}  ${counts}"
   else
@@ -512,7 +531,7 @@ render() {
     [ "$c_merged" -gt 0 ] && counts="${counts} · ${grn}${c_merged} done${off}"
     [ "$c_idle" -gt 0 ] && counts="${counts} · ${gry}${c_idle} idle${off}"
     [ "$c_left" -gt 0 ] && counts="${counts} · ${gry}${c_left} left over${off}"
-    printf '%s\n' "$title" " ${counts}  ${rule}│${off}  ${accent}${now}${off}"; overhead=11
+    printf '%s\n' "$title" " ${counts}  ${rule}│${off}  ${accent}${now}${off}"; overhead=$((overhead+1))
   fi
   # Label, then a dim pipe, then the value: the label column reads as the
   # row's title at a glance.
@@ -531,8 +550,9 @@ render() {
     # Working, waiting, then queued - everything not finished - and within a
     # group the most recent log first. The merged and idle tail is what makes
     # the list outgrow the screen, so it gets cut, oldest first.
-    # Frame overhead is 10 rows: rule, title, run, models, machine, rule,
-    # headings, rule, legend, note - 11 when the title line splits. Every other row is a table row, and the
+    # Frame overhead is 8 rows - rule, title, run, models, machine, rule,
+    # headings, rule - plus the legend's lines, and one more when the title
+    # line splits. Every other row is a table row, and the
     # "+N hidden" line only takes one when something is actually hidden.
     budget=$(( rows - overhead )); shown=0; hidden=0; hidden_list=""
     [ "$SHOW_ALL" = "all" ] && budget="$n_out"
@@ -559,8 +579,7 @@ render() {
   fi
 
   printf '%s\n' "$line"
-  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}◇ left over  · idle${off}"
-  printf '%s\n' " ${mute}◆ this run's branch, not merged (dry run, red gate, held) · age = time in phase while working, else since last log write · CPU in cores of ${NCPU}${off}"
+  printf '%s\n' "$legend"
 }
 
 if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi

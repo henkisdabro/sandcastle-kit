@@ -17,6 +17,12 @@ export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
 // kit's own directory, so the kit repo can be public and still in daily use.
 export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "sandcastle-kit");
 
+// Machine-wide settings from USER_CONFIG/config.json; empty when there is none.
+export const machineSettings = (): Record<string, unknown> => {
+  const file = join(USER_CONFIG, "config.json");
+  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+};
+
 export const sh = (cmd: string, args: string[], cwd?: string) =>
   execFileSync(cmd, args, { encoding: "utf8", cwd }).trim();
 

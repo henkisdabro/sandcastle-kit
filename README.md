@@ -453,6 +453,21 @@ you are happy with it; `sandcastle clean` clears leftover worktrees and branches
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
 
+### 😴 Sleep
+
+A machine that goes to sleep pauses every sandbox mid-task, so by default a run keeps it awake
+until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and prints
+`Keep awake: on` when it starts. The display can still turn off and the screen still locks. The
+helper is tied to the run's process, so it stops when the run ends, crashes or is killed.
+
+- **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
+- **Always:** add `"keepAwake": false` to `~/.config/sandcastle-kit/config.json`.
+- **A laptop lid is the exception.** Closing it sleeps a MacBook whatever the kit does, unless it is
+  on power with an external display attached. Leave the lid open, or run on a desktop machine.
+
+It is a machine setting, not a project one: `.sandcastle/config.ts` is committed, and would
+decide it for every teammate's machine.
+
 ## 🪟 Works best in Herdr
 
 sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https://herdr.dev), the
@@ -554,6 +569,7 @@ Examples: [`examples/`](examples/).
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
+| `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say (also `"keepAwake": false` in `config.json`). [Sleep](#-sleep) |
 
 A project that always wants different models or effort sets them in `.sandcastle/config.ts`
 (`review: { effort: "medium" }`); the env vars are for one run. Effort levels are `low`,
@@ -670,7 +686,7 @@ model; `sandcastle help` lists every command.
 | Place | Holds | Edited by |
 |---|---|---|
 | **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
-| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits) and `denylist` | The user, once. Not committed anywhere |
+| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits, keep-awake) and `denylist` | The user, once. Not committed anywhere |
 | **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting the project up |
 
 Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.

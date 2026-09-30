@@ -13,10 +13,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 Initial public release: an opinionated issue-burndown kit on
 [Sandcastle](https://github.com/mattpocock/sandcastle). The v0.1.0 tag was first cut earlier the
-same day and moved, four times, to include everything below - the fourth adding trackers (GitHub
+same day and moved, five times, to include everything below - the fourth adding trackers (GitHub
 Issues or ticket files, including the layout Matt Pocock's setup skill writes) and blockers beyond
 GitHub, after a third dry-run audit had found the token accounting empty and the status view
-clipping in narrow panes.
+clipping in narrow panes; the fifth keeping the machine awake during a run.
 
 ### Upgrading
 
@@ -64,6 +64,9 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   branch, and a clean base branch when you run. Queue with `Status: ready-for-agent`.
 - Run `sandcastle blockers` once per project; it replaces the manual comment search in the
   skill's `update` action.
+- **Runs now keep the machine awake by default.** Nothing in a project changes. If you would
+  rather your energy settings applied, add `"keepAwake": false` to
+  `~/.config/sandcastle-kit/config.json`.
 
 ### Added
 
@@ -125,6 +128,10 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - **`sandcastle blockers`** scans every open ticket (queued or not) and a run warns for tickets whose *comments* say "blocked by"
   about queued ones: a comment saying "blocked by" while the body does not is not read by a run,
   which would start the ticket. Comments whose blockers are all closed are reported as stale.
+- **Keep awake.** A run keeps the machine awake until it ends (`caffeinate -i` on macOS,
+  `systemd-inhibit` on Linux), so an idle sleep no longer pauses every sandbox mid-task.
+  `KEEP_AWAKE=0` turns it off for one run, `"keepAwake": false` in
+  `~/.config/sandcastle-kit/config.json` for good.
 
 ### Changed
 
@@ -233,6 +240,12 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   line.
 - `herdr-pane-N.log` links are removed when their pane closes and when a run starts, instead of
   dangling at archived logs.
+- A branch gated green and waiting for landing showed in the status view as `◇ left over` from
+  an earlier run, because its outcome was only written at the end. Each pipeline's result is now
+  recorded as it finishes (`green - lands when the run ends`, `gate red: ...`).
+- The status view's legend wraps to the pane's width instead of losing its last clause.
+- A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
+  and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
 [Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/henkisdabro/sandcastle-kit/releases/tag/v0.1.0
