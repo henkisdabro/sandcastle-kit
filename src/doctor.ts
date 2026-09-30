@@ -9,7 +9,7 @@ import { parseEnv } from "node:util";
 import { CONFIG_PATH } from "./config.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 
-const run = (cmd: string, args: string[]) => {
+export const run = (cmd: string, args: string[]) => {
   try {
     return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch {
@@ -28,7 +28,7 @@ export const doctor = async (repoRoot?: string) => {
   const node = Number(process.versions.node.split(".")[0]);
   check(node >= 22, `Node ${process.versions.node}`, "Install Node 22 or newer (24 LTS recommended).");
   check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `cd ${KIT} && pnpm install`);
-  check(!!run("docker", ["info", "--format", "{{.ServerVersion}}"]), "Docker running", "Start Docker Desktop (or the Docker daemon).");
+  check(!!run("docker", ["info", "--format", "{{.ServerVersion}}"]), "Docker running", "Start your container runtime (OrbStack, Podman machine, Docker Desktop or the Docker daemon) - `docker info` must work in this shell.");
   check(!!run("gh", ["auth", "status"]), "GitHub CLI signed in on this machine", "gh auth login");
   check(!!run("git", ["--version"]), "git", "Install git 2.31 or newer.");
 
@@ -40,7 +40,7 @@ export const doctor = async (repoRoot?: string) => {
       return false;
     }
   })();
-  check(linked, "`sandcastle` on PATH points at this kit", `ln -sf ${join(KIT, "bin/sandcastle")} ~/.local/bin/sandcastle   (and make sure ~/.local/bin is on PATH)`);
+  check(linked, "`sandcastle` on PATH points at this kit", `sandcastle setup   (or: ln -sf ${join(KIT, "bin/sandcastle")} ~/.local/bin/sandcastle, and put ~/.local/bin on PATH)`);
 
   const skill = join(homedir(), ".claude/skills/sandcastle");
   const skillOk = (() => {
@@ -54,13 +54,17 @@ export const doctor = async (repoRoot?: string) => {
 
   const envFile = join(USER_CONFIG, ".env");
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
-  check(existsSync(envFile), `credentials file ${envFile}`, `mkdir -p ${USER_CONFIG} && cp ${join(KIT, ".env.example")} ${envFile} && chmod 600 ${envFile}, then fill it in`);
-  check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", "Run `claude setup-token` and put the token in the credentials file.");
-  check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)", "Create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read.");
+  check(existsSync(envFile), `credentials file ${envFile}`, "sandcastle setup   (or see docs/INSTALL.md to write it by hand)");
+  // A run refuses empty values, so catch them here rather than hours later.
+  const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
+  if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")}, or run sandcastle setup.`);
+  check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", "sandcastle setup   (or run `claude setup-token` and put the token in the credentials file)");
+  check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)", "sandcastle setup   (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read)");
   check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "npm install -g @openai/codex && codex login", true);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
 
-  if (repoRoot) {
+  // The kit's own clone is not a project; checking it would print a false FIX.
+  if (repoRoot && realpathSync(repoRoot) !== realpathSync(KIT)) {
     console.log(`\nproject ${repoRoot}`);
     const hasConfig = existsSync(join(repoRoot, CONFIG_PATH));
     check(hasConfig, CONFIG_PATH, "sandcastle init   (then fill in gates, setup and lean - see the kit README)");
@@ -72,7 +76,7 @@ export const doctor = async (repoRoot?: string) => {
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", "Run `sandcastle init` again or add logs/, worktrees/, .run/, .env to .sandcastle/.gitignore");
   } else {
-    console.log("\n(not inside a git repository - run doctor again from a project to check it too)");
+    console.log("\n(not inside a project - run doctor again from one to check it too)");
   }
 
   console.log(bad ? `\n${bad} thing(s) to fix.` : "\nAll required checks pass.");

@@ -1,5 +1,7 @@
 // sandcastle <command> - run from anywhere inside a project's git repository.
 //
+//   setup            interactive install: link the command and skill, write
+//                    the credentials file, then run doctor
 //   doctor           check this machine and (inside a repo) this project are
 //                    set up; prints what is missing and how to fix it
 //   run              burn down the queue: build images if stale, preflight,
@@ -27,10 +29,11 @@ import { preflight } from "./run.ts";
 import { ensureImage, KIT, sh } from "./sandbox.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
+import { setup } from "./setup.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
-// `doctor` also works outside a repository (fresh install).
+// `setup` and `doctor` also work outside a repository (fresh install).
 const repoRoot = (() => {
   try {
     return sh("git", ["rev-parse", "--show-toplevel"]);
@@ -38,6 +41,10 @@ const repoRoot = (() => {
     return undefined;
   }
 })();
+if (command === "setup") {
+  await setup(repoRoot);
+  process.exit(0);
+}
 if (command === "doctor") {
   await doctor(repoRoot);
   process.exit(0);
