@@ -5,9 +5,14 @@
 // knows exactly what each sandbox is doing, and Herdr takes that as a report
 // (`pane report-agent`). So a run opens a tab with one pane per concurrent
 // sandbox, each tailing its issue's current log, and reports the phase: the
-// sidebar then shows every sandbox as a working, blocked or done agent. The
-// tab's first pane is the status view, so a run adds nothing to the tab the
-// user launched it from.
+// sidebar then shows every sandbox as a working, blocked or done agent.
+//
+// Where: a run started alone in its own tab (the skill makes one) adopts that
+// tab - the run's output, the status view and the sandboxes side by side.
+// Started anywhere else, it makes a tab of its own, whose first pane is the
+// status view, and adds nothing to the tab it was launched from. When the run
+// ends its sandbox panes close, so no sidebar entry outlives it; the status
+// view stays.
 //
 // Herdr (0.9.2+) clears a reported agent once its pane is back at an idle
 // shell. So a pane runs one `tail -F` for its whole life, on a symlink the
@@ -44,8 +49,9 @@ export const runsStatus = (pane: string) =>
 
 type Slot = { pane: string; issue?: number };
 export type SandboxView = {
-  /** The view's tab shows the status view; otherwise the caller opens it. */
-  status: boolean;
+  /** The status view's pane; undefined when this view is off and the caller opens one. */
+  status?: string;
+  tab?: string;
   /** An issue's pipeline starts: it takes a free pane. */
   claim(issue: number, title: string): void;
   /** A timed phase starts. */
@@ -58,7 +64,7 @@ export type SandboxView = {
   close(summary: string): void;
 };
 
-const NONE: SandboxView = { status: false, claim() {}, phase() {}, finish() {}, landed() {}, close() {} };
+const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, close() {} };
 const SOURCE = "sandcastle-kit";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
@@ -81,29 +87,66 @@ export const openSandboxView = (project: Project, panes: number): SandboxView =>
     }
   };
 
-  // A previous run's view is replaced, not stacked: close the tab it made.
-  // Only an id from our own record is ever closed.
+  const mine = process.env.HERDR_PANE_ID;
+  const myTab = safe(() => (mine ? (herdrJson(["pane", "get", mine]).result.pane.tab_id as string) : undefined));
+  if (failed) return NONE;
+
+  // A previous run's view is replaced, not stacked. Only ids from our own
+  // record are closed, and never the pane this run is typed in: a tab the
+  // kit made goes whole, an adopted tab keeps its run pane.
   if (existsSync(record)) {
     try {
-      herdr(["tab", "close", JSON.parse(readFileSync(record, "utf8")).tab]);
+      const old = JSON.parse(readFileSync(record, "utf8")) as { tab?: string; panes?: string[]; status?: string; adopted?: boolean };
+      if (old.tab && !old.adopted && old.tab !== myTab) {
+        herdr(["tab", "close", old.tab]);
+      } else {
+        for (const pane of [...(old.panes ?? []), ...(old.status ? [old.status] : [])]) {
+          if (pane === mine) continue;
+          try {
+            herdr(["pane", "close", pane]);
+          } catch {
+            /* already closed */
+          }
+        }
+      }
     } catch {
       /* already closed */
     }
   }
-  const created = safe(() =>
-    herdrJson([
-      "tab", "create", "--workspace", process.env.HERDR_WORKSPACE_ID ?? "", "--label", `sandcastle ${project.name}`,
-      "--cwd", project.root, "--no-focus",
-    ]),
-  );
-  if (!created) return NONE;
-  const tab = created.result.tab.tab_id as string;
-  const statusPane = created.result.root_pane.pane_id as string;
+
+  // Alone in its tab: adopt it. The status view splits off the run's pane.
+  const alone = safe(() => !!myTab && herdrJson(["tab", "get", myTab]).result.tab.pane_count === 1);
+  if (failed) return NONE;
+  let tab: string;
+  let statusPane: string;
+  if (alone && mine && myTab) {
+    const wide = (safe(() => (herdrJson(["pane", "layout", "--pane", mine]).result.layout.panes as { pane_id: string; rect: { width: number } }[])
+      .find((p) => p.pane_id === mine)?.rect.width) ?? 0) >= 160;
+    const split = safe(() => herdrJson(["pane", "split", mine, "--direction", wide ? "right" : "down", "--cwd", project.root, "--no-focus"]));
+    if (!split) return NONE;
+    tab = myTab;
+    statusPane = split.result.pane.pane_id as string;
+    safe(() => {
+      herdr(["tab", "rename", tab, `sandcastle ${project.name}`]);
+      herdr(["pane", "rename", mine, `sandcastle run ${project.name}`]);
+    });
+  } else {
+    const created = safe(() =>
+      herdrJson([
+        "tab", "create", "--workspace", process.env.HERDR_WORKSPACE_ID ?? "", "--label", `sandcastle ${project.name}`,
+        "--cwd", project.root, "--no-focus",
+      ]),
+    );
+    if (!created) return NONE;
+    tab = created.result.tab.tab_id as string;
+    statusPane = created.result.root_pane.pane_id as string;
+  }
+  const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, panes: slots.map((s) => s.pane) }) + "\n");
+  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.map((s) => s.pane) }) + "\n");
   save();
   if (!safe(() => {
-    herdr(["pane", "rename", statusPane, `sandcastle ${project.name}`]);
+    herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);
     herdr(["pane", "run", statusPane, STATUS_COMMAND]);
     return true;
   })) return NONE;
@@ -113,7 +156,7 @@ export const openSandboxView = (project: Project, panes: number): SandboxView =>
   if (existsSync(old)) {
     try {
       const pane = readFileSync(old, "utf8").trim();
-      if (runsStatus(pane)) herdr(["pane", "close", pane]);
+      if (pane !== statusPane && runsStatus(pane)) herdr(["pane", "close", pane]);
     } catch {
       /* already gone */
     }
@@ -147,21 +190,28 @@ export const openSandboxView = (project: Project, panes: number): SandboxView =>
   // pane if no later issue has taken it over since.
   const shownBy = new Map<string, number>();
 
-  // Reported states outlive the process. A run that dies must not leave its
-  // panes saying "working" forever.
+  // Reported states outlive the process: a finished run's panes went on
+  // saying "blocked" in the sidebar an hour later. The sandbox panes close
+  // with the run - the outcomes are in the report and the status view.
   process.on("exit", () => {
     for (const s of slots) {
-      if (s.issue === undefined) continue;
       try {
-        report(s.pane, "blocked", "run ended", `#${s.issue} stopped`);
+        herdr(["pane", "close", s.pane]);
       } catch {
-        /* best effort */
+        /* already closed */
       }
+    }
+    slots.length = 0;
+    try {
+      save();
+    } catch {
+      /* best effort */
     }
   });
 
   return {
-    status: true,
+    status: statusPane,
+    tab,
     claim(issue, title) {
       safe(() => {
         let slot = slots.find((s) => s.issue === undefined);

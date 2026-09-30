@@ -9,17 +9,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
-### Fixed
-
-- The lean sandbox no longer hides stray files under `.claude/skills`, `.claude/agents` or
-  `.claude/commands`. The harness never loads them, and hiding one such as `pyrightconfig.json`
-  turned `pyright -p .claude/skills` red on the base commit.
-
 ## [0.1.0] - 2026-09-30
 
 Initial public release: an opinionated issue-burndown kit on
 [Sandcastle](https://github.com/mattpocock/sandcastle). The v0.1.0 tag was first cut earlier the
-same day and moved to include everything below.
+same day and moved, twice, to include everything below - last after a dry-run audit of the
+operator view.
 
 ### Upgrading
 
@@ -45,6 +40,17 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   `REVIEW_EFFORT` can move those values into `implement` / `review` in its `.sandcastle/config.ts`.
 - If `sandcastle lean` now lists a dropped hook as named by a test, keep the hook (remove its
   `lean.dropHooks` entry) unless the test is host-only.
+- **If `sandcastle lean` warns that PreToolUse guards are kept with no `hookTests`, add tests**
+  (README: Hook tests), then run `sandcastle gates`. Until then nothing proves a guard blocks
+  anything in a sandbox, and one whose module is missing fails open. A failing hook test stops
+  every run at the base check.
+- **Start runs in a tab of their own.** Alone in its tab, a run adopts it for the status view and
+  sandboxes; the skill's `run` action now creates and names that tab and confirms the view.
+  Inside Herdr a run that cannot open a status view no longer starts.
+- Branches and worktrees earlier runs left behind show as `left over` in the status view; clear
+  them with `sandcastle clean` (`--all` for unmerged ones).
+- `sandcastle status` now fits its pane by default; `sandcastle status 10 all` is the old
+  behaviour, and the `collapse` argument is no longer needed.
 
 ### Added
 
@@ -77,6 +83,17 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - `model` and `effort` under `implement` and `review` in `.sandcastle/config.ts`, so a project
   keeps its own models or effort in its committed config. The `IMPL_*` / `REVIEW_*` env vars still
   win for a single run.
+- **Hook tests** (`hookTests` in the config): made-up tool calls handed to the kept PreToolUse
+  guards in the base-gate sandbox, after setup, each expected to be blocked or allowed. They prove
+  a guard fires without a model call, and a guard that errors (and so fails open) fails its test.
+  `sandcastle lean` warns when guards are kept with no test.
+- `sandcastle clean [--all]` removes leftover sandbox worktrees (unlocking them first) and
+  finished agent branches, and lists unmerged ones, which `--all` deletes too.
+- Token totals per agent pass in `timings.jsonl`, and per issue and per run in the report, read
+  from the captured Claude Code sessions.
+- A dry run snapshots each issue's state, labels and comment count before the agents start and
+  reports `dry run held` or `DRY RUN BREACHED` at the end.
+- `timings.jsonl` rows (issue 0) for the image check, preflight, hook check and base gates.
 
 ### Changed
 
@@ -99,6 +116,24 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - The lean check also names files that mention a hook `lean.dropHooks` removes (a test comparing
   `.claude/settings.json` with the hooks it expects is red in every sandbox).
 - The run and the status view list up to 500 queued issues (was 100).
+- The status view opens first thing in a run, before the image check, preflight and base gates -
+  a cold start used to leave over three minutes with nothing to watch - and the run record names
+  the stage, which the status view's run line shows. The run's issues read "in this run" from the
+  start and sort ahead of the rest of the queue.
+- Inside Herdr, a run started alone in its tab adopts that tab (renamed `sandcastle <project>`,
+  with its own pane named) instead of opening another; it prints `Status view: pane <id>`, and
+  does not start if no status view opens. When a run ends its sandbox panes close, so no stale
+  "blocked" entry stays in the sidebar; the next run clears what the last one recorded.
+- The live status view fits its pane: line wrap is off, and rows that do not fit are summarised
+  on one line by state (`+33 queued (#1234-#1376)`). `sandcastle status 0` still prints every row.
+- A finished branch's row shows its run's outcome (`gate red: pytest=FAIL`, `dry run: gated
+  green, would merge`, `needs a human merge`) instead of the sandbox's last log line, from the new
+  `.sandcastle/logs/outcomes.json`. A branch an earlier run left is `◇ left over`, counted apart
+  from this run's `waiting`; a re-queued issue says it builds on its earlier branch.
+- A forced red gate is reported as `test red gate (SANDCASTLE_TEST_RED_GATE; <gate> passed)`,
+  not as that gate being red.
+- The skill's `run` action creates a dedicated, named tab for the run, confirms the status view
+  exists and says so plainly if not, and reads the dry-run check and token lines in the report.
 
 ### Fixed
 
@@ -120,6 +155,14 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   did; each sandbox pane now runs one `tail -F` on a symlink that the phases repoint.
 - The lean inventory lists only what a harness loads: a stray file among the skills
   (`pyrightconfig.json`) is no longer a "skill", and `work.md` plus `work/` are one command.
+- The lean sandbox no longer hides stray files under `.claude/skills`, `.claude/agents` or
+  `.claude/commands`. The harness never loads them, and hiding one such as `pyrightconfig.json`
+  turned `pyright -p .claude/skills` red on the base commit.
+- `base-gates.log` from an earlier red run stayed in place after the gates went green, reading as
+  the current result. It is now removed on green, and a red one opens with the commit, time and
+  gate line.
+- A run stopped with Ctrl-C left its worktrees locked, so the `git worktree remove --force` it
+  printed failed. Every lock is released on exit.
 
 [Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/henkisdabro/sandcastle-kit/releases/tag/v0.1.0

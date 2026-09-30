@@ -49,6 +49,22 @@ export const releaseBranchWorktree = (branch: string) => {
   }
 };
 
+// Every worktree this kit locked, for a run that ends before its `finally`
+// (Ctrl-C, a crash): Sandcastle then prints `git worktree remove --force
+// <path>` as the clean-up, which a locked worktree refuses. One run per
+// project at a time (guard.ts), so every lock with our reason is that run's.
+export const unlockAll = () => {
+  try {
+    for (const entry of git(["worktree", "list", "--porcelain"]).split("\n\n")) {
+      const lines = entry.split("\n");
+      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+      if (path && lines.includes(`locked ${REASON}`)) unlockWorktree(path);
+    }
+  } catch {
+    /* not a repository any more - nothing to release */
+  }
+};
+
 // A gate that hangs holds its whole step: #1087's layout run sat for 12 hours
 // on 20260923 until it was killed by hand, with Docker itself unresponsive.
 // Two bounds: `timeout` in the container catches a hung test run, and the host

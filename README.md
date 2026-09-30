@@ -251,12 +251,15 @@ CROSS_REVIEW=1 sandcastle run         # add the Codex review
 ```
 
 A run refuses to start on a dirty tree, off the base branch, while another run of the same
-project is live, or while any check fails. Inside Herdr it opens `sandcastle status` in a sibling
-pane; elsewhere run `sandcastle status` in a second terminal. While agents work, the run prints a
-heartbeat line every five minutes, and the status view flags a sandbox whose log has been quiet
-for ten. Every agent pass and gate run is timed into `.sandcastle/logs/timings.jsonl`, and the
-report gives each issue's wall time. Afterwards, push the base branch yourself when you are happy
-with it.
+project is live, or while any check fails. The status view opens first, before the image check,
+preflight and base gates, and its run line names the stage the run is in. Inside Herdr the run
+lays it out itself (below), and does not start if it cannot; elsewhere run `sandcastle status` in
+a second terminal. While agents work, the run prints a heartbeat line every five minutes, and the
+status view flags a sandbox whose log has been quiet for ten. Every step - image, preflight, base
+gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.jsonl`, with each
+agent pass's tokens; the report gives each issue's wall time and tokens. A dry run ends by
+checking that its issues are unchanged on GitHub. Afterwards, push the base branch yourself when
+you are happy with it; `sandcastle clean` clears leftover worktrees and branches.
 
 > [!TIP]
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
@@ -268,10 +271,12 @@ sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https:/
 terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
 out its own view:
 
-- 🗂️ **A tab of its own.** A `sandcastle <project>` tab: the status view on the left, and one
-  pane per concurrent sandbox stacked on the right, named after its issue and following that
-  sandbox's agent log as it moves through implement, review and repair. The tab you launched the
-  run from gets nothing new.
+- 🗂️ **A tab of its own.** Started in a fresh tab where it is the only pane (what the skill
+  does), the run adopts that tab, names it `sandcastle <project>` and puts the status view beside
+  its own output. Started anywhere else, it opens that tab itself and the tab you launched from
+  gets nothing new. Either way one pane per concurrent sandbox stacks on the right, named after
+  its issue and following that sandbox's agent log through implement, review and repair. The run
+  prints `Status view: pane <id> (tab <id>)`.
 - 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
   reports each sandbox's phase to Herdr itself: *working* while it implements, reviews or gates,
   *done* when its pipeline finishes - shipped or red, the outcome is in the message - and
@@ -280,8 +285,8 @@ out its own view:
   a run needs you.
 - 🔔 **A notification** with the run's summary when it ends.
 
-The tab stays after the run, showing each sandbox's outcome, and the next run replaces it rather
-than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
+When the run ends its sandbox panes close, so nothing in the sidebar outlives it; the status view
+stays, showing each branch's outcome, and the next run replaces it rather than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
 `sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
 view then opens in a pane beside yours.
 
@@ -315,7 +320,8 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
-| `sandcastle status [secs] [collapse]` | Live view; `0` prints once | ➖ no |
+| `sandcastle status [secs] [all]` | Live view, fitted to its pane with the overflow summarised on one line; `0` prints every row once | ➖ no |
+| `sandcastle clean [--all]` | Removes leftover sandbox worktrees and finished `agent/*` branches; lists unmerged ones, which `--all` deletes too. Refuses while a run is live | ➖ no |
 
 ## 🔧 Configuration
 
@@ -334,6 +340,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `rules` | none | Markdown file added to both prompts under "Project rules" |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
+| `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; `attempts: 0` turns it off. A gate that timed out is never repaired |
@@ -351,7 +358,7 @@ Examples: [`examples/`](examples/).
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
-| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens) |
+| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
@@ -383,6 +390,30 @@ imports resolve. A failing hook stops the run; fix it in the project's Dockerfil
 untracked `.claude/settings.local.json` never reach a sandbox, and the check warns about them. Git
 hooks run on agent commits inside the sandbox as usual. The Codex review does not run Claude Code
 hooks.
+
+### Hook tests
+
+The check above proves a hook *can* run, not that it blocks anything. A guard that never fires
+and a guard that allowed a harmless call look the same in an agent's log, and a guard whose
+Python module is missing exits 1 - which Claude Code treats as a non-blocking error, so the guard
+fails open. `hookTests` closes that gap without a model call. Each test is a made-up tool call:
+
+```ts
+hookTests: [
+  { name: "brand guard refuses an unapproved claim", tool: "Write",
+    input: { file_path: "specs/example.json", content: "{\"headline\": \"Guaranteed #1 results\"}" },
+    expect: "block" },
+  { name: "ordinary edit is allowed", tool: "Edit",
+    input: { file_path: "README.md", old_string: "a", new_string: "b" }, expect: "allow" },
+],
+```
+
+`sandcastle gates` and every run's base check hand it, on stdin and exactly as Claude Code would,
+to each kept `PreToolUse` hook whose matcher takes that tool - in the base-gate sandbox, after
+`setup` has installed what the hooks import. `block` passes when at least one of them blocks
+(exit 2, or a JSON `deny`); `allow` passes when none does. The call itself never happens. A failed
+test is a red base gate: the run stops before any agent starts. `sandcastle lean` warns when
+guards are kept and no test exists.
 
 ## 🔒 Safety model
 

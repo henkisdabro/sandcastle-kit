@@ -134,12 +134,108 @@ export const renderPrompts = (project: Project, dryRun = false) => {
 export const recordRun = (project: Project, extra: Record<string, unknown> = {}) => {
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
-  const run = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
-  writeFileSync(file, JSON.stringify(run, null, 2) + "\n");
+  let run: Record<string, unknown> = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
+  const write = () => writeFileSync(file, JSON.stringify(run, null, 2) + "\n");
+  write();
   process.on("exit", (code) => {
-    writeFileSync(file, JSON.stringify({ ...run, finishedAt: new Date().toISOString(), exitCode: code }, null, 2) + "\n");
+    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
+    write();
   });
+  return {
+    startedAt: run.startedAt as string,
+    /** `stage` is what the status view's run line shows while the run is live. */
+    update(fields: Record<string, unknown>) {
+      run = { ...run, ...fields };
+      write();
+    },
+  };
 };
+
+// ---------------------------------------------------------------------------
+// Outcomes - what each branch's last run decided, kept across runs in
+// logs/outcomes.json by branch slug. The status view shows it on the row, so
+// a finished branch reads "gate red" or "dry run: would merge" rather than
+// its sandbox's last log line, and a branch from an earlier run is told apart
+// from this run's.
+// ---------------------------------------------------------------------------
+
+export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, string>) => {
+  const file = join(project.root, ".sandcastle/logs/outcomes.json");
+  let all: Record<string, unknown> = {};
+  try {
+    all = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    /* first run */
+  }
+  const at = new Date().toISOString();
+  for (const [slug, outcome] of Object.entries(outcomes)) all[slug] = { run, outcome, at };
+  writeFileSync(file, JSON.stringify(all, null, 2) + "\n");
+};
+
+// ---------------------------------------------------------------------------
+// Tokens. Sandcastle copies each Claude Code session to the host; the sum of
+// its assistant messages' usage is what a pass really cost. (Its own
+// `usage` is the last message only - the context size, not the spend.) A
+// streamed message repeats its id, so each id is counted once.
+// ---------------------------------------------------------------------------
+
+export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number };
+export const NO_TOKENS: Tokens = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+
+export const addTokens = (a: Tokens, b: Tokens): Tokens => ({
+  input: a.input + b.input,
+  cacheWrite: a.cacheWrite + b.cacheWrite,
+  cacheRead: a.cacheRead + b.cacheRead,
+  output: a.output + b.output,
+});
+
+export const sessionTokens = (result: unknown): Tokens | undefined => {
+  const iterations = (result as { iterations?: { sessionFilePath?: string }[] } | undefined)?.iterations;
+  const files = (Array.isArray(iterations) ? iterations : []).map((i) => i.sessionFilePath).filter((f): f is string => !!f && existsSync(f));
+  if (!files.length) return undefined;
+  const seen = new Map<string, Tokens>();
+  let anon = 0;
+  for (const f of files) {
+    for (const line of readFileSync(f, "utf8").split("\n")) {
+      if (!line.includes('"usage"')) continue;
+      try {
+        const m = JSON.parse(line).message;
+        const u = m?.usage;
+        if (!u) continue;
+        seen.set(m.id ?? `anon-${anon++}`, {
+          input: u.input_tokens ?? 0,
+          cacheWrite: u.cache_creation_input_tokens ?? 0,
+          cacheRead: u.cache_read_input_tokens ?? 0,
+          output: u.output_tokens ?? 0,
+        });
+      } catch {
+        /* a partial line */
+      }
+    }
+  }
+  return [...seen.values()].reduce(addTokens, NO_TOKENS);
+};
+
+const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
+export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
+
+// ---------------------------------------------------------------------------
+// Dry-run check. The orchestrator writes nothing to GitHub in a dry run, but
+// its agents hold a live gh; the prompt tells them not to post. This checks
+// it: each issue's state, labels and comment count before and after.
+// ---------------------------------------------------------------------------
+
+export const issueSnapshot = (issues: number[]) =>
+  new Map(
+    issues.map((n) => {
+      try {
+        const i = JSON.parse(sh("gh", ["issue", "view", String(n), "--json", "state,labels,comments"]));
+        return [n, `${i.state} [${i.labels.map((l: { name: string }) => l.name).sort().join(",")}] ${i.comments.length} comment(s)`];
+      } catch {
+        return [n, "unreadable"];
+      }
+    }),
+  );
 
 // ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
@@ -199,10 +295,10 @@ const callerWidth = (): number | undefined => {
   }
 };
 
-export const openStatusPane = (project: Project) => {
+export const openStatusPane = (project: Project): string | undefined => {
   if (!IN_HERDR) {
     console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
-    return;
+    return undefined;
   }
   const record = statusPaneRecord(project);
   const previous = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
@@ -210,11 +306,11 @@ export const openStatusPane = (project: Project) => {
     try {
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
       if (!runsStatus(previous)) herdr(["pane", "run", previous, STATUS_COMMAND]);
-      return;
+      return previous;
     } catch (error) {
       // Replace only a pane that is really gone. After a transient herdr
       // error the pane may be alive: opening another would show two views.
-      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return;
+      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return previous;
       unlinkSync(record);
     }
   }
@@ -227,8 +323,9 @@ export const openStatusPane = (project: Project) => {
     herdr(["pane", "rename", pane, `sandcastle ${project.name}`]);
     herdr(["pane", "run", pane, STATUS_COMMAND]);
     writeFileSync(record, pane + "\n");
+    return pane;
   } catch (error) {
-    // A status view is a convenience; it never stops a run.
     console.log(`Could not open the status pane (${String(error).slice(0, 160)}).`);
+    return undefined;
   }
 };

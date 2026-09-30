@@ -2,9 +2,10 @@
 # Live view of a Sandcastle run. Sandcastle ships no UI - this reads the
 # artefacts it does leave behind: log files, worktrees, branches, containers.
 #
-#   sandcastle status               refresh every 10s, from a project root
-#   sandcastle status 0             print once and exit
-#   sandcastle status 10 collapse   trim the merged/idle tail to fit
+#   sandcastle status               refresh every 10s, from a project root; every
+#                                   frame fits the pane, the overflow summarised
+#   sandcastle status 0             print once and exit, every row
+#   sandcastle status 10 all        refresh, every row even past the pane
 #
 # The CLI sets SANDCASTLE_PROJECT, SANDCASTLE_NAME, SANDCASTLE_LABEL and
 # SANDCASTLE_BASE from the project's .sandcastle/config.ts.
@@ -20,7 +21,10 @@ LABEL="${SANDCASTLE_LABEL:-ready-for-agent}"
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 INTERVAL="${1:-10}"
-SHOW_ALL="${2:-all}"   # "collapse" trims the merged/idle tail to fit the screen
+# A live frame taller than its pane scrolls its own top - the header and the
+# working rows - out of sight. So the refreshing view fits the pane unless
+# asked for "all"; a one-off snapshot (0) prints everything.
+if [ "$INTERVAL" = "0" ]; then SHOW_ALL="${2:-all}"; else SHOW_ALL="${2:-collapse}"; fi
 BASE="${SANDCASTLE_BASE:-$(git rev-parse --abbrev-ref HEAD)}"
 # docker reports CPU against ONE core, so 1399% is ~14 cores, not 14x the box.
 # Shown as cores so it can be read against the host straight away.
@@ -187,11 +191,15 @@ pool_line() {
 
 # Whether the recorded run is alive (RUN_LIVE=1), and while it is, the issues
 # it covers and its "issue|#dep, #dep" lines from run.json's `waiting`.
-WAITING=""; RUN_LIVE=0; RUN_ISSUES=""
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""
 load_waiting() {
-  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""
   local f=logs/run.json pid
+  # What each branch's last run decided: "slug|run|outcome" lines. A row
+  # shows it, and one whose run is not the recorded run is a leftover.
+  [ -f logs/outcomes.json ] && OUTCOMES=$(jq -r 'to_entries[] | "\(.key)|\(.value.run)|\(.value.outcome)"' logs/outcomes.json 2>/dev/null)
   [ -f "$f" ] || return 0
+  RUN_STARTED=$(jq -r '.startedAt // empty' "$f" 2>/dev/null)
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
   RUN_LIVE=1
@@ -223,20 +231,25 @@ blocked_on() {
   printf '%s' "$on"
 }
 
+# "run|outcome" for a branch slug, from OUTCOMES.
+outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3; exit}'; }
+
 label() { printf '%s%s%s %s│%s ' "$accent" "$(pad "$1" 7)" "$off" "$rule" "$off"; }
 
 run_line() {
-  local f=logs/run.json orch pid started finished code models
+  local f=logs/run.json orch pid started finished code models stage dry
   [ -f "$f" ] || { printf '%s' "${mute}no run recorded yet${off}"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
   # empty finishedAt would shift every later field.
-  IFS=$'\x1f' read -r orch pid started finished code models < <(jq -r \
-    '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models] | join("\u001f")' "$f")
+  IFS=$'\x1f' read -r orch pid started finished code models stage dry < <(jq -r \
+    '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end)] | join("\u001f")' "$f")
   started=$(epoch_fmt "$(utc_to_epoch "${started%%.*}")" '+%d %b %H:%M')
   if [ -n "$finished" ]; then
     printf '%s' "${mute}last one from ${started}, ended (exit ${code})${off}"
   elif kill -0 "$pid" 2>/dev/null; then
-    printf '%s' "${ylw}running${off} ${mute}since ${started}${off}"
+    # The stage says what a run is doing before its first sandbox exists -
+    # image, preflight, base gates - which takes minutes on a cold start.
+    printf '%s' "${ylw}running${off}${dry:+ ${dry}} ${mute}since ${started}${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}"
   else
     printf '%s' "${hot}killed${off} ${mute}from ${started}, no clean exit${off}"
   fi
@@ -250,7 +263,8 @@ models_line() {
 render() {
   local now issues n phase log age commits state glyph colour activity activity_note rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
-  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
+  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 c_left=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
+  local grp qsort oc oc_run oc_text hidden_list group summary
   local -a out=()
   local n_out=0
 
@@ -282,13 +296,13 @@ render() {
     # Held back by an open dependency, not waiting for a sandbox.
     on=$(blocked_on "$q")
     if [ -n "$on" ]; then
-      qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"
+      qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"; qsort=0
     else
       # Only the live run's own issues wait for a sandbox. The rest of the
       # label reads as in flight otherwise, long after the run has ended.
-      qstate="queued"; qglyph="○"
+      qstate="queued"; qglyph="○"; qsort=0
       if [ "$RUN_LIVE" = 0 ]; then qtext="for the next run"
-      elif grep -qx "$q" <<<"$RUN_ISSUES"; then qtext="waiting for a sandbox"
+      elif grep -qx "$q" <<<"$RUN_ISSUES"; then qtext="in this run - waiting for a sandbox"; qsort=1
       else qtext="not in this run"; fi
     fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
@@ -299,7 +313,8 @@ render() {
       "$gry" "$(pad - $W_CPU)" "$off" \
       "$gry" "$(pad - $W_MEM)" "$off" \
       "$mute" "$qtext" "$off")
-    out[n_out]="2	0	$q	$rendered"; n_out=$((n_out+1)); c_queue=$((c_queue+1))
+    # This run's issues sort ahead of the rest of the queue (the mtime key).
+    out[n_out]="2	$qsort	$q	queued	$rendered"; n_out=$((n_out+1)); c_queue=$((c_queue+1))
   done
 
   for n in $issues; do
@@ -330,28 +345,44 @@ render() {
     if [ "$live_wt" = 1 ] && [ -z "$S_CPU" ] && [ $(( $(date +%s) - mtime )) -ge 1800 ]; then
       # A worktree with no container and a log quiet for 30 minutes is a run
       # that died or was killed, not one in flight.
-      state="stalled"; glyph='!'; colour="$hot"; prio=1; c_stand=$((c_stand+1))
+      state="stalled"; glyph='!'; colour="$hot"; prio=1; c_stand=$((c_stand+1)); grp=waiting
     elif [ "$live_wt" = 1 ]; then
-      state="$phase"; glyph='●'; colour="$ylw"; prio=0; c_work=$((c_work+1))
+      state="$phase"; glyph='●'; colour="$ylw"; prio=0; c_work=$((c_work+1)); grp=working
       quiet=$(( $(date +%s) - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
-      state="no branch"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1))
+      state="no branch"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1)); grp=idle
     elif [ "$commits" -gt 0 ] && ! git cherry "$BASE" "agent/issue-$n" 2>/dev/null | grep -q '^+'; then
       # Every commit has an equivalent patch already on the base. The
       # orchestrator rebased instead of merging, so --merged cannot see it:
       # the work SHIPPED and the branch is a duplicate, not pending work.
-      state="shipped"; glyph='✓'; colour="$sea"; prio=3; c_merged=$((c_merged+1))
+      state="shipped"; glyph='✓'; colour="$sea"; prio=3; c_merged=$((c_merged+1)); grp=done
     elif [ "$commits" -gt 0 ]; then
-      state="waiting"; glyph='◆'; colour="$cyn"; prio=1; c_stand=$((c_stand+1))
+      # A finished branch left standing. Its run's outcome says why - a
+      # sandbox's last log line ("nothing to sync out") does not. One left by
+      # an earlier run is a leftover, not this run's work waiting on you.
+      oc=$(outcome_of "$n"); oc_run="${oc%%|*}"; oc_text="${oc#*|}"
+      if [ -n "$oc" ] && [ "$oc_run" = "$RUN_STARTED" ]; then
+        state="waiting"; glyph='◆'; colour="$cyn"; prio=1; c_stand=$((c_stand+1)); grp=waiting
+        activity_note="$oc_text"
+        case "$oc_text" in "gate red"*|crashed|"merge conflict"|"failed to land") colour="$hot";; esac
+      else
+        state="left over"; glyph='◇'; colour="$gry"; prio=4; c_left=$((c_left+1)); grp="left over"
+        activity_note="earlier run${oc_text:+: $oc_text} - sandcastle clean"
+      fi
     elif grep -q "agent/issue-${n}$" <<<"$merged_list"; then
-      state="merged"; glyph='✓'; colour="$grn"; prio=3; c_merged=$((c_merged+1))
+      state="merged"; glyph='✓'; colour="$grn"; prio=3; c_merged=$((c_merged+1)); grp=done
     else
-      state="no commits"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1))
+      state="no commits"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1)); grp=idle
     fi
     # Back on the queue after an earlier run: it is queued, not done.
     if [ "$prio" -ge 3 ] && in_queue "$n" && requeued "$n"; then
-      case "$prio" in 3) c_merged=$((c_merged-1));; 4) c_idle=$((c_idle-1));; esac
-      state="queued"; glyph='○'; colour="$blu"; prio=2; c_queue=$((c_queue+1))
+      case "$grp" in done) c_merged=$((c_merged-1));; idle) c_idle=$((c_idle-1));; "left over") c_left=$((c_left-1));; esac
+      state="queued"; glyph='○'; colour="$blu"; prio=2; c_queue=$((c_queue+1)); grp=queued
+      # Its old log's last line is history; say what happens next instead.
+      if [ "$RUN_LIVE" = 1 ] && grep -qx "$n" <<<"$RUN_ISSUES"; then activity_note="in this run"
+      elif [ "$RUN_LIVE" = 1 ]; then activity_note="not in this run"
+      else activity_note="for the next run"; fi
+      [ "$commits" -gt 0 ] && activity_note="$activity_note - on its earlier branch ($commits commit(s))"
       on=$(blocked_on "$n")
       if [ -n "$on" ]; then
         state="blocked"; glyph='◌'
@@ -410,11 +441,11 @@ render() {
       "$cpu_col" "$(pad "$cpu" $W_CPU)" "$off" \
       "$head" "$(pad "$mem" $W_MEM)" "$off" \
       "$act_col" "$activity" "$off")
-    out[n_out]="$prio	$mtime	$n	$rendered"; n_out=$((n_out+1))
+    out[n_out]="$prio	$mtime	$n	$grp	$rendered"; n_out=$((n_out+1))
   done
 
   printf '%s\n' "$line"
-  printf '%s\n' " ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off} · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}  ${rule}│${off}  ${accent}${now}${off}"
+  printf '%s\n' " ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off} · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}$([ "$c_left" -gt 0 ] && printf ' · %s%s left over%s' "$gry" "$c_left" "$off")  ${rule}│${off}  ${accent}${now}${off}"
   # Label, then a dim pipe, then the value: the label column reads as the
   # row's title at a glance.
   printf '%s\n' " $(label run)$(run_line)"
@@ -435,23 +466,33 @@ render() {
     # Frame overhead is 10 rows: rule, title, run, models, machine, rule,
     # headings, rule, legend, note. Every other row is a table row, and the
     # "+N hidden" line only takes one when something is actually hidden.
-    budget=$(( rows - 10 )); shown=0; hidden=0
+    budget=$(( rows - 10 )); shown=0; hidden=0; hidden_list=""
     [ "$SHOW_ALL" = "all" ] && budget="$n_out"
     [ "$budget" -lt 3 ] && budget=3
     [ "$n_out" -gt "$budget" ] && budget=$(( budget - 1 ))
-    while IFS=$'\t' read -r prio mtime n rendered; do
+    while IFS=$'\t' read -r prio mtime n group rendered; do
       if [ "$shown" -lt "$budget" ]; then
         printf '%s\n' "$rendered"; shown=$((shown+1))
       else
-        hidden=$((hidden+1))
+        hidden=$((hidden+1)); hidden_list="${hidden_list}${group}|${n%%-*}
+"
       fi
     done < <(printf '%s\n' "${out[@]}" | sort -t$'\t' -k1,1n -k2,2nr -k3,3n)
-    [ "$hidden" -gt 0 ] && printf '%s\n' " ${gry}+${hidden} more hidden to fit the pane (oldest finished first)${off}"
+    # What did not fit, by state, so a long queue is one line rather than a
+    # screen of rows: "+33 queued (#1234-#1376) · 2 done".
+    if [ "$hidden" -gt 0 ]; then
+      summary=$(printf '%s' "$hidden_list" | awk -F'|' 'NF==2 {
+          if (!($1 in c)) { order[++k]=$1; lo[$1]=$2; hi[$1]=$2 }
+          c[$1]++; if ($2+0 < lo[$1]+0) lo[$1]=$2; if ($2+0 > hi[$1]+0) hi[$1]=$2 }
+        END { for (i=1; i<=k; i++) { g=order[i]
+          printf "%s%d %s (#%s%s)", (i>1 ? " · " : ""), c[g], g, lo[g], (hi[g]!=lo[g] ? "-#" hi[g] : "") } }')
+      printf '%s\n' " ${gry}+${summary} - not shown, to fit the pane${off}"
+    fi
   fi
 
   printf '%s\n' "$line"
-  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}· idle${off}"
-  printf '%s\n' " ${mute}◆ finished, not merged: dry run or red gate · age = since last log write · CPU in cores of ${NCPU}${off}"
+  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}◇ left over  · idle${off}"
+  printf '%s\n' " ${mute}◆ this run's branch, not merged (dry run, red gate, held) · age = since last log write · CPU in cores of ${NCPU}${off}"
 }
 
 if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
@@ -459,10 +500,12 @@ if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
 # Alternate screen + hidden cursor, restored on exit. INT and TERM must exit
 # explicitly: a handler that only restores the screen returns into the loop,
 # which leaves Ctrl-C unable to stop the script at all.
-restore() { printf '\e[?25h\e[?1049l'; }
+# Line wrap off as well: a line wider than the pane would wrap onto a second
+# row, and enough of them push the frame's top off the screen.
+restore() { printf '\e[?7h\e[?25h\e[?1049l'; }
 trap restore EXIT
 trap 'restore; exit 130' INT TERM
-printf '\e[?1049h\e[?25l\e[2J'
+printf '\e[?1049h\e[?25l\e[?7l\e[2J'
 
 # Redraw straight away on a pane resize instead of waiting out the interval.
 SLEEP_PID=""

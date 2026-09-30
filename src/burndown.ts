@@ -26,12 +26,15 @@ import type { Project } from "./config.ts";
 import { type Gate, gateBase, gateLine, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
-import { openSandboxView } from "./herdr.ts";
+import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
-import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, recordRun, renderPrompts } from "./run.ts";
+import {
+  addTokens, archiveFinishedLogs, assertCleanBase, issueSnapshot, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  recordRun, renderPrompts, sessionTokens, type Tokens, tokenLine,
+} from "./run.ts";
 import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
 import { usageLine, usageStop } from "./usage.ts";
-import { lockWorktree, releaseBranchWorktree, unlockWorktree } from "./worktree-lock.ts";
+import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 
 type Issue = { number: number; title: string; body?: string };
 type Outcome = {
@@ -130,9 +133,57 @@ export const burndown = async (project: Project) => {
   if (TEST_RED_GATE) console.log("SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass.");
   else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
 
-  const image = ensureImage(project);
+  // The run is on record and on screen before anything slow starts: a cold
+  // image check, preflight and base gates took over three minutes with no
+  // view at all, and the chosen issues looked like the rest of the queue.
+  // `waiting` lets the status view show a held-back issue as blocked, not queued.
+  const run = recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN, waiting, stage: "starting" });
+  // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
+  // prints for a kept worktree works as printed.
+  process.on("exit", unlockAll);
+  // Inside Herdr, the run's own tab: the status view and one pane per
+  // concurrent sandbox, reporting each one's phase. Otherwise (or with the
+  // view off) the status view opens beside the caller. Inside Herdr a run
+  // with no status view does not start: nobody would see it.
+  const view = openSandboxView(project, Math.min(CONCURRENCY, issues.length));
+  const statusPane = view.status ?? openStatusPane(project);
+  if (IN_HERDR && !statusPane) {
+    throw new Error("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
+  }
+  if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
+
+  // Every step is timed into logs/timings.jsonl, so how long a project's
+  // issues take - and where the time goes - is on record rather than guessed.
+  // Steps before the agents are issue 0. The same map drives the heartbeat.
+  const runId = run.startedAt;
+  const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
+  const active = new Map<number, { phase: string; since: number }>();
+  const took = new Map<number, number>();
+  const spent = new Map<number, Tokens>();
+  const keptWorktrees: { issue: number; path: string }[] = [];
+  const timed = async <T>(issue: number, phase: string, fn: () => Promise<T> | T): Promise<T> => {
+    const since = Date.now();
+    active.set(issue, { phase, since });
+    if (issue) view.phase(issue, phase);
+    else run.update({ stage: phase });
+    let ok = false;
+    let tokens: Tokens | undefined;
+    try {
+      const result = await fn();
+      ok = true;
+      tokens = sessionTokens(result);
+      if (tokens) spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
+      return result;
+    } finally {
+      active.delete(issue);
+      const line = { ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok, ...(tokens ? { tokens } : {}) };
+      appendFileSync(timings, JSON.stringify(line) + "\n");
+    }
+  };
+
+  const image = await timed(0, "image", () => ensureImage(project));
   const prompts = renderPrompts(project, DRY_RUN);
-  preflight(project, image);
+  await timed(0, "preflight", () => preflight(project, image));
   const env = credentials(project);
   const usageNote = await usageLine(env);
   if (usageNote) console.log(usageNote);
@@ -155,47 +206,20 @@ export const burndown = async (project: Project) => {
   }
   // A kept hook that cannot run fails on every tool call of every agent, or
   // silently guards nothing. Stop before any sandbox starts.
-  const hookCheck = checkHooks(project, image, lean);
+  const hookCheck = await timed(0, "hook check", () => checkHooks(project, image, lean));
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new Error("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
-  else await requireGreenBase(project, image, planFile);
-  // `waiting` lets the status view show a held-back issue as blocked, not queued.
-  recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN, waiting });
-  // Inside Herdr, the run's own tab: the status view and one pane per
-  // concurrent sandbox, reporting each one's phase. Otherwise (or with the
-  // view off) the status view opens beside the caller.
-  const view = openSandboxView(project, Math.min(CONCURRENCY, issues.length));
-  if (!view.status) openStatusPane(project);
+  else await timed(0, "base gates", () => requireGreenBase(project, image, planFile));
+  // What GitHub says about each issue now, to prove a dry run left it alone.
+  const before = DRY_RUN ? issueSnapshot(issues.map((i) => i.number)) : undefined;
+  run.update({ stage: "running" });
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.
   let tampered: string | undefined;
 
   const runGates = (sandbox: Parameters<typeof gatesIn>[1], label: string) => gatesIn(project, sandbox, label);
 
-  // Every agent pass and gate run is timed into logs/timings.jsonl, so how
-  // long a project's issues take - and where the time goes - is on record
-  // rather than guessed. The same map drives the heartbeat below.
-  const runId = new Date().toISOString();
-  const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
-  const active = new Map<number, { phase: string; since: number }>();
-  const took = new Map<number, number>();
-  const keptWorktrees: { issue: number; path: string }[] = [];
-  const timed = async <T>(issue: number, phase: string, fn: () => Promise<T>): Promise<T> => {
-    const since = Date.now();
-    active.set(issue, { phase, since });
-    view.phase(issue, phase);
-    let ok = false;
-    try {
-      const result = await fn();
-      ok = true;
-      return result;
-    } finally {
-      active.delete(issue);
-      const line = { ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok };
-      appendFileSync(timings, JSON.stringify(line) + "\n");
-    }
-  };
   const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
 
   // A run is silent for as long as its agents are, which for a review can be
@@ -300,7 +324,11 @@ export const burndown = async (project: Project) => {
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
       let gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
+      // The forced red is named as such everywhere it shows: "ruff red" for a
+      // gate that passed sent a reader looking for a ruff failure.
+      let forced = false;
       if (TEST_RED_GATE && !gated.failure) {
+        forced = true;
         const g = project.gates[0];
         const failure = {
           name: g.name,
@@ -323,7 +351,10 @@ export const burndown = async (project: Project) => {
       for (let red = gated.failure; red && red.exitCode !== 124 && repairs < (project.repair.attempts ?? 1); red = gated.failure) {
         const failure = red;
         repairs++;
-        console.log(`#${issue.number}: ${failure.name} red - repair pass ${repairs}`);
+        console.log(
+          `#${issue.number}: ${forced ? `test red gate (SANDCASTLE_TEST_RED_GATE; ${failure.name} passed)` : `${failure.name} red`} - repair pass ${repairs}`,
+        );
+        forced = false;
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -396,6 +427,7 @@ export const burndown = async (project: Project) => {
   // Bounded fan-out: a sliding pool, not a batch barrier, inside the
   // machine-wide sandbox limit.
   const results: PromiseSettledResult<Outcome>[] = [];
+  const crashed = new Map<number, string>();
   const queue = [...issues];
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, issues.length) }, async () => {
@@ -414,6 +446,7 @@ export const burndown = async (project: Project) => {
             },
             (reason) => {
               view.finish(issue.number, "crashed");
+              crashed.set(issue.number, String(reason));
               if (hitLimit(issue.number)) limitHit = issue.number;
               return { status: "rejected", reason } as const;
             },
@@ -428,6 +461,7 @@ export const burndown = async (project: Project) => {
   // Phase 3: land the green ones, sequentially, on the host
   // -------------------------------------------------------------------------
 
+  run.update({ stage: "landing" });
   assertGitUnchanged(project, fingerprint, "before landing");
   const green = results.flatMap((r) =>
     r.status === "fulfilled" && (r.value.status === "shipped" || r.value.status === "merged-earlier") ? [r.value] : [],
@@ -545,6 +579,23 @@ export const burndown = async (project: Project) => {
 
   let verify: Gate[] | undefined;
   if (merged.length > 1) verify = (await timed(0, "verify", () => gateBase(project, image, planFile, "verify"))).gates;
+  run.update({ stage: "report" });
+
+  // Each branch's outcome, for the status view's rows (run.ts).
+  const outcome = new Map<number, string>();
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const o = r.value;
+    outcome.set(o.issue, o.status === "gate-failed" ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}` : o.status);
+  }
+  for (const n of merged) outcome.set(n, "merged");
+  for (const n of conflicted) outcome.set(n, "merge conflict");
+  for (const f of failedToLand) outcome.set(f.issue, "failed to land");
+  for (const k of skipped) outcome.set(k.issue, `not merged: ${k.reason}`);
+  for (const h of heldBack) outcome.set(h.issue, "needs a human merge");
+  if (DRY_RUN) for (const o of green) if (outcome.get(o.issue) === "shipped") outcome.set(o.issue, "dry run: gated green, would merge");
+  for (const [n] of crashed) outcome.set(n, "crashed");
+  recordOutcomes(project, runId, Object.fromEntries([...outcome].map(([n, v]) => [String(n), v])));
 
   // -------------------------------------------------------------------------
   // Report
@@ -560,8 +611,11 @@ export const burndown = async (project: Project) => {
     const g = gateLine(o.gates);
     const repaired = o.repairs ? ` repaired=${o.repairs}` : "";
     const time = took.has(o.issue) ? ` ${minutes(took.get(o.issue)!)}` : "";
-    console.log(`  #${o.issue} ${o.status.padEnd(14)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}${time}  ${o.branch}`);
+    const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
+    console.log(`  #${o.issue} ${o.status.padEnd(14)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}${time}  ${o.branch}${cost}`);
   }
+  const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
+  if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log(`\nmerged & closed: ${merged.join(", ") || "none"}`);
   if (closedEarlier.length) console.log(`closed, merged by an earlier run: ${closedEarlier.join(", ")}`);
   if (conflicted.length) console.log(`merge conflicts: ${conflicted.join(", ")}`);
@@ -585,7 +639,16 @@ export const burndown = async (project: Project) => {
   for (const k of keptWorktrees) {
     console.log(`worktree kept with uncommitted files: #${k.issue} - ${k.path} (inspect, then \`git worktree remove --force\` it)`);
   }
-  console.log("Branches left standing for review are not deleted. Nothing is pushed.");
+  if (before) {
+    const after = issueSnapshot([...before.keys()]);
+    const changed = [...before].filter(([n, was]) => after.get(n) !== was);
+    console.log(
+      changed.length
+        ? `DRY RUN BREACHED: ${changed.map(([n, was]) => `#${n} ${was} -> ${after.get(n)}`).join("; ")} - an agent wrote to GitHub.`
+        : `dry run held: ${before.size} issue(s) unchanged on GitHub (state, labels, comments).`,
+    );
+  }
+  console.log("Branches left standing for review are not deleted (`sandcastle clean` lists them). Nothing is pushed.");
   view.close(
     `merged ${merged.length}` +
       (conflicted.length + failedToLand.length + skipped.length ? `, not landed ${conflicted.length + failedToLand.length + skipped.length}` : "") +

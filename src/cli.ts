@@ -6,7 +6,8 @@
 //                    set up; prints what is missing and how to fix it
 //   run              burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge
-//   status [s] [collapse]   the live status view (refresh every s seconds, 0 = once)
+//   status [s] [all] the live status view (refresh every s seconds, 0 = once);
+//                    it fits its pane unless given "all"
 //   build [--force]  build the base and project images
 //   preflight        one reply from every model, nothing else
 //   gates            every gate on the base branch in a sandbox, as a run's
@@ -16,6 +17,8 @@
 //                    they can run in the image; --measure runs one real turn
 //                    with and without the extras
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
+//   clean [--all]    remove leftover sandbox worktrees and finished agent branches;
+//                    --all also deletes unmerged agent branches (listed first)
 //
 // Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
 // environment variables, see README.md.
@@ -26,12 +29,12 @@ import { join } from "node:path";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
-import { preflight } from "./run.ts";
+import { archiveFinishedLogs, preflight } from "./run.ts";
 import { ensureImage, KIT, sh } from "./sandbox.ts";
-import { lockWorktree } from "./worktree-lock.ts";
+import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
@@ -135,6 +138,46 @@ switch (command) {
     // sandbox agent, all hidden until lean.keep names it.
     const project = await loadProject(root);
     leanReport(project, leanPlan(project));
+    break;
+  }
+  case "clean": {
+    // Leftovers a run owns nobody: worktrees an interrupted or dirty sandbox
+    // kept, and agent branches nothing reports once their row ages out. A
+    // live run's own worktrees must survive, so this takes the run lock.
+    disableHostGitHooks();
+    const project = await loadProject(root);
+    lockRun(project);
+    unlockAll();
+    const worktrees = sh("git", ["worktree", "list", "--porcelain"])
+      .split("\n\n")
+      .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
+      .filter((p): p is string => !!p && p.startsWith(join(root, ".sandcastle/worktrees/")));
+    for (const path of worktrees) {
+      sh("git", ["worktree", "remove", "--force", path]);
+      console.log(`removed worktree ${path}`);
+    }
+    sh("git", ["worktree", "prune"]);
+    const base = project.baseBranch;
+    const all = args.includes("--all");
+    const standing: string[] = [];
+    let deleted = 0;
+    for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"]).split("\n").filter(Boolean)) {
+      // A base-gate or verify branch is always scratch. An agent branch is
+      // finished when every commit is on base, merged or as an equal patch.
+      const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch]).split("\n").some((l) => l.startsWith("+"));
+      if (finished || all) {
+        sh("git", ["branch", "-D", branch]);
+        deleted++;
+        console.log(`deleted ${branch}${finished ? "" : " (unmerged)"}`);
+      } else {
+        standing.push(`${branch} (${sh("git", ["rev-list", "--count", `${base}..${branch}`])} commit(s) not on ${base})`);
+      }
+    }
+    archiveFinishedLogs(project);
+    if (standing.length) {
+      console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
+    }
+    if (!worktrees.length && !deleted && !standing.length) console.log("Nothing to clean.");
     break;
   }
   default:

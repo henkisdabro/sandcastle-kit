@@ -9,7 +9,9 @@ import { configureModels, type Effort } from "./agents.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
 
-export type AgentConfig = { model?: string; effort?: Effort; maxIterations?: number; idleTimeoutSeconds?: number };
+export type HookTest = { name: string; tool: string; input: Record<string, unknown>; expect: "block" | "allow" };
+
+export type AgentConfig ={ model?: string; effort?: Effort; maxIterations?: number; idleTimeoutSeconds?: number };
 
 export type ProjectConfig = {
   /** Names the project image (`sandcastle-<name>`) and labels the status view. */
@@ -36,6 +38,13 @@ export type ProjectConfig = {
   lean?: { keep?: string[]; dropHooks?: string[] };
   /** Run by the orchestrator after both agents, in order, stopping at the first red. */
   gates: { name: string; command: string }[];
+  /**
+   * Proof that the kept PreToolUse guards fire. Each test hands every kept
+   * PreToolUse hook whose matcher takes `tool` a made-up call, in the base-gate
+   * sandbox after setup, and expects at least one to block it (`block`) or
+   * none to (`allow`). Nothing is written: the hook only sees the call.
+   */
+  hookTests?: HookTest[];
   /**
    * Extra path prefixes a branch may not change and still land automatically
    * (on top of hooks, CI, agent settings and install scripts - src/guard.ts).
@@ -82,6 +91,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     implement: {},
     review: {},
     repair: {},
+    hookTests: [],
     ...config,
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
   };

@@ -304,6 +304,16 @@ export const report = (project: Project, p: Plan) => {
         "  move any guard or check among them into .claude/settings.json.",
     );
   }
+  // The hook check proves a guard CAN run; only a hook test proves it blocks.
+  const guards = p.hooks.filter((h) => h.event === "PreToolUse").length;
+  if (guards && !project.hookTests.length) {
+    console.log(
+      `  WARNING: ${guards} PreToolUse guard(s) kept, but no hookTests in the config: nothing proves they block\n` +
+        "  anything in a sandbox. Add one test per guard that matters (README: Hook tests).",
+    );
+  } else if (project.hookTests.length) {
+    console.log(`  Hook tests: ${project.hookTests.length} configured - run by \`sandcastle gates\` and every run's base check.`);
+  }
   const gitHooks = gitHooksDir(project.root);
   if (gitHooks) {
     console.log(`  Git hooks (${gitHooks}) run on every agent commit in the sandbox; the kit's merge uses --no-verify.`);
@@ -404,7 +414,7 @@ export const reportHookCheck = (r: { failures: string[]; warnings: string[] }, h
     return;
   }
   for (const f of r.failures) console.log(`  HOOK FAIL  ${f}`);
-  for (const w of r.warnings) console.log(`  hook warn  ${w} (fine if the project's setup installs it)`);
+  for (const w of r.warnings) console.log(`  hook warn  ${w} (fine if the project's setup installs it - a hook test proves it)`);
   if (r.failures.length) {
     console.log(
       "  Fix a failing hook in the project's image layer, or - only if it is a host-only convenience,\n" +

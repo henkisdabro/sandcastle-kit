@@ -13,7 +13,7 @@ Requested action: `$action`
 |---|---|---|
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
 | `queue` | Triages every open issue into the agent queue, with the user | Every open issue is labelled, parked, or left with a stated reason |
-| `run` | Starts a burndown in a separate pane or terminal | The run is live in its own pane, or the user holds the exact command |
+| `run` | Starts a burndown in a tab of its own | The run is live in its own tab and its status view is confirmed, or the user holds the exact command |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
 | `update` | Pulls the latest kit and brings the current project up to date with it | The kit is current, the project's image and hook check are clean, and every change that affects it is reported or applied |
 
@@ -85,10 +85,16 @@ going keeps its models; the change applies from the next one. It never needs a c
      `.claude/settings.json`.
    - Git hooks (`core.hooksPath`, `.husky`) run on every agent commit inside the sandbox. Check
      that what they call is in the image and that none pushes or deploys.
+   - **Prove the guards.** The hook check only proves a hook can run. For each kept `PreToolUse`
+     guard that matters, add a `hookTests` entry to the config (README: Hook tests): a tool call
+     it must refuse, with `expect: "block"` - read the guard's script for what it refuses - and
+     for a broad guard one ordinary call with `expect: "allow"`. Step 6 runs them.
 5. **Settings that stay.** Permissions and `env` in `.claude/settings.json` are kept. Check `env`
    for host paths or secrets a container cannot resolve.
 6. **Gate the base commit: `sandcastle gates`.** Required, and free of model calls. It runs every
-   gate on the base branch in a sandbox set up exactly as an agent's is - image, setup, lean plan.
+   gate and hook test on the base branch in a sandbox set up exactly as an agent's is - image,
+   setup, lean plan. A failed hook test is a guard that does not block in a sandbox: fix its
+   dependencies (a module `setup` never installs is the usual cause), never the test.
    A gate red there is red on every branch, so fix the cause (an image missing a tool or too old
    for a test, a setup step, a hidden item or dropped hook a test reads) and run it again until
    every gate is green. The red gates' full output is in `.sandcastle/logs/base-gates.log`. Every
@@ -151,20 +157,33 @@ comments, and the gates can prove it.
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes issues on GitHub and merges into the base branch locally. A dry run
    (`DRY_RUN=1`) merges and closes nothing, and its agents are told to post nothing to GitHub.
-2. Start it outside your own shell - it takes hours. In a terminal multiplexer you can drive (for
-   example Herdr: `test "${HERDR_ENV:-}" = 1`), open a sibling pane at the repo root without
-   taking focus and run `<env vars> sandcastle run` there; inside Herdr the run opens a
-   `sandcastle <project>` tab holding the status view and one pane per sandbox, each reported to
-   the agent sidebar (blocked means a human has to act). Otherwise give the user the command to
-   run in a second terminal, plus `sandcastle status` for a third.
+2. **Start it in a tab of its own, never beside yourself** - it takes hours. In a terminal
+   multiplexer you can drive (for example Herdr: `test "${HERDR_ENV:-}" = 1`):
+   1. Create a tab without taking focus, at the repo root: `herdr tab create --label "sandcastle
+      <project>" --cwd <root> --no-focus`. Its root pane is the run pane: name it `herdr pane
+      rename <pane> "sandcastle run <project>"`.
+   2. Run `<env vars> sandcastle run` in that pane (`herdr pane run <pane> "..."`). Alone in its
+      tab, the run adopts it: the status view opens beside it at once - before the image check,
+      preflight and base gates - and one pane per sandbox follows, each reported to the agent
+      sidebar (blocked means a human has to act). Never open a status view of your own: the kit
+      opens exactly one.
+   3. **Confirm the view exists** within a minute: the run pane prints `Status view: pane <id>`
+      (`herdr pane wait-output <pane> --match "Status view:" --timeout 60000`), and `herdr tab get
+      <tab>` shows more than one pane. If the line is missing, or the run printed "Could not open
+      the status view", say so plainly to the user - do not carry on as if they can watch it.
+   4. Tell the user the tab, the run pane and the status pane ids.
+
+   Otherwise give the user the command to run in a second terminal, plus `sandcastle status` for
+   a third.
 3. **Arrange to hear when it ends.** A command handed to another pane is not your own process, so
    your harness never tells you it finished. Every run's last line is `sandcastle run ended (exit
-   N)` - after the report, after a drained queue, after a crash. Right after starting it, start a
-   background command your harness reports back on when it exits (`run_in_background` in Claude
-   Code) that waits for that line in the pane, for example `herdr pane wait-output <pane> --match
-   "sandcastle run ended" --timeout <ms>`. Use a fresh pane per run - the wait also matches output
-   already in the pane - and when the timeout lapses before the run ends, start the wait again. When
-   it fires, read the report (`herdr pane read <pane> --source recent-unwrapped`) and tell the user.
+   N)` - after the report, after a drained queue, after a crash or Ctrl-C. Right after starting
+   it, start a background command your harness reports back on when it exits (`run_in_background`
+   in Claude Code) that waits for that line in the run pane, for example `herdr pane wait-output
+   <pane> --match "sandcastle run ended" --timeout <ms>`. Use a fresh pane per run - the wait also
+   matches output already in the pane - and when the timeout lapses before the run ends, start the
+   wait again. When it fires, read the report (`herdr pane read <pane> --source recent-unwrapped`)
+   and tell the user.
 4. A run pushes nothing. Pushing the merged base branch afterwards follows the repo's own
    shipping rules. When reading the report: `needs-human` branches were green but change hooks,
    CI or install scripts and need a human merge; "gated green but not merged" means the issue
@@ -173,7 +192,12 @@ comments, and the gates can prove it.
    repair commit usually means the repair agent judged the failure outside the branch - read the
    repair log and its issue comment, then check that gate with `sandcastle gates` before blaming
    the branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the
-   cause is the image, the setup or the lean plan (`.sandcastle/logs/base-gates.log`).
+   cause is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).
+   A dry run's report ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent
+   wrote to an issue on GitHub; show the user what changed. Each issue's line carries its tokens.
+   Branches a dry run or a red gate leave standing, and worktrees a stopped run kept, are cleared
+   with `sandcastle clean` (unmerged branches only with `--all`, after asking - their work is
+   lost).
 
 ## status - what a run is doing
 
@@ -181,7 +205,12 @@ comments, and the gates can prove it.
 separate pane or terminal). Each row's log is `.sandcastle/logs/agent-issue-<n>-*.log`; the last
 lines of a failed run's log hold the real cause (a usage limit usually reads as a "trust dialog"
 error). A `repair` row is fixing a red gate; `quiet Nm` means a live sandbox's log has been
-silent that long - read its log tail before calling it hung. How long each phase took is in
+silent that long - read its log tail before calling it hung. While a run is live, its `run` line
+names the stage (image, preflight, base gates, running, landing). A `waiting` row is a branch this
+run left standing, with its outcome (`gate red: ...`, `dry run: gated green, would merge`, `needs a
+human merge`) as its activity; `left over` is one from an earlier run, for `sandcastle clean`. The
+live view fits its pane and summarises the rows that do not fit on one line (`sandcastle status
+10 all` shows them all). How long each step took, and each agent pass's tokens, is in
 `.sandcastle/logs/timings.jsonl`.
 
 ## update - bring the kit and this project up to date
@@ -211,5 +240,10 @@ was set up with.
       For each whose comment still names an open blocker, propose moving it into the body as
       `Blocked by #N` and adding the queue label - but only if its spec is otherwise closed (see
       queue). Apply after the user agrees.
+   5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
+      `hookTests`, propose tests as in init step 4, then `sandcastle gates`.
+   6. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
+      entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
+      yes).
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
