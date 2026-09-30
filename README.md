@@ -297,6 +297,7 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 
 Effort levels are `low`, `medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a

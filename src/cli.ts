@@ -15,7 +15,7 @@
 //                    with and without the extras
 //   init             scaffold .sandcastle/config.ts and rules.md, then the lean check
 //
-// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT:
+// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, USAGE_CHECK:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";

@@ -24,7 +24,8 @@ import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, prote
 import { checkHooks, plan as leanPlan, reportHookCheck } from "./lean.ts";
 import { usage, withSlot } from "./pool.ts";
 import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, recordRun, renderPrompts } from "./run.ts";
-import { ensureImage, sandboxConfig, sh } from "./sandbox.ts";
+import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
+import { usageLine, usageStop } from "./usage.ts";
 import { execGate, lockWorktree, releaseBranchWorktree, unlockWorktree } from "./worktree-lock.ts";
 
 type Issue = { number: number; title: string; body?: string };
@@ -127,6 +128,9 @@ export const burndown = async (project: Project) => {
   const image = ensureImage(project);
   const prompts = renderPrompts(project);
   preflight(project, image);
+  const env = credentials(project);
+  const usageNote = await usageLine(env);
+  if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
   // Written next to the prompts; the worktree hook applies it to each sandbox.
   const lean = leanPlan(project);
@@ -337,6 +341,7 @@ export const burndown = async (project: Project) => {
   // A spent plan allowance fails every issue after it the same way, each one
   // after paying for a sandbox and an install. The first one stops the queue.
   let limitHit: number | undefined;
+  let usageHit: string | undefined;
   const hitLimit = (issue: number) => {
     const logs = join(project.root, ".sandcastle/logs");
     if (!existsSync(logs)) return false;
@@ -351,8 +356,13 @@ export const burndown = async (project: Project) => {
   const queue = [...issues];
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, issues.length) }, async () => {
-      for (let next = queue.shift(); next && limitHit === undefined && !tampered; next = queue.shift()) {
+      for (let next = queue.shift(); next && limitHit === undefined && !usageHit && !tampered; next = queue.shift()) {
         const issue = next;
+        const stop = await usageStop(env);
+        if (stop) {
+          usageHit ??= stop;
+          break;
+        }
         results.push(
           await withSlot("sandboxes", `${project.name} #${issue.number}`, () => pipeline(issue)).then(
             (value) => ({ status: "fulfilled", value }) as const,
@@ -519,6 +529,8 @@ export const burndown = async (project: Project) => {
   if (limitHit !== undefined) {
     const skipped = issues.length - results.length;
     console.log(`\nSTOPPED EARLY: #${limitHit} hit the plan's usage limit; ${skipped} queued issue(s) were not started.`);
+  } else if (usageHit) {
+    console.log(`\nSTOPPED EARLY: ${usageHit}; ${issues.length - results.length} queued issue(s) were not started.`);
   }
   for (const w of waiting) console.log(`waiting, not started: #${w.issue} - on ${w.on.map((d) => `#${d}`).join(", ")}`);
   console.log("Branches left standing for review are not deleted. Nothing is pushed.");
