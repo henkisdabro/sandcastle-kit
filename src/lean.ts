@@ -91,18 +91,16 @@ export const plan = (project: Project): Plan => {
 
   // Only what the harness loads is an item: a skill is a directory with a
   // SKILL.md, an agent or command a .md file or a folder of them. A stray
-  // file (a pyrightconfig.json among the skills) is hidden with its folder's
-  // siblings but is not listed as something to keep. `work.md` and `work/`
-  // are one command, kept or hidden together.
+  // file (a pyrightconfig.json among the skills) is neither listed nor hidden:
+  // the harness never loads it, so hiding saves no tokens, and a tool that
+  // reads it (`pyright -p .claude/skills`) would lose its config. `work.md`
+  // and `work/` are one command, kept or hidden together.
   const dirOf = (kind: Item["kind"], dir: string, loads: (name: string) => string | undefined) => {
     const byId = new Map<string, Item & { paths: string[] }>();
     for (const name of children(root, dir)) {
       const path = `${dir}/${name}`;
       const file = loads(name);
-      if (!file) {
-        hide.push(path);
-        continue;
-      }
+      if (!file) continue;
       const id = name.replace(/\.md$/, "");
       const item = byId.get(id);
       const tokens = frontmatterTokens(join(root, file));

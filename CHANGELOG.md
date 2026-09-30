@@ -9,6 +9,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Fixed
+
+- The lean sandbox no longer hides stray files under `.claude/skills`, `.claude/agents` or
+  `.claude/commands`. The harness never loads them, and hiding one such as `pyrightconfig.json`
+  turned `pyright -p .claude/skills` red on the base commit.
+
 ## [0.1.0] - 2026-09-30
 
 Initial public release: an opinionated issue-burndown kit on
