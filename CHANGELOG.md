@@ -17,6 +17,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Set `repair: { attempts: 0 }` in `.sandcastle/config.ts` to keep the old behaviour.
 - **Blocked issues are read from the issue body.** Issues triaged earlier as unlabelled with a
   "blocked by #N" comment can move the line into the body and take the queue label.
+- The status view's header is now five rows (run state, models and machine limits each get
+  their own), so it fits a narrower pane.
 
 ### Added
 
@@ -43,11 +45,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A project's first run crashed with ENOENT on `.sandcastle/logs/run.lock`.
 - A worktree Sandcastle kept for its uncommitted files showed as working forever in the status
   view; it now shows its branch's state, and the run report names it.
-
-### Upgrading (status view)
-
-- The status header's second line is now three rows (run, models, machine), so the view fits a
-  narrower pane.
 
 ## [0.1.0] - 2026-09-30
 
