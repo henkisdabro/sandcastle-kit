@@ -174,6 +174,25 @@ export const archiveFinishedLogs = (project: Project) => {
 // .sandcastle/logs/status-pane; a closed pane is simply replaced.
 // ---------------------------------------------------------------------------
 
+// This kit's own entry, not whichever `sandcastle` PATH finds first: a second
+// checkout (a branch under test, say) would otherwise run with the other
+// checkout's status view.
+const STATUS_COMMAND = `"${KIT}/bin/sandcastle" status`;
+
+// The pane splits beside the calling pane, so that pane's width picks the
+// direction. stdout is no guide: piped (`sandcastle run | tee run.log`), it has
+// no columns at all and every pane split down.
+const callerWidth = (): number | undefined => {
+  const id = process.env.HERDR_PANE_ID;
+  if (!id) return undefined;
+  try {
+    const panes = herdrJson(["pane", "layout", "--pane", id]).result.layout.panes as { pane_id: string; rect: { width: number } }[];
+    return panes.find((p) => p.pane_id === id)?.rect.width;
+  } catch {
+    return undefined;
+  }
+};
+
 export const openStatusPane = (project: Project) => {
   if (!IN_HERDR) {
     console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
@@ -186,7 +205,7 @@ export const openStatusPane = (project: Project) => {
       const info = herdrJson(["pane", "process-info", "--pane", previous]).result.process_info;
       const running = (info.foreground_processes as { cmdline: string }[]).some((p) => p.cmdline.includes("status.sh"));
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
-      if (!running) herdr(["pane", "run", previous, "sandcastle status"]);
+      if (!running) herdr(["pane", "run", previous, STATUS_COMMAND]);
       return;
     } catch (error) {
       // Replace only a pane that is really gone. After a transient herdr
@@ -196,13 +215,13 @@ export const openStatusPane = (project: Project) => {
     }
   }
   try {
-    const wide = (process.stdout.columns ?? 0) >= 160;
+    const wide = (callerWidth() ?? process.stdout.columns ?? 0) >= 160;
     const pane = herdrJson([
       "pane", "split", "--current", "--direction", wide ? "right" : "down",
       "--cwd", project.root, "--no-focus",
     ]).result.pane.pane_id as string;
     herdr(["pane", "rename", pane, `sandcastle ${project.name}`]);
-    herdr(["pane", "run", pane, "sandcastle status"]);
+    herdr(["pane", "run", pane, STATUS_COMMAND]);
     writeFileSync(record, pane + "\n");
   } catch (error) {
     // A status view is a convenience; it never stops a run.
