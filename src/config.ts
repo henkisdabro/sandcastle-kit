@@ -1,12 +1,15 @@
 // A project's `.sandcastle/config.ts`: everything that differs between repos.
-// Everything else - models, image base, orchestrator, prompts, status view -
-// lives in this kit and is shared.
+// Everything else - default models, image base, orchestrator, prompts, status
+// view - lives in this kit and is shared.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { configureModels, type Effort } from "./agents.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
+
+export type AgentConfig = { model?: string; effort?: Effort; maxIterations?: number; idleTimeoutSeconds?: number };
 
 export type ProjectConfig = {
   /** Names the project image (`sandcastle-<name>`) and labels the status view. */
@@ -40,8 +43,13 @@ export type ProjectConfig = {
   protectedPaths?: string[];
   /** Markdown added to both prompts under "Project rules", relative to the repo root. */
   rules?: string;
-  implement?: { maxIterations?: number; idleTimeoutSeconds?: number };
-  review?: { maxIterations?: number; idleTimeoutSeconds?: number };
+  /**
+   * `model` and `effort` replace the kit's defaults for this project; the
+   * IMPL_* / REVIEW_* env vars still override them for one run. Repair uses
+   * the implementer's model and effort.
+   */
+  implement?: AgentConfig;
+  review?: AgentConfig;
   /**
    * Passes the implementer's model gets to fix a red gate, fed that gate's
    * output, on the same sandbox. Default 1; 0 leaves a red branch as it is.
@@ -63,6 +71,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   if (!config?.name || !config.gates?.length) {
     throw new Error(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
   }
+  configureModels(config);
   return {
     root,
     baseBranch: "main",

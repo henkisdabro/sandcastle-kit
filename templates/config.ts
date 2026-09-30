@@ -11,6 +11,10 @@ export default {
 
   rules: ".sandcastle/rules.md",
 
+  // Models and effort differ from the kit's defaults only when set here, per agent.
+  // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
+  // review: { model: "claude-opus-5-5", effort: "medium" },
+
   // A red gate gets this many repair passes, fed its output. 0 turns it off.
   // repair: { attempts: 1 },
 

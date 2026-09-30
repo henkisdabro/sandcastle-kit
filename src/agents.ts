@@ -24,31 +24,43 @@
 // see the CLAUDE_CODE_VERSION pin in docker/base.Dockerfile.
 
 import { claudeCode, codex } from "@ai-hero/sandcastle";
+import type { ProjectConfig } from "./config.ts";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-type Effort = (typeof EFFORTS)[number];
+export type Effort = (typeof EFFORTS)[number];
 
-const effort = (name: string, allowed: readonly string[] = EFFORTS): Effort => {
-  const value = process.env[name] ?? "high";
+const effort = (name: string, configured?: string, allowed: readonly string[] = EFFORTS): Effort => {
+  const value = process.env[name] ?? configured ?? "high";
   if (!allowed.includes(value)) {
-    throw new Error(`${name}=${value} - expected one of ${allowed.join(", ")}.`);
+    throw new Error(`${name}=${value} (env or .sandcastle/config.ts) - expected one of ${allowed.join(", ")}.`);
   }
   return value as Effort;
 };
 
-export const IMPL_MODEL = process.env.IMPL_MODEL ?? "claude-sonnet-5-5";
-export const REVIEW_MODEL = process.env.REVIEW_MODEL ?? "claude-opus-5-5";
-const IMPL_EFFORT = effort("IMPL_EFFORT");
-const REVIEW_EFFORT = effort("REVIEW_EFFORT");
-
 export const CROSS_REVIEW = process.env.CROSS_REVIEW === "1";
 export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra";
 // Codex has no `max`.
-const CROSS_REVIEW_EFFORT = effort("CROSS_REVIEW_EFFORT", EFFORTS.slice(0, 4)) as Exclude<Effort, "max">;
+const CROSS_REVIEW_EFFORT = effort("CROSS_REVIEW_EFFORT", undefined, EFFORTS.slice(0, 4)) as Exclude<Effort, "max">;
 
-export const MODELS_LINE =
-  `implement ${IMPL_MODEL}/${IMPL_EFFORT} · review ${REVIEW_MODEL}/${REVIEW_EFFORT}` +
-  (CROSS_REVIEW ? ` · cross-review ${CROSS_REVIEW_MODEL}/${CROSS_REVIEW_EFFORT}` : "");
+export let IMPL_MODEL: string;
+export let REVIEW_MODEL: string;
+let IMPL_EFFORT: Effort;
+let REVIEW_EFFORT: Effort;
+export let MODELS_LINE: string;
+
+// An env var wins for one run, then the project's config.ts, then the kit's
+// default. loadProject() calls this; importers see the values through ESM's
+// live bindings, so every use must read them after the project has loaded.
+export const configureModels = (config: Pick<ProjectConfig, "implement" | "review"> = {}) => {
+  IMPL_MODEL = process.env.IMPL_MODEL ?? config.implement?.model ?? "claude-sonnet-5-5";
+  REVIEW_MODEL = process.env.REVIEW_MODEL ?? config.review?.model ?? "claude-opus-5-5";
+  IMPL_EFFORT = effort("IMPL_EFFORT", config.implement?.effort);
+  REVIEW_EFFORT = effort("REVIEW_EFFORT", config.review?.effort);
+  MODELS_LINE =
+    `implement ${IMPL_MODEL}/${IMPL_EFFORT} · review ${REVIEW_MODEL}/${REVIEW_EFFORT}` +
+    (CROSS_REVIEW ? ` · cross-review ${CROSS_REVIEW_MODEL}/${CROSS_REVIEW_EFFORT}` : "");
+};
+configureModels();
 
 // Session capture is off: Sandcastle would otherwise copy every sandbox
 // transcript into the host's ~/.claude/projects/, where it shows up in
