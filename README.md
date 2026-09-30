@@ -91,7 +91,7 @@ whole mental model.
 
 | Place | What lives there | Who edits it |
 |---|---|---|
-| **The kit** - this repository, cloned once per machine (anywhere) | Orchestrator code, prompts, base Docker image, status view, the Claude Code skill | Nobody, for normal use. It is shared by every project and may be public: **never write credentials, names, client or project details into it.** |
+| **The kit** - this repository, cloned once per machine (anywhere) | Orchestrator code, prompts, base Docker image, status view, the `/sandcastle` agent skill | Nobody, for normal use. It is shared by every project and may be public: **never write credentials, names, client or project details into it.** |
 | **User config** - `~/.config/sandcastle-kit/` | `.env` (tokens), optional `config.json` (machine-wide limits), optional `denylist` | The user, once. Never committed anywhere. |
 | **Each project** - the repository the agents will work on | `.sandcastle/config.ts`, `.sandcastle/rules.md`, optional `.sandcastle/Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting that project up. |
 
@@ -137,7 +137,7 @@ The `sandcastle` command is run **from inside a project**, never from inside the
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | Opened automatically in a sibling pane if you use the Herdr terminal multiplexer. |
-| 🧩 | **A Claude Code skill** | `/sandcastle`, for setup, issue triage and starting runs. |
+| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage and starting runs. |
 
 ## 🔄 How it works
 
@@ -216,8 +216,10 @@ cd sandcastle-kit && pnpm install
 # The command, on your PATH (~/.local/bin must be on PATH)
 ln -sf "$PWD/bin/sandcastle" ~/.local/bin/sandcastle
 
-# The Claude Code skill (optional, recommended)
-ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle
+# The /sandcastle skill (optional, recommended) - one file for every agent
+mkdir -p ~/.claude/skills ~/.agents/skills
+ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle    # Claude Code (OpenCode reads it here too)
+ln -sfn "$PWD/skill" ~/.agents/skills/sandcastle    # Codex ($sandcastle) - skip if you only use Claude Code
 
 # Credentials, outside the repo
 mkdir -p ~/.config/sandcastle-kit
