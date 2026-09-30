@@ -122,6 +122,7 @@ flowchart LR
 | | Feature | What you get |
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
+| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again. |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -150,10 +151,12 @@ flowchart TD
         R -.-> X["🤖 Codex review<br/>optional, non-blocking"]
         R --> G{"🚦 Gates<br/>run by the orchestrator"}
         X -.-> G
+        G -- "red" --> FX["🩹 Repair agent<br/>fed the gate output<br/>(bounded)"]
+        FX --> G
     end
 
     G -- "green" --> PP{"🛡️ Touches hooks, CI,<br/>install scripts?"}
-    G -- "red" --> RED["🔴 Reported red"]
+    G -- "still red" --> RED["🔴 Reported red"]
     PP -- "no" --> M["✅ Merge --no-ff into base<br/>close issue with a comment"]
     PP -- "yes" --> NH["🙋 Labelled needs-human<br/>not merged"]
     M --> V["🔁 Verify: gates once more<br/>on the merged base branch"]
@@ -167,7 +170,7 @@ flowchart TD
     classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f
     class M,V ok
     class RED,NH bad
-    class I,R,X agent
+    class I,R,X,FX agent
     class G,PP,P gate
 ```
 
@@ -273,6 +276,7 @@ yourself when you are happy with it.
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
 | `implement` / `review` | 8 / 3 iterations, 2400 s idle | `{ maxIterations, idleTimeoutSeconds }` per agent |
+| `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; `attempts: 0` turns it off. A gate that timed out is never repaired |
 
 Examples: [`examples/`](examples/).
 

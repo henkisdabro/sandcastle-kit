@@ -89,8 +89,8 @@ export const renderPrompts = (project: Project) => {
     : "";
   const out = join(project.root, ".sandcastle/.run");
   mkdirSync(out, { recursive: true });
-  const paths = { implement: "", review: "" };
-  for (const kind of ["implement", "review"] as const) {
+  const paths = { implement: "", review: "", repair: "" };
+  for (const kind of ["implement", "review", "repair"] as const) {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind}.md`), "utf8")
@@ -101,6 +101,9 @@ export const renderPrompts = (project: Project) => {
     // the sandbox, after the install. Refuse it here instead. (A literal
     // {{...}} in rules.md, e.g. a template variable, has to be reworded.)
     const allowed = new Set(["ISSUE_NUMBER", "SOURCE_BRANCH", "TARGET_BRANCH"]);
+    // The orchestrator fills these for a repair pass. Sandcastle substitutes
+    // in one pass, so gate output holding `{{...}}` or a shell block stays text.
+    if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
@@ -150,7 +153,7 @@ export const archiveFinishedLogs = (project: Project) => {
   };
   let moved = 0;
   for (const name of readdirSync(logs)) {
-    const slug = name.match(/^agent-issue-(\d+(?:-[a-z]+)*)-(?:impl|review)-/)?.[1];
+    const slug = name.match(/^agent-issue-(\d+(?:-[a-z]+)*)-(?:impl|review|repair)-/)?.[1];
     if (!slug) continue;
     // A live sandbox is still appending to its log, whatever its branch says.
     if (existsSync(join(project.root, `.sandcastle/worktrees/agent-issue-${slug}`))) continue;

@@ -194,7 +194,7 @@ render() {
   # runs on agent/issue-1086-closeout while agent/issue-1086 is long merged, and
   # keying both on 1086 hid the live sandbox under the merged row.
   issues=$(ls logs/agent-issue-*.log 2>/dev/null \
-    | sed -nE 's#.*agent-issue-([0-9]+(-[a-z]+)*)-(impl|review)-.*#\1#p' | sort -u)
+    | sed -nE 's#.*agent-issue-([0-9]+(-[a-z]+)*)-(impl|review|repair)-.*#\1#p' | sort -u)
 
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
@@ -211,9 +211,9 @@ render() {
   done
 
   for n in $issues; do
-    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log 2>/dev/null | head -1)
+    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log 2>/dev/null | head -1)
     [ -z "$log" ] && continue
-    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *) phase="impl";; esac
+    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
     age=$(( $(date +%s) - mtime ))

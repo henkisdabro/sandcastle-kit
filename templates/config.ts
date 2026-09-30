@@ -25,6 +25,9 @@ export default {
 
   rules: ".sandcastle/rules.md",
 
+  // A red gate gets this many repair passes, fed its output. 0 turns it off.
+  // repair: { attempts: 1 },
+
   // Sandboxes load NONE of the repo's skills, agents, commands, MCP servers or
   // plugins unless kept here. Keep only what a run literally needs (e.g. a
   // skill rules.md tells agents to use). Every hook is KEPT - they enforce the

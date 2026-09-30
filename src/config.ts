@@ -42,6 +42,11 @@ export type ProjectConfig = {
   rules?: string;
   implement?: { maxIterations?: number; idleTimeoutSeconds?: number };
   review?: { maxIterations?: number; idleTimeoutSeconds?: number };
+  /**
+   * Passes the implementer's model gets to fix a red gate, fed that gate's
+   * output, on the same sandbox. Default 1; 0 leaves a red branch as it is.
+   */
+  repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
 export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths">> &
@@ -67,6 +72,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     setup: [],
     implement: {},
     review: {},
+    repair: {},
     ...config,
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
   };

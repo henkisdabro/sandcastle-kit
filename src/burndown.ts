@@ -4,7 +4,8 @@
 //                      review (and optionally cross-review) on the same warm
 //                      sandbox.
 //   Phase 2  Gate    - the project's gates, run by the ORCHESTRATOR via
-//                      exec(), never self-reported by an agent.
+//                      exec(), never self-reported by an agent. A red gate
+//                      gets a bounded repair pass fed its output.
 //   Phase 3  Land    - green branches merge to the base branch; the issue is
 //                      closed with a comment. Red branches, and green ones
 //                      that change hooks/CI/install scripts, are left standing.
@@ -28,17 +29,33 @@ import { execGate, lockWorktree, releaseBranchWorktree, unlockWorktree } from ".
 
 type Issue = { number: number; title: string };
 type Gate = { name: string; pass: boolean };
+type GateRun = { gates: Gate[]; failure?: { name: string; command: string; exitCode: number; output: string } };
 type Outcome = {
   issue: number;
   branch: string;
   status: "shipped" | "gate-failed" | "nochange";
   commits: number;
   reviewCommits: number;
+  repairs: number;
   gates: Gate[];
 };
 
 // What a spent plan allowance leaves at the end of an agent's log.
 const LIMIT = /out of usage credits|usage limit|limit reached/i;
+
+// Start and end of a gate's output: the first compiler error is at the top,
+// the test summary at the bottom, and a whole log would swamp the prompt.
+const clip = (text: string, head = 8_000, tail = 24_000) =>
+  text.length <= head + tail
+    ? text
+    : `${text.slice(0, head)}\n[... ${text.length - head - tail} characters cut ...]\n${text.slice(-tail)}`;
+
+// A fence one backtick longer than any run inside, so gate output cannot
+// close it and carry on as prompt text.
+const fence = (text: string) => {
+  const f = "`".repeat(Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
+  return `${f}\n${text}\n${f}`;
+};
 
 export const burndown = async (project: Project) => {
   const DRY_RUN = process.env.DRY_RUN === "1";
@@ -101,14 +118,17 @@ export const burndown = async (project: Project) => {
   let tampered: string | undefined;
 
   const runGates = (sandbox: Parameters<typeof execGate>[0], label: string) =>
-    withSlot("gates", label, async () => {
+    withSlot("gates", label, async (): Promise<GateRun> => {
       const gates: Gate[] = [];
       for (const g of project.gates) {
         const r = await execGate(sandbox, g.command);
         gates.push({ name: g.name, pass: r.exitCode === 0 });
-        if (r.exitCode !== 0) break;
+        if (r.exitCode !== 0) {
+          const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+          return { gates, failure: { name: g.name, command: g.command, exitCode: r.exitCode, output } };
+        }
       }
-      return gates;
+      return { gates };
     });
 
   // -------------------------------------------------------------------------
@@ -144,7 +164,7 @@ export const burndown = async (project: Project) => {
       // still standing, unreviewed and unmerged.
       const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`]));
       if (impl.commits.length === 0 && branchCommits === 0) {
-        return { issue: issue.number, branch, status: "nochange", commits: 0, reviewCommits: 0, gates: [] };
+        return { issue: issue.number, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
       }
 
       // Review passes run on the same warm sandbox and branch. Their commits
@@ -165,17 +185,44 @@ export const burndown = async (project: Project) => {
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
-      const gates = await runGates(sandbox, `#${issue.number} gates`);
+      let gated = await runGates(sandbox, `#${issue.number} gates`);
+
+      // A red gate is often one type error or one broken test away from green,
+      // and the sandbox is still warm. Repair commits ride the same gates and
+      // the same protected-path check; they are not reviewed again, because
+      // the repair prompt forbids exactly what a review would catch here
+      // (weakened tests, removed guards). Not after a timeout (124): a hung
+      // gate leaves nothing to repair from and would hang again.
+      let repairs = 0;
+      while (gated.failure && gated.failure.exitCode !== 124 && repairs < (project.repair.attempts ?? 1)) {
+        repairs++;
+        console.log(`#${issue.number}: ${gated.failure.name} red - repair pass ${repairs}`);
+        await sandbox.run({
+          name: `repair-${issue.number}`,
+          agent: implAgent(),
+          promptFile: prompts.repair,
+          promptArgs: {
+            ...promptArgs,
+            GATE_NAME: gated.failure.name,
+            GATE_COMMAND: gated.failure.command,
+            GATE_OUTPUT: fence(gated.failure.output),
+          },
+          maxIterations: project.repair.maxIterations ?? 4,
+          idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
+        });
+        gated = await runGates(sandbox, `#${issue.number} gates`);
+      }
 
       return {
         issue: issue.number,
         branch,
-        status: gates.every((g) => g.pass) ? "shipped" : "gate-failed",
+        status: gated.failure ? "gate-failed" : "shipped",
         // Branch total, so a re-run of an already-implemented branch does not
         // report 0 commits while shipping its work.
-        commits: branchCommits + reviewCommits,
+        commits: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])),
         reviewCommits,
-        gates,
+        repairs,
+        gates: gated.gates,
       };
     } finally {
       unlockWorktree(sandbox.worktreePath);
@@ -263,7 +310,9 @@ export const burndown = async (project: Project) => {
       sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
       sh("gh", [
         "issue", "close", String(o.issue), "--comment",
-        `Shipped by the Sandcastle loop on \`${o.branch}\` (${o.commits} commit(s)); ${gateNames} all green before merge.`,
+        `Shipped by the Sandcastle loop on \`${o.branch}\` (${o.commits} commit(s)` +
+          (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
+          `); ${gateNames} all green before merge.`,
       ]);
     } catch (error) {
       // A real conflict and a merge that failed for another reason (a hook, a
@@ -297,7 +346,7 @@ export const burndown = async (project: Project) => {
     verify = await withSlot("sandboxes", `${project.name} verify`, async () => {
       const sandbox = await createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) });
       try {
-        return await runGates(sandbox, `${project.name} verify gates`);
+        return (await runGates(sandbox, `${project.name} verify gates`)).gates;
       } finally {
         unlockWorktree(sandbox.worktreePath);
         await sandbox.close();
@@ -322,7 +371,8 @@ export const burndown = async (project: Project) => {
     }
     const o = r.value;
     const g = o.gates.map((x) => `${x.name}=${x.pass ? "pass" : "FAIL"}`).join(" ");
-    console.log(`  #${o.issue} ${o.status.padEnd(11)} commits=${o.commits} (review=${o.reviewCommits}) ${g}  ${o.branch}`);
+    const repaired = o.repairs ? ` repaired=${o.repairs}` : "";
+    console.log(`  #${o.issue} ${o.status.padEnd(11)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}  ${o.branch}`);
   }
   console.log(`\nmerged & closed: ${merged.join(", ") || "none"}`);
   if (conflicted.length) console.log(`merge conflicts: ${conflicted.join(", ")}`);
