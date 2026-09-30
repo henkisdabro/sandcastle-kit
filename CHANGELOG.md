@@ -46,6 +46,11 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - Herdr sandbox view: inside Herdr, a run opens a tab with a pane per concurrent sandbox, each
   following its agent's log, and reports every sandbox to Herdr's agent sidebar as working,
   blocked or done, landing outcome included. `SANDCASTLE_HERDR_VIEW=0` turns it off.
+- `SANDCASTLE_TEST_RED_GATE=1` counts each issue's first gate run as red, so the repair pass can be
+  tested live - agents that can read a gate make it pass themselves, so a real run seldom reaches one.
+- Every `sandcastle run` ends with the line `sandcastle run ended (exit N)`, and the skill's `run`
+  action has the agent that started the run in another pane wait for it in the background, so it
+  hears when the run ends instead of never being told.
 
 ### Changed
 
@@ -60,6 +65,13 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A project's first run crashed with ENOENT on `.sandcastle/logs/run.lock`.
 - A worktree Sandcastle kept for its uncommitted files showed as working forever in the status
   view; it now shows its branch's state, and the run report names it.
+- The status view shows an issue whose body names an open dependency (`Blocked by #N`) as
+  `◌ blocked` before, between and outside runs, not only while the run that held it back is live.
+- A just-merged issue no longer shows as `○ queued` in the status view while its run lands it or
+  while GitHub's issue listing still trails the close; the queue is re-read as soon as a run ends.
+- Inside Herdr, the status pane splits right of a wide pane even when the run's output is piped, and
+  it runs the status view of the kit checkout doing the run rather than whichever `sandcastle` is on
+  `PATH`.
 
 [Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/henkisdabro/sandcastle-kit/releases/tag/v0.1.0

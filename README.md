@@ -343,6 +343,7 @@ Examples: [`examples/`](examples/).
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens) |
+| `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 

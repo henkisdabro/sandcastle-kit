@@ -62,6 +62,10 @@ process.chdir(root);
 
 switch (command) {
   case "run": {
+    // An agent that started the run in another pane (Herdr's `pane run`) is
+    // told nothing when it ends; its watcher waits for this line, printed on
+    // every exit - a drained queue and a crash included.
+    process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
     await burndown(await loadProject(root));
     break;
   }

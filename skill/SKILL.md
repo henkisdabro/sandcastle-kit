@@ -139,7 +139,15 @@ comments, and the gates can prove it.
    status pane and a `sandcastle <project>` tab with one pane per sandbox, each reported to the
    agent sidebar as working, blocked or done. Otherwise give the user the command to run in a second terminal, plus
    `sandcastle status` for a third.
-3. A run pushes nothing. Pushing the merged base branch afterwards follows the repo's own
+3. **Arrange to hear when it ends.** A command handed to another pane is not your own process, so
+   your harness never tells you it finished. Every run's last line is `sandcastle run ended (exit
+   N)` - after the report, after a drained queue, after a crash. Right after starting it, start a
+   background command your harness reports back on when it exits (`run_in_background` in Claude
+   Code) that waits for that line in the pane, for example `herdr pane wait-output <pane> --match
+   "sandcastle run ended" --timeout <ms>`. Use a fresh pane per run - the wait also matches output
+   already in the pane - and when the timeout lapses before the run ends, start the wait again. When
+   it fires, read the report (`herdr pane read <pane> --source recent-unwrapped`) and tell the user.
+4. A run pushes nothing. Pushing the merged base branch afterwards follows the repo's own
    shipping rules. When reading the report: `needs-human` branches were green but change hooks,
    CI or install scripts and need a human merge; "gated green but not merged" means the issue
    was closed or re-labelled during the run, or the branch moved after its gates; "waiting, not

@@ -13,7 +13,8 @@
 //                      two branches green on their own can be red together.
 //
 // Environment: ISSUES=1,2 (instead of the queue label), CONCURRENCY, DRY_RUN=1,
-// plus the model variables in agents.ts and the machine-wide limits in pool.ts.
+// SANDCASTLE_TEST_RED_GATE=1, plus the model variables in agents.ts and the
+// machine-wide limits in pool.ts.
 
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -66,6 +67,12 @@ const fence = (text: string) => {
 
 export const burndown = async (project: Project) => {
   const DRY_RUN = process.env.DRY_RUN === "1";
+  // A test of the repair path itself. An agent that can read a gate makes it
+  // pass before it exits, so a live run almost never reaches a repair; this
+  // counts each issue's first gate run as red, with an output that says so.
+  // Off without repair passes: a forced red nobody repairs would only hold
+  // good work back.
+  const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && (project.repair.attempts ?? 1) > 0;
   // Four by default, not one-per-issue. Twelve at once saturated a 15-core
   // machine to load 33 and starved a vitest run into a false gate failure -
   // good work withheld by resource contention rather than by a defect.
@@ -126,6 +133,8 @@ export const burndown = async (project: Project) => {
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) console.log(`  #${i.number} ${i.title}`);
   console.log(`Machine-wide: ${usage()}`);
+  if (TEST_RED_GATE) console.log("SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass.");
+  else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
 
   const image = ensureImage(project);
   const prompts = renderPrompts(project);
@@ -307,6 +316,20 @@ export const burndown = async (project: Project) => {
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
       let gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
+      if (TEST_RED_GATE && !gated.failure) {
+        const g = project.gates[0];
+        gated = {
+          gates: [{ name: g.name, pass: false }],
+          failure: {
+            name: g.name,
+            command: g.command,
+            exitCode: 1,
+            output:
+              "SANDCASTLE_TEST_RED_GATE=1: the orchestrator counted this gate run as red to test the repair pass. " +
+              "The gate itself passed. Run the gates to confirm; if they are green there is nothing to fix, so commit nothing.",
+          },
+        };
+      }
 
       // A red gate is often one type error or one broken test away from green,
       // and the sandbox is still warm. Repair commits ride the same gates and
