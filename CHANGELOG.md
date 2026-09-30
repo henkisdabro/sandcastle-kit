@@ -9,7 +9,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-30
+
+Initial public release: an opinionated issue-burndown kit on
+[Sandcastle](https://github.com/mattpocock/sandcastle). The v0.1.0 tag was first cut earlier the
+same day and moved to include everything below.
+
 ### Upgrading
+
+If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each project.
 
 - Nothing in a project has to change: every new config field is optional and prompts come from
   the kit. Run `sandcastle build` and `sandcastle lean` once.
@@ -52,10 +60,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A project's first run crashed with ENOENT on `.sandcastle/logs/run.lock`.
 - A worktree Sandcastle kept for its uncommitted files showed as working forever in the status
   view; it now shows its branch's state, and the run report names it.
-
-## [0.1.0] - 2026-09-30
-
-Initial public release.
 
 [Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/henkisdabro/sandcastle-kit/releases/tag/v0.1.0
