@@ -27,9 +27,10 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: setup, doctor, init, build, gates, lean, lean-apply (internal hook), preflight, queue, blockers, run, status, clean |
+| `src/cli.ts` | Commands: setup, doctor, init, build, gates, lean, lean-apply (internal hook), preflight, queue, blockers, run, report, status, clean |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
+| `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
@@ -39,7 +40,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint, protected paths, run lock |
-| `src/pool.ts` | Machine-wide sandbox and gate slots (lock files with pids) |
+| `src/pool.ts` | Machine-wide sandbox and gate slots, and the lock-file helper the run lock shares (pid and token, guarded takeover) |
 | `src/run.ts` | Preconditions, preflight, prompt rendering, run record, log archive, status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
@@ -47,7 +48,12 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/config.ts` | The `ProjectConfig` type and loader |
 | `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
-| `status.sh` | Status view; bash 3.2-safe, macOS and Linux |
+| `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
+| `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
+| `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
+| `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
+| `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
+| `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |
 | `skill/SKILL.md` | The `sandcastle` agent skill - one file shared by Claude Code, Codex and OpenCode |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
@@ -73,11 +79,12 @@ does not know. Keep it portable:
 
 ## Verifying a change
 
-Nothing here has unit tests yet. A change is ready to commit when all of these pass:
+A change is ready to commit when all of these pass:
 
 ```bash
 pnpm exec tsc --noEmit
 bash -n status.sh bin/sandcastle .githooks/pre-commit
+pnpm test            # the status view, the closing summary, gates, locks and the .git guard against fixtures (no Docker, no model calls)
 sandcastle doctor
 # from inside a test project (no model calls):
 sandcastle status 0

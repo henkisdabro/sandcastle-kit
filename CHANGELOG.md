@@ -9,6 +9,136 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- Most projects need no change. Pull the kit; a run already going keeps its old code, so
+  restart only between runs. `sandcastle report` needs a run made with this version: an older
+  run's summary is in its run pane.
+- A watcher that parsed the end of a run's output: the old tail lines (`merged & closed: ...`,
+  `held for a human merge: ...`, `waiting, not started: ...`) are replaced by the closing summary's
+  sections. `sandcastle run ended (exit N)` is still the last line.
+- **A red gate can now get up to two repair passes beyond `repair.attempts`**, each only while
+  the previous pass turned up a different failure (the same failure twice stops it). That can
+  spend more allowance on a branch close to green. `repair: { attempts: 0 }` still turns repair
+  off.
+- **A hook test with `expect: "allow"` now fails when a matching hook errors** (a missing module,
+  a crash), not only when one blocks. A hook that errors fails open and errors on every tool call,
+  so the base check now stops the run and says which hook. Run `sandcastle gates` after pulling;
+  fix a hook it names, or drop it with `lean.dropHooks`.
+- `sandcastle init` on a repo with no known stack now writes a placeholder gate that fails, and no
+  setup, instead of pnpm commands. Existing configs are untouched.
+- Anything that reads `.sandcastle/logs/timings.jsonl` for pass/fail: a gate run with a red gate
+  now has `ok: false` and names the red gates in `red`. Before, `ok` only meant the step did not
+  throw.
+- **A branch a repair pass turned green is reviewed again before it lands**: the review model, on
+  the repair commits, looking for weakened tests and removed guards; if that review commits, the
+  gates run once more, and a red there leaves the branch red. A repaired branch costs one more
+  review pass (often 10-30 minutes) and sometimes one more gate run.
+- **A GitHub issue whose queue label comes off during a run is no longer landed** - the same rule
+  ticket files already had for a changed status. An `ISSUES=` ticket that never had the label is
+  unaffected. To stop a run landing one ticket, take its label off. Such a ticket, and one closed
+  during the run, ends in the new state `withdrawn` (the status view's grey "left over" group, the
+  summary's "Done"), not "not landed": nothing about it needs fixing. Its branch stays. A ticket
+  closed, unqueued or marked `needs-human` before its sandbox starts is not started at all, and a
+  GitHub issue carrying both the queue label and `needs-human` is no longer queued.
+- **A ticket re-run on a branch from an earlier run gets the base merged in first**, by the
+  orchestrator: a clean merge needs no agent, and a conflicted one is left for the implementer to
+  resolve (the prompt names the files). Before, such a branch hit the same landing conflict every
+  run. Expect `merged <base> into its branch` lines and a merge commit on those branches. The
+  merge runs inside the sandbox, never on the host. Such carried-over branches also land first, so
+  a new branch of the same run conflicts instead, and it lands on its next run.
+- **A run started while a killed run's sandboxes still work stops them**, and so does `sandcastle
+  clean`: a killed run's containers went on spending the allowance on work nobody would land.
+
+### Changed
+
+- The status view shows a live run's tickets from the run's own record (`run.json` `tickets`),
+  kept by the orchestrator as each ticket moves, instead of inferring a state from branches, logs
+  and label times. A finished, green branch waiting for landing reads `ready`, not `queued`; the
+  header counts add up to the run (working, ready to land, need you, queued, blocked, merged); the
+  `gates` row names the gate running or says it waits for a gates slot; the run line counts
+  landing down (`landing 6/25`) and, before it, estimates when it starts from the project's
+  earlier runs. A step at twice its usual time shows its AGE in red.
+- One vocabulary everywhere: the table, the header, the Herdr pane titles and the report use the
+  same words, and "shipped" is gone - the panes said it while nothing had landed.
+- Gate output is written to `.sandcastle/logs/agent-issue-<id>-gates-<id>.log` as it runs, and
+  the Herdr pane follows it, so a pane shows the test run rather than the review's last words.
+- Once nothing is left to start, each Herdr sandbox pane closes as its sandbox finishes, rather
+  than sitting on a finished agent's summary; a crashed one stays open.
+- Tickets that other queued tickets wait for start first.
+- The repair prompt tells the agent to run the red gate without its stop-at-first-failure option
+  (`pytest -x`), fix every failure, and quote the full gate's result.
+- Between runs the status view's `models` line shows what the next run would use (the project's
+  config), not the last run's models.
+- A merge conflict at landing names the conflicting files and the branch merged before it that
+  changed them, in the report and the status row.
+- The lock files behind the run lock and the machine-wide slots now hold `<pid> <token> <label>`
+  (the pid still first).
+- A run stopped by the shared-`.git` check says which it was. A moved base branch lists the new
+  commits and says to run again if they are yours; a changed `.git/config` or `.git/info/` is
+  still called tampering. The stop prints the closing summary, headed "Run STOPPED", with no stack
+  trace, and the tickets that had finished read `stopped` rather than `crashed`.
+- A repaired branch whose second review fails (timeout, agent exit) is held for a human, not
+  reported as crashed; unreviewed repair commits are never merged.
+- New states in the status view and the summary: `withdrawn`, `stopped`, `orphaned`, and `held`
+  for a ticket an agent handed back (reported as "Nothing to change" on GitHub before).
+
+### Fixed
+
+- An error while recording a finished ticket's state (a git call, a full disk) could reject the
+  whole sandbox pool, so no green branch landed. It is now logged and the outcome stands.
+- A gate that ignores TERM is killed 30 seconds after its timeout (`timeout -k`), and still counts
+  as timed out; the base check stops at a timed-out gate rather than running the rest beside it.
+- The closing summary of a killed run (Ctrl-C, no clean exit) said "finished" with the time the
+  report was asked for; it now says the run ended without a clean exit and gives no end time.
+- The status view's "+N not shown" line made ranges of ticket-file ids (`#helpers-01-#...`); it
+  names them instead, and fits the pane.
+- The status view lost CPU and memory for every sandbox of a project whose path has a space in it.
+- `sandcastle lean` and the hook check no longer pass temp paths through a shell.
+- A branch that merged but whose ticket failed to close (a GitHub API error) was reported as not
+  landed, sending a human to merge work already on the base branch. It now counts as merged, and
+  the summary lists it under "Needs you" as merged but still open; the next run closes it.
+- A failed tracker call at landing reported the whole `gh` command line, comment and all; it now
+  reports the command's own error (`HTTP 502 ...`).
+- The Herdr sandbox view turned itself off when a ticket that had waited for a machine-wide slot
+  started after the other panes had closed.
+- A ticket handed back with no commits was listed with "0 file(s)" and merge commands; it now asks
+  for an answer and a requeue.
+- The summary said a merged base was "not re-gated (no result recorded)" when the run had merged
+  only one branch (a ticket closed as merged earlier counted as a second).
+- After a run, the status view showed a handed-back ticket's empty branch as merged.
+- A repair that fixed one failure and uncovered another got no further pass when the gate's
+  message had no "fail" or "error" in it: both read as the same failure.
+- A failed label removal after a successful GitHub close was reported as a failed close.
+- Two runs taking over the same stale slot or run lock could both get it (the second deleted the
+  first's fresh lock), and a run's exit removed a lock someone else had taken since. A takeover
+  now happens under a guard file and only if the lock is unchanged; a release removes only its own
+  lock. A lock released between two reads no longer crashes the pipeline asking for it.
+
+- A live run's green branches read `queued ... in this run - on its earlier branch` in the status
+  view until landing, because a rule meant for re-queued tickets from earlier runs claimed them.
+  That rule now never applies to a ticket the live run holds, even under an older orchestrator.
+- The status view could read a half-written `run.json`; it is now written whole and renamed into
+  place.
+
+### Added
+
+- **A closing summary** at the end of every run, and `sandcastle report` to print it again: run
+  finished (with whether the merged base re-gated green), done, needs you (held branches, each with
+  its size and review and merge commands), needs fixing (with conflict files and failing test ids,
+  a `Same failing test` line when one test fails on several branches, and a weaker `Same file`
+  line when they only fail or conflict in one file), runnable now and still
+  blocked (blockers re-read after landing, so issues this run unblocked are named), local state
+  (commits ahead of the upstream, branches left standing - "nothing is pushed" beside the fact
+  that the issues are already closed) and an ordered next step. Every section prints, "none" when
+  empty. The per-issue lines above it now show each ticket's final state.
+- The skill's `run` action ends with a required seven-section closing message built on that
+  summary: one recommended next action, one question where a decision is needed, and the
+  follow-ups offered, not taken.
+- `pnpm test`: the status view rendered against a fixture repo and run records (a mixed run,
+  an older orchestrator's record, a finished run), checked row by row and for width at 80
+  columns. A CI workflow runs it with the type check on every push.
+
 ## [0.1.0] - 2026-09-30
 
 Initial public release: an opinionated issue-burndown kit on

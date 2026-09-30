@@ -17,7 +17,21 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 {{KIT_TICKET_VIEW}}
 
-{{KIT_COMMENTS_VIEW}}# Before you write anything
+{{KIT_COMMENTS_VIEW}}# Where this branch stands
+
+Work already on this branch from an earlier run (empty for a new branch):
+
+!`git log --oneline {{TARGET_BRANCH}}..HEAD`
+
+If `{{TARGET_BRANCH}}` had moved on since then, the orchestrator has merged it into this branch.
+Files where that merge conflicts (empty when none): !`git diff --name-only --diff-filter=U | tr '\n' ' '`
+
+**If any file is listed, resolve the merge before anything else**, even if the issue looks done:
+the orchestrator merges this branch into `{{TARGET_BRANCH}}` when you finish, and an unresolved
+conflict leaves all of your work unmerged, run after run. Keep both sides' changes (theirs is
+merged work, not yours to undo), run the gates, then `git commit --no-edit`.
+
+# Before you write anything
 
 Read the repo's agent instructions (`CLAUDE.md`, `AGENTS.md`, whichever exist) and the files the
 issue names. The project rules below say what else to read.

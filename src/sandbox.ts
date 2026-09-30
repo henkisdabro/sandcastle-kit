@@ -3,9 +3,9 @@
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
@@ -25,6 +25,44 @@ export const machineSettings = (): Record<string, unknown> => {
 
 export const sh = (cmd: string, args: string[], cwd?: string) =>
   execFileSync(cmd, args, { encoding: "utf8", cwd }).trim();
+
+/**
+ * Stops the sandboxes a killed run of this project left working. A run killed
+ * outright (SIGKILL, a closed terminal) cannot close its containers, and their
+ * agents went on spending the plan's allowance on work nobody would gate or
+ * land. Call only while holding the project's run lock: then no live run owns
+ * a container that mounts one of its agent worktrees. `sandcastle gates` uses
+ * other worktrees and is never touched.
+ */
+export const reapOrphans = (project: Project) => {
+  // Docker records a bind mount's source as it was given: either spelling.
+  const root = realpathSync(project.root);
+  const prefixes = [...new Set([root, project.root])].map((r) => join(r, ".sandcastle/worktrees/agent-issue-"));
+  let ids: string[];
+  try {
+    ids = sh("docker", ["ps", "-q", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
+  } catch {
+    return; // Docker not up: nothing of ours can be running
+  }
+  for (const id of ids) {
+    try {
+      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)));
+      if (!worktree) continue;
+      sh("docker", ["rm", "-f", id]);
+      console.log(`Stopped a sandbox a killed run left working: ${relative(worktree.startsWith(root) ? root : project.root, worktree)}`);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
+};
+
+/** A failed command's own last word (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */
+export const errorLine = (error: unknown) => {
+  const stderr = (error as { stderr?: unknown })?.stderr;
+  const said = typeof stderr === "string" ? stderr.trim().split("\n").filter(Boolean).at(-1) : undefined;
+  return (said ?? String(error).split("\n")[0]).slice(0, 160);
+};
 
 // ---------------------------------------------------------------------------
 // Credentials: ~/.config/sandcastle-kit/.env for every project, then the

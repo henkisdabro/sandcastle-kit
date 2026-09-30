@@ -1,0 +1,28 @@
+name: Check
+
+# The checks AGENTS.md asks of every change that need neither Docker nor a
+# model: types, shell syntax, and the status view against a fixture run. The
+# view once showed a live run's green branches as queued for over an hour, and
+# nothing here would have noticed.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: bash -n status.sh bin/sandcastle .githooks/pre-commit
+      - run: pnpm test

@@ -7,7 +7,8 @@
     "sandcastle": "bin/sandcastle"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bash test/status.test.sh && tsx --test test/*.test.ts"
   },
   "packageManager": "pnpm@12.3.4",
   "dependencies": {

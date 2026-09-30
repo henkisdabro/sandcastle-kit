@@ -74,7 +74,12 @@ const fence = (text: string) => {
 const github = (project: Project): Tracker => {
   const gh = (args: string[]) => sh("gh", args);
   const list = (extra: string[], withComments: boolean): Ticket[] =>
-    (JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", "500", "--json", `number,title,body,updatedAt${withComments ? ",comments" : ""}`])) as any[]).map((i) => ({
+    (JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", "500", "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[])
+      // A person who marks a queued issue needs-human by hand leaves the queue
+      // label on (hold() takes it off). Listed, it came back every run only to
+      // be withdrawn unstarted; it is a human's until they requeue it.
+      .filter((i) => !extra.includes("--label") || !i.labels.some((l: { name: string }) => l.name === "needs-human"))
+      .map((i) => ({
       id: String(i.number),
       title: i.title,
       body: i.body ?? "",
@@ -85,7 +90,9 @@ const github = (project: Project): Tracker => {
     kind: "github",
     agentsWrite: true,
     ref: refOf,
-    queued: (withComments = true) => list(["--label", project.label], withComments),
+    // The queue label stands in for a status: the check before landing then
+    // sees a ticket taken out of the queue mid-run, as it does for ticket files.
+    queued: (withComments = true) => list(["--label", project.label], withComments).map((t) => ({ ...t, status: project.label })),
     open: (withComments = true) => list([], withComments),
     get: (id) => {
       const i = JSON.parse(gh(["issue", "view", id, "--json", "number,title,state,body,comments,labels"]));
@@ -96,6 +103,7 @@ const github = (project: Project): Tracker => {
         comments: i.comments.map((c: { body: string }) => c.body),
         open: i.state === "OPEN",
         held: i.labels.some((l: { name: string }) => l.name === "needs-human"),
+        status: i.labels.some((l: { name: string }) => l.name === project.label) ? project.label : undefined,
       };
     },
     // The sandbox reads the live issue itself, with the token it already holds.
@@ -107,7 +115,13 @@ const github = (project: Project): Tracker => {
       // issues only), where the other order left an open, unlabelled, merged
       // issue that no later run would ever list again.
       gh(["issue", "close", id, "--comment", text]);
-      gh(["issue", "edit", id, "--remove-label", project.label]);
+      // Closed is what counts: a failed unlabel here was reported as a failed
+      // close, and "the next run closes it" - of an issue already closed.
+      try {
+        gh(["issue", "edit", id, "--remove-label", project.label]);
+      } catch {
+        /* a stale label on a closed issue is harmless */
+      }
     },
     hold: (id, text) => {
       gh(["label", "create", "needs-human", "--color", "D93F0B", "--force"]);

@@ -6,6 +6,8 @@
 //                    set up; prints what is missing and how to fix it
 //   run              burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge
+//   report           the last run's closing summary: done, needs you, needs fixing,
+//                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
 //   build [--force]  build the base and project images
@@ -30,6 +32,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { MODELS_LINE } from "./agents.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
@@ -37,9 +40,10 @@ import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
+import { closingReport } from "./report.ts";
 import { makeTracker } from "./tracker.ts";
 import { archiveFinishedLogs, preflight } from "./run.ts";
-import { ensureImage, KIT, sh } from "./sandbox.ts";
+import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
 import { init } from "./init.ts";
@@ -79,7 +83,14 @@ switch (command) {
     // told nothing when it ends; its watcher waits for this line, printed on
     // every exit - a drained queue and a crash included.
     process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
-    await burndown(await loadProject(root));
+    try {
+      await burndown(await loadProject(root));
+    } catch (error) {
+      // A stop is a message for the operator, not a crash: no stack trace.
+      if (!String((error as Error).message).startsWith("STOPPED")) throw error;
+      console.error(`\n${(error as Error).message}`);
+      process.exitCode = 1;
+    }
     break;
   }
   case "status": {
@@ -91,13 +102,19 @@ switch (command) {
         SANDCASTLE_PROJECT: root,
         SANDCASTLE_BIN: join(KIT, "bin/sandcastle"),
         SANDCASTLE_NAME: project.name,
-        SANDCASTLE_LABEL: project.label,
         SANDCASTLE_BASE: project.baseBranch,
+        // What the next run would use: between runs the view showed the last
+        // run's models, which read as the current setting.
+        SANDCASTLE_MODELS: MODELS_LINE,
         SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
         SANDCASTLE_MAX_GATES: String(limit("gates")),
       },
     });
     process.exit(r.status ?? 0);
+  }
+  case "report": {
+    console.log(await closingReport(await loadProject(root)));
+    break;
   }
   case "build": {
     console.log(ensureImage(await loadProject(root), args.includes("--force")));
@@ -188,6 +205,7 @@ switch (command) {
     disableHostGitHooks();
     const project = await loadProject(root);
     lockRun(project);
+    reapOrphans(project);
     unlockAll();
     const worktrees = sh("git", ["worktree", "list", "--porcelain"])
       .split("\n\n")

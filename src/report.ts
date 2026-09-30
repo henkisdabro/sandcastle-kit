@@ -1,0 +1,310 @@
+// The closing summary: what a run did and what happens next, in the order an
+// operator acts on it. The per-issue log above it had every fact and none of
+// the consequences - no owner, no action, no order - and the facts a next
+// step needs (commits not on origin, issues this run unblocked, what a
+// conflict was on, a test failing on several red branches) were gathered by
+// hand after the run. Printed at the end of `sandcastle run` and by
+// `sandcastle report`, from run.json, git and the tracker.
+//
+// Every section is printed, "none" when empty, so a missing one is never
+// mistaken for good news. gather() reads the world; render() is pure, so the
+// sections are testable without a repo (test/report.test.ts).
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { blockerResolver, openBlockers, refLabel } from "./blockers.ts";
+import type { Project } from "./config.ts";
+import type { TicketRecord } from "./run.ts";
+import { sh } from "./sandbox.ts";
+import { makeTracker, refOf } from "./tracker.ts";
+
+export type Facts = {
+  base: string;
+  tracker: "github" | "files";
+  started: string;
+  finished?: string;
+  live: boolean;
+  /** No finishedAt and its process gone: killed, so its end time is unknown. */
+  killed?: boolean;
+  dryRun: boolean;
+  tokens?: string;
+  verify?: { green: boolean; line: string } | null;
+  gateCount: number;
+  tickets: Record<string, TicketRecord>;
+  /** Blocked tickets whose blockers are all closed now, after landing. */
+  runnable: string[];
+  /** Blocked tickets still waiting, with each open blocker's label. */
+  blocked: { id: string; on: string[] }[];
+  /** Why the blockers could not be re-read, if they could not. */
+  blockCheck?: string;
+  /** Commits on the base branch not on its upstream (as of the last fetch); undefined with no upstream. */
+  ahead?: number;
+  upstream?: string;
+  /** Agent branches with work not on the base branch. */
+  standing: string[];
+  keptWorktrees: { issue: string; path: string }[];
+  dryRunCheck?: string;
+  /** Why the run stopped before landing, if it did. */
+  stopped?: string;
+  /** Files changed per held branch. */
+  changed: Record<string, number>;
+};
+
+const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
+const LEFT = ["blocked", "skipped"];
+
+// Git is asked, never assumed: a repo with no upstream, a deleted branch.
+const git = (args: string[], cwd: string) => {
+  try {
+    return sh("git", args, cwd);
+  } catch {
+    return undefined;
+  }
+};
+
+export const gather = async (project: Project): Promise<Facts> => {
+  const root = project.root;
+  const base = project.baseBranch;
+  const run = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
+  const tickets = (run.tickets ?? {}) as Record<string, TicketRecord>;
+  const pid = Number(run.pid);
+  const live = !run.finishedAt && (() => {
+    try {
+      process.kill(pid, 0);
+      return pid !== process.pid;
+    } catch {
+      return false;
+    }
+  })();
+
+  // Blockers read again now: this run's own merges close some of them, and a
+  // list from the start of the run said "blocked" for issues ready to go.
+  const runnable: string[] = [];
+  const blocked: Facts["blocked"] = [];
+  let blockCheck: string | undefined;
+  const waiting = Object.entries(tickets).filter(([, t]) => t.state === "blocked").map(([id]) => id);
+  if (waiting.length) {
+    try {
+      const tracker = makeTracker(project);
+      const resolve = blockerResolver(project, tracker);
+      for (const id of waiting) {
+        const t = tracker.get(id);
+        if (!t.open) continue;
+        const on = (await openBlockers(project, tracker, resolve, t)).map(refLabel);
+        if (on.length) blocked.push({ id, on });
+        else runnable.push(id);
+      }
+    } catch (error) {
+      blockCheck = String(error).split("\n")[0].slice(0, 160);
+      for (const id of waiting) blocked.push({ id, on: [] });
+    }
+  }
+
+  const upstream = git(["rev-parse", "--abbrev-ref", `${base}@{upstream}`], root);
+  const ahead = upstream ? Number(git(["rev-list", "--count", `${upstream}..${base}`], root) ?? NaN) : undefined;
+  const standing = (git(["branch", "--format=%(refname:short)", "--list", "agent/*"], root) ?? "")
+    .split("\n")
+    .filter((b) => b && (git(["cherry", base, b], root) ?? "").split("\n").some((l) => l.startsWith("+")));
+  const changed: Record<string, number> = {};
+  for (const [id, t] of Object.entries(tickets)) {
+    if (t.state !== "held") continue;
+    const files = git(["diff", "--name-only", `${base}...agent/issue-${id}`], root);
+    if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
+  }
+
+  return {
+    base,
+    tracker: project.tracker.kind,
+    started: run.startedAt,
+    finished: run.finishedAt,
+    live,
+    killed: !run.finishedAt && !live && pid !== process.pid,
+    dryRun: !!run.dryRun,
+    tokens: run.tokens,
+    verify: run.verify,
+    gateCount: project.gates.length,
+    tickets,
+    runnable,
+    blocked,
+    blockCheck,
+    ahead: Number.isNaN(ahead) ? undefined : ahead,
+    upstream,
+    standing,
+    keptWorktrees: run.keptWorktrees ?? [],
+    dryRunCheck: run.dryRunCheck,
+    stopped: run.stopped,
+    changed,
+  };
+};
+
+const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
+const span = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+};
+
+/** The closing summary as Markdown-ish text, every section present. */
+export const render = (f: Facts): string => {
+  const ids = (states: string[]) => Object.entries(f.tickets).filter(([, t]) => states.includes(t.state ?? "")).map(([id]) => id);
+  const name = (id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
+  const list = (xs: string[]) => xs.map(refOf).join(" ") || "none";
+  const merged = ids(["merged"]);
+  // Merged, but the tracker refused the close: the work is on base, the ticket still open.
+  const notClosed = merged.filter((id) => f.tickets[id].closeFailed);
+  const closed = merged.filter((id) => !notClosed.includes(id));
+  const held = ids(["held"]);
+  // Held with nothing on its branch: an agent handed it back, or a person took
+  // it before any commit. There is nothing to review or merge - only a question.
+  const handedBack = held.filter((id) => f.changed[id] === 0);
+  // Marked needs-human by a person mid-run: they took it; the branch is only there if it helps.
+  const takenBack = held.filter((id) => !handedBack.includes(id) && f.tickets[id].note?.startsWith("marked needs-human"));
+  const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id));
+  const fixing = ids(NEEDS_FIXING);
+  const notStarted = ids(LEFT);
+  const nochange = ids(["nochange"]);
+  const withdrawn = ids(["withdrawn"]);
+  const stoppedIds = ids(["stopped"]);
+  // A dry run's green branches end as "ready": they would have merged.
+  const wouldMerge = f.dryRun ? ids(["ready"]) : [];
+  // Withdrawn before its sandbox started: someone's decision, not an attempt.
+  const attempted = Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length;
+  const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
+  const out: string[] = [];
+  const section = (heading: string, lines: string[]) => out.push("", heading, ...(lines.length ? lines : ["none"]));
+
+  // Headline. A killed run wrote no end: "now" would be whenever the report
+  // was asked for, perhaps hours later, and "finished" would be untrue.
+  const end = f.finished ?? (f.killed ? undefined : new Date().toISOString());
+  out.push(
+    `## 🏁 Run ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+    (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
+      ` - ${attempted} attempted - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length + fixing.length + stoppedIds.length} need you - ` +
+      `${notStarted.length} not started${f.tokens ? ` - tokens ${f.tokens}` : ""}`,
+    f.verify === undefined || f.verify === null
+      // null: the run ended and chose not to (fewer than two merges this run - a
+      // ticket closed as merged earlier merges nothing); undefined: it never got there.
+      ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : "no result recorded"}).`
+      : f.verify.green
+        ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green.`
+        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed.`,
+  );
+  if (f.stopped) out.push(f.stopped);
+  if (f.dryRunCheck) out.push(f.dryRunCheck);
+
+  // Done
+  const done: string[] = [];
+  if (closed.length) done.push(`${closed.length} merged and ${closedWhere}: ${list(closed)}`);
+  if (merged.length) {
+    if (f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
+  }
+  if (wouldMerge.length) done.push(`Dry run - would merge: ${list(wouldMerge)}. Nothing was merged or closed.`);
+  if (nochange.length) done.push(`Nothing to change: ${list(nochange)}`);
+  // Someone's decision during the run; its branch stands in case they want it.
+  for (const id of withdrawn) {
+    const kept = f.standing.includes(`agent/issue-${id}`) ? ` (branch agent/issue-${id} kept)` : "";
+    done.push(`Not landed, as the tracker now says: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
+  }
+  section("## ✅ Done", done);
+
+  // Needs you
+  section(
+    "## 🙋 Needs you",
+    [
+      ...heldWork.flatMap((id) => {
+        const t = f.tickets[id];
+        const size = f.changed[id] !== undefined ? ` - ${f.changed[id]} file(s)` : "";
+        const why = t.files?.length ? `changes ${t.files.join(", ")}` : (t.note ?? "held");
+        return [`- ${name(id)} - ${why}${size}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
+      }),
+      ...takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
+      ...handedBack.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"}, no commits - read the ticket, answer it, then requeue it`),
+      // The next run finds its own merge message and closes the ticket, so
+      // nobody should merge or redo the work.
+      ...notClosed.map(
+        (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
+      ),
+    ],
+  );
+
+  // Needs fixing, with what several branches have in common
+  const fixLines = fixing.map((id) => {
+    const t = f.tickets[id];
+    const what = t.state === "conflict" ? `merge conflict: ${t.note ?? ""}` : t.state === "red" ? `gate ${t.note ?? "red"}` : `${t.state}: ${t.note ?? ""}`;
+    const tests = t.failing?.length ? ` - failing: ${t.failing.join(", ")}` : "";
+    return `- ${name(id)} - ${what}${tests} (branch agent/issue-${id})`;
+  });
+  // One test failing on several branches is likely one cause. One file only
+  // says where to look first: two branches can conflict in a file, or fail
+  // different tests in it, for unrelated reasons.
+  const group = (key: (id: string) => string[]) => {
+    const by = new Map<string, string[]>();
+    for (const id of [...fixing, ...held]) for (const k of new Set(key(id))) by.set(k, [...(by.get(k) ?? []), id]);
+    return [...by].filter(([, who]) => who.length > 1);
+  };
+  const sameTest = group((id) => f.tickets[id].failing ?? []);
+  const inSameTest = (file: string, who: string[]) => sameTest.some(([test, w]) => test.split("::")[0] === file && who.every((id) => w.includes(id)));
+  const sameFile = group((id) => {
+    const t = f.tickets[id];
+    return [...(t.state === "held" ? [] : (t.files ?? [])), ...(t.failing ?? []).map((x) => x.split("::")[0])];
+  }).filter(([file, who]) => !inSameTest(file, who));
+  for (const [test, who] of sameTest) fixLines.push(`Same failing test: ${test} - on ${list(who)}. Likely one cause: fix it once.`);
+  for (const [file, who] of sameFile) fixLines.push(`Same file: ${file} - ${list(who)} fail or conflict there. Check whether it is one cause.`);
+  section("## ❌ Needs fixing (failed or conflicted)", fixLines);
+
+  // Runnable / blocked
+  const ticketState = (label: string) => {
+    const id = Object.keys(f.tickets).find((k) => refOf(k) === label || k === label);
+    const s = id ? f.tickets[id].state : undefined;
+    return s && s !== "merged" ? ` (${s === "red" ? "gate red" : s})` : "";
+  };
+  const skipped = ids(["skipped"]);
+  const anyLeft = f.runnable.length + f.blocked.length + skipped.length > 0 || !!f.blockCheck;
+  section("## ▶️ Runnable now / ⏳ Still blocked", anyLeft ? [
+    `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
+    ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}`).join(", ") || "blockers that could not be read"}`),
+    ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
+    ...(f.blockCheck ? [`Could not re-read blockers: ${f.blockCheck}`] : []),
+  ] : []);
+
+  // Local state
+  section("## 📤 Local state", [
+    f.ahead === undefined
+      ? `${f.base} has no upstream to compare with.`
+      : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
+    "Nothing is pushed by Sandcastle. Push by this repo's own rules (for example `git push`, or a pull request).",
+    `Agent branches with unmerged work: ${f.standing.length ? f.standing.join(", ") : "none"}`,
+    ...f.keptWorktrees.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+  ]);
+
+  // Next step: the first thing that unblocks the most, then the rest in order.
+  const next: string[] = [];
+  if (f.stopped) {
+    next.push(
+      `Check what stopped the run (above). If it is your own commit, \`sandcastle run\` again` +
+        (stoppedIds.length ? ` - ${list(stoppedIds)} finished and land then.` : "."),
+    );
+  }
+  if (f.verify && !f.verify.green) next.push(`Fix ${f.base}: merged together, the gates are red. Do not push until they are green.`);
+  if (sameTest.length) next.push(`Fix ${sameTest.map(([test]) => test).join(", ")} once - it fails on ${new Set(sameTest.flatMap(([, w]) => w)).size} of the unmerged branches.`);
+  if (sameFile.length) next.push(`Start with ${sameFile.map(([file]) => file).join(", ")}: ${new Set(sameFile.flatMap(([, w]) => w)).size} of the unmerged branches fail or conflict there.`);
+  if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
+  if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue.`);
+  if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
+  const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
+  if (lone.length) next.push(`Look at ${list(lone)}; once fixed, merge the branch or requeue the issue with a note.`);
+  if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
+  if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
+  if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
+  if (f.standing.length) next.push("`sandcastle clean` once the branches above are resolved.");
+  section("## 👉 Next step", next.map((n, i) => `${i + 1}. ${n}`));
+  return out.join("\n");
+};
+
+/** The summary for the project's last recorded run. */
+export const closingReport = async (project: Project) => {
+  if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
+  const facts = await gather(project);
+  if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
+  return render(facts);
+};

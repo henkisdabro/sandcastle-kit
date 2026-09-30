@@ -1,6 +1,6 @@
 ---
 name: sandcastle
-description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, queueing issues for agents, or updating or upgrading sandcastle-kit."
+description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, queueing issues for agents, or updating or upgrading sandcastle-kit."
 argument-hint: "[init|queue|run|status|update]"
 arguments: [action]
 ---
@@ -13,7 +13,7 @@ Requested action: `$action`
 |---|---|---|
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
 | `queue` | Triages every open issue into the agent queue, with the user | Every open issue is labelled, parked, or left with a stated reason |
-| `run` | Starts a burndown in a tab of its own | The run is live in its own tab and its status view is confirmed, or the user holds the exact command |
+| `run` | Starts a burndown in a tab of its own, and closes it with a summary | The run is live in its own tab and its status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
 | `update` | Pulls the latest kit and brings the current project up to date with it | The kit is current, the project's image and hook check are clean, and every change that affects it is reported or applied |
 
@@ -155,7 +155,8 @@ comments, and the gates can prove it.
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
    same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry run, and `sandcastle status 0`'s
    machine line (other projects' runs share the limits). Say that a red gate gets a repair pass
-   (`repair.attempts`, default 1) - more allowance, fewer red branches - and offer `USAGE_CHECK=1`
+   (`repair.attempts`, default 1), and a repair that turns it green a second review - more
+   allowance, fewer red branches - and offer `USAGE_CHECK=1`
    if the plan is close to its limit. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
@@ -185,37 +186,90 @@ comments, and the gates can prove it.
    it, start a background command your harness reports back on when it exits (`run_in_background`
    in Claude Code) that waits for that line in the run pane, for example `herdr pane wait-output
    <pane> --match "sandcastle run ended" --timeout <ms>`. Use a fresh pane per run - the wait also
-   matches output already in the pane - and when the timeout lapses before the run ends, start the
-   wait again. When it fires, read the report (`herdr pane read <pane> --source recent-unwrapped`)
-   and tell the user.
-4. A run pushes nothing. Pushing the merged base branch afterwards follows the repo's own
-   shipping rules. When reading the report: `needs-human` branches were green but change hooks,
-   CI or install scripts and need a human merge; "gated green but not merged" means the issue
-   was closed or re-labelled during the run, or the branch moved after its gates; "waiting, not
-   started" names the open issue each one is blocked by. `gate-failed` with `repaired=1` and no
-   repair commit usually means the repair agent judged the failure outside the branch - read the
-   repair log and its issue comment, then check that gate with `sandcastle gates` before blaming
-   the branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the
-   cause is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).
-   A dry run's report ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent
-   wrote to an issue on GitHub; show the user what changed. Each issue's line carries its tokens.
-   Branches a dry run or a red gate leave standing, and worktrees a stopped run kept, are cleared
-   with `sandcastle clean` (unmerged branches only with `--all`, after asking - their work is
-   lost).
+   matches output already in the pane. Runs take hours; a timeout exits 1 with
+   `{"error":{"code":"timeout"...}}`, which your harness reports as a failed task although the run
+   is fine. That is not a result: check `.sandcastle/logs/run.json` (a `finishedAt` means it
+   ended; no `finishedAt` and a live `pid` means it is still going) and, if it is still going,
+   start the wait again. When the line arrives, read the report (`herdr pane read <pane> --source
+   recent-unwrapped`) and tell the user.
+4. **Close the run - required, even mid-way through another request.** Relaying the report is not
+   the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
+   finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
+   project root, with the blockers re-read and the local git state as it is now. Run it, then write
+   your closing message with **all seven sections, in this order, with these headings**, each one
+   present and saying "none" when empty:
+
+   1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
+      merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
+   2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the issues are
+      closed in the tracker but the code is only on the local base branch until pushed - the pair of
+      facts operators most often misread.
+   3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
+      held, its size, the review and merge commands, and anything that needs a decision.
+   4. `## ❌ Needs fixing` - each red, conflicted, crashed or unlanded branch: the cause in one line,
+      the file or test, whether it shares a cause with another, and the concrete fix path. The
+      summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
+      place to look - read both branches' failures before calling it one cause. For a red gate, read the gate log
+      (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate
+      run with `-x` shows only its first failure.
+   5. `## ▶️ Runnable now / ⏳ Still blocked` - the unblocked list is computed after landing; for
+      each still blocked, what it waits for and whether that blocker is itself held or red.
+   6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
+      and the push that fits the repo's own shipping rules (read its AGENTS.md or CONTRIBUTING).
+      Say plainly that Sandcastle pushed nothing.
+   7. `## 👉 Next step` - **one** recommended action and why, then the short list after it, then
+      **one** question where a human decision is needed (for example: "Three of the unmerged
+      branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
+
+   End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
+   requeue a failed issue with a note, start a run for the unblocked issues, `sandcastle clean`
+   once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
+
+   Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
+   person marked the ticket `needs-human` during the run; `held` with "no commits" is a ticket an
+   agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
+   unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
+   after its gates or the merge failed for a reason other than a conflict. A run headed **Run
+   STOPPED** merged nothing: it names what moved - for a moved base branch, show the user the
+   commits it lists and ask whether they are theirs before offering a re-run; for a changed
+   `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
+   no commit usually means the repair agent judged the failure outside the branch - read the repair
+   log and its issue comment, then check that gate with `sandcastle gates` before blaming the
+   branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the cause
+   is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`). A dry
+   run ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote to the
+   tracker; show the user what changed. Unmerged branches are cleared with `sandcastle clean
+   --all` only after asking - their work is lost.
 
 ## status - what a run is doing
 
 `sandcastle status 0` prints a snapshot; `sandcastle status` refreshes every 10 s (run it in a
-separate pane or terminal). Each row's log is `.sandcastle/logs/agent-issue-<n>-*.log`; the last
-lines of a failed run's log hold the real cause (a usage limit usually reads as a "trust dialog"
-error). A `repair` row is fixing a red gate; `quiet Nm` means a live sandbox's log has been
-silent that long - read its log tail before calling it hung. While a run is live, its `run` line
-names the stage (image, preflight, base gates, running, landing). A `waiting` row is a branch this
-run left standing, with its outcome (`gate red: ...`, `dry run: gated green, would merge`, `needs a
-human merge`) as its activity; `left over` is one from an earlier run, for `sandcastle clean`. The
-live view fits its pane and summarises the rows that do not fit on one line (`sandcastle status
-10 all` shows them all). How long each step took, and each agent pass's tokens, is in
-`.sandcastle/logs/timings.jsonl`.
+separate pane or terminal). While a run is live, every ticket it holds is shown from the run's
+own record (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run:
+working, ready to land, need you, queued, blocked, merged. The states:
+
+- **Working** - `setup`, `impl`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
+  or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
+  has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
+  the log before calling either hung.
+- **`ready`** - gates green, lands when the run ends. Landing starts only once every sandbox has
+  finished; the `run` line then counts it down (`landing 6/25`), and before that estimates when it
+  starts (`lands ~16:20`). `human merge: <paths>` means it will be held for a person instead.
+- **Needs you** - `gate red`, `conflict`, `held`, `crashed`, `not landed`, `stopped` (finished,
+  but the run stopped before landing), `orphaned` (its run was killed and its container still
+  works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed or unqueued
+  during the run) is greyed with the leftovers.
+- **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
+  `(this run)` when the blocker is in this run - then the next run can start it), **`merged`**,
+  **`no change`**, **`skipped`** (not started because the run stopped early).
+
+After a run, or for a ticket outside it, the state is inferred from branches and logs: `left
+over` is a branch from an earlier run, for `sandcastle clean`. Each ticket's agent and gate logs
+are `.sandcastle/logs/agent-issue-<n>-*.log` (the `-gates-` one is the orchestrator's gate
+output); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
+a "trust dialog" error). The live view fits its pane and summarises the rows that do not fit on
+one line (`sandcastle status 10 all` shows them all). How long each step took, and each agent
+pass's tokens, is in `.sandcastle/logs/timings.jsonl`.
 
 ## update - bring the kit and this project up to date
 

@@ -20,7 +20,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 !`git log {{TARGET_BRANCH}}..HEAD --format='%h %s%n%b'`
 
-# What to look for, in priority order
+{{KIT_AFTER_REPAIR}}# What to look for, in priority order
 
 1. **Does it do what the issue asked?** Not what would be nice - what the issue asked. A correct
    implementation of the wrong thing is the most expensive failure here, because the gates cannot

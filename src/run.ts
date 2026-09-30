@@ -2,7 +2,7 @@
 // preflight, prompts, the run record, the log archive and the status pane.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IterationUsage } from "@ai-hero/sandcastle";
@@ -112,11 +112,14 @@ export const preflight = (project: Project, image: string) => {
 
 // A log is named agent-issue-<id>-<phase>-<id>.log, so the id appears twice and
 // the repeat tells a ticket called "code-review-01" from phase "review". Logs
-// from hand-suffixed branches (agent-issue-1086-closeout-impl-...) fall back
+// from hand-suffixed branches (agent-issue-12-closeout-impl-...) fall back
 // to the first phase word.
 export const logOwner = (name: string) =>
-  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair)-\1\.log$/)?.[1] ??
-  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair)-/)?.[1];
+  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair|gates)-\1\.log$/)?.[1] ??
+  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair|gates)-/)?.[1];
+
+/** Where the orchestrator writes an issue's gate output as it runs; named like an agent log so it is archived with them. */
+export const gatesLog = (project: Project, id: string) => join(project.root, `.sandcastle/logs/agent-issue-${id}-gates-${id}.log`);
 
 // Sandcastle warns about an argument its prompt never mentions, so each run
 // gets only the ones its rendered prompt uses.
@@ -125,17 +128,32 @@ export const usedArgs = (promptFile: string, args: Record<string, string>) => {
   return Object.fromEntries(Object.entries(args).filter(([k]) => text.includes(`{{${k}}}`)));
 };
 
+// A repair agent works against a red gate, where the easy way to green is to
+// weaken the test. Its commits used to land unreviewed, trusted to the repair
+// prompt's rules alone.
+const AFTER_REPAIR =
+  "# This is a second review, after a repair\n\n" +
+  "This branch was reviewed once. Then a gate went red, and a repair agent committed the fixes below to turn it " +
+  "green. Nobody has reviewed those commits. Review them now, above all for what a repair under pressure gets " +
+  "wrong: a test weakened, skipped or deleted, an assertion loosened, an expected value changed to match a wrong " +
+  "result, a guard removed, an error swallowed instead of fixed. Put back what should not have gone, and fix the " +
+  "cause instead. The rest of the branch was reviewed already: leave it alone unless a repair commit broke it.\n\n" +
+  "!`git log -p {{REPAIR_BASE}}..HEAD --format='%h %s%n%b'`\n\n";
+
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
     : "";
   const out = join(project.root, ".sandcastle/.run");
   mkdirSync(out, { recursive: true });
-  const paths = { implement: "", review: "", repair: "" };
-  for (const kind of ["implement", "review", "repair"] as const) {
+  const paths = { implement: "", review: "", repair: "", rereview: "" };
+  // `rereview` is the review prompt again, for the review after a repair pass
+  // committed: it names the unreviewed repair commits and what to look for in them.
+  for (const kind of ["implement", "review", "repair", "rereview"] as const) {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
-    const text = readFileSync(join(KIT, `prompts/${kind}.md`), "utf8")
+    const text = readFileSync(join(KIT, `prompts/${kind === "rereview" ? "review" : kind}.md`), "utf8")
+      .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : ""))
       .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|NEW_TICKET_REVIEW|NEW_TICKET|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
@@ -148,6 +166,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
+    if (kind === "rereview") allowed.add("REPAIR_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
@@ -163,11 +182,45 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
 // run is still alive; `finishedAt` is written on a clean exit.
 // ---------------------------------------------------------------------------
 
+/**
+ * Where one ticket of the live run is. The status view shows the run's tickets
+ * from this record, not from branches and logs: before it, a branch waiting to
+ * land had no outcome, and the view's rules for old runs read it as queued.
+ * `state` is one of: queued, blocked, setup, implement, review, cross-review,
+ * gates, repair, ready, landing, merged, held, conflict, red, nochange,
+ * crashed, not landed, withdrawn (closed or unqueued during the run), stopped (finished, but
+ * the run stopped before landing), skipped.
+ */
+export type TicketRecord = {
+  state?: string;
+  since?: number;
+  started?: number;
+  order?: number;
+  note?: string | null;
+  title?: string;
+  // For the closing summary (report.ts), set when the pipeline ends.
+  commits?: number;
+  tokens?: string;
+  minutes?: number;
+  /** Test ids a red gate named. */
+  failing?: string[];
+  /** Files a merge conflicted on, or protected paths a held branch changes. */
+  files?: string[];
+  /** Merged, but the tracker refused the close: the error, short. */
+  closeFailed?: string;
+};
+
 export const recordRun = (project: Project, extra: Record<string, unknown> = {}) => {
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   let run: Record<string, unknown> = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
-  const write = () => writeFileSync(file, JSON.stringify(run, null, 2) + "\n");
+  // Written whole and renamed into place: the view reads it every few seconds,
+  // and a half-written file read as no record at all, so every row fell back
+  // to the guesswork the record is there to replace.
+  const write = () => {
+    writeFileSync(`${file}.tmp`, JSON.stringify(run, null, 2) + "\n");
+    renameSync(`${file}.tmp`, file);
+  };
   write();
   process.on("exit", (code) => {
     run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
@@ -180,7 +233,47 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {})
       run = { ...run, ...fields };
       write();
     },
+    tickets: () => (run.tickets ?? {}) as Record<string, TicketRecord>,
+    /** A new `state` also restarts its clock; a note alone does not. */
+    ticket(id: string, fields: TicketRecord) {
+      const tickets = (run.tickets ?? {}) as Record<string, TicketRecord>;
+      const now = fields.state ? { since: Math.floor(Date.now() / 1000), note: null } : {};
+      run = { ...run, tickets: { ...tickets, [id]: { ...tickets[id], ...now, ...fields } } };
+      write();
+    },
   };
+};
+
+// ---------------------------------------------------------------------------
+// Typical times - how long each step of an issue usually takes in this
+// project, from earlier runs' timings. The status view marks a step running
+// at twice its usual time, and estimates when landing starts: a run that is
+// busy but healthy and one that is stuck looked the same for an hour.
+// ---------------------------------------------------------------------------
+
+const median = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : undefined);
+
+/** Seconds per step, and `issue` for one whole issue; `extra` adds this run's finished issues (ms). */
+export const typicalTimes = (project: Project, extra: number[] = []) => {
+  let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number }[] = [];
+  try {
+    lines = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    /* no runs yet */
+  }
+  // Steps before the agents are issue 0 (or "" in older lines).
+  const steps = lines.filter((l) => l.project === project.name && l.issue && String(l.issue) !== "0" && typeof l.ms === "number");
+  const byPhase = new Map<string, number[]>();
+  const byIssue = new Map<string, number>();
+  for (const l of steps) {
+    byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
+    byIssue.set(`${l.run}|${l.issue}`, (byIssue.get(`${l.run}|${l.issue}`) ?? 0) + l.ms!);
+  }
+  const out: Record<string, number> = {};
+  for (const [phase, ms] of byPhase) out[phase] = Math.round(median(ms)! / 1000);
+  const issue = median([...byIssue.values(), ...extra]);
+  if (issue !== undefined) out.issue = Math.round(issue / 1000);
+  return out;
 };
 
 // ---------------------------------------------------------------------------
@@ -231,6 +324,8 @@ export const runTokens = (result: unknown): Tokens | undefined => {
 
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
+/** The status view's run line has no room for the cached share. */
+export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
 
 // ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent

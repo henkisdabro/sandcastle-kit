@@ -117,21 +117,19 @@ const rust = (root: string): Stack | undefined =>
       }
     : undefined;
 
-// What the template said before detection existed: a pnpm project.
+// No stack detected: gates that fail, saying why, rather than a guess. A pnpm
+// guess in a project without pnpm failed at setup, far from its cause, and a
+// gate that happened to pass would vouch for nothing.
 const FALLBACK = `  // Project image layer on top of sandcastle-base (toolchains, browsers, pinned
   // package manager). Omit to run on the base image.
   // dockerfile: ".sandcastle/Dockerfile",
 
-  // Mount the host pnpm store so each sandbox's install hardlinks instead of
-  // downloading. \`pnpm store path\` prints yours: ~/Library/pnpm/store/v11 on
-  // macOS, ~/.local/share/pnpm/store/v11 on Linux.
-  mounts: [{ hostPath: "~/Library/pnpm/store/v11", sandboxPath: "/home/agent/.pnpm-store" }],
-  setup: ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"],
+  // Commands run once in each fresh sandbox before any agent, e.g. installing dependencies.
+  setup: [],
 
+  // What CI runs, in order. Until these are filled in, every run stops at its base check.
   gates: [
-    { name: "lint", command: "pnpm run lint" },
-    { name: "build", command: "pnpm run build" },
-    { name: "test", command: "pnpm test" },
+    { name: "gates-not-set", command: "echo 'No gates yet: set them in .sandcastle/config.ts' >&2; exit 1" },
   ],`;
 
 export const init = (root: string) => {
@@ -165,7 +163,8 @@ export const init = (root: string) => {
     `Wrote ${CONFIG_PATH}${dockerfile ? ", .sandcastle/Dockerfile" : ""} and .sandcastle/rules.md.\n` +
       (stack
         ? `Detected ${stack.label} - gates and setup are filled in from it; check them against what CI runs.`
-        : "No known stack detected (package.json, pyproject.toml + uv.lock, go.mod, Cargo.toml) - fill in gates and setup.") +
+        : "No known stack detected (package.json, pyproject.toml + uv.lock, go.mod, Cargo.toml). The gates are a placeholder that " +
+          "fails, so no run starts until you fill in gates and setup.") +
       "\nThen `sandcastle build`.\n",
   );
 };

@@ -357,6 +357,19 @@ if missing: print("MODULES", " ".join(missing))
 
 const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
+// HEAD as plain files, through a tar file rather than a shell pipe: a temp
+// path is then never parsed by a shell, whatever TMPDIR holds.
+const exportHead = (root: string, into: string) => {
+  const tar = `${into}.tar`;
+  mkdirSync(into, { recursive: true });
+  try {
+    execFileSync("git", ["archive", "--format=tar", "-o", tar, "HEAD"], { cwd: root });
+    execFileSync("tar", ["-x", "-f", tar, "-C", into]);
+  } finally {
+    rmSync(tar, { force: true });
+  }
+};
+
 export const checkHooks = (project: Project, image: string, p: Plan) => {
   if (!p.hooks.length) return { failures: [] as string[], warnings: [] as string[] };
   const lines = ["cd " + WORKSPACE];
@@ -384,7 +397,7 @@ export const checkHooks = (project: Project, image: string, p: Plan) => {
   });
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-hooks-"));
   try {
-    execFileSync("sh", ["-c", `git archive HEAD | tar -x -C "${dir}"`], { cwd: project.root });
+    exportHead(project.root, dir);
     for (const path of p.hide) rmSync(join(dir, path), { recursive: true, force: true });
     for (const [path, content] of Object.entries(p.write)) writeFileSync(join(dir, path), content);
     const out = execFileSync(
@@ -450,7 +463,7 @@ export const measure = (project: Project, image: string, p: Plan) => {
   const tree = join(dir, "tree");
   try {
     // A plain export of HEAD, not a worktree: nothing to prune, nothing shared.
-    execFileSync("sh", ["-c", `mkdir -p "${tree}" && git archive HEAD | tar -x -C "${tree}"`], { cwd: project.root });
+    exportHead(project.root, tree);
     const before = probe(project, image, tree);
     for (const path of p.hide) rmSync(join(tree, path), { recursive: true, force: true });
     for (const [path, content] of Object.entries(p.write)) writeFileSync(join(tree, path), content);

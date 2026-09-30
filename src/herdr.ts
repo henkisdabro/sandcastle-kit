@@ -47,7 +47,7 @@ export const runsStatus = (pane: string) =>
     p.cmdline.includes("status.sh"),
   );
 
-type Slot = { pane: string; issue?: string };
+type Slot = { pane: string; issue?: string; closed?: boolean };
 export type SandboxView = {
   /** The status view's pane; undefined when this view is off and the caller opens one. */
   status?: string;
@@ -56,8 +56,8 @@ export type SandboxView = {
   claim(issue: string, title: string): void;
   /** A timed phase starts. */
   phase(issue: string, phase: string): void;
-  /** The pipeline ended; the pane keeps the final state until reused. */
-  finish(issue: string, outcome: string): void;
+  /** The pipeline ended; the pane keeps the final state until reused, or closes when `release` (nothing left to start). */
+  finish(issue: string, outcome: string, release?: boolean): void;
   /** Landing decided the issue's fate; shown if its pane still shows it. */
   landed(issue: string, ok: boolean, outcome: string): void;
   /** The run ended: a notification with the summary. */
@@ -68,7 +68,9 @@ const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, cl
 const SOURCE = "sandcastle-kit";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
-const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair" } as const;
+// Gates have one too: the orchestrator writes their output as it arrives
+// (burndown.ts), so a pane shows the test run instead of the review's last words.
+const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
 
 export const openSandboxView = (project: Project, panes: number, ref: (id: string) => string): SandboxView => {
   if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return NONE;
@@ -146,7 +148,7 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.map((s) => s.pane) }) + "\n");
+  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);
@@ -197,7 +199,7 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   // saying "blocked" in the sidebar an hour later. The sandbox panes close
   // with the run - the outcomes are in the report and the status view.
   process.on("exit", () => {
-    for (const s of slots) {
+    for (const s of slots.filter((s) => !s.closed)) {
       rmSync(link(s.pane), { force: true });
       try {
         herdr(["pane", "close", s.pane]);
@@ -218,10 +220,14 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
     tab,
     claim(issue, title) {
       safe(() => {
-        let slot = slots.find((s) => s.issue === undefined);
-        if (!slot && slots.length < panes) {
-          // Sandboxes stack to the right of the status view.
-          const [from, direction] = slots.length ? [slots[slots.length - 1].pane, "down"] : [statusPane, "right"];
+        let slot = slots.find((s) => s.issue === undefined && !s.closed);
+        const open = slots.filter((s) => !s.closed);
+        if (!slot && open.length < panes) {
+          // Sandboxes stack to the right of the status view. From an open
+          // pane: one that waited for a machine-wide slot starts after the
+          // queue looked empty and its neighbours' panes closed, and a split
+          // from a closed pane turned the whole view off.
+          const [from, direction] = open.length ? [open[open.length - 1].pane, "down"] : [statusPane, "right"];
           const pane = herdrJson(["pane", "split", from, "--direction", direction, "--cwd", project.root, "--no-focus"])
             .result.pane.pane_id as string;
           slot = addSlot(pane);
@@ -239,17 +245,28 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
       safe(() => {
         report(slot.pane, "working", phase, `${ref(issue)} ${phase}`);
         const name = LOG[phase as keyof typeof LOG];
-        if (!name) return; // gates and setup have no agent log of their own
+        if (!name) return; // setup has no log of its own
         follow(slot.pane, `agent-issue-${issue}-${name}-${issue}.log`);
       });
     },
-    finish(issue, outcome) {
+    finish(issue, outcome, release) {
       const slot = slotOf(issue);
       if (!slot) return;
+      slot.issue = undefined;
+      if (release) {
+        // Nothing will reuse it. Left open it showed a finished agent's last
+        // words for the rest of the run, and five of them read as five stuck
+        // sandboxes; the status view has the outcome.
+        slot.closed = true;
+        shownBy.delete(slot.pane);
+        rmSync(link(slot.pane), { force: true });
+        safe(() => herdr(["pane", "close", slot.pane]));
+        save();
+        return;
+      }
       // Herdr's "blocked" means "needs your input". A red branch is a
       // finished result, read from the report; a crash is not.
       safe(() => report(slot.pane, outcome === "crashed" ? "blocked" : "idle", outcome, `${ref(issue)} ${outcome}`));
-      slot.issue = undefined;
     },
     /** `ok` false: a human has to act - a conflict, a failed landing, a held branch. */
     landed(issue, ok, outcome) {

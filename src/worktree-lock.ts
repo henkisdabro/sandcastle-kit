@@ -5,7 +5,7 @@
 // (tidying a scratch worktree it made) deletes every other live sandbox's
 // record - and the host's own prune, which Sandcastle runs before each new
 // sandbox, then deletes the worktree directory an agent "repaired" with a
-// container path. That is how #1080 and #1082 crashed in the 20260923 dry run
+// container path. Two sandboxes of one run crashed that way
 // (`safe.directory ... not a git repository`). Git never prunes a LOCKED
 // worktree, from either side, so each sandbox's worktree is locked for its
 // whole life and unlocked just before Sandcastle removes it.
@@ -65,11 +65,14 @@ export const unlockAll = () => {
   }
 };
 
-// A gate that hangs holds its whole step: #1087's layout run sat for 12 hours
-// on 20260923 until it was killed by hand, with Docker itself unresponsive.
+// A gate that hangs holds its whole step: one sat for twelve hours until it
+// was killed by hand, with Docker itself unresponsive.
 // Two bounds: `timeout` in the container catches a hung test run, and the host
 // race catches a Docker that never answers. Either reads as a red gate (124),
 // never as a pass. The output is returned so a red gate can be repaired.
+// `-k`: a gate that ignores TERM is killed, not left running in the container
+// after its slot is freed. The host race cancels nothing - Sandcastle's exec
+// takes no signal - and only the sandbox's close ends what it started.
 const GATE_TIMEOUT_SECONDS = 45 * 60;
 const HOST_GRACE_MS = 5 * 60 * 1000;
 
@@ -83,7 +86,7 @@ export const execGate = async (
   cmd: string,
   options?: { onLine?: (line: string) => void },
 ): Promise<ExecResult> => {
-  const bounded = `timeout ${GATE_TIMEOUT_SECONDS} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
+  const bounded = `timeout -k 30 ${GATE_TIMEOUT_SECONDS} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
   let timer: NodeJS.Timeout | undefined;
   const hostBound = new Promise<ExecResult>((resolve) => {
     timer = setTimeout(() => {
@@ -91,8 +94,12 @@ export const execGate = async (
       resolve({ exitCode: 124, stdout: "", stderr: "timed out" });
     }, GATE_TIMEOUT_SECONDS * 1000 + HOST_GRACE_MS);
   });
+  const since = Date.now();
   try {
-    return await Promise.race([sandbox.exec(bounded, options), hostBound]);
+    const r = await Promise.race([sandbox.exec(bounded, options), hostBound]);
+    // `timeout` exits 137, not 124, when it had to follow up with KILL. It is
+    // still a timeout: nothing a repair pass could fix, and it would hang again.
+    return r.exitCode === 137 && Date.now() - since >= GATE_TIMEOUT_SECONDS * 1000 ? { ...r, exitCode: 124 } : r;
   } finally {
     clearTimeout(timer);
   }

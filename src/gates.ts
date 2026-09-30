@@ -10,7 +10,7 @@
 
 import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
@@ -29,24 +29,45 @@ export const clip = (text: string, head = 8_000, tail = 24_000) =>
     ? text
     : `${text.slice(0, head)}\n[... ${text.length - head - tail} characters cut ...]\n${text.slice(-tail)}`;
 
+/**
+ * What a gate run tells its caller as it goes. A gate run takes minutes and
+ * writes no agent log, so without this the status view could not tell one
+ * waiting for a machine-wide slot from one halfway through its test suite.
+ */
+export type GateProgress = {
+  /** No gates slot was free; the run waits for one. */
+  wait?: () => void;
+  /** Gate `index` (0-based) starts. */
+  gate?: (index: number, name: string) => void;
+  /** Each gate's output is appended here as it arrives. */
+  log?: string;
+};
+
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false) =>
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}) =>
   withSlot("gates", label, async (): Promise<GateRun> => {
     const gates: Gate[] = [];
     const failures: Failure[] = [];
-    for (const g of project.gates) {
+    const log = progress.log;
+    for (const [i, g] of project.gates.entries()) {
+      progress.gate?.(i, g.name);
+      if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
       const since = Date.now();
-      const r = await execGate(sandbox, g.command);
+      const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
+      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : `RED (exit ${r.exitCode})`} in ${Math.round((Date.now() - since) / 1000)}s\n`);
       gates.push({ name: g.name, pass: r.exitCode === 0, ms: Date.now() - since });
       if (r.exitCode === 0) continue;
       const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
       failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
-      if (!all) break;
+      // A timed-out gate may still be running in this container (or Docker
+      // may not be answering): a later gate would run beside it, or wait out
+      // its own timeout too.
+      if (!all || r.exitCode === 124) break;
     }
     return { gates, failure: failures[0], failures };
-  });
+  }, progress.wait);
 
 // ---------------------------------------------------------------------------
 // Hook tests. A guard that never ran and a guard that allowed everything look
@@ -103,12 +124,16 @@ export const runHookTests = async (tests: HookTest[], hooks: Hook[], sandbox: Ex
       if (blocked(r)) blockers.push(h.command);
       else if (r.exitCode !== 0) errors.push(`${h.command.slice(0, 60)} exited ${r.exitCode}: ${(r.stderr || r.stdout).trim().split("\n").slice(-2).join(" ").slice(0, 200)}`);
     }
-    const pass = t.expect === "block" ? blockers.length > 0 : blockers.length === 0;
+    // An allow that got through because a guard crashed is not an allow: the
+    // guard is dead (it fails open) and errors on every tool call of every agent.
+    const pass = t.expect === "block" ? blockers.length > 0 : blockers.length === 0 && errors.length === 0;
     const detail = pass
       ? t.expect === "block" ? `blocked by ${blockers[0].slice(0, 70)}` : `allowed by all ${guards.length} matching hook(s)`
       : t.expect === "block"
         ? `none of ${guards.length} matching hook(s) blocked it${errors.length ? ` - errors (a guard that errors fails open): ${errors.join("; ")}` : ""}`
-        : `blocked by ${blockers.map((b) => b.slice(0, 70)).join(", ")}`;
+        : blockers.length
+          ? `blocked by ${blockers.map((b) => b.slice(0, 70)).join(", ")}`
+          : `a matching hook errored (a guard that errors fails open): ${errors.join("; ")}`;
     results.push({ name: t.name, pass, detail });
   }
   return results;
@@ -146,7 +171,20 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
   const timed = (Array.isArray(gates) ? gates : []).filter((g) => typeof g.ms === "number");
   return timed.length ? Object.fromEntries(timed.map((g) => [g.name, g.ms!])) : undefined;
 };
-const gateTimeLine = (gates: Gate[]) =>
+// The failing tests a red gate names, for the closing summary: pytest's
+// "FAILED path::test", vitest's and jest's "FAIL path". Three branches red on
+// the same test once read as three separate mysteries; named, they group.
+export const failingTests = (output: string) =>
+  [...new Set([...output.matchAll(/^(?:FAILED|ERROR)\s+(\S+)|^\s*FAIL\s+(\S+)/gm)].map((m) => m[1] ?? m[2]))].slice(0, 5);
+
+// The red gates of a result, or undefined for a step that is not a gate run.
+// A timings line once said `ok: true` for a red gate run, because `ok` meant
+// only that the step did not throw; anything reading it for pass/fail was wrong.
+export const gateRed = (result: unknown): string[] | undefined => {
+  const gates = (result as { gates?: Gate[] } | undefined)?.gates;
+  return Array.isArray(gates) ? gates.filter((g) => !g.pass).map((g) => g.name) : undefined;
+};
+const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${Math.round(g.ms! / 1000)}s`).join(", ");
 
 // A green result holds for as long as nothing it depended on changes: the
@@ -210,4 +248,16 @@ export const requireGreenBase = async (project: Project, image: string, planFile
       `so no sandbox started. The cause is the image, the setup, the lean plan or a hook, not an issue: full output in ` +
       `.sandcastle/logs/base-gates.log. Fix it, then \`sandcastle gates\` to check (SKIP_BASE_GATES=1 runs anyway).`,
   );
+};
+
+// What a red gate said, less the numbers that differ between two runs of the
+// same failure (durations, counts, ports). A repair that turns up a different
+// failure has made progress; one that leaves the same failure has not.
+// A gate whose message says neither word ("the export count says 12, but ...")
+// is keyed by all it said: keyed by nothing, two different failures read as
+// the same one and the repair loop stopped a pass early.
+export const failureKey = (f: { name: string; output: string }) => {
+  const lines = f.output.split("\n").map((l) => l.trim()).filter(Boolean);
+  const said = lines.filter((l) => /fail|error/i.test(l));
+  return `${f.name}\n${(said.length ? said : lines.slice(-20)).map((l) => l.replace(/\d+/g, "N")).join("\n")}`;
 };
