@@ -27,7 +27,7 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: doctor, init, build, lean, lean-apply (internal hook), preflight, run, status |
+| `src/cli.ts` | Commands: setup, doctor, init, build, lean, lean-apply (internal hook), preflight, run, status |
 | `src/burndown.ts` | The orchestrator: fan out, implement, review, gate, land, verify, report |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
@@ -36,7 +36,8 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/pool.ts` | Machine-wide sandbox and gate slots (lock files with pids) |
 | `src/run.ts` | Preconditions, preflight, prompt rendering, run record, log archive, status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates |
-| `src/doctor.ts` | Setup self-check |
+| `src/setup.ts` | Interactive install: links, credentials file, then doctor |
+| `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/config.ts` | The `ProjectConfig` type and loader |
 | `prompts/` | Implement and review templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
@@ -44,6 +45,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `skill/SKILL.md` | The `sandcastle` agent skill - one file shared by Claude Code, Codex and OpenCode |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
+| `docs/INSTALL.md` | Requirements, what `setup` does, the manual install |
 
 `@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in
 `node_modules/@ai-hero/sandcastle/dist` - read the source there when unsure.

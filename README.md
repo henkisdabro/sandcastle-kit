@@ -13,12 +13,12 @@ gated and merged while you are away from the keyboard.
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-implement%20%2B%20review-d97757?style=flat-square&logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-cross--review-10a37f?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
-[![Docker](https://img.shields.io/badge/sandbox-Docker%20%7C%20OrbStack%20%7C%20Podman-2496ed?style=flat-square&logo=docker&logoColor=white)](#-requirements)
+[![Docker](https://img.shields.io/badge/sandbox-Docker%20%7C%20OrbStack%20%7C%20Podman-2496ed?style=flat-square&logo=docker&logoColor=white)](docs/INSTALL.md#-requirements)
 [![Node](https://img.shields.io/badge/node-22%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Why](#-why-sandcastle-kit) · [Requirements](#-requirements) · [Install](#-install-once-per-machine) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -33,6 +33,43 @@ any GitHub repository: it picks up issues labelled `ready-for-agent`, has one ag
 each issue and a stronger one review it, runs your project's own lint/build/test gates itself
 (an agent never gets to say "tests pass"), merges what is green and closes the issue. One install
 serves all your projects; each project adds a small config file.
+
+> [!TIP]
+> **AI coding agent?** Read [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this) first.
+
+## ⚡ Quick start
+
+**You need:** macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (`gh auth login`),
+and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
+macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
+[Full requirements](docs/INSTALL.md#-requirements).
+
+**1. Install the kit** (once per machine) - one line, paste it into your terminal:
+
+```bash
+git clone https://github.com/henkisdabro/sandcastle-kit.git ~/sandcastle-kit && cd ~/sandcastle-kit && pnpm install && ./bin/sandcastle setup
+```
+
+`setup` puts the `sandcastle` command on your PATH, installs the agent skill, walks you through
+your Claude and GitHub tokens, and finishes with a health check. Re-run it any time.
+([What it does, and doing it by hand](docs/INSTALL.md).)
+
+**2. Point it at a project:**
+
+```bash
+cd ~/code/your-project
+sandcastle init              # or ask your agent: /sandcastle init
+sandcastle build
+```
+
+Fill in the gate commands (`lint`, `test`, ...) in `.sandcastle/config.ts` - see
+[Set up a project](#-set-up-a-project).
+
+**3. Label some issues `ready-for-agent` and try a dry run:**
+
+```bash
+DRY_RUN=1 sandcastle run     # implement, review, gate - never merge or close
+```
 
 ---
 
@@ -79,50 +116,6 @@ flowchart LR
     class F ok
     class G,H bad
 ```
-
----
-
-## 🤖 If you are an AI coding agent reading this
-
-You are probably helping a user who cloned this repository. Read this section first; it is the
-whole mental model.
-
-**There are three places. Never mix them up.**
-
-| Place | What lives there | Who edits it |
-|---|---|---|
-| **The kit** - this repository, cloned once per machine (anywhere) | Orchestrator code, prompts, base Docker image, status view, the `/sandcastle` agent skill | Nobody, for normal use. It is shared by every project and may be public: **never write credentials, names, client or project details into it.** |
-| **User config** - `~/.config/sandcastle-kit/` | `.env` (tokens), optional `config.json` (machine-wide limits), optional `denylist` | The user, once. Never committed anywhere. |
-| **Each project** - the repository the agents will work on | `.sandcastle/config.ts`, `.sandcastle/rules.md`, optional `.sandcastle/Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting that project up. |
-
-The `sandcastle` command is run **from inside a project**, never from inside the kit (except
-`sandcastle doctor`, which works anywhere).
-
-**Map the user's request to an action:**
-
-| The user says | Do this |
-|---|---|
-| "set this up", "install sandcastle-kit", anything on a fresh clone | Follow [Install](#-install-once-per-machine). Run `sandcastle doctor` and fix each `FIX` line in order until none remain. Ask the user to create the two tokens - you cannot. |
-| "use sandcastle in this project", "set up this repo" | Follow [Set up a project](#-set-up-a-project). If the `/sandcastle` skill is installed, `/sandcastle init` does this with the user. |
-| "which issues can the agents do?", "triage for sandcastle" | `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. |
-| "start a run", "burn down the queue" | [Run](#-run). A run takes hours: start it in a separate terminal or pane, not in your own shell. |
-| "is it working?", "what is it doing?" | `sandcastle status 0` for a snapshot; logs are in the project's `.sandcastle/logs/`. |
-| Anything fails | `sandcastle doctor`, then [Troubleshooting](#-troubleshooting). |
-
-**Rules for you:**
-
-- Run `sandcastle doctor` before anything else. It prints `ok`, `opt` or `FIX` per requirement,
-  each `FIX` with the exact command to run.
-- Tokens go only in `~/.config/sandcastle-kit/.env` (or a project's gitignored `.sandcastle/.env`).
-  Never into the kit, never into a committed file.
-- `sandcastle run`, `sandcastle preflight` and `sandcastle lean --measure` call the model and spend
-  the user's plan allowance or API credits. Ask before running them.
-- A run merges into the project's base branch locally and comments on and closes GitHub issues.
-  Confirm with the user before starting one. It never pushes.
-- Do not weaken the safety rules below (token type, protected paths, hook checks) to make a run
-  start. Fix the cause, or ask the user.
-
----
 
 ## ✨ What it adds to Sandcastle
 
@@ -177,70 +170,6 @@ flowchart TD
     class I,R,X agent
     class G,PP,P gate
 ```
-
-## ✅ Requirements
-
-| | Requirement | Notes |
-|---|---|---|
-| 💻 | **macOS or Linux** | Windows is not supported natively. WSL 2 with Docker Engine may work but is untested. |
-| 🐳 | **A Docker-compatible container runtime** | The kit calls the `docker` command, so any runtime that provides it works - see the table below. |
-| 🟩 | **Node.js 22+** | 24 LTS recommended. |
-| 📦 | **pnpm** | Installs the kit's dependencies. |
-| 🌿 | **git 2.31+** | Worktrees are the backbone of every run. |
-| 🐙 | **GitHub CLI**, signed in | `gh auth login`. |
-| 🧠 | **A Claude subscription or Anthropic API key** | For the implement and review agents. |
-| 🔑 | **A fine-grained GitHub token** | Issues read/write and metadata read, on chosen repos only. See [Install](#-install-once-per-machine). |
-
-**Container runtime by operating system**
-
-| OS | Recommended | Also works |
-|---|---|---|
-| 🍎 **macOS** | **[OrbStack](https://orbstack.dev)** - light, fast, and provides `docker` out of the box | **[Podman](https://podman.io)** with Docker compatibility turned on (Podman Desktop -> Settings -> Docker Compatibility, so `docker` talks to the Podman machine), or Docker Desktop |
-| 🐧 **Linux** | **[Docker Engine](https://docs.docker.com/engine/install/)** | **Podman** with the `podman-docker` package, which installs a `docker` command |
-| 🪟 **Windows** | Not supported | Try WSL 2 with Docker Engine inside it, at your own risk |
-
-> [!TIP]
-> Whichever runtime you choose, `docker info` must succeed in the same shell you run `sandcastle`
-> from. `sandcastle doctor` checks this for you.
-
-**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review),
-Herdr (automatic status pane), [gitleaks](https://github.com/gitleaks/gitleaks)
-(only to contribute to the kit).
-
-## 📦 Install (once per machine)
-
-```bash
-git clone https://github.com/henkisdabro/sandcastle-kit.git
-cd sandcastle-kit && pnpm install
-
-# The command, on your PATH (~/.local/bin must be on PATH)
-ln -sf "$PWD/bin/sandcastle" ~/.local/bin/sandcastle
-
-# The /sandcastle skill (optional, recommended) - one file for every agent
-mkdir -p ~/.claude/skills ~/.agents/skills
-ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle    # Claude Code (OpenCode reads it here too)
-ln -sfn "$PWD/skill" ~/.agents/skills/sandcastle    # Codex ($sandcastle) - skip if you only use Claude Code
-
-# Credentials, outside the repo
-mkdir -p ~/.config/sandcastle-kit
-cp .env.example ~/.config/sandcastle-kit/.env && chmod 600 ~/.config/sandcastle-kit/.env
-
-sandcastle doctor
-```
-
-Fill in `~/.config/sandcastle-kit/.env`:
-
-- `CLAUDE_CODE_OAUTH_TOKEN` - run `claude setup-token` (uses your Claude subscription), **or**
-  `ANTHROPIC_API_KEY` (billed per token).
-- `GH_TOKEN` - a **fine-grained** token (`github_pat_...`) from
-  <https://github.com/settings/personal-access-tokens/new>: repository access limited to the
-  repos you will run, permissions **Issues: Read and write** and **Metadata: Read**.
-
-> [!IMPORTANT]
-> Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
-> agents run with permission prompts off and such a token could push or edit workflows.
-
-Run `sandcastle doctor` until it reports no `FIX` lines.
 
 ## 🧱 Set up a project
 
@@ -316,6 +245,7 @@ yourself when you are happy with it.
 
 | Command | What it does | Calls the model? |
 |---|---|---|
+| `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
 | `sandcastle doctor` | Checks machine and project setup; prints the fix for each problem | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
@@ -418,8 +348,8 @@ first issue that hits the usage limit stops that run's queue.
 
 | Symptom | Cause and fix |
 |---|---|
-| `Docker running` shows `FIX` | Start OrbStack, Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
-| `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token as in [Install](#-install-once-per-machine). A project's `.sandcastle/.env` overrides the shared one - check both. |
+| `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
+| `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token with `sandcastle setup` (or as in [docs/INSTALL.md](docs/INSTALL.md#-installing-by-hand)). A project's `.sandcastle/.env` overrides the shared one - check both. |
 | `Preflight failed` naming a model | Plan limit reached, token expired, or the image's Claude Code is older than the model needs: bump `CLAUDE_CODE_VERSION` in `docker/base.Dockerfile`; the next run rebuilds. |
 | `A kept hook cannot run in the image` | Install what the hook calls in the project's Dockerfile, or - only for host-only conveniences - add it to `lean.dropHooks`. |
 | `placeholders Sandcastle cannot fill` | `rules.md` contains `{{SOMETHING}}`; reword it. |
@@ -427,6 +357,46 @@ first issue that hits the usage limit stops that run's queue.
 | `STOPPED ... .git/config ... changed` | Inspect `git config --local --list`, `.git/info/` and `git reflog <base>` before any other git command in that repo. |
 | An issue `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
+
+## 🤖 If you are an AI coding agent reading this
+
+You are probably helping a user who cloned this repository. Read this section first; it is the
+whole mental model.
+
+**There are three places. Never mix them up.**
+
+| Place | What lives there | Who edits it |
+|---|---|---|
+| **The kit** - this repository, cloned once per machine (anywhere) | Orchestrator code, prompts, base Docker image, status view, the `/sandcastle` agent skill | Nobody, for normal use. It is shared by every project and may be public: **never write credentials, names, client or project details into it.** |
+| **User config** - `~/.config/sandcastle-kit/` | `.env` (tokens), optional `config.json` (machine-wide limits), optional `denylist` | The user, once. Never committed anywhere. |
+| **Each project** - the repository the agents will work on | `.sandcastle/config.ts`, `.sandcastle/rules.md`, optional `.sandcastle/Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting that project up. |
+
+The `sandcastle` command is run **from inside a project**, never from inside the kit (except
+`sandcastle doctor`, which works anywhere).
+
+**Map the user's request to an action:**
+
+| The user says | Do this |
+|---|---|
+| "set this up", "install sandcastle-kit", anything on a fresh clone | Ask the user to run `./bin/sandcastle setup` from the kit clone in their own terminal - it asks for tokens, which only they can create. Then run `sandcastle doctor` and fix each `FIX` line in order until none remain. [docs/INSTALL.md](docs/INSTALL.md) has the manual steps. |
+| "use sandcastle in this project", "set up this repo" | Follow [Set up a project](#-set-up-a-project). If the `/sandcastle` skill is installed, `/sandcastle init` does this with the user. |
+| "which issues can the agents do?", "triage for sandcastle" | `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. |
+| "start a run", "burn down the queue" | [Run](#-run). A run takes hours: start it in a separate terminal or pane, not in your own shell. |
+| "is it working?", "what is it doing?" | `sandcastle status 0` for a snapshot; logs are in the project's `.sandcastle/logs/`. |
+| Anything fails | `sandcastle doctor`, then [Troubleshooting](#-troubleshooting). |
+
+**Rules for you:**
+
+- Run `sandcastle doctor` before anything else. It prints `ok`, `opt` or `FIX` per requirement,
+  each `FIX` with the exact command to run.
+- Tokens go only in `~/.config/sandcastle-kit/.env` (or a project's gitignored `.sandcastle/.env`).
+  Never into the kit, never into a committed file.
+- `sandcastle run`, `sandcastle preflight` and `sandcastle lean --measure` call the model and spend
+  the user's plan allowance or API credits. Ask before running them.
+- A run merges into the project's base branch locally and comments on and closes GitHub issues.
+  Confirm with the user before starting one. It never pushes.
+- Do not weaken the safety rules below (token type, protected paths, hook checks) to make a run
+  start. Fix the cause, or ask the user.
 
 ## 🤝 Contributing to the kit
 

@@ -23,8 +23,8 @@ action that fits what it shows.
 ## Before every action
 
 1. Run `sandcastle doctor`. Its first line is the kit's location; that kit's `README.md` covers
-   anything this file does not. If `sandcastle` is not found, the kit is not installed: follow the
-   README's Install section with the user.
+   anything this file does not. If `sandcastle` is not found, the kit is not installed: have the
+   user clone it and run `./bin/sandcastle setup` in their own terminal (it asks for tokens).
 2. Fix every `FIX` line doctor prints before going further. Tokens are the user's to create.
 
 **Where things are written.** The kit is shared by all the user's projects and may be public, so
