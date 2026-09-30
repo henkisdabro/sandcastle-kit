@@ -2,8 +2,8 @@
 
 # 🏰 sandcastle-kit
 
-**Turn your GitHub issues into a software factory.**<br>
-Unattended coding agents burn down your issue queue in Docker sandboxes - implemented, reviewed,
+**Turn your ticket backlog into a software factory.**<br>
+Unattended coding agents burn down your queue of GitHub issues or ticket files in Docker sandboxes - implemented, reviewed,
 gated and merged while you are away from the keyboard.
 
 [![Built on Sandcastle](https://img.shields.io/badge/built%20on-Sandcastle%20by%20Matt%20Pocock-f59e0b?style=flat-square)](https://github.com/mattpocock/sandcastle)
@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Run](#-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -29,18 +29,75 @@ gated and merged while you are away from the keyboard.
 > one way to put it to work, learned from and improved on with gratitude.
 
 Sandcastle runs coding agents in Docker sandboxes. This kit turns it into a ready-made loop for
-any GitHub repository: it picks up issues labelled `ready-for-agent`, has one agent implement
-each issue and a stronger one review it, runs your project's own lint/build/test gates itself
-(an agent never gets to say "tests pass"), merges what is green and closes the issue. One install
-serves all your projects; each project adds a small config file.
+any repository whose tickets are GitHub Issues or Markdown files in the repo: it picks up tickets
+marked `ready-for-agent`, has one agent implement each ticket and a stronger one review it, runs
+your project's own lint/build/test gates itself (an agent never gets to say "tests pass"), merges
+what is green and closes the ticket. One install serves all your projects; each project adds a
+small config file.
+
+## 🙋 Who is this for?
+
+**In one line:** developers who already work with Claude Code or Codex, keep their to-do list as
+tickets, and want the well-specified ones done while they are away from the keyboard.
+
+**It is a good fit if you:**
+
+- 🧑‍💻 are a solo developer, freelancer or small team with a backlog of clear, small-to-medium
+  tickets - bug fixes, small features, refactors, test coverage, dependency and docs chores;
+- 🗂️ track work in **GitHub Issues**, or as **Markdown files in the repo** (including the
+  `.scratch/` layout from [Matt Pocock's skills](https://github.com/mattpocock/skills), if you use them - you do not have to);
+- ✅ have real **gates** - lint, typecheck, tests, a build - that a machine can run. They are how the kit
+  knows work is good, so the better your tests, the more you can hand over;
+- 🖥️ have a Mac or Linux machine with Docker (or OrbStack, or Podman) and a Claude subscription or API key;
+- 🌙 are happy to come back to a report and review what merged, rather than watch it happen.
+
+**It is probably not for you if:**
+
+- your tickets are vague ("make it faster", "improve onboarding") - an unattended agent with no chat
+  context needs a closed spec, and the [queue step](#-queue-what-agents-work-on) helps you write one;
+- the repo has no automated checks - nothing then stands between an agent's guess and your base branch;
+- you want an agent pair-programming with you live (use Claude Code directly), or work that needs a
+  production system, a device or a secret the sandbox must not have;
+- your tickets live only in Linear, Jira or another tool. Linear issues can be *blockers* today, and
+  the [tracker interface](#-trackers-github-or-ticket-files) is built for more, but only GitHub and ticket files are queues so far.
+
+**What a day looks like:** in the morning you write or triage a handful of tickets and mark them
+ready. You start a run and go about your day. When you are back there is a report: which tickets
+merged into your local base branch (nothing is ever pushed), which are red and why, and which
+need you. You review, push what you like, and repeat.
+
+**Do I need anyone else's tools?** No, but one is recommended. The kit needs only Docker, Node, git
+and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
+**[Matt Pocock's skills](https://github.com/mattpocock/skills)** - the same author as Sandcastle,
+which this kit is built on - and we recommend installing them: `/grill-with-docs`, `/to-spec`
+and `/to-tickets` are a good way to turn an idea into tickets an unattended agent can finish, and
+`/triage` keeps incoming issues in shape. Run his `/setup-matt-pocock-skills` in your repo once
+and the kit reads what it wrote (which tracker, which label), with no extra configuration. It stays
+optional: skip his skills and one line in `config.ts` does the same job.
+
+### 📖 The words used here
+
+New to GitHub or to agents? These are the only terms you need.
+
+| Word | Plain meaning |
+|---|---|
+| **Ticket** | One piece of work, written down: a title, a description of what should change, and how you will know it is done. On GitHub a ticket is an **issue**; in the files tracker it is a Markdown file. |
+| **GitHub issue** | GitHub's built-in ticket: a page in your repository (the **Issues** tab) with a title, a description and a comment thread. |
+| **Label** | A coloured tag you stick on a GitHub issue, such as `bug` or `ready-for-agent`. Labels are how this kit knows which issues to work on: it only touches the ones carrying its queue label. |
+| **`ready-for-agent`** | The kit's default queue label. It means "an agent may do this without asking me anything". Putting it on a ticket is you saying yes. [How to add it](#-how-to-mark-a-ticket-ready). |
+| **Queue** | Every ticket currently marked `ready-for-agent`. A run works through it. |
+| **Gate** | A command that must pass before anything merges: your linter, type checker, tests, build. You list them once in `config.ts`. |
+| **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
+| **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
+| **`needs-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. |
 
 > [!TIP]
-> **AI coding agent?** Read [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this) first.
+> **AI coding agent?** Start at [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this), then run `sandcastle doctor`.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (`gh auth login`),
-and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
+**You need:** macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (`gh auth login`;
+skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
 macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
 [Full requirements](docs/INSTALL.md#-requirements).
 
@@ -65,7 +122,13 @@ sandcastle build
 `init` fills in the gate commands (`lint`, `test`, ...) from your stack; check them against CI in
 `.sandcastle/config.ts` - see [Set up a project](#-set-up-a-project).
 
-**3. Label some issues `ready-for-agent` and try a dry run:**
+> [!TIP]
+> **Recommended, optional:** install [Matt Pocock's skills](https://github.com/mattpocock/skills) too
+> and run `/setup-matt-pocock-skills` in your project. The kit understands the tracker and labels it
+> records, and his `/grill-with-docs`, `/to-tickets` and `/triage` are a good way to write the tickets
+> this kit works through. Nothing here requires them.
+
+**3. Mark some tickets `ready-for-agent` - on GitHub that is a label you add to an issue ([step by step](#-how-to-mark-a-ticket-ready), no experience needed); in ticket files it is a `Status:` line ([Trackers](#-trackers-github-or-ticket-files)) - and try a dry run:**
 
 ```bash
 DRY_RUN=1 sandcastle run     # implement, review, gate - never merge or close
@@ -79,8 +142,9 @@ You already drive Claude Code or Codex every day - maybe with subagents, maybe s
 side by side. That still needs **you** in the loop: approving prompts, watching terminals, copying
 context between chats. sandcastle-kit is the next step up.
 
-- 🎫 **GitHub Issues become the universal ticket system.** Write an issue an agent could finish
-  with no chat context, add a label, and it joins the queue. No new tool to learn.
+- 🎫 **Your tickets stay where they are.** GitHub Issues or Markdown files in the repo: write a
+  ticket an agent could finish with no chat context, mark it ready, and it joins the queue. No new
+  tool to learn.
 - 🏭 **A software factory per repository.** Each queued issue gets its own git worktree and its
   own Docker sandbox, several at once, across several projects.
 - 🧪 **Proof, not promises.** The orchestrator - not the agent - runs your gates. Only green
@@ -92,7 +156,7 @@ context between chats. sandcastle-kit is the next step up.
 
 ```mermaid
 flowchart LR
-    A["📝 You write issues<br/>on GitHub"] --> B["🏷️ Label<br/>ready-for-agent"]
+    A["📝 You write tickets<br/>GitHub or repo files"] --> B["🏷️ Label<br/>ready-for-agent"]
     B --> C["🚀 sandcastle run"]
     C --> D1["🐳 Sandbox<br/>issue #12"]
     C --> D2["🐳 Sandbox<br/>issue #15"]
@@ -124,7 +188,8 @@ flowchart LR
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
 | 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again. |
-| 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. |
+| 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
+| 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -194,6 +259,10 @@ Where the base image lacks the toolchain (uv, Go, Rust, Bun) it also writes
 
 Then edit, in this order:
 
+0. **Where do your tickets live?** Nothing to do for GitHub Issues. For Markdown tickets set
+   `tracker: "files"` in `config.ts` (or let the kit read `docs/agents/issue-tracker.md` if you
+   ran [Matt Pocock's setup skill](https://github.com/mattpocock/skills), recommended but optional). `sandcastle queue` shows which tracker the kit chose and why;
+   see [Trackers](#-trackers-github-or-ticket-files).
 1. **`.sandcastle/config.ts`** - `gates` (the commands CI runs: lint, typecheck, build, test),
    `setup` (dependency install in the sandbox), `mounts` (e.g. the host package store), `lean`.
    See [Configuration](#-configuration).
@@ -216,15 +285,40 @@ Commit `config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` in t
 
 ## 📋 Queue: what agents work on
 
-The queue is every open issue with the label from `config.ts` (default `ready-for-agent`). Label
-an issue only when an agent with no chat context could finish it from the issue and its comments,
+The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
+the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the issue and its comments,
 and your gates could prove it. The `/sandcastle queue` skill action walks every open issue,
 gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
 labels it.
 
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run skips it while #12 is open - even when #12 is in the same run, because the dependent
-would branch before #12 lands - and the next run picks it up.
+would branch before #12 lands - and the next run picks it up. A blocker can also live outside
+GitHub; see [Blockers](#-blockers-github-linear-ticket-files).
+
+### 🏷️ How to mark a ticket ready
+
+**On GitHub** (the default):
+
+1. **Create the label once per repository.** In the repo, open **Issues > Labels > New label**
+   and name it exactly `ready-for-agent` (or run
+   `gh label create ready-for-agent --description "Ready for an unattended agent" --color 0E8A16`).
+   If your team already uses another name, set `label` in `config.ts` instead.
+2. **Put it on an issue.** Open the issue, click the gear next to **Labels** in the right-hand
+   sidebar and tick `ready-for-agent`. From a terminal: `gh issue edit 12 --add-label ready-for-agent`.
+3. **Take it off to pull the ticket back.** The kit removes the label itself when it finishes.
+
+**In ticket files:** add a line `Status: ready-for-agent` directly under the ticket's title and
+commit it. See [Trackers](#-trackers-github-or-ticket-files).
+
+**Before you do, check the ticket is ready.** An agent has only the ticket and the code, never your
+chat. A good one says what should change, where to look, and how you will know it worked ("the
+signup form rejects an empty email; `pnpm test` covers it"). If you are unsure, the
+`/sandcastle queue` skill action reads your open issues with you and only labels the ones that
+qualify.
+
+Where the queue lives is your choice - see [Trackers](#-trackers-github-or-ticket-files). Blockers
+can also be Linear issues or ticket files.
 
 ```mermaid
 flowchart LR
@@ -239,6 +333,99 @@ flowchart LR
     class L ok
     class D,K ask
 ```
+
+### 🧷 Blockers: GitHub, Linear, ticket files
+
+Only the ticket **body** is read: a `Blocked by ...` line in a comment does nothing, and a run
+starts the ticket anyway. Both `sandcastle run` and `sandcastle blockers` warn about that, and about
+comments whose blockers are all closed (stale).
+
+| Named in the body | Waits until | Enable |
+|---|---|---|
+| `Blocked by #12`, `Depends on #12` | issue or pull request #12 is closed or merged | always on |
+| `Blocked by ENG-42` | the Linear issue is in a *completed* or *canceled* state | `blockers.linear: ["ENG"]` and `LINEAR_API_KEY` |
+| `Blocked by .scratch/checkout/issues/03-pay.md` | that file on the base branch has `Status: done` | the files tracker, or `blockers.files: { dir }` |
+| `Blocked by: 01, 02` (a header line in a ticket file) | those tickets of the same feature are done | the files tracker |
+
+Several may share a line: `Blocked by #12, ENG-42 and .scratch/checkout/issues/03-pay.md`.
+
+```ts
+// .sandcastle/config.ts
+blockers: {
+  linear: ["ENG", "OPS"],                             // Linear team keys
+  files: { dir: ".scratch", done: ["done", "shipped"] }, // where ticket files live; done defaults to done, closed, resolved, wontfix
+},
+```
+
+- **Linear** needs a personal API key (read-only is enough) as `LINEAR_API_KEY` in
+  `~/.config/sandcastle-kit/.env`, not the project's `.sandcastle/.env` (Sandcastle forwards that
+  file into every container, so the kit refuses the key there). It stays on the host. `sandcastle doctor` checks it when `blockers.linear` is set.
+- **Ticket files** are read from the base branch, not your working tree, so a blocker counts as done
+  once its `Status:` change is committed there. Front matter (`status: done`) is read too.
+- **Unreadable = open.** A missing Linear key, a network error or a missing file holds the ticket
+  back; guessing wrong would start work on a missing foundation.
+
+## 🗂️ Trackers: GitHub or ticket files
+
+A tracker is where tickets live. The kit ships two:
+
+| Tracker | Tickets are | Queue | Done |
+|---|---|---|---|
+| `github` (default) | GitHub Issues, through `gh` | open issues with the `label` | closed, label removed |
+| `files` | Markdown files `.scratch/<feature>/issues/<NN>-<slug>.md` | files whose `Status:` equals the queue value | `Status: done`, committed on the base branch |
+
+**Which one a project uses**, first match wins:
+
+1. `tracker` in `.sandcastle/config.ts`: `"github"`, `"files"`, or `{ type: "files", dir: "tickets", done: [...] }`.
+2. **Matt Pocock's setup, if the repo has it.** [`/setup-matt-pocock-skills`](https://github.com/mattpocock/skills)
+   writes `docs/agents/issue-tracker.md` (`# Issue tracker: GitHub` or `Local Markdown`) and
+   `docs/agents/triage-labels.md`. The kit reads both: the tracker from the first, and the queue
+   value from the row that maps `ready-for-agent`, so a repo that renamed that label needs no `label`
+   setting. GitLab and "other" trackers are noticed and reported by `sandcastle doctor`; the kit falls
+   back to GitHub.
+3. GitHub.
+
+**Matt Pocock's skills are supported and recommended, never required.** Install
+[his skills](https://github.com/mattpocock/skills) and run `/setup-matt-pocock-skills` in the
+project: that writes `docs/agents/`, the kit detects it, and tickets that `/to-tickets` writes
+(`.scratch/...`) or issues that `/triage` labels `ready-for-agent` are picked up as they are - the
+skills plan and shape the work, the kit burns it down unattended. Without them, `tracker: "files"`
+and a `.scratch/` folder (or plain GitHub Issues) is the whole setup.
+
+**The files layout** (Matt's "Local Markdown"):
+
+```markdown
+# Add the cart
+
+Status: ready-for-agent
+Blocked by: 01
+
+What to build...
+
+## Comments
+
+### 2026-09-30 - sandcastle
+Shipped by the Sandcastle loop on `agent/issue-checkout-02`...
+```
+
+Keep `Status:` and `Blocked by:` as plain lines directly under the title, together: only that
+block is read, so a "Status:" in the description below is just text. A value may be in backticks;
+`Blocked by:` takes bare numbers (`01, 02`) for tickets of the same feature.
+
+A ticket is named by its feature and number: `checkout-02` in branches (`agent/issue-checkout-02`),
+logs and the status view. `sandcastle queue` lists the queue and what holds each ticket back;
+`sandcastle doctor` says which tracker was chosen and why.
+
+**Who writes to the tracker.** With GitHub, agents comment and label themselves, as before. With
+`files`, agents write nothing to the tickets: they end with `<report>...</report>` (or
+`<blocked>...</blocked>` to hand the ticket to a human), and the orchestrator posts it, commits it to
+the base branch and marks the ticket `done` or `needs-human`. That keeps ticket files out of the
+agents' branches, and the GitHub token out of the sandbox when nothing needs it (a `files` project
+does not require `GH_TOKEN`).
+
+**Limits.** The `files` tracker needs the run to start from a clean base branch (it commits ticket
+changes there). Linear as a full tracker is not built; Linear issues work as blockers today.
+
 
 ## 🚀 Run
 
@@ -319,6 +506,8 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
+| `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
+| `sandcastle blockers` | Lists open queued issues whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
 | `sandcastle status [secs] [all]` | Live view, fitted to its pane with the overflow summarised on one line; `0` prints every row once | ➖ no |
@@ -333,11 +522,13 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `name` | required | Names the project image (`sandcastle-<name>`) and the status view |
 | `gates` | required | `[{ name, command }]`, run in order, stopping at the first red |
 | `baseBranch` | `"main"` | Branch agents start from and green work merges into |
-| `label` | `"ready-for-agent"` | The queue label |
+| `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
+| `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
+| `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to both prompts under "Project rules" |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
@@ -464,50 +655,47 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `STOPPED ... .git/config ... changed` | Inspect `git config --local --list`, `.git/info/` and `git reflog <base>` before any other git command in that repo. |
 | An issue `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
-| `waits for #N to close` / `waiting, not started` | The issue body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to issues named in `ISSUES=`. |
+| `waits for #N to close` / `waiting, not started` | The issue body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to issues named in `ISSUES=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
+| `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `gated green but not merged` | The issue was closed or labelled `needs-human` during the run, or its branch gained a commit after the gates passed. The branch is left standing. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
 ## 🤖 If you are an AI coding agent reading this
 
-You are probably helping a user who cloned this repository. Read this section first; it is the
-whole mental model.
+You are probably helping a user who cloned this repository. This section is the whole mental
+model; `sandcastle help` lists every command.
 
-**There are three places. Never mix them up.**
+**Three places, each with one job:**
 
-| Place | What lives there | Who edits it |
+| Place | Holds | Edited by |
 |---|---|---|
-| **The kit** - this repository, cloned once per machine (anywhere) | Orchestrator code, prompts, base Docker image, status view, the `/sandcastle` agent skill | Nobody, for normal use. It is shared by every project and may be public: **never write credentials, names, client or project details into it.** |
-| **User config** - `~/.config/sandcastle-kit/` | `.env` (tokens), optional `config.json` (machine-wide limits), optional `denylist` | The user, once. Never committed anywhere. |
-| **Each project** - the repository the agents will work on | `.sandcastle/config.ts`, `.sandcastle/rules.md`, optional `.sandcastle/Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting that project up. |
+| **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
+| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits) and `denylist` | The user, once. Not committed anywhere |
+| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting the project up |
 
-The `sandcastle` command is run **from inside a project**, never from inside the kit (except
-`sandcastle doctor`, which works anywhere).
+Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.
 
-**Map the user's request to an action:**
+**Start with `sandcastle doctor`.** It prints `ok`, `opt` or `FIX` for each requirement, with the
+exact command under every `FIX`. Any failure later starts there too, then [Troubleshooting](#-troubleshooting).
 
-| The user says | Do this |
-|---|---|
-| "set this up", "install sandcastle-kit", anything on a fresh clone | Ask the user to run `./bin/sandcastle setup` from the kit clone in their own terminal - it asks for tokens, which only they can create. Then run `sandcastle doctor` and fix each `FIX` line in order until none remain. [docs/INSTALL.md](docs/INSTALL.md) has the manual steps. |
-| "use sandcastle in this project", "set up this repo" | Follow [Set up a project](#-set-up-a-project). If the `/sandcastle` skill is installed, `/sandcastle init` does this with the user. |
-| "which issues can the agents do?", "triage for sandcastle" | `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. |
-| "start a run", "burn down the queue" | [Run](#-run). A run takes hours: start it in a separate terminal or pane, not in your own shell. |
-| "is it working?", "what is it doing?" | `sandcastle status 0` for a snapshot; logs are in the project's `.sandcastle/logs/`. |
-| "update sandcastle", "get the latest kit" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating) by hand. It pulls the kit and brings the current project up to date; `CHANGELOG.md` says what changed. |
-| Anything fails | `sandcastle doctor`, then [Troubleshooting](#-troubleshooting). |
+**Match the request, then check its finish line:**
 
-**Rules for you:**
+| The user says | Do this | Finished when |
+|---|---|---|
+| "set this up", "install sandcastle-kit", a fresh clone | Ask the user to run `./bin/sandcastle setup` in their own terminal (it asks for tokens only they can create). Then fix each `FIX` line in order. [docs/INSTALL.md](docs/INSTALL.md) has the manual steps. | `sandcastle doctor` ends "All required checks pass." |
+| "use sandcastle in this project" | [Set up a project](#-set-up-a-project), or `/sandcastle init` with the user. | `sandcastle gates` is green on the base branch |
+| "which issues can the agents do?", "triage for sandcastle" | `sandcastle queue` first: it names the tracker and queue label in use. Then `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. | Every open ticket is queued, decided with the user, or left with a reason |
+| "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
+| "start a run", "burn down the queue" | [Run](#-run), in a separate terminal or pane: a run takes hours. | `sandcastle run ended` is printed, and you have read the run report |
+| "is it working?" | `sandcastle status 0`; logs are in `.sandcastle/logs/`. | You can name each ticket's phase |
+| "update sandcastle" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating). `CHANGELOG.md` says what changed. | The kit is pulled and `sandcastle doctor` is green in the project |
 
-- Run `sandcastle doctor` before anything else. It prints `ok`, `opt` or `FIX` per requirement,
-  each `FIX` with the exact command to run.
-- Tokens go only in `~/.config/sandcastle-kit/.env` (or a project's gitignored `.sandcastle/.env`).
-  Never into the kit, never into a committed file.
-- `sandcastle run`, `sandcastle preflight` and `sandcastle lean --measure` call the model and spend
-  the user's plan allowance or API credits. Ask before running them.
-- A run merges into the project's base branch locally and comments on and closes GitHub issues.
-  Confirm with the user before starting one. It never pushes.
-- Do not weaken the safety rules below (token type, protected paths, hook checks) to make a run
-  start. Fix the cause, or ask the user.
+**Ask the user first** for anything that spends allowance or changes their repo:
+`sandcastle run`, `preflight` and `lean --measure` call the model; a run also merges into the base
+branch locally and updates the tickets (GitHub, or commits to ticket files). It never pushes.
+
+**Keep the safety rules intact** (token type, protected paths, hook checks). When one blocks a run,
+fix its cause or ask the user.
 
 ## 🤝 Contributing to the kit
 

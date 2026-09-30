@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { IterationUsage } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
+import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, KIT, sh } from "./sandbox.ts";
 
@@ -82,20 +83,25 @@ export const preflight = (project: Project, image: string) => {
 // ---------------------------------------------------------------------------
 // Prompts: the kit's templates with the project's gates, label and rules
 // filled in, written where Sandcastle reads them. Sandcastle's own
-// placeholders ({{ISSUE_NUMBER}}, {{SOURCE_BRANCH}}, ...) are left for it.
+// placeholders ({{ISSUE_NUMBER}}, {{TICKET}}, {{SOURCE_BRANCH}}, ...) are left for it.
 // ---------------------------------------------------------------------------
 
-// The orchestrator writes nothing to GitHub in a dry run; its agents would,
-// because the prompts tell them to comment. A comment saying "done on branch
-// X" for work that never merged misleads whoever reads the issue next.
-const DRY_RUN_NOTE =
-  "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any issue " +
-  "(`gh issue comment`, `gh issue create`, `gh issue close`, `gh issue edit`, `gh label`). Wherever these " +
-  "instructions say to do one of those, put what you would have posted in your final message instead, under " +
-  "\"Would post:\". Reading issues with `gh` is fine. Everything else - the work, the commits, the gates - is " +
-  "exactly as in a real run.\n\n";
+// A log is named agent-issue-<id>-<phase>-<id>.log, so the id appears twice and
+// the repeat tells a ticket called "code-review-01" from phase "review". Logs
+// from hand-suffixed branches (agent-issue-1086-closeout-impl-...) fall back
+// to the first phase word.
+export const logOwner = (name: string) =>
+  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair)-\1\.log$/)?.[1] ??
+  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair)-/)?.[1];
 
-export const renderPrompts = (project: Project, dryRun = false) => {
+// Sandcastle warns about an argument its prompt never mentions, so each run
+// gets only the ones its rendered prompt uses.
+export const usedArgs = (promptFile: string, args: Record<string, string>) => {
+  const text = readFileSync(promptFile, "utf8");
+  return Object.fromEntries(Object.entries(args).filter(([k]) => text.includes(`{{${k}}}`)));
+};
+
+export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
     : "";
@@ -106,14 +112,15 @@ export const renderPrompts = (project: Project, dryRun = false) => {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind}.md`), "utf8")
+      .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|NEW_TICKET_REVIEW|NEW_TICKET|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
-      .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? DRY_RUN_NOTE : ""));
+      .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? tracker.dryRunNote : ""));
     // Sandcastle refuses a prompt with any other {{NAME}} - but only inside
     // the sandbox, after the install. Refuse it here instead. (A literal
     // {{...}} in rules.md, e.g. a template variable, has to be reworded.)
-    const allowed = new Set(["ISSUE_NUMBER", "SOURCE_BRANCH", "TARGET_BRANCH"]);
+    const allowed = new Set(["ISSUE_NUMBER", "TICKET", "TICKET_BODY", "SOURCE_BRANCH", "TARGET_BRANCH"]);
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
@@ -202,24 +209,6 @@ const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
 
 // ---------------------------------------------------------------------------
-// Dry-run check. The orchestrator writes nothing to GitHub in a dry run, but
-// its agents hold a live gh; the prompt tells them not to post. This checks
-// it: each issue's state, labels and comment count before and after.
-// ---------------------------------------------------------------------------
-
-export const issueSnapshot = (issues: number[]) =>
-  new Map(
-    issues.map((n) => {
-      try {
-        const i = JSON.parse(sh("gh", ["issue", "view", String(n), "--json", "state,labels,comments"]));
-        return [n, `${i.state} [${i.labels.map((l: { name: string }) => l.name).sort().join(",")}] ${i.comments.length} comment(s)`];
-      } catch {
-        return [n, "unreadable"];
-      }
-    }),
-  );
-
-// ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
 // patch is history, and moving it out keeps the status view down to live
 // work. Sandcastle appends each run to the same file name, so the archive
@@ -243,7 +232,7 @@ export const archiveFinishedLogs = (project: Project) => {
   };
   let moved = 0;
   for (const name of readdirSync(logs)) {
-    const slug = name.match(/^agent-issue-(\d+(?:-[a-z]+)*)-(?:impl|review|repair)-/)?.[1];
+    const slug = logOwner(name);
     if (!slug) continue;
     // A live sandbox is still appending to its log, whatever its branch says.
     if (existsSync(join(project.root, `.sandcastle/worktrees/agent-issue-${slug}`))) continue;

@@ -110,12 +110,17 @@ the hook check and refuses to start while a kept hook cannot run.
 
 ## queue - triage every open issue into the queue
 
-The queue is the config's `label` (default `ready-for-agent`). An issue gets it only when its
+The queue is the config's `label` (default `ready-for-agent`). A ticket gets it only when its
 spec is **closed**: an unattended agent with no chat context can finish it from the issue and its
 comments, and the gates can prove it.
 
+0. **Which tracker?** `sandcastle queue` names it and why. `github`: use `gh` as below. `files`:
+   tickets are `.scratch/<feature>/issues/<NN>-<slug>.md`; list them, write each decision under
+   `## Comments`, and queue by setting `Status: <label>` (commit it). If the repo has
+   `docs/agents/issue-tracker.md`, its conventions win. The kit reads that file (Matt Pocock's setup
+   skill writes it) but does not need it.
 1. **List every open issue**: `gh issue list --state open --limit 500 --json
-   number,title,labels,updatedAt`. Already-queued issues get a quick sanity check only.
+   number,title,labels,updatedAt` (files: every ticket whose `Status:` is not done). Already-queued issues get a quick sanity check only.
 2. **Facts first.** Fan out read-only subagents, about seven issues each (without subagents, work
    through them in the same batches). Each reads the issue, its comments, the code it names,
    recent history, the repo's decision records (`docs/adr/` or similar), its label vocabulary
@@ -129,7 +134,7 @@ comments, and the gates can prove it.
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the issue is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the repo's human label (e.g. `needs-human`), with a comment saying why |
-   | Blocked by another issue | label it, with a `Blocked by #N` line in the issue *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read |
+   | Blocked by another issue | label it, with a `Blocked by #N` line in the issue *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child issues; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
@@ -148,15 +153,14 @@ comments, and the gates can prove it.
 
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
-   same checkout). Show the user the queue (`gh issue list --label <label> --limit 500` - without
-   `--limit`, gh stops at 30), the models, whether it is a dry run, and `sandcastle status 0`'s
+   same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry run, and `sandcastle status 0`'s
    machine line (other projects' runs share the limits). Say that a red gate gets a repair pass
    (`repair.attempts`, default 1) - more allowance, fewer red branches - and offer `USAGE_CHECK=1`
    if the plan is close to its limit. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
-   comments on and closes issues on GitHub and merges into the base branch locally. A dry run
-   (`DRY_RUN=1`) merges and closes nothing, and its agents are told to post nothing to GitHub.
+   comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run
+   (`DRY_RUN=1`) merges and closes nothing, and its agents are told to write nothing to the tracker.
 2. **Start it in a tab of its own, never beside yourself** - it takes hours. In a terminal
    multiplexer you can drive (for example Herdr: `test "${HERDR_ENV:-}" = 1`):
    1. Create a tab without taking focus, at the repo root: `herdr tab create --label "sandcastle
@@ -233,13 +237,16 @@ was set up with.
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
       changes what a run does or spends (the Upgrading notes list them) and ask whether to set it
       explicitly. Edit only what the user agrees to; never rewrite the config wholesale.
-   3. **Gates.** Check they still match what CI runs; CI drifts.
-   4. **Blocked issues recorded the old way.** Earlier triage left a blocked issue unlabelled with
-      a "blocked by #N" comment, which runs do not read. List them with
-      `gh issue list --state open --search '"blocked by" in:comments' --json number,title,labels`.
-      For each whose comment still names an open blocker, propose moving it into the body as
-      `Blocked by #N` and adding the queue label - but only if its spec is otherwise closed (see
-      queue). Apply after the user agrees.
+   3. **Gates.** Check they still match what CI runs; CI drifts. Run `sandcastle queue`: it names
+      the tracker and queue label the kit chose (`docs/agents/` can change either). If that is not where this project's tickets live (a repo that
+      moved to `.scratch/` files, or back), set `tracker` in the config.
+   4. **Blocked issues recorded the old way.** Earlier triage left blocked issues with a "blocked
+      by" comment, which runs do not read. Run `sandcastle blockers`: it lists open tickets - queued
+      or not - whose comment names a blocker the body does not, and marks those whose blockers are
+      all closed as stale. For each that is not stale, propose moving the line into the body as `Blocked by ...`
+      (and, for an unlabelled issue, adding the queue label - only if its spec is otherwise closed,
+      see queue). If the project tracks work in Linear or task files, check `blockers` in its
+      config covers them. Apply after the user agrees.
    5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
       `hookTests`, propose tests as in init step 4, then `sandcastle gates`.
    6. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds

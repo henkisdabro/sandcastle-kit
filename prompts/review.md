@@ -1,5 +1,5 @@
-You are reviewing work another agent just did on branch `{{SOURCE_BRANCH}}` for issue
-#{{ISSUE_NUMBER}}. You are the last pair of eyes before the change is gated and merged. Nobody will
+You are reviewing work another agent just did on branch `{{SOURCE_BRANCH}}` for ticket
+{{TICKET}}. You are the last pair of eyes before the change is gated and merged. Nobody will
 answer a question for you.
 
 {{KIT_DRY_RUN}}**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
@@ -7,12 +7,12 @@ prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anythin
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is
 removed with `git worktree remove --force <path>` and nothing else. If git ever tells you this
-worktree is not a git repository, stop: comment on the issue that the sandbox's git record was lost
+worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 # The issue that was implemented
 
-!`gh issue view {{ISSUE_NUMBER}}`
+{{KIT_TICKET_VIEW}}
 
 # What was changed
 
@@ -42,8 +42,7 @@ implementer's.
 
 Constraints:
 
-- **Do not expand scope.** If you find a real problem outside this issue, open a new GitHub issue
-  (`gh issue create`) rather than fixing it here.
+- **Do not expand scope.** If you find a real problem outside this issue, {{KIT_NEW_TICKET_REVIEW}} rather than fixing it here.
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
   the implementation is the suspect, not the test.
 - **Do not rewrite work that is merely not how you would have done it.** Style disagreement is not

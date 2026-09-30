@@ -9,6 +9,59 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **Trackers.** Tickets can now be GitHub Issues (the default, unchanged) or Markdown files in the
+  repo, in the layout Matt Pocock's `/setup-matt-pocock-skills` calls "Local Markdown"
+  (`.scratch/<feature>/issues/<NN>-<slug>.md`, a `Status:` line, `Blocked by: NN`, `## Comments`).
+  Choose with the new `tracker` config field; unset, the kit reads `docs/agents/issue-tracker.md`
+  and `docs/agents/triage-labels.md` if that setup skill wrote them, and otherwise uses GitHub.
+  Those skills are recommended but optional: nothing requires them. With `files`, agents write nothing to tickets: the orchestrator
+  posts their `<report>` / `<blocked>` and commits the change, and `GH_TOKEN` is not required.
+- **Ticket ids are strings**, so branches, logs, the run record and the status view take
+  `checkout-03` as well as `12`. GitHub ids are unchanged.
+- **`sandcastle queue [--json]`** lists the queue and what holds each ticket back; the status
+  view now reads its queue from it instead of calling `gh`.
+- **Blockers beyond GitHub issues.** A ticket body can say `Blocked by ENG-42` (Linear, set up
+  with `blockers.linear`; `LINEAR_API_KEY` stays on the host) or name a ticket file. A list on one
+  line (`Blocked by #1, #2`) counts every entry.
+- **`sandcastle blockers`** scans every open ticket (queued or not) and a run warns for tickets whose *comments* say "blocked by"
+  about queued ones: a comment saying "blocked by" while the body does not is not read by a run,
+  which would start the ticket. Comments whose blockers are all closed are reported as stale.
+
+### Changed
+
+- The files tracker takes a ticket's text from the host as a prompt argument rather than running
+  `cat` in the sandbox, so a stale agent branch or an odd file name cannot show the agent an old
+  ticket or break the run. It reads `Status:` and `Blocked by:` only from the block of plain
+  `Key: value` lines under the title, writes the first of the `done` values when it closes a ticket,
+  refuses two tickets that map to one id, and posts every agent's `<report>` (implementer,
+  reviewer, repair) on tickets that did not land as well as on those that did.
+- A ticket moved to another `Status:` during a run is no longer merged and closed.
+- `LINEAR_API_KEY` is read from the user-level credentials file only. A project's
+  `.sandcastle/.env` is forwarded into every container by Sandcastle itself, so `credentials()`
+  and `sandcastle doctor` now refuse the key there.
+- `sandcastle doctor` no longer requires `gh` or `GH_TOKEN` for a project that keeps tickets in files.
+- Log files are matched by their repeated ticket id, so ids containing `review` or `repair`
+  (`code-review-01`) are not mistaken for a phase.
+
+- The agent prompts say "ticket" and take their tracker wording from the kit; GitHub projects get
+  the same instructions as before (bar "for ticket" in two headings).
+- `sandcastle doctor` reports which tracker a project uses and why.
+
+### Upgrading
+
+- Nothing has to change for a GitHub project. Run `sandcastle queue` once: it shows the tracker
+  and queue label the kit chose. **Two things can now be picked up from `docs/agents/`** (Matt
+  Pocock's setup skill): the queue label, if `triage-labels.md` maps `ready-for-agent` to another
+  name and `label` is unset in `config.ts`; and the tracker, below. Pin `label` and `tracker` in
+  `config.ts` to keep exactly what you had. A repo with `docs/agents/issue-tracker.md` naming "Local Markdown" is now run
+  against its `.scratch/` tickets, not GitHub - set `tracker: "github"` if you want the old behaviour.
+- To use ticket files: `tracker: "files"` (or Matt's setup skill), tickets committed on the base
+  branch, and a clean base branch when you run. Queue with `Status: ready-for-agent`.
+- Run `sandcastle blockers` once per project; it replaces the manual comment search in the
+  skill's `update` action.
+
 ## [0.1.0] - 2026-09-30
 
 Initial public release: an opinionated issue-burndown kit on

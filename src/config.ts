@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
+import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
 
@@ -18,7 +19,17 @@ export type ProjectConfig = {
   name: string;
   /** Branch agents branch from and green work merges into. Default `main`. */
   baseBranch?: string;
-  /** The queue label. Default `ready-for-agent`. */
+  /**
+   * Where tickets live: `"github"` or `"files"` (or `{ type: "files", dir, done }` for a
+   * directory other than `.scratch` and done-statuses other than done, closed, resolved,
+   * wontfix). Unset, the kit reads docs/agents/issue-tracker.md (Matt Pocock's
+   * setup skill writes it) and otherwise uses GitHub.
+   */
+  tracker?: TrackerConfig;
+  /**
+   * The queue label (GitHub) or `Status:` value (files). Default: the string
+   * docs/agents/triage-labels.md maps `ready-for-agent` to, else `ready-for-agent`.
+   */
   label?: string;
   /** Parallel sandboxes. Default 4. */
   concurrency?: number;
@@ -50,6 +61,14 @@ export type ProjectConfig = {
    * (on top of hooks, CI, agent settings and install scripts - src/guard.ts).
    */
   protectedPaths?: string[];
+  /**
+   * What an issue may wait for besides a GitHub issue (`Blocked by #12`), named in its body.
+   * `linear`: team keys, so `Blocked by ENG-42` is read from Linear (LINEAR_API_KEY, host only).
+   * `files`: a directory of ticket files (default: the files tracker's), so
+   * `Blocked by .scratch/checkout/issues/03-pay.md` waits until that file on the base branch has
+   * a `Status:` line (or front-matter `status:`) in `done`. A blocker that cannot be read counts as open.
+   */
+  blockers?: { linear?: string[]; files?: { dir: string; done?: string[] } };
   /** Markdown added to both prompts under "Project rules", relative to the repo root. */
   rules?: string;
   /**
@@ -66,8 +85,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths"> & { root: string };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
@@ -84,7 +103,6 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   return {
     root,
     baseBranch: "main",
-    label: "ready-for-agent",
     concurrency: 4,
     mounts: [],
     setup: [],
@@ -93,6 +111,8 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     repair: {},
     hookTests: [],
     ...config,
+    label: config.label ?? detectFromDocs(root).label ?? "ready-for-agent",
+    tracker: resolveTracker(root, config.tracker),
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
   };
 };

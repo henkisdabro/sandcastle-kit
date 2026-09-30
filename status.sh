@@ -112,7 +112,7 @@ load_container_stats() {
   while read -r name src; do
     [ -z "$name" ] && continue
     n=$(printf '%s\n' $src | grep -F "$PWD/worktrees/agent-issue-" \
-          | sed -nE 's#.*/worktrees/agent-issue-([0-9]+(-[a-z]+)*).*#\1#p' | head -1)
+          | sed -nE 's#.*/worktrees/agent-issue-([a-z0-9][a-z0-9-]*).*#\1#p' | head -1)
     [ -n "$n" ] && map="${map}${name#/}|${n}
 "
   done < <(docker inspect "${ids[@]}" \
@@ -154,40 +154,39 @@ load_container_stats() {
 # "issue|epoch" lines for when each issue last changed.
 QUEUE=""; QUEUE_DEPS=""; QUEUE_UPDATED=""; QUEUE_AT=0; QUEUE_RUN=""
 load_queue() {
-  local t run json n d deps on state known=""
+  local t run json
   t=$(date +%s)
   # A run rewrites run.json when it starts and when it exits, having closed
   # what it landed: refetch then, rather than show a stale queue for a minute.
   run=$(mtime_of logs/run.json)
   [ $(( t - QUEUE_AT )) -lt 60 ] && [ "$run" = "$QUEUE_RUN" ] && return 0
   QUEUE_AT="$t"; QUEUE_RUN="$run"; QUEUE_DEPS=""
-  json=$(gh issue list --label "$LABEL" --state open --limit 500 --json number,body,updatedAt 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
-  QUEUE=$(jq -r '.[].number' <<<"$json" 2>/dev/null | sort -n)
-  QUEUE_UPDATED=$(jq -r '.[] | select(.updatedAt) | "\(.number)|\(.updatedAt | fromdateiso8601)"' <<<"$json" 2>/dev/null)
-  while IFS='|' read -r n deps; do
-    [ -z "$deps" ] && continue
-    on=""
-    for d in $deps; do
-      # A queued dependency is open by definition; any other is asked once per
-      # refresh. One that cannot be read counts as open, as in the orchestrator.
-      if in_queue "$d"; then
-        state=open
-      else
-        state=$(printf '%s\n' "$known" | awk -F'|' -v k="$d" '$1==k{print $2; exit}')
-        if [ -z "$state" ]; then
-          state=$(gh api "repos/{owner}/{repo}/issues/$d" --jq .state 2>/dev/null) || state=unreadable
-          known="${known}${d}|${state}
-"
-        fi
-      fi
-      [ "$state" = closed ] || on="${on}${on:+, }#${d}"
-    done
-    [ -n "$on" ] && QUEUE_DEPS="${QUEUE_DEPS}${n}|${on}
-"
-  done < <(jq -r '.[] | "\(.number)|\([(.body // "") | scan("(?i)(?:blocked by|depends on):?\\s+#(\\d+)")[0] | tonumber] | unique | join(" "))"' <<<"$json" 2>/dev/null)
+  # The kit reads whichever tracker the project uses, and resolves each
+  # ticket's blockers the way a run does (GitHub, Linear, ticket files).
+  json=$("${SANDCASTLE_BIN:-sandcastle}" queue --json 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
+  QUEUE=$(jq -r '.[].id' <<<"$json" 2>/dev/null | sort -V)
+  QUEUE_UPDATED=$(jq -r '.[] | select(.updated) | "\(.id)|\(.updated)"' <<<"$json" 2>/dev/null)
+  QUEUE_DEPS=$(jq -r '.[] | select(.blockedOn | length > 0) | "\(.id)|\(.blockedOn | join(", "))"' <<<"$json" 2>/dev/null)
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+# Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log:
+# the id appears twice, and the repeat tells a ticket called "code-review-01" from the
+# phase "review". Logs of hand-suffixed branches (agent-issue-1086-closeout-impl-1086)
+# fall back to the first phase word. (BSD sed has no back-references in -E; awk does it.)
+log_ids() {
+  awk '{ f=$0; sub(/^.*\//, "", f); if (f !~ /^agent-issue-/) next
+    s=substr(f, 13); sub(/\.log$/, "", s); n=length(s); found=""
+    for (i=1; i<n; i++) { rest=substr(s, i+1)
+      if (rest ~ /^-(impl|review-codex|review|repair)-/) { t=rest; sub(/^-(impl|review-codex|review|repair)-/, "", t)
+        if (t == substr(s, 1, i)) { found=substr(s, 1, i); break } } }
+    if (found == "" && match(s, /-(impl|review|repair)-/)) found=substr(s, 1, RSTART-1)
+    if (found != "") print found }'
+}
+# A ticket as a person names it: "#12", a suffixed branch "#12" (its suffix is
+# shown apart), or a slug such as "checkout-03" as it is.
+legacy_id() { [[ "$1" =~ ^[0-9]+(-[a-z]+)*$ ]]; }
+disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1"; fi; }
 
 # The orchestrator writes logs/run.json: which one, since when, which models,
 # and on a clean exit when it finished. A pid that is gone without a
@@ -226,7 +225,7 @@ load_waiting() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
   RUN_LIVE=1
   RUN_ISSUES=$(jq -r '(.issues // [])[]' "$f" 2>/dev/null)
-  WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
+  WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
   return 0
 }
@@ -247,7 +246,7 @@ ago() {
 # by hand) the listing is taken at its word.
 requeued() {
   local updated merged
-  merged=$(git log "$BASE" -1 --format=%ct --fixed-strings --grep="Merge agent/issue-$1 (closes #$1)" 2>/dev/null)
+  merged=$(git log "$BASE" -1 --format=%ct --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" 2>/dev/null)
   [ -z "$merged" ] && return 0
   updated=$(printf '%s\n' "$QUEUE_UPDATED" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
   [ -n "$updated" ] && [ "$updated" -gt "$merged" ]
@@ -320,7 +319,7 @@ render() {
   # runs on agent/issue-1086-closeout while agent/issue-1086 is long merged, and
   # keying both on 1086 hid the live sandbox under the merged row.
   issues=$(ls logs/agent-issue-*.log 2>/dev/null \
-    | sed -nE 's#.*agent-issue-([0-9]+(-[a-z]+)*)-(impl|review|repair)-.*#\1#p' | sort -u)
+    | log_ids | sort -u)
 
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
@@ -341,7 +340,7 @@ render() {
       else qtext="not in this run"; fi
     fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
-      "$head" "$(pad "#$q" $W_ISSUE)" "$off" \
+      "$head" "$(pad "$(disp "$q")" $W_ISSUE)" "$off" \
       "$blu" "$qglyph" "$(pad "$qstate" $W_STATE)" "$off" \
       "$gry" "$(pad - $W_AGE)" "$off" \
       "$gry" "$(pad - $W_COMMITS)" "$off" \
@@ -475,10 +474,10 @@ render() {
       glyph='!'; colour="$hot"
     fi
     # A suffixed branch shows its number in ISSUE and its suffix here.
-    [ "$n" != "${n%%-*}" ] && activity=$(printf '[%s] %s' "${n#*-}" "$activity" | cut -c1-"$w_act")
+    legacy_id "$n" && [ "$n" != "${n%%-*}" ] && activity=$(printf '[%s] %s' "${n#*-}" "$activity" | cut -c1-"$w_act")
 
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
-      "$head" "$(pad "#${n%%-*}" $W_ISSUE)" "$off" \
+      "$head" "$(pad "$(disp "$n")" $W_ISSUE)" "$off" \
       "$colour" "$glyph" "$(pad "$state" $W_STATE)" "$off" \
       "$head" "$(pad "$age" $W_AGE)" "$off" \
       "$head" "$(pad "$commits" $W_COMMITS)" "$off" \
@@ -535,7 +534,7 @@ render() {
       if [ "$shown" -lt "$budget" ]; then
         printf '%s\n' "$rendered"; shown=$((shown+1))
       else
-        hidden=$((hidden+1)); hidden_list="${hidden_list}${group}|${n%%-*}
+        hidden=$((hidden+1)); hidden_list="${hidden_list}${group}|$(disp "$n" | tr -d "#")
 "
       fi
     done < <(printf '%s\n' "${out[@]}" | sort -t$'\t' -k1,1n -k2,2nr -k3,3n)

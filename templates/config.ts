@@ -7,6 +7,14 @@ export default {
   // label: "ready-for-agent",
   // concurrency: 4,
 
+  // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
+  // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.
+  // tracker: "github",
+  // tracker: "files",                      // .scratch/<feature>/issues/NN-<slug>.md, `Status:` line
+  // tracker: { type: "files", dir: "tickets", done: ["done", "shipped"] },
+  // Extra things a ticket may wait for: Linear issues, ticket files. README -> Blockers.
+  // blockers: { linear: ["ENG"] },
+
   // {{KIT_STACK}}
 
   rules: ".sandcastle/rules.md",

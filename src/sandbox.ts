@@ -34,19 +34,27 @@ export const sh = (cmd: string, args: string[], cwd?: string) =>
 // ANTHROPIC_API_KEY into the container and bill API credits.
 // ---------------------------------------------------------------------------
 
+// Read on the host only; the sandbox's agents run unattended and never get them.
+export const HOST_ONLY_KEYS = ["LINEAR_API_KEY"];
+
 const readEnv = (file: string) => (existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {});
 
 export const credentials = (project: Project): Record<string, string> => {
   const files = [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
   const env: Record<string, string | undefined> = { ...readEnv(files[0]), ...readEnv(files[1]) };
+  for (const k of HOST_ONLY_KEYS) delete env[k];
+  // Sandcastle forwards every key of the project's .sandcastle/.env into the
+  // container by itself, past the filter above, so a host-only key cannot live there.
+  const inProject = HOST_ONLY_KEYS.filter((k) => readEnv(files[1])[k]);
+  if (inProject.length) throw new Error(`${inProject.join(", ")} in ${files[1]} would reach the sandbox. Move it to ${files[0]}.`);
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
   if (empty.length) throw new Error(`Empty ${empty.join(", ")} in ${files.join(" or ")} - remove the line or give it a value.`);
   const missing = [
     ...(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY ? [] : ["CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)"]),
-    ...(env.GH_TOKEN ? [] : ["GH_TOKEN"]),
+    ...(env.GH_TOKEN || project.tracker.kind === "files" ? [] : ["GH_TOKEN"]),
   ];
   if (missing.length) throw new Error(`Missing ${missing.join(", ")} in ${files[0]} (see .env.example in the kit).`);
-  if (!env.GH_TOKEN!.startsWith("github_pat_") && process.env.SANDCASTLE_ALLOW_BROAD_TOKEN !== "1") {
+  if (env.GH_TOKEN && !env.GH_TOKEN.startsWith("github_pat_") && process.env.SANDCASTLE_ALLOW_BROAD_TOKEN !== "1") {
     throw new Error(
       "GH_TOKEN is not a fine-grained token (github_pat_...). Sandbox agents run unattended with " +
         "permission prompts off; a classic or OAuth token lets them push and edit workflows. Create one " +

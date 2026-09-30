@@ -10,6 +10,10 @@
 //                    it fits its pane unless given "all"
 //   build [--force]  build the base and project images
 //   preflight        one reply from every model, nothing else
+//   queue [--json]   the queue and what holds each ticket back (the tracker in use:
+//                    GitHub Issues or ticket files; see README, Trackers); no model calls
+//   blockers         open queued issues whose comments say "blocked by" while the body
+//                    does not (a run reads only the body); no model calls
 //   gates            every gate on the base branch in a sandbox, as a run's
 //                    first phase does; no model calls
 //   lean [--measure] what the repo's skills, agents, MCP servers and plugins
@@ -26,12 +30,14 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
+import { makeTracker } from "./tracker.ts";
 import { archiveFinishedLogs, preflight } from "./run.ts";
 import { ensureImage, KIT, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
@@ -83,6 +89,7 @@ switch (command) {
       env: {
         ...process.env,
         SANDCASTLE_PROJECT: root,
+        SANDCASTLE_BIN: join(KIT, "bin/sandcastle"),
         SANDCASTLE_NAME: project.name,
         SANDCASTLE_LABEL: project.label,
         SANDCASTLE_BASE: project.baseBranch,
@@ -99,6 +106,40 @@ switch (command) {
   case "preflight": {
     const project = await loadProject(root);
     preflight(project, ensureImage(project));
+    break;
+  }
+  case "queue": {
+    // The queue and what holds each ticket back; `--json` is what the status view reads.
+    const project = await loadProject(root);
+    const tracker = makeTracker(project);
+    const queued = tracker.queued(false);
+    const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
+    const rows = await Promise.all(
+      queued.map(async (t) => ({
+        id: t.id,
+        title: t.title,
+        updated: t.updated ?? null,
+        blockedOn: (await openBlockers(project, tracker, resolve, t)).map(refLabel),
+      })),
+    );
+    if (args.includes("--json")) console.log(JSON.stringify(rows));
+    else {
+      console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
+      for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
+      if (!rows.length) console.log("  (empty)");
+    }
+    break;
+  }
+  case "blockers": {
+    const project = await loadProject(root);
+    const tracker = makeTracker(project);
+    // Every open ticket, not only the queued: earlier triage parked blocked ones
+    // unqueued with a comment, and they need the line moved before they are queued.
+    const queuedIds = new Set(tracker.queued(false).map((t) => t.id));
+    const open = tracker.open();
+    const found = await commentOnlyBlocks(project, tracker, open.map((t) => ({ ...t, queued: queuedIds.has(t.id) })));
+    for (const f of found) console.log(commentBlockLine(f));
+    console.log(found.length ? `\n${found.length} of ${open.length} open ticket(s) to look at.` : `No stale or unread blocker comments on ${open.length} open ticket(s).`);
     break;
   }
   case "gates": {
