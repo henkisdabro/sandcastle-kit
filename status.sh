@@ -121,13 +121,47 @@ load_container_stats() {
 # gh is a network call, so it is cached and re-read at most once a minute.
 # It is called from the refresh loop, never from render: render runs in a
 # $(...) subshell, where the cache timestamp is thrown away on every frame.
-QUEUE=""; QUEUE_AT=0
+#
+# The same call reads each queued issue's body for `Blocked by #N` /
+# `Depends on #N` (the orchestrator's pattern, burndown.ts), so an issue held
+# back by an open dependency shows as blocked before, between and outside
+# runs - not only while the run that decided it is live. QUEUE_DEPS holds
+# "issue|#dep, #dep" lines for the dependencies still open, and QUEUE_UPDATED
+# "issue|epoch" lines for when each issue last changed.
+QUEUE=""; QUEUE_DEPS=""; QUEUE_UPDATED=""; QUEUE_AT=0; QUEUE_RUN=""
 load_queue() {
-  local t; t=$(date +%s)
-  [ $(( t - QUEUE_AT )) -lt 60 ] && return 0
-  QUEUE=$(gh issue list --label "$LABEL" --state open --limit 100 \
-            --json number --jq '.[].number' 2>/dev/null | sort -n) || QUEUE=""
-  QUEUE_AT="$t"
+  local t run json n d deps on state known=""
+  t=$(date +%s)
+  # A run rewrites run.json when it starts and when it exits, having closed
+  # what it landed: refetch then, rather than show a stale queue for a minute.
+  run=$(mtime_of logs/run.json)
+  [ $(( t - QUEUE_AT )) -lt 60 ] && [ "$run" = "$QUEUE_RUN" ] && return 0
+  QUEUE_AT="$t"; QUEUE_RUN="$run"; QUEUE_DEPS=""
+  json=$(gh issue list --label "$LABEL" --state open --limit 100 --json number,body,updatedAt 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
+  QUEUE=$(jq -r '.[].number' <<<"$json" 2>/dev/null | sort -n)
+  QUEUE_UPDATED=$(jq -r '.[] | select(.updatedAt) | "\(.number)|\(.updatedAt | fromdateiso8601)"' <<<"$json" 2>/dev/null)
+  while IFS='|' read -r n deps; do
+    [ -z "$deps" ] && continue
+    on=""
+    for d in $deps; do
+      # A queued dependency is open by definition; any other is asked once per
+      # refresh. One that cannot be read counts as open, as in the orchestrator.
+      if in_queue "$d"; then
+        state=open
+      else
+        state=$(printf '%s\n' "$known" | awk -F'|' -v k="$d" '$1==k{print $2; exit}')
+        if [ -z "$state" ]; then
+          state=$(gh api "repos/{owner}/{repo}/issues/$d" --jq .state 2>/dev/null) || state=unreadable
+          known="${known}${d}|${state}
+"
+        fi
+      fi
+      [ "$state" = closed ] || on="${on}${on:+, }#${d}"
+    done
+    [ -n "$on" ] && QUEUE_DEPS="${QUEUE_DEPS}${n}|${on}
+"
+  done < <(jq -r '.[] | "\(.number)|\([(.body // "") | scan("(?i)(?:blocked by|depends on):?\\s+#(\\d+)")[0] | tonumber] | unique | join(" "))"' <<<"$json" 2>/dev/null)
+  return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
 
@@ -164,6 +198,29 @@ load_waiting() {
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
   return 0
 }
+# A merged issue that is open and labelled again was re-queued after its
+# merge - or it only looks that way: landing merges before it closes the
+# issue, and GitHub's labelled-issue listing can trail a close by a while
+# after the run has ended. Only a change to the issue after the merge commit
+# the orchestrator wrote counts. With no such merge commit (rebased, or merged
+# by hand) the listing is taken at its word.
+requeued() {
+  local updated merged
+  merged=$(git log "$BASE" -1 --format=%ct --fixed-strings --grep="Merge agent/issue-$1 (closes #$1)" 2>/dev/null)
+  [ -z "$merged" ] && return 0
+  updated=$(printf '%s\n' "$QUEUE_UPDATED" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
+  [ -n "$updated" ] && [ "$updated" -gt "$merged" ]
+}
+
+# What an issue waits for: the live run's own decision first - it will not
+# start the issue this run even if the dependency closes meanwhile - then the
+# issue body's open dependencies. Empty when nothing holds it back.
+blocked_on() {
+  local on
+  on=$(printf '%s\n' "$WAITING" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
+  [ -z "$on" ] && on=$(printf '%s\n' "$QUEUE_DEPS" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
+  printf '%s' "$on"
+}
 
 label() { printf '%s%s%s %s│%s ' "$accent" "$(pad "$1" 7)" "$off" "$rule" "$off"; }
 
@@ -190,7 +247,7 @@ models_line() {
 }
 
 render() {
-  local now issues n phase log age commits state glyph colour activity rendered
+  local now issues n phase log age commits state glyph colour activity activity_note rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
   local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
   local -a out=()
@@ -221,9 +278,8 @@ render() {
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
     grep -qx "$q" <<<"$issues" && continue
-    # Held back by an open dependency (run.json's `waiting`), not waiting for
-    # a sandbox - only while the run that decided it is live.
-    on=$(printf '%s\n' "$WAITING" | awk -F'|' -v k="$q" '$1==k{print $2; exit}')
+    # Held back by an open dependency, not waiting for a sandbox.
+    on=$(blocked_on "$q")
     if [ -n "$on" ]; then
       qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"
     else
@@ -256,7 +312,7 @@ render() {
     # Order matters: a branch with no commits yet is trivially "merged",
     # so an in-flight worktree has to win over the merged check.
     stat_for "$n"
-    quiet=0; act_col="$mute"
+    quiet=0; act_col="$mute"; activity_note=""
     # A worktree is live work only while a container holds it or its run is
     # alive. Sandcastle keeps a closed sandbox's worktree when it has
     # uncommitted files (a setup step's lockfile, say); that one is shown by
@@ -287,9 +343,14 @@ render() {
       state="no commits"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1))
     fi
     # Back on the queue after an earlier run: it is queued, not done.
-    if [ "$prio" -ge 3 ] && in_queue "$n"; then
+    if [ "$prio" -ge 3 ] && in_queue "$n" && requeued "$n"; then
       case "$prio" in 3) c_merged=$((c_merged-1));; 4) c_idle=$((c_idle-1));; esac
       state="queued"; glyph='○'; colour="$blu"; prio=2; c_queue=$((c_queue+1))
+      on=$(blocked_on "$n")
+      if [ -n "$on" ]; then
+        state="blocked"; glyph='◌'
+        activity_note="waiting for $on to close"
+      fi
     fi
 
     cpu="$S_CPU"; mem="$S_MEM"
@@ -317,6 +378,7 @@ render() {
         -e 's#[[:space:]]+# #g' -e 's#^ ##' \
       | cut -c1-"$w_act")
     [ "$kept_wt" = 1 ] && activity=$(printf 'worktree kept (uncommitted files) - %s' "$activity" | cut -c1-"$w_act")
+    [ -n "$activity_note" ] && activity=$(printf '%s' "$activity_note" | cut -c1-"$w_act")
     # A live sandbox whose log has been silent for ten minutes may be thinking
     # or may be hung; either way it is worth a look before the 30-minute
     # stalled mark or the agent's own idle timeout.
