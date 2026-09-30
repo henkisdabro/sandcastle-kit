@@ -16,7 +16,7 @@
 // plus the model variables in agents.ts and the machine-wide limits in pool.ts.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
@@ -133,6 +133,39 @@ export const burndown = async (project: Project) => {
       return { gates };
     });
 
+  // Every agent pass and gate run is timed into logs/timings.jsonl, so how
+  // long a project's issues take - and where the time goes - is on record
+  // rather than guessed. The same map drives the heartbeat below.
+  const runId = new Date().toISOString();
+  const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
+  const active = new Map<number, { phase: string; since: number }>();
+  const took = new Map<number, number>();
+  const timed = async <T>(issue: number, phase: string, fn: () => Promise<T>): Promise<T> => {
+    const since = Date.now();
+    active.set(issue, { phase, since });
+    let ok = false;
+    try {
+      const result = await fn();
+      ok = true;
+      return result;
+    } finally {
+      active.delete(issue);
+      const line = { ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok };
+      appendFileSync(timings, JSON.stringify(line) + "\n");
+    }
+  };
+  const minutes = (ms: number) => `${Math.round(ms / 60_000)}m`;
+
+  // A run is silent for as long as its agents are, which for a review can be
+  // half an hour. One line every five minutes says it is alive and where.
+  const heartbeat = setInterval(() => {
+    if (!active.size) return;
+    const now = Date.now();
+    const clock = new Date().toTimeString().slice(0, 5);
+    console.log(`[${clock}] working: ${[...active].map(([n, a]) => `#${n} ${a.phase} ${minutes(now - a.since)}`).join(", ")}`);
+  }, 5 * 60_000);
+  heartbeat.unref();
+
   // A run that died between merging a branch and closing its issue leaves the
   // issue queued with its work already on base. Re-running it finds nothing
   // to do and reports `nochange`, so the issue would stay open for good. Our
@@ -159,21 +192,26 @@ export const burndown = async (project: Project) => {
       return { issue: issue.number, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
     }
 
+    const started = Date.now();
     releaseBranchWorktree(branch);
-    const sandbox = await createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) });
+    const sandbox = await timed(issue.number, "setup", () =>
+      createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
+    );
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
       lockWorktree(sandbox.worktreePath);
-      const impl = await sandbox.run({
-        name: `impl-${issue.number}`,
-        agent: implAgent(),
-        promptFile: prompts.implement,
-        promptArgs,
-        maxIterations: project.implement.maxIterations ?? 8,
-        idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
-      });
+      const impl = await timed(issue.number, "implement", () =>
+        sandbox.run({
+          name: `impl-${issue.number}`,
+          agent: implAgent(),
+          promptFile: prompts.implement,
+          promptArgs,
+          maxIterations: project.implement.maxIterations ?? 8,
+          idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
+        }),
+      );
 
       // `impl.commits` counts what THIS run added, which is zero in two very
       // different cases: the agent found nothing to do, and the agent found the
@@ -199,13 +237,17 @@ export const burndown = async (project: Project) => {
           maxIterations: project.review.maxIterations ?? 3,
           idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
         });
-      const review = await reviewWithFallback(`#${issue.number}`, reviewRun(`review-${issue.number}`));
-      const cross = await crossReview(`#${issue.number}`, reviewRun(`review-codex-${issue.number}`));
+      const review = await timed(issue.number, "review", () =>
+        reviewWithFallback(`#${issue.number}`, reviewRun(`review-${issue.number}`)),
+      );
+      const cross = await timed(issue.number, "cross-review", () =>
+        crossReview(`#${issue.number}`, reviewRun(`review-codex-${issue.number}`)),
+      );
       const reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
-      let gated = await runGates(sandbox, `#${issue.number} gates`);
+      let gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
 
       // A red gate is often one type error or one broken test away from green,
       // and the sandbox is still warm. Repair commits ride the same gates and
@@ -214,23 +256,26 @@ export const burndown = async (project: Project) => {
       // (weakened tests, removed guards). Not after a timeout (124): a hung
       // gate leaves nothing to repair from and would hang again.
       let repairs = 0;
-      while (gated.failure && gated.failure.exitCode !== 124 && repairs < (project.repair.attempts ?? 1)) {
+      for (let red = gated.failure; red && red.exitCode !== 124 && repairs < (project.repair.attempts ?? 1); red = gated.failure) {
+        const failure = red;
         repairs++;
-        console.log(`#${issue.number}: ${gated.failure.name} red - repair pass ${repairs}`);
-        await sandbox.run({
-          name: `repair-${issue.number}`,
-          agent: implAgent(),
-          promptFile: prompts.repair,
-          promptArgs: {
-            ...promptArgs,
-            GATE_NAME: gated.failure.name,
-            GATE_COMMAND: gated.failure.command,
-            GATE_OUTPUT: fence(gated.failure.output),
-          },
-          maxIterations: project.repair.maxIterations ?? 4,
-          idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-        });
-        gated = await runGates(sandbox, `#${issue.number} gates`);
+        console.log(`#${issue.number}: ${failure.name} red - repair pass ${repairs}`);
+        await timed(issue.number, "repair", () =>
+          sandbox.run({
+            name: `repair-${issue.number}`,
+            agent: implAgent(),
+            promptFile: prompts.repair,
+            promptArgs: {
+              ...promptArgs,
+              GATE_NAME: failure.name,
+              GATE_COMMAND: failure.command,
+              GATE_OUTPUT: fence(failure.output),
+            },
+            maxIterations: project.repair.maxIterations ?? 4,
+            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
+          }),
+        );
+        gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
       }
 
       return {
@@ -246,6 +291,7 @@ export const burndown = async (project: Project) => {
         head: sh("git", ["rev-parse", branch]),
       };
     } finally {
+      took.set(issue.number, Date.now() - started);
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {
@@ -288,6 +334,7 @@ export const burndown = async (project: Project) => {
       }
     }),
   );
+  clearInterval(heartbeat);
 
   // -------------------------------------------------------------------------
   // Phase 3: land the green ones, sequentially, on the host
@@ -396,7 +443,7 @@ export const burndown = async (project: Project) => {
     verify = await withSlot("sandboxes", `${project.name} verify`, async () => {
       const sandbox = await createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) });
       try {
-        return (await runGates(sandbox, `${project.name} verify gates`)).gates;
+        return (await timed(0, "verify", () => runGates(sandbox, `${project.name} verify gates`))).gates;
       } finally {
         unlockWorktree(sandbox.worktreePath);
         await sandbox.close();
@@ -422,7 +469,8 @@ export const burndown = async (project: Project) => {
     const o = r.value;
     const g = o.gates.map((x) => `${x.name}=${x.pass ? "pass" : "FAIL"}`).join(" ");
     const repaired = o.repairs ? ` repaired=${o.repairs}` : "";
-    console.log(`  #${o.issue} ${o.status.padEnd(11)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}  ${o.branch}`);
+    const time = took.has(o.issue) ? ` ${minutes(took.get(o.issue)!)}` : "";
+    console.log(`  #${o.issue} ${o.status.padEnd(14)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}${time}  ${o.branch}`);
   }
   console.log(`\nmerged & closed: ${merged.join(", ") || "none"}`);
   if (closedEarlier.length) console.log(`closed, merged by an earlier run: ${closedEarlier.join(", ")}`);

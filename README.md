@@ -237,8 +237,11 @@ CROSS_REVIEW=1 sandcastle run         # add the Codex review
 
 A run refuses to start on a dirty tree, off the base branch, while another run of the same
 project is live, or while any check fails. Inside Herdr it opens `sandcastle status` in a sibling
-pane; elsewhere run `sandcastle status` in a second terminal. Afterwards, push the base branch
-yourself when you are happy with it.
+pane; elsewhere run `sandcastle status` in a second terminal. While agents work, the run prints a
+heartbeat line every five minutes, and the status view flags a sandbox whose log has been quiet
+for ten. Every agent pass and gate run is timed into `.sandcastle/logs/timings.jsonl`, and the
+report gives each issue's wall time. Afterwards, push the base branch yourself when you are happy
+with it.
 
 > [!TIP]
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -

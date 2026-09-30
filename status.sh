@@ -171,7 +171,7 @@ run_line() {
 render() {
   local now issues n phase log age commits state glyph colour activity rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
-  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q
+  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col
   local -a out=()
   local n_out=0
 
@@ -226,12 +226,14 @@ render() {
     # Order matters: a branch with no commits yet is trivially "merged",
     # so an in-flight worktree has to win over the merged check.
     stat_for "$n"
+    quiet=0; act_col="$mute"
     if [ -d "worktrees/agent-issue-$n" ] && [ -z "$S_CPU" ] && [ $(( $(date +%s) - mtime )) -ge 1800 ]; then
       # A worktree with no container and a log quiet for 30 minutes is a run
       # that died or was killed, not one in flight.
       state="stalled"; glyph='!'; colour="$hot"; prio=1; c_stand=$((c_stand+1))
     elif [ -d "worktrees/agent-issue-$n" ]; then
       state="$phase"; glyph='●'; colour="$ylw"; prio=0; c_work=$((c_work+1))
+      quiet=$(( $(date +%s) - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
       state="no branch"; glyph='·'; colour="$gry"; prio=4; c_idle=$((c_idle+1))
     elif [ "$commits" -gt 0 ] && ! git cherry "$BASE" "agent/issue-$n" 2>/dev/null | grep -q '^+'; then
@@ -276,6 +278,13 @@ render() {
         -e 's#\*\*##g' -e 's#`##g' \
         -e 's#[[:space:]]+# #g' -e 's#^ ##' \
       | cut -c1-"$w_act")
+    # A live sandbox whose log has been silent for ten minutes may be thinking
+    # or may be hung; either way it is worth a look before the 30-minute
+    # stalled mark or the agent's own idle timeout.
+    if [ "$quiet" -ge 600 ]; then
+      activity=$(printf 'quiet %sm - %s' "$((quiet/60))" "$activity" | cut -c1-"$w_act")
+      act_col="$hot"
+    fi
     # A spent Max plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
     # Only on an unfinished row: a merged branch's old log keeps the line.
@@ -293,7 +302,7 @@ render() {
       "$head" "$(pad "$commits" $W_COMMITS)" "$off" \
       "$cpu_col" "$(pad "$cpu" $W_CPU)" "$off" \
       "$head" "$(pad "$mem" $W_MEM)" "$off" \
-      "$mute" "$activity" "$off")
+      "$act_col" "$activity" "$off")
     out[n_out]="$prio	$mtime	$n	$rendered"; n_out=$((n_out+1))
   done
 
