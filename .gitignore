@@ -1,0 +1,10 @@
+node_modules/
+# Credentials never live in this repo - see ~/.config/sandcastle-kit/ - but
+# guard against a stray copy anyway.
+.env
+.env.*
+!.env.example
+*.local.*
+.DS_Store
+# If someone runs the kit on the kit itself.
+.sandcastle/

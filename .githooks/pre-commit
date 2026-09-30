@@ -1,0 +1,29 @@
+#!/bin/sh
+# This repository is public and in daily use on the maintainer's machine.
+# Nothing personal, client-specific or secret may be committed to it.
+#
+# 1. gitleaks scans the staged changes for secrets.
+# 2. Your personal denylist - one extended regex per line, e.g. your name,
+#    email, client and private project names - blocks any staged line that
+#    matches. It lives OUTSIDE the repo so it is never published:
+#      ${XDG_CONFIG_HOME:-~/.config}/sandcastle-kit/denylist
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is required (brew install gitleaks) - it keeps secrets out of this public repo." >&2
+  exit 1
+fi
+gitleaks protect --staged --redact --no-banner
+
+deny="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/denylist"
+if [ -f "$deny" ]; then
+  hits=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' | grep -inEf "$deny" || true)
+  if [ -n "$hits" ]; then
+    echo "pre-commit: staged lines match your personal denylist ($deny):" >&2
+    echo "$hits" | head -20 >&2
+    echo "Remove them - this repository is public." >&2
+    exit 1
+  fi
+fi

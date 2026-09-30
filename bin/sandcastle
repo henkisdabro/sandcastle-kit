@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Resolves the kit through any symlink (it is linked into ~/.local/bin), then
+# runs the CLI with the kit's own tsx and node_modules.
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ $src != /* ]] && src="$dir/$src"
+done
+KIT="$(cd -P "$(dirname "$src")/.." && pwd)"
+exec "$KIT/node_modules/.bin/tsx" "$KIT/src/cli.ts" "$@"

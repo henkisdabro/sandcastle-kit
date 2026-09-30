@@ -1,0 +1,21 @@
+{
+  "name": "sandcastle-kit",
+  "private": true,
+  "type": "module",
+  "description": "Shared Sandcastle setup: one base image, one orchestrator, per-project config.",
+  "bin": {
+    "sandcastle": "bin/sandcastle"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "dependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}
