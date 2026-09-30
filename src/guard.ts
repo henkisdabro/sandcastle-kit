@@ -3,7 +3,7 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { sh } from "./sandbox.ts";
@@ -107,6 +107,8 @@ export const lockRun = (project: Project) => {
     if (alive) throw new Error(`Another sandcastle run of this project is live (pid ${pid}). One run per project at a time.`);
     unlinkSync(file); // stale - that run was killed
   }
+  // A project's first run has no logs/ yet - init does not create it.
+  mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   writeFileSync(file, `${process.pid}\n`, { flag: "wx" });
   process.on("exit", () => {
     try {
