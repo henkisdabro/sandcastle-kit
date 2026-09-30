@@ -137,7 +137,7 @@ load_queue() {
   run=$(mtime_of logs/run.json)
   [ $(( t - QUEUE_AT )) -lt 60 ] && [ "$run" = "$QUEUE_RUN" ] && return 0
   QUEUE_AT="$t"; QUEUE_RUN="$run"; QUEUE_DEPS=""
-  json=$(gh issue list --label "$LABEL" --state open --limit 100 --json number,body,updatedAt 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
+  json=$(gh issue list --label "$LABEL" --state open --limit 500 --json number,body,updatedAt 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
   QUEUE=$(jq -r '.[].number' <<<"$json" 2>/dev/null | sort -n)
   QUEUE_UPDATED=$(jq -r '.[] | select(.updatedAt) | "\(.number)|\(.updatedAt | fromdateiso8601)"' <<<"$json" 2>/dev/null)
   while IFS='|' read -r n deps; do
@@ -185,16 +185,17 @@ pool_line() {
   printf '%s' "$out"
 }
 
-# Whether the recorded run is alive (RUN_LIVE=1), and while it is, its
-# "issue|#dep, #dep" lines from run.json's `waiting`.
-WAITING=""; RUN_LIVE=0
+# Whether the recorded run is alive (RUN_LIVE=1), and while it is, the issues
+# it covers and its "issue|#dep, #dep" lines from run.json's `waiting`.
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""
 load_waiting() {
-  WAITING=""; RUN_LIVE=0
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""
   local f=logs/run.json pid
   [ -f "$f" ] || return 0
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
   RUN_LIVE=1
+  RUN_ISSUES=$(jq -r '(.issues // [])[]' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
   return 0
 }
@@ -283,7 +284,12 @@ render() {
     if [ -n "$on" ]; then
       qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"
     else
-      qstate="queued"; qglyph="○"; qtext="waiting for a sandbox"
+      # Only the live run's own issues wait for a sandbox. The rest of the
+      # label reads as in flight otherwise, long after the run has ended.
+      qstate="queued"; qglyph="○"
+      if [ "$RUN_LIVE" = 0 ]; then qtext="for the next run"
+      elif grep -qx "$q" <<<"$RUN_ISSUES"; then qtext="waiting for a sandbox"
+      else qtext="not in this run"; fi
     fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
       "$head" "$(pad "#$q" $W_ISSUE)" "$off" \

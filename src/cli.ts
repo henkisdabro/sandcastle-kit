@@ -9,13 +9,15 @@
 //   status [s] [collapse]   the live status view (refresh every s seconds, 0 = once)
 //   build [--force]  build the base and project images
 //   preflight        one reply from every model, nothing else
+//   gates            every gate on the base branch in a sandbox, as a run's
+//                    first phase does; no model calls
 //   lean [--measure] what the repo's skills, agents, MCP servers and plugins
 //                    would cost each sandbox, which hooks are kept and whether
 //                    they can run in the image; --measure runs one real turn
 //                    with and without the extras
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //
-// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, USAGE_CHECK:
+// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
@@ -23,7 +25,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
-import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck } from "./lean.ts";
+import { requireGreenBase } from "./gates.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint } from "./guard.ts";
+import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { preflight } from "./run.ts";
 import { ensureImage, KIT, sh } from "./sandbox.ts";
@@ -92,6 +96,19 @@ switch (command) {
   case "preflight": {
     const project = await loadProject(root);
     preflight(project, ensureImage(project));
+    break;
+  }
+  case "gates": {
+    // The sandbox shares the repo's .git, so the run's host guards apply.
+    disableHostGitHooks();
+    const project = await loadProject(root);
+    const fingerprint = gitFingerprint(project);
+    try {
+      await requireGreenBase(project, ensureImage(project), writePlan(project).file, false);
+    } finally {
+      assertGitUnchanged(project, fingerprint, "after the gates");
+    }
+    console.log("All gates green on the base branch.");
     break;
   }
   case "lean": {

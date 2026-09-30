@@ -1,5 +1,7 @@
 // The issue-burndown orchestrator, for any project with a `.sandcastle/config.ts`.
 //
+//   Phase 0  Base    - every gate on the base commit, in the image; a red one
+//                      stops the run before any agent starts (gates.ts).
 //   Phase 1  Fan out - one sandbox per queued issue, own branch: implement,
 //                      review (and optionally cross-review) on the same warm
 //                      sandbox.
@@ -13,26 +15,25 @@
 //                      two branches green on their own can be red together.
 //
 // Environment: ISSUES=1,2 (instead of the queue label), CONCURRENCY, DRY_RUN=1,
-// SANDCASTLE_TEST_RED_GATE=1, plus the model variables in agents.ts and the
+// SANDCASTLE_TEST_RED_GATE=1, SKIP_BASE_GATES=1, plus the model variables in agents.ts and the
 // machine-wide limits in pool.ts.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
+import { type Gate, gateBase, gateLine, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
-import { checkHooks, hiddenReferences, plan as leanPlan, reportHookCheck } from "./lean.ts";
+import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
 import { openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
 import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, recordRun, renderPrompts } from "./run.ts";
 import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
 import { usageLine, usageStop } from "./usage.ts";
-import { execGate, lockWorktree, releaseBranchWorktree, unlockWorktree } from "./worktree-lock.ts";
+import { lockWorktree, releaseBranchWorktree, unlockWorktree } from "./worktree-lock.ts";
 
 type Issue = { number: number; title: string; body?: string };
-type Gate = { name: string; pass: boolean };
-type GateRun = { gates: Gate[]; failure?: { name: string; command: string; exitCode: number; output: string } };
 type Outcome = {
   issue: number;
   branch: string;
@@ -50,13 +51,6 @@ const DEPENDENCY = /(?:blocked by|depends on):?\s+#(\d+)/gi;
 
 // What a spent plan allowance leaves at the end of an agent's log.
 const LIMIT = /out of usage credits|usage limit|limit reached/i;
-
-// Start and end of a gate's output: the first compiler error is at the top,
-// the test summary at the bottom, and a whole log would swamp the prompt.
-const clip = (text: string, head = 8_000, tail = 24_000) =>
-  text.length <= head + tail
-    ? text
-    : `${text.slice(0, head)}\n[... ${text.length - head - tail} characters cut ...]\n${text.slice(-tail)}`;
 
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
@@ -94,7 +88,7 @@ export const burndown = async (project: Project) => {
         return { number: i.number, title: i.title, body: i.body };
       })
     : JSON.parse(
-        sh("gh", ["issue", "list", "--state", "open", "--label", project.label, "--limit", "100", "--json", "number,title,body"]),
+        sh("gh", ["issue", "list", "--state", "open", "--label", project.label, "--limit", "500", "--json", "number,title,body"]),
       );
   if (queued.length === 0) {
     console.log(`No ${project.label} issues. Queue drained.`);
@@ -137,16 +131,14 @@ export const burndown = async (project: Project) => {
   else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
 
   const image = ensureImage(project);
-  const prompts = renderPrompts(project);
+  const prompts = renderPrompts(project, DRY_RUN);
   preflight(project, image);
   const env = credentials(project);
   const usageNote = await usageLine(env);
   if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
   // Written next to the prompts; the worktree hook applies it to each sandbox.
-  const lean = leanPlan(project);
-  const planFile = join(project.root, ".sandcastle/.run/lean-plan.json");
-  writeFileSync(planFile, JSON.stringify(lean, null, 2));
+  const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);
   const dropped = lean.items.filter((i) => i.kind === "hook" && !i.kept).length;
   console.log(
@@ -154,10 +146,10 @@ export const burndown = async (project: Project) => {
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
-  const refs = hiddenReferences(project.root, lean);
+  const refs = hiddenReferences(project.root, lean, project.lean.dropHooks);
   if (refs.length) {
     console.log(
-      `Lean warning: ${refs.length} hidden item(s) are named by files the sandbox keeps (${refs.map((r) => r.path).join(", ")}). ` +
+      `Lean warning: ${refs.length} hidden or dropped item(s) are named by files the sandbox keeps (${refs.map((r) => r.path).join(", ")}). ` +
         "If a gate reads one, it fails on every branch - see `sandcastle lean`.",
     );
   }
@@ -166,28 +158,20 @@ export const burndown = async (project: Project) => {
   const hookCheck = checkHooks(project, image, lean);
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new Error("A kept hook cannot run in the image - no sandbox started.");
+  if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
+  else await requireGreenBase(project, image, planFile);
   // `waiting` lets the status view show a held-back issue as blocked, not queued.
   recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN, waiting });
-  openStatusPane(project);
-  // One Herdr pane per concurrent sandbox, reporting each one's phase.
+  // Inside Herdr, the run's own tab: the status view and one pane per
+  // concurrent sandbox, reporting each one's phase. Otherwise (or with the
+  // view off) the status view opens beside the caller.
   const view = openSandboxView(project, Math.min(CONCURRENCY, issues.length));
+  if (!view.status) openStatusPane(project);
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.
   let tampered: string | undefined;
 
-  const runGates = (sandbox: Parameters<typeof execGate>[0], label: string) =>
-    withSlot("gates", label, async (): Promise<GateRun> => {
-      const gates: Gate[] = [];
-      for (const g of project.gates) {
-        const r = await execGate(sandbox, g.command);
-        gates.push({ name: g.name, pass: r.exitCode === 0 });
-        if (r.exitCode !== 0) {
-          const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
-          return { gates, failure: { name: g.name, command: g.command, exitCode: r.exitCode, output } };
-        }
-      }
-      return { gates };
-    });
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], label: string) => gatesIn(project, sandbox, label);
 
   // Every agent pass and gate run is timed into logs/timings.jsonl, so how
   // long a project's issues take - and where the time goes - is on record
@@ -318,17 +302,15 @@ export const burndown = async (project: Project) => {
       let gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
       if (TEST_RED_GATE && !gated.failure) {
         const g = project.gates[0];
-        gated = {
-          gates: [{ name: g.name, pass: false }],
-          failure: {
-            name: g.name,
-            command: g.command,
-            exitCode: 1,
-            output:
-              "SANDCASTLE_TEST_RED_GATE=1: the orchestrator counted this gate run as red to test the repair pass. " +
-              "The gate itself passed. Run the gates to confirm; if they are green there is nothing to fix, so commit nothing.",
-          },
+        const failure = {
+          name: g.name,
+          command: g.command,
+          exitCode: 1,
+          output:
+            "SANDCASTLE_TEST_RED_GATE=1: the orchestrator counted this gate run as red to test the repair pass. " +
+            "The gate itself passed. Run the gates to confirm; if they are green there is nothing to fix, so commit nothing.",
         };
+        gated = { gates: [{ name: g.name, pass: false }], failure, failures: [failure] };
       }
 
       // A red gate is often one type error or one broken test away from green,
@@ -562,23 +544,7 @@ export const burndown = async (project: Project) => {
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
-  if (merged.length > 1) {
-    const branch = `sandcastle/verify-${Date.now()}`;
-    verify = await withSlot("sandboxes", `${project.name} verify`, async () => {
-      const sandbox = await createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) });
-      try {
-        return (await timed(0, "verify", () => runGates(sandbox, `${project.name} verify gates`))).gates;
-      } finally {
-        unlockWorktree(sandbox.worktreePath);
-        await sandbox.close();
-        try {
-          sh("git", ["branch", "-D", branch]);
-        } catch {
-          /* never created */
-        }
-      }
-    });
-  }
+  if (merged.length > 1) verify = (await timed(0, "verify", () => gateBase(project, image, planFile, "verify"))).gates;
 
   // -------------------------------------------------------------------------
   // Report
@@ -591,7 +557,7 @@ export const burndown = async (project: Project) => {
       continue;
     }
     const o = r.value;
-    const g = o.gates.map((x) => `${x.name}=${x.pass ? "pass" : "FAIL"}`).join(" ");
+    const g = gateLine(o.gates);
     const repaired = o.repairs ? ` repaired=${o.repairs}` : "";
     const time = took.has(o.issue) ? ` ${minutes(took.get(o.issue)!)}` : "";
     console.log(`  #${o.issue} ${o.status.padEnd(14)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}${time}  ${o.branch}`);
@@ -605,7 +571,7 @@ export const burndown = async (project: Project) => {
   if (verify) {
     const ok = verify.every((g) => g.pass);
     console.log(
-      `merged ${base} re-gated: ${verify.map((g) => `${g.name}=${g.pass ? "pass" : "FAIL"}`).join(" ")}` +
+      `merged ${base} re-gated: ${gateLine(verify)}` +
         (ok ? "" : ` - RED TOGETHER: do not push ${base} until this is fixed`),
     );
   }

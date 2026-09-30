@@ -27,13 +27,14 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: setup, doctor, init, build, lean, lean-apply (internal hook), preflight, run, status |
+| `src/cli.ts` | Commands: setup, doctor, init, build, gates, lean, lean-apply (internal hook), preflight, run, status |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
-| `src/burndown.ts` | The orchestrator: fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
+| `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
+| `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint, protected paths, run lock |
 | `src/pool.ts` | Machine-wide sandbox and gate slots (lock files with pids) |

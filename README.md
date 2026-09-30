@@ -122,6 +122,7 @@ flowchart LR
 | | Feature | What you get |
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
+| 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again. |
 | 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
@@ -132,7 +133,7 @@ flowchart LR
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal; flags a sandbox gone quiet. Phase timings are logged per issue. |
-| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The status view opens itself, every sandbox gets a pane, and Herdr's agent sidebar shows each one as working, blocked or done - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab: the status view and a pane per sandbox, each shown in Herdr's agent sidebar as working, done or blocked - see [Works best in Herdr](#-works-best-in-herdr). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage, starting runs and updating. |
 
 ## 🔄 How it works
@@ -144,7 +145,9 @@ then fans out one sandbox per issue, up to `CONCURRENCY` at once and within the 
 flowchart TD
     S(["🚀 sandcastle run"]) --> P["🔍 Checks<br/>token type · images (build if stale) · preflight<br/>prompts · hook check · git fingerprint"]
     P --> Q["📋 Queue: open issues labelled ready-for-agent"]
-    Q --> W
+    Q --> B{"🧱 Every gate on the base commit<br/>(skipped if green before at this commit)"}
+    B -- "red" --> STOP(["⛔ Stop - no agent started"])
+    B -- "green" --> W
 
     subgraph W ["🐳 Per issue - git worktree + Docker sandbox on branch agent/issue-N"]
         direction TB
@@ -205,6 +208,7 @@ Then edit, in this order:
 ```bash
 sandcastle build             # base image, then the project layer
 sandcastle lean              # lean table + hook check (no model calls)
+sandcastle gates             # every gate on the base commit in the image (no model calls)
 sandcastle preflight         # one reply per model (spends a little allowance)
 ```
 
@@ -264,29 +268,32 @@ sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https:/
 terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
 out its own view:
 
-- 📊 **Status pane.** `sandcastle status` opens in a sibling pane, and a later run reuses it.
-- 🐳 **A pane per sandbox.** A `sandcastle <project>` tab gets one pane per concurrent sandbox,
-  named after its issue and following that sandbox's agent log as it moves through implement,
-  review and repair.
+- 🗂️ **A tab of its own.** A `sandcastle <project>` tab: the status view on the left, and one
+  pane per concurrent sandbox stacked on the right, named after its issue and following that
+  sandbox's agent log as it moves through implement, review and repair. The tab you launched the
+  run from gets nothing new.
 - 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
   reports each sandbox's phase to Herdr itself: *working* while it implements, reviews or gates,
-  *done* when it ships, *blocked* on a red gate, a merge conflict or a branch held for a human.
-  The tab and workspace badges roll the states up, so a glance at the sidebar says whether a run
-  needs you.
+  *done* when its pipeline finishes - shipped or red, the outcome is in the message - and
+  *blocked* only when a human has to act: a crash, a merge conflict, a branch held for a human
+  merge. The tab and workspace badges roll the states up, so a glance at the sidebar says whether
+  a run needs you.
 - 🔔 **A notification** with the run's summary when it ends.
 
-The next run replaces the previous run's tab rather than stacking another. Outside Herdr none of
-this happens and nothing else changes - watch with `sandcastle status` in a second terminal.
-`SANDCASTLE_HERDR_VIEW=0` keeps the status pane but skips the per-sandbox tab.
+The tab stays after the run, showing each sandbox's outcome, and the next run replaces it rather
+than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
+`sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
+view then opens in a pane beside yours.
 
 ```
-┌ you ─────────────────┬ sandcastle run ──────────────┐   tab "sandcastle my-app"
-│ your agent / shell   │ 2 issue(s), 2 at a time ...  │   ┌ #12 Add rate limiter ───────┐
-│                      │ [impl-12] Started ...        │   │ Bash(pnpm test)             │
-│                      ├ sandcastle my-app ───────────┤   ├ #15 Fix date parsing ───────┤
-│                      │ #12 ● review   3m  2 ...     │   │ Edit(src/date.ts)           │
-│                      │ #15 ● impl     1m  0 ...     │   └─────────────────────────────┘
-└──────────────────────┴──────────────────────────────┘   sidebar: #12 review ● · #15 implement ●
+┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
+│ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
+│ $ sandcastle run                       │   │ #12 ● review   3m  2 ... │ Bash(pnpm test)        │
+│ 2 issue(s), 2 at a time ...            │   │ #15 ● impl     1m  0 ... │                        │
+│ Gates on main: lint=pass test=pass     │   │ #18 ○ queued   not in .. ├ #15 Fix date parsing ──┤
+│ [impl-12] Started ...                  │   │                          │ Edit(src/date.ts)      │
+└────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘
+                                              sidebar: #12 review ● · #15 implement ●
 ```
 
 ## 📥 Updating
@@ -305,6 +312,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
+| `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
 | `sandcastle status [secs] [collapse]` | Live view; `0` prints once | ➖ no |
@@ -327,7 +335,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `implement` / `review` | 8 / 3 iterations, 2400 s idle | `{ maxIterations, idleTimeoutSeconds }` per agent |
+| `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; `attempts: 0` turns it off. A gate that timed out is never repaired |
 
 Examples: [`examples/`](examples/).
@@ -342,12 +350,15 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
+| `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens) |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 
-Effort levels are `low`, `medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a
+A project that always wants different models or effort sets them in `.sandcastle/config.ts`
+(`review: { effort: "medium" }`); the env vars are for one run. Effort levels are `low`,
+`medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a
 starting point for agentic coding on both 5.5 models; the kit defaults to `high` for quality.
 Measure before changing it.
 

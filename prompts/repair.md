@@ -3,7 +3,7 @@ the issue and a reviewer checked it, but a gate the orchestrator runs after them
 job is to make it green without changing what the issue asked for. Nobody will answer a question for
 you.
 
-**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
+{{KIT_DRY_RUN}}**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
 prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anything under `.git/`
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. If git ever tells you this worktree is not a git repository, stop and output

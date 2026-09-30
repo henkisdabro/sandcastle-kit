@@ -2,7 +2,7 @@ You are reviewing work another agent just did on branch `{{SOURCE_BRANCH}}` for 
 #{{ISSUE_NUMBER}}. You are the last pair of eyes before the change is gated and merged. Nobody will
 answer a question for you.
 
-**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
+{{KIT_DRY_RUN}}**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
 prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anything under `.git/`
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is

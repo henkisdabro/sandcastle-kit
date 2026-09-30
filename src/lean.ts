@@ -19,7 +19,7 @@
 // kept hook can run in the image before any sandbox starts.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { IMPL_MODEL } from "./agents.ts";
@@ -89,19 +89,42 @@ export const plan = (project: Project): Plan => {
   const hide: string[] = [];
   const write: Record<string, string> = {};
 
-  const dirOf = (kind: Item["kind"], dir: string, file: (name: string) => string) => {
+  // Only what the harness loads is an item: a skill is a directory with a
+  // SKILL.md, an agent or command a .md file or a folder of them. A stray
+  // file (a pyrightconfig.json among the skills) is hidden with its folder's
+  // siblings but is not listed as something to keep. `work.md` and `work/`
+  // are one command, kept or hidden together.
+  const dirOf = (kind: Item["kind"], dir: string, loads: (name: string) => string | undefined) => {
+    const byId = new Map<string, Item & { paths: string[] }>();
     for (const name of children(root, dir)) {
-      const id = name.replace(/\.md$/, "");
       const path = `${dir}/${name}`;
-      const kept = keep.has(`${kind}:${id}`);
-      items.push({ kind, id, path, tokens: frontmatterTokens(join(root, file(name))), kept });
-      if (!kept) hide.push(path);
+      const file = loads(name);
+      if (!file) {
+        hide.push(path);
+        continue;
+      }
+      const id = name.replace(/\.md$/, "");
+      const item = byId.get(id);
+      const tokens = frontmatterTokens(join(root, file));
+      if (item) {
+        item.paths.push(path);
+        if (tokens !== undefined) item.tokens = (item.tokens ?? 0) + tokens;
+      } else {
+        byId.set(id, { kind, id, path, tokens, kept: keep.has(`${kind}:${id}`), paths: [path] });
+      }
+    }
+    for (const { paths, ...item } of byId.values()) {
+      items.push(item);
+      if (!item.kept) hide.push(...paths);
     }
   };
-  dirOf("skill", ".claude/skills", (n) => `.claude/skills/${n}/SKILL.md`);
-  dirOf("agent", ".claude/agents", (n) => `.claude/agents/${n}`);
-  dirOf("command", ".claude/commands", (n) => `.claude/commands/${n}`);
-  dirOf("codex-skill", ".agents/skills", (n) => `.agents/skills/${n}/SKILL.md`);
+  const isDir = (path: string) => existsSync(join(root, path)) && lstatSync(join(root, path)).isDirectory();
+  const skill = (dir: string) => (n: string) => (existsSync(join(root, dir, n, "SKILL.md")) ? `${dir}/${n}/SKILL.md` : undefined);
+  const markdown = (dir: string) => (n: string) => (n.endsWith(".md") || isDir(`${dir}/${n}`) ? `${dir}/${n}` : undefined);
+  dirOf("skill", ".claude/skills", skill(".claude/skills"));
+  dirOf("agent", ".claude/agents", markdown(".claude/agents"));
+  dirOf("command", ".claude/commands", markdown(".claude/commands"));
+  dirOf("codex-skill", ".agents/skills", skill(".agents/skills"));
 
   // A kept item that is a symlink (`.claude/skills/x -> ../../.agents/skills/x`)
   // keeps its target too, or it would point at a deleted directory.
@@ -178,6 +201,15 @@ export const plan = (project: Project): Plan => {
   return { hide, write, items, hooks };
 };
 
+// Where the worktree hook reads the plan from; a sandbox without it is not lean.
+export const writePlan = (project: Project) => {
+  const p = plan(project);
+  const file = join(project.root, ".sandcastle/.run/lean-plan.json");
+  mkdirSync(join(project.root, ".sandcastle/.run"), { recursive: true });
+  writeFileSync(file, JSON.stringify(p, null, 2));
+  return { plan: p, file };
+};
+
 // Runs in a fresh worktree (a Sandcastle host hook). skip-worktree makes git
 // ignore the removals and rewrites, so they can never be committed by an
 // agent's `git add -A`.
@@ -210,18 +242,31 @@ const instructionsTokens = (root: string) => {
 // skill a test reads (a guard over agent docs, say) turns the test gate red
 // on every branch - and on the base branch - for a reason no agent can fix.
 // Markdown is skipped: docs mention these paths all the time and never run.
-export const hiddenReferences = (root: string, p: Plan) =>
-  p.hide.flatMap((path) => {
-    let hits: string[] = [];
+//
+// A dropped hook is checked the same way, by the lean.dropHooks string that
+// dropped it: a test that compares .claude/settings.json with the hooks it
+// expects is red in every sandbox once one of them is gone.
+export const hiddenReferences = (root: string, p: Plan, dropHooks: string[] = []) => {
+  const grep = (text: string, exclude: string[]) => {
     try {
-      hits = sh("git", ["grep", "-l", "-F", path, "--", ".", ":(exclude)*.md", ...p.hide.map((h) => `:(exclude)${h}`)], root)
+      return sh("git", ["grep", "-l", "-F", text, "--", ".", ":(exclude)*.md", ...exclude.map((h) => `:(exclude)${h}`)], root)
         .split("\n")
         .filter(Boolean);
     } catch {
-      /* git grep exits 1 when nothing matches */
+      return []; // git grep exits 1 when nothing matches
     }
-    return hits.length ? [{ path, by: hits }] : [];
-  });
+  };
+  const droppedBy = dropHooks.filter((d) => p.items.some((i) => i.kind === "hook" && !i.kept && i.id.includes(d)));
+  return [
+    ...p.hide.map((path) => ({ path, by: grep(path, p.hide) })),
+    // The hook's own script names the string too, and the config that drops
+    // it; only other files count.
+    ...droppedBy.map((d) => ({
+      path: `hook "${d}"`,
+      by: grep(d, [...p.hide, ".claude/settings.json", ".sandcastle"]).filter((f) => !p.items.some((i) => i.kind === "hook" && i.id.includes(f))),
+    })),
+  ].filter((r) => r.by.length);
+};
 
 export const report = (project: Project, p: Plan) => {
   const rows = p.items.map((i) => [
@@ -247,9 +292,9 @@ export const report = (project: Project, p: Plan) => {
   const kept = p.items.filter((i) => i.kept && i.kind !== "hook");
   if (kept.length) console.log(`  Kept on purpose (lean.keep): ${kept.map((i) => `${i.kind}:${i.id}`).join(", ")}`);
 
-  const refs = hiddenReferences(project.root, p);
+  const refs = hiddenReferences(project.root, p, project.lean.dropHooks);
   if (refs.length) {
-    console.log("\n  Hidden, but named by files a sandbox keeps - if a gate, test or hook reads one, keep it:");
+    console.log("\n  Hidden or dropped, but named by files a sandbox keeps - if a gate, test or hook reads one, keep it:");
     for (const r of refs) console.log(`    ${r.path}  <- ${r.by.slice(0, 3).join(", ")}${r.by.length > 3 ? ` (+${r.by.length - 3})` : ""}`);
   }
 

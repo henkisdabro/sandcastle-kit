@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { herdr, herdrJson, IN_HERDR } from "./herdr.ts";
+import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, KIT, sh } from "./sandbox.ts";
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
@@ -84,7 +84,17 @@ export const preflight = (project: Project, image: string) => {
 // placeholders ({{ISSUE_NUMBER}}, {{SOURCE_BRANCH}}, ...) are left for it.
 // ---------------------------------------------------------------------------
 
-export const renderPrompts = (project: Project) => {
+// The orchestrator writes nothing to GitHub in a dry run; its agents would,
+// because the prompts tell them to comment. A comment saying "done on branch
+// X" for work that never merged misleads whoever reads the issue next.
+const DRY_RUN_NOTE =
+  "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any issue " +
+  "(`gh issue comment`, `gh issue create`, `gh issue close`, `gh issue edit`, `gh label`). Wherever these " +
+  "instructions say to do one of those, put what you would have posted in your final message instead, under " +
+  "\"Would post:\". Reading issues with `gh` is fine. Everything else - the work, the commits, the gates - is " +
+  "exactly as in a real run.\n\n";
+
+export const renderPrompts = (project: Project, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
     : "";
@@ -97,7 +107,8 @@ export const renderPrompts = (project: Project) => {
     const text = readFileSync(join(KIT, `prompts/${kind}.md`), "utf8")
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
-      .replaceAll("{{KIT_PROJECT_RULES}}", () => rules);
+      .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
+      .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? DRY_RUN_NOTE : ""));
     // Sandcastle refuses a prompt with any other {{NAME}} - but only inside
     // the sandbox, after the install. Refuse it here instead. (A literal
     // {{...}} in rules.md, e.g. a template variable, has to be reworded.)
@@ -174,11 +185,6 @@ export const archiveFinishedLogs = (project: Project) => {
 // .sandcastle/logs/status-pane; a closed pane is simply replaced.
 // ---------------------------------------------------------------------------
 
-// This kit's own entry, not whichever `sandcastle` PATH finds first: a second
-// checkout (a branch under test, say) would otherwise run with the other
-// checkout's status view.
-const STATUS_COMMAND = `"${KIT}/bin/sandcastle" status`;
-
 // The pane splits beside the calling pane, so that pane's width picks the
 // direction. stdout is no guide: piped (`sandcastle run | tee run.log`), it has
 // no columns at all and every pane split down.
@@ -198,14 +204,12 @@ export const openStatusPane = (project: Project) => {
     console.log("Not inside Herdr - watch the run with `sandcastle status` in another terminal.");
     return;
   }
-  const record = join(project.root, ".sandcastle/logs/status-pane");
+  const record = statusPaneRecord(project);
   const previous = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
   if (previous) {
     try {
-      const info = herdrJson(["pane", "process-info", "--pane", previous]).result.process_info;
-      const running = (info.foreground_processes as { cmdline: string }[]).some((p) => p.cmdline.includes("status.sh"));
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
-      if (!running) herdr(["pane", "run", previous, STATUS_COMMAND]);
+      if (!runsStatus(previous)) herdr(["pane", "run", previous, STATUS_COMMAND]);
       return;
     } catch (error) {
       // Replace only a pane that is really gone. After a transient herdr

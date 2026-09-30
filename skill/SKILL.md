@@ -35,6 +35,13 @@ its files (this skill, the README, prompts) stay generic. Project facts go in th
 **Costs.** `sandcastle run`, `sandcastle preflight` and `sandcastle lean --measure` call the model
 and spend the user's plan allowance or API credits. Say so and get a yes before running them.
 
+**Models and effort.** The kit's defaults are in its README ("Environment variables"). To change
+them for a project, set `model` or `effort` under `implement` or `review` in the project's
+`.sandcastle/config.ts` and commit it - for example `review: { effort: "medium" }`. For one run
+only, prefix the command with `IMPL_MODEL`, `IMPL_EFFORT`, `REVIEW_MODEL` or `REVIEW_EFFORT`;
+these win over the config. Repair uses the implementer's model and effort. A run that is already
+going keeps its models; the change applies from the next one. It never needs a change to the kit.
+
 ## init - set up a project
 
 1. Read the repo's `CLAUDE.md` / `AGENTS.md`, `package.json` (or equivalent), CI workflows and
@@ -54,9 +61,10 @@ and spend the user's plan allowance or API credits. Say so and get a yes before 
    literally needs it - `rules.md` tells agents to use that skill, or a gate depends on that MCP
    server - with a comment saying why. The usual answer is `keep: []`. If `CLAUDE.md` or
    `AGENTS.md` sends agents to a skill you hide, add a line to `rules.md` saying it is absent and
-   what to do instead. When the lean check lists a hidden item as named by a kept file, open that
-   file: if a gate, test or hook reads the item, keep it - otherwise that gate is red on every
-   branch, base included, and no agent can fix it. Flag an always-loaded `CLAUDE.md` chain over ~10k tokens as worth trimming.
+   what to do instead. When the lean check lists a hidden item or a dropped hook as named by a
+   kept file, open that file: if a gate, test or hook reads the item (a test comparing
+   `.claude/settings.json` with the hooks it expects, say), keep it - otherwise that gate is red on
+   every branch, base included, and no agent can fix it. Flag an always-loaded `CLAUDE.md` chain over ~10k tokens as worth trimming.
 4. **Keep the enforcement - review every hook.** Hooks cost no context and are how a repo
    enforces its rules, so every hook in `.claude/settings.json` is kept by default. Read each
    hook's script and sort it:
@@ -79,9 +87,16 @@ and spend the user's plan allowance or API credits. Say so and get a yes before 
      that what they call is in the image and that none pushes or deploys.
 5. **Settings that stay.** Permissions and `env` in `.claude/settings.json` are kept. Check `env`
    for host paths or secrets a container cannot resolve.
-6. Show the user the config, rules, lean table and hook decisions. Offer (costs a little allowance)
-   `sandcastle preflight`, and optionally `sandcastle lean --measure` to see the tokens saved.
-7. Commit `.sandcastle/config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` by the
+6. **Gate the base commit: `sandcastle gates`.** Required, and free of model calls. It runs every
+   gate on the base branch in a sandbox set up exactly as an agent's is - image, setup, lean plan.
+   A gate red there is red on every branch, so fix the cause (an image missing a tool or too old
+   for a test, a setup step, a hidden item or dropped hook a test reads) and run it again until
+   every gate is green. The red gates' full output is in `.sandcastle/logs/base-gates.log`. Every
+   run repeats this check and stops while a gate is red on base.
+7. Show the user the config, rules, lean table, hook decisions and the green gate line. Offer
+   (costs a little allowance) `sandcastle preflight`, and optionally `sandcastle lean --measure`
+   to see the tokens saved.
+8. Commit `.sandcastle/config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` by the
    repo's own commit rules. `.sandcastle/.env` stays uncommitted.
 
 Re-run `sandcastle lean` whenever the project adds skills, MCP servers or hooks. Every run repeats
@@ -127,18 +142,21 @@ comments, and the gates can prove it.
 
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
-   same checkout). Show the user the queue (`gh issue list --label <label>`), the models, whether
-   it is a dry run, and `sandcastle status 0`'s machine line (other projects' runs share the
-   limits). Say that a red gate gets a repair pass (`repair.attempts`, default 1) - more
-   allowance, fewer red branches - and offer `USAGE_CHECK=1` if the plan is close to its limit.
-   Confirm before starting - a run comments on and closes issues on GitHub and merges into the
-   base branch locally.
+   same checkout). Show the user the queue (`gh issue list --label <label> --limit 500` - without
+   `--limit`, gh stops at 30), the models, whether it is a dry run, and `sandcastle status 0`'s
+   machine line (other projects' runs share the limits). Say that a red gate gets a repair pass
+   (`repair.attempts`, default 1) - more allowance, fewer red branches - and offer `USAGE_CHECK=1`
+   if the plan is close to its limit. Say that the run first gates the base commit and stops if a
+   gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
+   model calls) rather than finding out after the image build. Confirm before starting - a run
+   comments on and closes issues on GitHub and merges into the base branch locally. A dry run
+   (`DRY_RUN=1`) merges and closes nothing, and its agents are told to post nothing to GitHub.
 2. Start it outside your own shell - it takes hours. In a terminal multiplexer you can drive (for
    example Herdr: `test "${HERDR_ENV:-}" = 1`), open a sibling pane at the repo root without
-   taking focus and run `<env vars> sandcastle run` there; inside Herdr the run opens its own
-   status pane and a `sandcastle <project>` tab with one pane per sandbox, each reported to the
-   agent sidebar as working, blocked or done. Otherwise give the user the command to run in a second terminal, plus
-   `sandcastle status` for a third.
+   taking focus and run `<env vars> sandcastle run` there; inside Herdr the run opens a
+   `sandcastle <project>` tab holding the status view and one pane per sandbox, each reported to
+   the agent sidebar (blocked means a human has to act). Otherwise give the user the command to
+   run in a second terminal, plus `sandcastle status` for a third.
 3. **Arrange to hear when it ends.** A command handed to another pane is not your own process, so
    your harness never tells you it finished. Every run's last line is `sandcastle run ended (exit
    N)` - after the report, after a drained queue, after a crash. Right after starting it, start a
@@ -151,7 +169,11 @@ comments, and the gates can prove it.
    shipping rules. When reading the report: `needs-human` branches were green but change hooks,
    CI or install scripts and need a human merge; "gated green but not merged" means the issue
    was closed or re-labelled during the run, or the branch moved after its gates; "waiting, not
-   started" names the open issue each one is blocked by.
+   started" names the open issue each one is blocked by. `gate-failed` with `repaired=1` and no
+   repair commit usually means the repair agent judged the failure outside the branch - read the
+   repair log and its issue comment, then check that gate with `sandcastle gates` before blaming
+   the branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the
+   cause is the image, the setup or the lean plan (`.sandcastle/logs/base-gates.log`).
 
 ## status - what a run is doing
 
@@ -176,7 +198,8 @@ was set up with.
    project may act on.
 3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise stop after 2):
    1. `sandcastle build`, then `sandcastle lean` - new images, and the hook check against them.
-      Fix a `HOOK FAIL` as in init step 4.
+      Fix a `HOOK FAIL` as in init step 4. Then `sandcastle gates` (no model calls): a new image
+      can turn a gate red or green on base. Fix a red gate as in init step 6.
    2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
       changes what a run does or spends (the Upgrading notes list them) and ask whether to set it
