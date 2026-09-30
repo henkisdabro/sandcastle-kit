@@ -9,17 +9,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
-### Changed
-
-- A run that will not start on a dirty tree or the wrong branch now says so without a stack
-  trace, and lists the uncommitted files (the first ten) that are in its way.
-
-### Fixed
-
-- Inside Herdr, a run's tab opens in the workspace the run was started from, not in whichever
-  workspace had focus when the tab was created. Both the skill's run tab and the kit's own view
-  tab name their workspace now.
-
 ## [0.2.0] - 2026-09-30
 
 ### Upgrading
@@ -95,8 +84,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   reported as crashed; unreviewed repair commits are never merged.
 - New states in the status view and the summary: `withdrawn`, `stopped`, `orphaned`, and `held`
   for a ticket an agent handed back (reported as "Nothing to change" on GitHub before).
+- A run that will not start on a dirty tree or the wrong branch now says so without a stack
+  trace, and lists the uncommitted files (the first ten) that are in its way.
 
 ### Fixed
+
+- Inside Herdr, a run's tab opens in the workspace the run was started from, not in whichever
+  workspace had focus when the tab was created. Both the skill's run tab and the kit's own view
+  tab name their workspace now.
 
 - An error while recording a finished ticket's state (a git call, a full disk) could reject the
   whole sandbox pool, so no green branch landed. It is now logged and the outcome stands.
