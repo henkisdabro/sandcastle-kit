@@ -86,8 +86,8 @@ switch (command) {
     try {
       await burndown(await loadProject(root));
     } catch (error) {
-      // A stop is a message for the operator, not a crash: no stack trace.
-      if (!String((error as Error).message).startsWith("STOPPED")) throw error;
+      // A stop or a refusal to start is a message for the operator, not a crash: no stack trace.
+      if (!/^(STOPPED|NOT STARTED)/.test(String((error as Error).message))) throw error;
       console.error(`\n${(error as Error).message}`);
       process.exitCode = 1;
     }

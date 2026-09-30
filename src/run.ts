@@ -37,13 +37,23 @@ export const keepAwake = (): string => {
 };
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
+// "NOT STARTED" makes the CLI print it as a message: a stack trace read as a kit bug, and
+// without the file list the operator had to run git status to find a stray lockfile.
 export const assertCleanBase = (project: Project) => {
-  if (sh("git", ["status", "--porcelain"], project.root) !== "") {
-    throw new Error("Working tree is dirty. The run merges into it - commit or stash first.");
+  // Not sh(): its trim would eat the first line's leading status column.
+  const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: project.root, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  if (dirty.length > 0) {
+    const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
+    if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
+    throw new Error(
+      `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}`,
+    );
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);
   if (branch !== project.baseBranch) {
-    throw new Error(`Expected to be on ${project.baseBranch}, found ${branch}.`);
+    throw new Error(`NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}.`);
   }
 };
 

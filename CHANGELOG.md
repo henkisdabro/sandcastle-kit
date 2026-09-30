@@ -9,6 +9,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- A run that will not start on a dirty tree or the wrong branch now says so without a stack
+  trace, and lists the uncommitted files (the first ten) that are in its way.
+
 ## [0.2.0] - 2026-09-30
 
 ### Upgrading
