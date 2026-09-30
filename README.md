@@ -360,7 +360,8 @@ agent starts, each worktree loses `.claude/skills`, `.claude/agents`, `.claude/c
 `.agents/skills` (read by Codex), `.mcp.json`, `.codex/config.toml`, and the plugin, marketplace,
 MCP-enable and status-line keys of `.claude/settings.json`. Permissions and `env` stay. The
 changes are marked skip-worktree, so an agent can never commit them. `lean.keep` brings items
-back. On a real project this saved ~2,500 input tokens per agent turn.
+back. `sandcastle lean` (and every run) warns when a hidden item is named by a file the sandbox
+keeps - a test that reads a skill file, say, would fail on every branch until the item is kept. On a real project this saved ~2,500 input tokens per agent turn.
 
 **Hooks are the opposite: kept.** They cost no context and are how a repo enforces its rules -
 guards, linters, test gates, audit logs. `lean.dropHooks` removes host-only conveniences (a token

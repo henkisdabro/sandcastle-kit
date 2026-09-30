@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
-import { checkHooks, plan as leanPlan, reportHookCheck } from "./lean.ts";
+import { checkHooks, hiddenReferences, plan as leanPlan, reportHookCheck } from "./lean.ts";
 import { openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
 import { archiveFinishedLogs, assertCleanBase, openStatusPane, preflight, recordRun, renderPrompts } from "./run.ts";
@@ -145,6 +145,13 @@ export const burndown = async (project: Project) => {
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
+  const refs = hiddenReferences(project.root, lean);
+  if (refs.length) {
+    console.log(
+      `Lean warning: ${refs.length} hidden item(s) are named by files the sandbox keeps (${refs.map((r) => r.path).join(", ")}). ` +
+        "If a gate reads one, it fails on every branch - see `sandcastle lean`.",
+    );
+  }
   // A kept hook that cannot run fails on every tool call of every agent, or
   // silently guards nothing. Stop before any sandbox starts.
   const hookCheck = checkHooks(project, image, lean);

@@ -17,6 +17,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Set `repair: { attempts: 0 }` in `.sandcastle/config.ts` to keep the old behaviour.
 - **Blocked issues are read from the issue body.** Issues triaged earlier as unlabelled with a
   "blocked by #N" comment can move the line into the body and take the queue label.
+- Run `sandcastle lean` once: it now lists hidden items that tests or scripts name. Keep any a
+  gate reads, or that gate fails on every branch.
 - The status view's header is now five rows (run state, models and machine limits each get
   their own), so it fits a narrower pane.
 

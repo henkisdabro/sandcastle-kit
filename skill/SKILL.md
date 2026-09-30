@@ -54,7 +54,9 @@ and spend the user's plan allowance or API credits. Say so and get a yes before 
    literally needs it - `rules.md` tells agents to use that skill, or a gate depends on that MCP
    server - with a comment saying why. The usual answer is `keep: []`. If `CLAUDE.md` or
    `AGENTS.md` sends agents to a skill you hide, add a line to `rules.md` saying it is absent and
-   what to do instead. Flag an always-loaded `CLAUDE.md` chain over ~10k tokens as worth trimming.
+   what to do instead. When the lean check lists a hidden item as named by a kept file, open that
+   file: if a gate, test or hook reads the item, keep it - otherwise that gate is red on every
+   branch, base included, and no agent can fix it. Flag an always-loaded `CLAUDE.md` chain over ~10k tokens as worth trimming.
 4. **Keep the enforcement - review every hook.** Hooks cost no context and are how a repo
    enforces its rules, so every hook in `.claude/settings.json` is kept by default. Read each
    hook's script and sort it:
