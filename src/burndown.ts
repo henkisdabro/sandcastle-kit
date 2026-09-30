@@ -177,6 +177,7 @@ export const burndown = async (project: Project) => {
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<number, { phase: string; since: number }>();
   const took = new Map<number, number>();
+  const keptWorktrees: { issue: number; path: string }[] = [];
   const timed = async <T>(issue: number, phase: string, fn: () => Promise<T>): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
@@ -350,7 +351,10 @@ export const burndown = async (project: Project) => {
     } finally {
       took.set(issue.number, Date.now() - started);
       unlockWorktree(sandbox.worktreePath);
-      await sandbox.close();
+      // Sandcastle keeps a worktree with uncommitted files rather than lose
+      // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
+      const closed = await sandbox.close();
+      if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.number, path: closed.preservedWorktreePath });
       try {
         assertGitUnchanged(project, fingerprint, `after #${issue.number}`);
       } catch (error) {
@@ -566,5 +570,8 @@ export const burndown = async (project: Project) => {
     console.log(`\nSTOPPED EARLY: ${usageHit}; ${issues.length - results.length} queued issue(s) were not started.`);
   }
   for (const w of waiting) console.log(`waiting, not started: #${w.issue} - on ${w.on.map((d) => `#${d}`).join(", ")}`);
+  for (const k of keptWorktrees) {
+    console.log(`worktree kept with uncommitted files: #${k.issue} - ${k.path} (inspect, then \`git worktree remove --force\` it)`);
+  }
   console.log("Branches left standing for review are not deleted. Nothing is pushed.");
 };

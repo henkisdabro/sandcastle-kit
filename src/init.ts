@@ -40,7 +40,10 @@ const node = (root: string): Stack | undefined => {
   const locked = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "package-lock.json"].some(has);
   const berry = has("yarn.lock") && readFileSync(join(root, "yarn.lock"), "utf8").includes("__metadata:");
   const frozen = { pnpm: "pnpm install --frozen-lockfile", yarn: berry ? "yarn install --immutable" : "yarn install --frozen-lockfile", bun: "bun install --frozen-lockfile", npm: "npm ci" }[pm];
-  const install = (locked && frozen) || `${pm} install`;
+  // Without a lockfile, an install that writes one leaves every sandbox's
+  // worktree with an uncommitted file, which Sandcastle then keeps.
+  const unlocked = { pnpm: "pnpm install --no-lockfile", yarn: "yarn install --no-lockfile", bun: "bun install --no-save", npm: "npm install --no-package-lock" }[pm];
+  const install = (locked ? frozen : unlocked) || `${pm} install`;
   const scripts = pkg.scripts ?? {};
   // npm init's placeholder test script fails by design; it is not a gate.
   const real = (name: string) => scripts[name] !== undefined && !/no test specified/.test(scripts[name]);

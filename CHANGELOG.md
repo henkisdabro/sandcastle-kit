@@ -41,6 +41,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   closes it.
 - A closed Herdr status pane printed a `pane_not_found` error into the run's output.
 - A project's first run crashed with ENOENT on `.sandcastle/logs/run.lock`.
+- A worktree Sandcastle kept for its uncommitted files showed as working forever in the status
+  view; it now shows its branch's state, and the run report names it.
+
+### Upgrading (status view)
+
+- The status header's second line is now three rows (run, models, machine), so the view fits a
+  narrower pane.
 
 ## [0.1.0] - 2026-09-30
 
