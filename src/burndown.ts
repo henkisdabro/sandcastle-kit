@@ -18,7 +18,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
+import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, plan as leanPlan, reportHookCheck } from "./lean.ts";
@@ -149,7 +149,8 @@ export const burndown = async (project: Project) => {
   const hookCheck = checkHooks(project, image, lean);
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new Error("A kept hook cannot run in the image - no sandbox started.");
-  recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN });
+  // `waiting` lets the status view show a held-back issue as blocked, not queued.
+  recordRun(project, { issues: issues.map((i) => i.number), dryRun: DRY_RUN, waiting });
   openStatusPane(project);
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.
@@ -190,7 +191,7 @@ export const burndown = async (project: Project) => {
       appendFileSync(timings, JSON.stringify(line) + "\n");
     }
   };
-  const minutes = (ms: number) => `${Math.round(ms / 60_000)}m`;
+  const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
 
   // A run is silent for as long as its agents are, which for a review can be
   // half an hour. One line every five minutes says it is alive and where.
@@ -283,9 +284,11 @@ export const burndown = async (project: Project) => {
       const review = await timed(issue.number, "review", () =>
         reviewWithFallback(`#${issue.number}`, reviewRun(`review-${issue.number}`)),
       );
-      const cross = await timed(issue.number, "cross-review", () =>
-        crossReview(`#${issue.number}`, reviewRun(`review-codex-${issue.number}`)),
-      );
+      const cross = CROSS_REVIEW
+        ? await timed(issue.number, "cross-review", () =>
+            crossReview(`#${issue.number}`, reviewRun(`review-codex-${issue.number}`)),
+          )
+        : undefined;
       const reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us

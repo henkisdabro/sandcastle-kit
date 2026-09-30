@@ -24,7 +24,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `Blocked by #N` / `Depends on #N` in an issue body holds the issue back while #N is open.
 - Opt-in plan usage guard: `USAGE_CHECK=1` starts no new issue past `USAGE_STOP` percent.
 - Phase timings in `.sandcastle/logs/timings.jsonl`, per-issue wall time in the report, a
-  heartbeat line every five minutes, and a `quiet Nm` hint in the status view.
+  heartbeat line every five minutes, and a `quiet Nm` hint in the status view. An issue held
+  back by a dependency shows as `◌ blocked` there, not queued.
 - `sandcastle init` detects the stack (Node, Python with uv, Go, Rust) and writes gates, setup
   and, where needed, a project Dockerfile.
 - `/sandcastle update` skill action.
@@ -39,6 +40,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A run that died between merging and closing left the issue open for good; the next run now
   closes it.
 - A closed Herdr status pane printed a `pane_not_found` error into the run's output.
+- A project's first run crashed with ENOENT on `.sandcastle/logs/run.lock`.
 
 ## [0.1.0] - 2026-09-30
 

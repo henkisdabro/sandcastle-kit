@@ -151,6 +151,18 @@ pool_line() {
   printf '%s' "$out"
 }
 
+# "issue|#dep, #dep" lines from run.json's `waiting`, while that run is live.
+WAITING=""
+load_waiting() {
+  WAITING=""
+  local f=logs/run.json pid
+  [ -f "$f" ] || return 0
+  pid=$(jq -r '.pid // empty' "$f" 2>/dev/null)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
+  return 0
+}
+
 run_line() {
   local f=logs/run.json orch pid started finished code models
   [ -f "$f" ] || { printf '%s' "${mute}no run recorded yet${off}"; return 0; }
@@ -171,7 +183,7 @@ run_line() {
 render() {
   local now issues n phase log age commits state glyph colour activity rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
-  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col
+  local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 mtime q quiet act_col on qstate qglyph qtext
   local -a out=()
   local n_out=0
 
@@ -186,6 +198,7 @@ render() {
 
   now=$(date +%H:%M:%S)
   load_container_stats
+  load_waiting
   merged_list=$(git branch --merged "$BASE" --list 'agent/issue-*' 2>/dev/null)
 
   line="${rule}$(printf "%${cols}s" '' | tr ' ' '─')${off}"
@@ -199,14 +212,22 @@ render() {
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
     grep -qx "$q" <<<"$issues" && continue
+    # Held back by an open dependency (run.json's `waiting`), not waiting for
+    # a sandbox - only while the run that decided it is live.
+    on=$(printf '%s\n' "$WAITING" | awk -F'|' -v k="$q" '$1==k{print $2; exit}')
+    if [ -n "$on" ]; then
+      qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"
+    else
+      qstate="queued"; qglyph="○"; qtext="waiting for a sandbox"
+    fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
       "$head" "$(pad "#$q" $W_ISSUE)" "$off" \
-      "$blu" "○" "$(pad queued $W_STATE)" "$off" \
+      "$blu" "$qglyph" "$(pad "$qstate" $W_STATE)" "$off" \
       "$gry" "$(pad - $W_AGE)" "$off" \
       "$gry" "$(pad - $W_COMMITS)" "$off" \
       "$gry" "$(pad - $W_CPU)" "$off" \
       "$gry" "$(pad - $W_MEM)" "$off" \
-      "$mute" "waiting for a sandbox" "$off")
+      "$mute" "$qtext" "$off")
     out[n_out]="2	0	$q	$rendered"; n_out=$((n_out+1)); c_queue=$((c_queue+1))
   done
 
@@ -338,7 +359,7 @@ render() {
   fi
 
   printf '%s\n' "$line"
-  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}· idle${off}"
+  printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}· idle${off}"
   printf '%s\n' " ${mute}◆ finished, not merged: dry run or red gate · age = since last log write · CPU in cores of ${NCPU}${off}"
 }
 
