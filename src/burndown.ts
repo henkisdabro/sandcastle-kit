@@ -33,8 +33,10 @@ type GateRun = { gates: Gate[]; failure?: { name: string; command: string; exitC
 type Outcome = {
   issue: number;
   branch: string;
-  status: "shipped" | "gate-failed" | "nochange";
+  status: "shipped" | "gate-failed" | "nochange" | "merged-earlier";
   commits: number;
+  /** The branch tip the gates passed on; landing refuses a branch that moved since. */
+  head?: string;
   reviewCommits: number;
   repairs: number;
   gates: Gate[];
@@ -131,6 +133,20 @@ export const burndown = async (project: Project) => {
       return { gates };
     });
 
+  // A run that died between merging a branch and closing its issue leaves the
+  // issue queued with its work already on base. Re-running it finds nothing
+  // to do and reports `nochange`, so the issue would stay open for good. Our
+  // own merge message finds it instead - unless someone reopened the issue
+  // since, which asks for more work, not for a close.
+  const mergedEarlier = (issue: number, branch: string) => {
+    const merge = sh("git", ["log", base, "-1", "--format=%h", "--fixed-strings", `--grep=Merge ${branch} (closes #${issue})`]);
+    if (!merge) return undefined;
+    const reopened = sh("gh", [
+      "api", "--paginate", `repos/{owner}/{repo}/issues/${issue}/events`, "--jq", '.[] | select(.event == "reopened") | .id',
+    ]);
+    return reopened ? undefined : merge;
+  };
+
   // -------------------------------------------------------------------------
   // Phase 1 + 2: implement, review, gate - one pipeline per issue
   // -------------------------------------------------------------------------
@@ -138,6 +154,10 @@ export const burndown = async (project: Project) => {
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.number}`;
     const promptArgs = { ISSUE_NUMBER: String(issue.number) };
+    const merge = mergedEarlier(issue.number, branch);
+    if (merge) {
+      return { issue: issue.number, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
+    }
 
     releaseBranchWorktree(branch);
     const sandbox = await createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) });
@@ -223,6 +243,7 @@ export const burndown = async (project: Project) => {
         reviewCommits,
         repairs,
         gates: gated.gates,
+        head: sh("git", ["rev-parse", branch]),
       };
     } finally {
       unlockWorktree(sandbox.worktreePath);
@@ -273,14 +294,43 @@ export const burndown = async (project: Project) => {
   // -------------------------------------------------------------------------
 
   assertGitUnchanged(project, fingerprint, "before landing");
-  const green = results.flatMap((r) => (r.status === "fulfilled" && r.value.status === "shipped" ? [r.value] : []));
+  const green = results.flatMap((r) =>
+    r.status === "fulfilled" && (r.value.status === "shipped" || r.value.status === "merged-earlier") ? [r.value] : [],
+  );
   const gateNames = project.gates.map((g) => g.name).join(", ");
   const merged: number[] = [];
   const conflicted: number[] = [];
   const heldBack: { issue: number; paths: string[] }[] = [];
   const failedToLand: { issue: number; reason: string }[] = [];
+  const skipped: { issue: number; reason: string }[] = [];
+  const closedEarlier: number[] = [];
 
   for (const o of green) {
+    // The issue can change during a long run: closed by hand, or sent to a
+    // human. Merging then would land work nobody still wants.
+    const now = JSON.parse(sh("gh", ["issue", "view", String(o.issue), "--json", "state,labels"])) as {
+      state: string;
+      labels: { name: string }[];
+    };
+    if (now.state !== "OPEN" || now.labels.some((l) => l.name === "needs-human")) {
+      skipped.push({ issue: o.issue, reason: now.state !== "OPEN" ? `issue is ${now.state.toLowerCase()}` : "labelled needs-human" });
+      continue;
+    }
+    if (o.status === "merged-earlier") {
+      if (DRY_RUN) {
+        console.log(`[dry run] would close #${o.issue} - merged by an earlier run (${o.head})`);
+        continue;
+      }
+      sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
+      sh("gh", ["issue", "close", String(o.issue), "--comment", `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`]);
+      closedEarlier.push(o.issue);
+      continue;
+    }
+    // The gates vouched for one commit. Anything added after it is ungated.
+    if (sh("git", ["rev-parse", o.branch]) !== o.head) {
+      skipped.push({ issue: o.issue, reason: `${o.branch} moved after its gates passed` });
+      continue;
+    }
     const touched = protectedChanges(project, o.branch);
     if (touched.length) {
       heldBack.push({ issue: o.issue, paths: touched });
@@ -375,9 +425,11 @@ export const burndown = async (project: Project) => {
     console.log(`  #${o.issue} ${o.status.padEnd(11)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${g}  ${o.branch}`);
   }
   console.log(`\nmerged & closed: ${merged.join(", ") || "none"}`);
+  if (closedEarlier.length) console.log(`closed, merged by an earlier run: ${closedEarlier.join(", ")}`);
   if (conflicted.length) console.log(`merge conflicts: ${conflicted.join(", ")}`);
   for (const h of heldBack) console.log(`held for a human merge: #${h.issue} - changes ${h.paths.join(", ")}`);
   for (const f of failedToLand) console.log(`gated green but failed to land: #${f.issue} - ${f.reason}`);
+  for (const k of skipped) console.log(`gated green but not merged: #${k.issue} - ${k.reason}`);
   if (verify) {
     const ok = verify.every((g) => g.pass);
     console.log(
