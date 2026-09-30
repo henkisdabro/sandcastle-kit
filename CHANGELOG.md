@@ -38,6 +38,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   refuses two tickets that map to one id, and posts every agent's `<report>` (implementer,
   reviewer, repair) on tickets that did not land as well as on those that did.
 - A ticket moved to another `Status:` during a run is no longer merged and closed.
+- The status view widens its ISSUE column to the longest ticket id shown (up to 16), so ids like
+  `helpers-01` no longer push the other columns out of line.
 - `LINEAR_API_KEY` is read from the user-level credentials file only. A project's
   `.sandcastle/.env` is forwarded into every container by Sandcastle itself, so `credentials()`
   and `sandcastle doctor` now refuse the key there.

@@ -321,6 +321,14 @@ render() {
   issues=$(ls logs/agent-issue-*.log 2>/dev/null \
     | log_ids | sort -u)
 
+  # The ISSUE column fits the longest ticket shown ("helpers-01" is longer than
+  # "#1086"), up to 16; the row for a longer one is cut to it.
+  local id d longest=6
+  for id in $issues $QUEUE; do d=$(disp "$id"); [ "${#d}" -gt "$longest" ] && longest=${#d}; done
+  W_ISSUE=$(( longest > 16 ? 16 : longest ))
+  W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 8 ))
+  w_act=$(( cols - W_FIXED ))
+
   # Queued issues with no log yet get a row of their own.
   for q in $QUEUE; do
     grep -qx "$q" <<<"$issues" && continue
@@ -340,7 +348,7 @@ render() {
       else qtext="not in this run"; fi
     fi
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
-      "$head" "$(pad "$(disp "$q")" $W_ISSUE)" "$off" \
+      "$head" "$(pad "$(disp "$q" | cut -c1-"$W_ISSUE")" $W_ISSUE)" "$off" \
       "$blu" "$qglyph" "$(pad "$qstate" $W_STATE)" "$off" \
       "$gry" "$(pad - $W_AGE)" "$off" \
       "$gry" "$(pad - $W_COMMITS)" "$off" \
@@ -477,7 +485,7 @@ render() {
     legacy_id "$n" && [ "$n" != "${n%%-*}" ] && activity=$(printf '[%s] %s' "${n#*-}" "$activity" | cut -c1-"$w_act")
 
     rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s %s%s%s' \
-      "$head" "$(pad "$(disp "$n")" $W_ISSUE)" "$off" \
+      "$head" "$(pad "$(disp "$n" | cut -c1-"$W_ISSUE")" $W_ISSUE)" "$off" \
       "$colour" "$glyph" "$(pad "$state" $W_STATE)" "$off" \
       "$head" "$(pad "$age" $W_AGE)" "$off" \
       "$head" "$(pad "$commits" $W_COMMITS)" "$off" \
