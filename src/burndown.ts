@@ -97,18 +97,19 @@ export const burndown = async (project: Project) => {
   // in this same run, which cannot be on base before landing, so the
   // dependent would branch without it. The next run picks it up. A
   // dependency that cannot be read counts as open: guessing wrong there
-  // starts work on a missing foundation.
+  // starts work on a missing foundation. The issues API also answers for a
+  // pull request (`closed` once merged), where `gh issue view` does not.
   const depState = new Map<number, string>();
   const openDependencies = (issue: Issue) =>
     [...new Set([...(issue.body ?? "").matchAll(DEPENDENCY)].map((m) => Number(m[1])))].filter((d) => {
       if (!depState.has(d)) {
         try {
-          depState.set(d, JSON.parse(sh("gh", ["issue", "view", String(d), "--json", "state"])).state);
+          depState.set(d, sh("gh", ["api", `repos/{owner}/{repo}/issues/${d}`, "--jq", ".state"]));
         } catch {
-          depState.set(d, "UNREADABLE");
+          depState.set(d, "unreadable");
         }
       }
-      return depState.get(d) !== "CLOSED";
+      return depState.get(d) !== "closed";
     });
   const waiting = queued.flatMap((i) => {
     const on = openDependencies(i);
@@ -205,14 +206,21 @@ export const burndown = async (project: Project) => {
   // issue queued with its work already on base. Re-running it finds nothing
   // to do and reports `nochange`, so the issue would stay open for good. Our
   // own merge message finds it instead - unless someone reopened the issue
-  // since, which asks for more work, not for a close.
+  // after that merge, which asks for more work, not for a close. Any doubt
+  // (gh unreachable) means a normal run, which is what happened before.
   const mergedEarlier = (issue: number, branch: string) => {
-    const merge = sh("git", ["log", base, "-1", "--format=%h", "--fixed-strings", `--grep=Merge ${branch} (closes #${issue})`]);
-    if (!merge) return undefined;
-    const reopened = sh("gh", [
-      "api", "--paginate", `repos/{owner}/{repo}/issues/${issue}/events`, "--jq", '.[] | select(.event == "reopened") | .id',
-    ]);
-    return reopened ? undefined : merge;
+    const found = sh("git", ["log", base, "-1", "--format=%h %cI", "--fixed-strings", `--grep=Merge ${branch} (closes #${issue})`]);
+    if (!found) return undefined;
+    const [merge, mergedAt] = found.split(" ");
+    try {
+      const reopens = sh("gh", [
+        "api", "--paginate", `repos/{owner}/{repo}/issues/${issue}/events`, "--jq", '.[] | select(.event == "reopened") | .created_at',
+      ]);
+      const reopenedSince = reopens.split("\n").some((t) => t && Date.parse(t) > Date.parse(mergedAt));
+      return reopenedSince ? undefined : merge;
+    } catch {
+      return undefined;
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -295,7 +303,10 @@ export const burndown = async (project: Project) => {
         const failure = red;
         repairs++;
         console.log(`#${issue.number}: ${failure.name} red - repair pass ${repairs}`);
-        await timed(issue.number, "repair", () =>
+        // A repair that dies (idle timeout, agent exit) leaves the branch red,
+        // not the issue crashed: the gate results stay in the report. A spent
+        // allowance still has to stop the queue, so that one is rethrown.
+        const fixed = await timed(issue.number, "repair", () =>
           sandbox.run({
             name: `repair-${issue.number}`,
             agent: implAgent(),
@@ -309,7 +320,15 @@ export const burndown = async (project: Project) => {
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
           }),
+        ).then(
+          () => true,
+          (error) => {
+            if (hitLimit(issue.number)) throw error;
+            console.log(`#${issue.number}: repair pass failed (${String(error).slice(0, 120)}); leaving the branch red.`);
+            return false;
+          },
         );
+        if (!fixed) break;
         gated = await timed(issue.number, "gates", () => runGates(sandbox, `#${issue.number} gates`));
       }
 
@@ -395,23 +414,29 @@ export const burndown = async (project: Project) => {
 
   for (const o of green) {
     // The issue can change during a long run: closed by hand, or sent to a
-    // human. Merging then would land work nobody still wants.
-    const now = JSON.parse(sh("gh", ["issue", "view", String(o.issue), "--json", "state,labels"])) as {
-      state: string;
-      labels: { name: string }[];
-    };
-    if (now.state !== "OPEN" || now.labels.some((l) => l.name === "needs-human")) {
-      skipped.push({ issue: o.issue, reason: now.state !== "OPEN" ? `issue is ${now.state.toLowerCase()}` : "labelled needs-human" });
-      continue;
-    }
-    if (o.status === "merged-earlier") {
-      if (DRY_RUN) {
-        console.log(`[dry run] would close #${o.issue} - merged by an earlier run (${o.head})`);
+    // human. Merging then would land work nobody still wants. A gh error here
+    // costs this issue, never the landing of every green branch after it.
+    try {
+      const now = JSON.parse(sh("gh", ["issue", "view", String(o.issue), "--json", "state,labels"])) as {
+        state: string;
+        labels: { name: string }[];
+      };
+      if (now.state !== "OPEN" || now.labels.some((l) => l.name === "needs-human")) {
+        skipped.push({ issue: o.issue, reason: now.state !== "OPEN" ? `issue is ${now.state.toLowerCase()}` : "labelled needs-human" });
         continue;
       }
-      sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
-      sh("gh", ["issue", "close", String(o.issue), "--comment", `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`]);
-      closedEarlier.push(o.issue);
+      if (o.status === "merged-earlier") {
+        if (DRY_RUN) {
+          console.log(`[dry run] would close #${o.issue} - merged by an earlier run (${o.head})`);
+          continue;
+        }
+        sh("gh", ["issue", "close", String(o.issue), "--comment", `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`]);
+        sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
+        closedEarlier.push(o.issue);
+        continue;
+      }
+    } catch (error) {
+      failedToLand.push({ issue: o.issue, reason: String(error).slice(0, 200) });
       continue;
     }
     // The gates vouched for one commit. Anything added after it is ungated.
@@ -441,17 +466,22 @@ export const burndown = async (project: Project) => {
       // --no-verify: a pre-commit hook re-running what the gates covered only
       // adds a way for a green branch to fail to land. (Hooks are off for the
       // whole host process anyway - see guard.ts.)
-      sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${o.branch} (closes #${o.issue})`, o.branch]);
+      // The commit the gates passed on, not whatever the branch names now.
+      sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${o.branch} (closes #${o.issue})`, o.head!]);
       merged.push(o.issue);
-      // A closed issue must leave the queue too, or it lingers as work that
-      // is still waiting for an agent.
-      sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
+      // Close before unlabelling: a run that dies between the two leaves a
+      // closed issue with a stale label (harmless - the queue lists open
+      // issues only), where the other order left an open, unlabelled,
+      // merged issue that no later run would ever list again.
       sh("gh", [
         "issue", "close", String(o.issue), "--comment",
         `Shipped by the Sandcastle loop on \`${o.branch}\` (${o.commits} commit(s)` +
           (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
           `); ${gateNames} all green before merge.`,
       ]);
+      // A closed issue must leave the queue too, or it lingers as work that
+      // is still waiting for an agent.
+      sh("gh", ["issue", "edit", String(o.issue), "--remove-label", project.label]);
     } catch (error) {
       // A real conflict and a merge that failed for another reason (a hook, a
       // gh API error) are reported apart - calling both "conflict" sent us

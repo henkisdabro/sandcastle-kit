@@ -195,9 +195,10 @@ export const openStatusPane = (project: Project) => {
       if (!running) herdr(["pane", "run", previous, "sandcastle status"]);
       return;
     } catch (error) {
-      // Forget only a pane that is really gone; a transient herdr error must
-      // not lose a live pane's id and open a second view next run.
-      if (/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) unlinkSync(record);
+      // Replace only a pane that is really gone. After a transient herdr
+      // error the pane may be alive: opening another would show two views.
+      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return;
+      unlinkSync(record);
     }
   }
   try {

@@ -35,7 +35,12 @@ const node = (root: string): Stack | undefined => {
     : has("bun.lock") || has("bun.lockb") ? "bun"
     : has("package-lock.json") ? "npm"
     : (pkg.packageManager?.split("@")[0] ?? "npm");
-  const install = { pnpm: "pnpm install --frozen-lockfile", yarn: "yarn install --immutable", bun: "bun install --frozen-lockfile", npm: "npm ci" }[pm] ?? `${pm} install`;
+  // A frozen install needs a lockfile to be frozen against; Yarn 1 spells
+  // it --frozen-lockfile, Yarn Berry (`__metadata:` in yarn.lock) --immutable.
+  const locked = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "package-lock.json"].some(has);
+  const berry = has("yarn.lock") && readFileSync(join(root, "yarn.lock"), "utf8").includes("__metadata:");
+  const frozen = { pnpm: "pnpm install --frozen-lockfile", yarn: berry ? "yarn install --immutable" : "yarn install --frozen-lockfile", bun: "bun install --frozen-lockfile", npm: "npm ci" }[pm];
+  const install = (locked && frozen) || `${pm} install`;
   const scripts = pkg.scripts ?? {};
   // npm init's placeholder test script fails by design; it is not a gate.
   const real = (name: string) => scripts[name] !== undefined && !/no test specified/.test(scripts[name]);
