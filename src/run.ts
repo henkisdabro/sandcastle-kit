@@ -170,7 +170,12 @@ export const archiveFinishedLogs = (project: Project) => {
 // .sandcastle/logs/status-pane; a closed pane is simply replaced.
 // ---------------------------------------------------------------------------
 
-const herdr = (args: string[]) => JSON.parse(sh("herdr", args));
+// stderr is captured, not inherited: a closed pane makes herdr print
+// `{"error":{"code":"pane_not_found",...}}` there, which leaked into the run's
+// output although the catch below already handles it.
+const herdr = (args: string[]) =>
+  execFileSync("herdr", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const herdrJson = (args: string[]) => JSON.parse(herdr(args));
 
 export const openStatusPane = (project: Project) => {
   if (process.env.HERDR_ENV !== "1") {
@@ -181,23 +186,25 @@ export const openStatusPane = (project: Project) => {
   const previous = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
   if (previous) {
     try {
-      const info = herdr(["pane", "process-info", "--pane", previous]).result.process_info;
+      const info = herdrJson(["pane", "process-info", "--pane", previous]).result.process_info;
       const running = (info.foreground_processes as { cmdline: string }[]).some((p) => p.cmdline.includes("status.sh"));
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
-      if (!running) sh("herdr", ["pane", "run", previous, "sandcastle status"]);
+      if (!running) herdr(["pane", "run", previous, "sandcastle status"]);
       return;
-    } catch {
-      /* closed - open a new one */
+    } catch (error) {
+      // Forget only a pane that is really gone; a transient herdr error must
+      // not lose a live pane's id and open a second view next run.
+      if (/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) unlinkSync(record);
     }
   }
   try {
     const wide = (process.stdout.columns ?? 0) >= 160;
-    const pane = herdr([
+    const pane = herdrJson([
       "pane", "split", "--current", "--direction", wide ? "right" : "down",
       "--cwd", project.root, "--no-focus",
     ]).result.pane.pane_id as string;
-    sh("herdr", ["pane", "rename", pane, `sandcastle ${project.name}`]);
-    sh("herdr", ["pane", "run", pane, "sandcastle status"]);
+    herdr(["pane", "rename", pane, `sandcastle ${project.name}`]);
+    herdr(["pane", "run", pane, "sandcastle status"]);
     writeFileSync(record, pane + "\n");
   } catch (error) {
     // A status view is a convenience; it never stops a run.
