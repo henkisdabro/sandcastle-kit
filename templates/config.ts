@@ -7,21 +7,7 @@ export default {
   // label: "ready-for-agent",
   // concurrency: 4,
 
-  // Project image layer on top of sandcastle-base (toolchains, browsers, pinned
-  // package manager). Omit to run on the base image.
-  // dockerfile: ".sandcastle/Dockerfile",
-
-  // Mount the host pnpm store so each sandbox's install hardlinks instead of
-  // downloading. `pnpm store path` prints yours: ~/Library/pnpm/store/v11 on
-  // macOS, ~/.local/share/pnpm/store/v11 on Linux.
-  mounts: [{ hostPath: "~/Library/pnpm/store/v11", sandboxPath: "/home/agent/.pnpm-store" }],
-  setup: ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"],
-
-  gates: [
-    { name: "lint", command: "pnpm run lint" },
-    { name: "build", command: "pnpm run build" },
-    { name: "test", command: "pnpm test" },
-  ],
+  // {{KIT_STACK}}
 
   rules: ".sandcastle/rules.md",
 

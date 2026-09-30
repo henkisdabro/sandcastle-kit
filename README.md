@@ -182,6 +182,11 @@ From the project's root, on its base branch:
 sandcastle init      # writes .sandcastle/config.ts, rules.md, .gitignore; prints the lean check
 ```
 
+`init` reads the stack from the repo root - `package.json` (with its lockfile and scripts),
+`pyproject.toml` + `uv.lock`, `go.mod` or `Cargo.toml` - and fills in the gates and setup from it.
+Where the base image lacks the toolchain (uv, Go, Rust, Bun) it also writes
+`.sandcastle/Dockerfile`. Treat what it writes as a starting point.
+
 Then edit, in this order:
 
 1. **`.sandcastle/config.ts`** - `gates` (the commands CI runs: lint, typecheck, build, test),
@@ -257,7 +262,7 @@ with it.
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
 | `sandcastle doctor` | Checks machine and project setup; prints the fix for each problem | ➖ no |
-| `sandcastle init` | Scaffolds `.sandcastle/` in the current project, then the lean check | ➖ no |
+| `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
