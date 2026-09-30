@@ -13,8 +13,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 Initial public release: an opinionated issue-burndown kit on
 [Sandcastle](https://github.com/mattpocock/sandcastle). The v0.1.0 tag was first cut earlier the
-same day and moved, twice, to include everything below - last after a dry-run audit of the
-operator view.
+same day and moved, three times, to include everything below - last after a second dry-run
+audit, which found the token accounting empty and the status view clipping in narrow panes.
 
 ### Upgrading
 
@@ -134,6 +134,11 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   not as that gate being red.
 - The skill's `run` action creates a dedicated, named tab for the run, confirms the status view
   exists and says so plainly if not, and reads the dry-run check and token lines in the report.
+- The reviewer no longer runs the full gates when it commits nothing: the orchestrator runs every
+  gate right after the review, so a clean review's own run repeated minutes of tests for nothing.
+- Each gate's run time is recorded (`gates` in the gates row of `timings.jsonl`), and the base
+  check prints the gates slowest first - where to look when sandboxes take long.
+- `SANDCASTLE_TEST_RED_GATE=1` says at the start what it costs per issue.
 
 ### Fixed
 
@@ -163,6 +168,20 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
   gate line.
 - A run stopped with Ctrl-C left its worktrees locked, so the `git worktree remove --force` it
   printed failed. Every lock is released on exit.
+- **Token accounting was empty**: no `timings.jsonl` row carried `tokens` and the report had no
+  token figures. With session capture off, Sandcastle reports no usage for Claude; the kit now reads
+  what each `claude -p` process spent from its stream's closing `result` line (per model, so
+  subagents count).
+- The status view in a narrow or short pane: every line is cut to the pane's width with an
+  ellipsis, and the header's counts move to a line of their own (zeros dropped) rather than being
+  clipped mid-word. A resize redraws at once, even when it lands mid-render, instead of showing the
+  old frame's tail for up to one refresh. Blocked issues are counted and summarised as blocked, not
+  queued.
+- A working row's STATE is the orchestrator's phase, so a branch being gated reads `gates`, not the
+  last agent's name, and its AGE is the time in that phase, not the seconds since the log's last
+  line.
+- `herdr-pane-N.log` links are removed when their pane closes and when a run starts, instead of
+  dangling at archived logs.
 
 [Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/henkisdabro/sandcastle-kit/releases/tag/v0.1.0

@@ -18,7 +18,7 @@ import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, unlockWorktree } from "./worktree-lock.ts";
 
-export type Gate = { name: string; pass: boolean };
+export type Gate = { name: string; pass: boolean; ms?: number };
 type Failure = { name: string; command: string; exitCode: number; output: string };
 export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[] };
 
@@ -37,8 +37,9 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     for (const g of project.gates) {
+      const since = Date.now();
       const r = await execGate(sandbox, g.command);
-      gates.push({ name: g.name, pass: r.exitCode === 0 });
+      gates.push({ name: g.name, pass: r.exitCode === 0, ms: Date.now() - since });
       if (r.exitCode === 0) continue;
       const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
       failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
@@ -137,6 +138,17 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : "FAIL"}`).join(" ");
 
+// Where gate time goes, per gate. A slow gate runs on every branch, its
+// repair passes and the base check, so it is the first place to look when
+// sandboxes take long - and the one test runner is usually most of it.
+export const gateMs = (result: unknown): Record<string, number> | undefined => {
+  const gates = (result as { gates?: Gate[] } | undefined)?.gates;
+  const timed = (Array.isArray(gates) ? gates : []).filter((g) => typeof g.ms === "number");
+  return timed.length ? Object.fromEntries(timed.map((g) => [g.name, g.ms!])) : undefined;
+};
+const gateTimeLine = (gates: Gate[]) =>
+  [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${Math.round(g.ms! / 1000)}s`).join(", ");
+
 // A green result holds for as long as nothing it depended on changes: the
 // base commit, the image, and the config that shapes a sandbox.
 const baseKey = (project: Project, image: string, planFile: string) =>
@@ -171,6 +183,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
   const run = await gateBase(project, image, planFile, "base-gates", true);
   console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
+  console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   const redHooks = run.hookTests.filter((t) => !t.pass);
   if (!run.failures.length && !redHooks.length) {

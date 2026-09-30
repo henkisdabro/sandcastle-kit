@@ -65,7 +65,53 @@ configureModels();
 // Session capture is off: Sandcastle would otherwise copy every sandbox
 // transcript into the host's ~/.claude/projects/, where it shows up in
 // `claude --resume`. The .sandcastle/logs stream is the record.
-const claude = (model: string, effort: Effort) => claudeCode(model, { effort, captureSessions: false });
+//
+// With capture off Sandcastle reports no usage for Claude at all: it reads it
+// only from the captured session, and then only the last message's (the
+// context size, not the spend). Every pass would go unmeasured. The stream's
+// closing `result` line carries what the whole `claude -p` process spent,
+// per model in `modelUsage` (subagents included), so it is read from there.
+const claude = (model: string, effort: Effort) => {
+  const provider = claudeCode(model, { effort, captureSessions: false });
+  return {
+    ...provider,
+    parseStreamLine(line: string) {
+      const events = provider.parseStreamLine(line);
+      const usage = line.includes('"type":"result"') ? resultUsage(line) : undefined;
+      return usage ? [...events, { type: "usage" as const, usage }] : events;
+    },
+  };
+};
+
+type Usage = { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; output_tokens?: number };
+type ModelUsage = { inputTokens?: number; cacheCreationInputTokens?: number; cacheReadInputTokens?: number; outputTokens?: number };
+
+const resultUsage = (line: string) => {
+  try {
+    const r = JSON.parse(line) as { type?: string; usage?: Usage; modelUsage?: Record<string, ModelUsage> };
+    if (r.type !== "result") return undefined;
+    const models = Object.values(r.modelUsage ?? {});
+    if (models.length) {
+      const sum = (k: keyof ModelUsage) => models.reduce((n, m) => n + (m[k] ?? 0), 0);
+      return {
+        inputTokens: sum("inputTokens"),
+        cacheCreationInputTokens: sum("cacheCreationInputTokens"),
+        cacheReadInputTokens: sum("cacheReadInputTokens"),
+        outputTokens: sum("outputTokens"),
+      };
+    }
+    const u = r.usage;
+    if (!u) return undefined;
+    return {
+      inputTokens: u.input_tokens ?? 0,
+      cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+      outputTokens: u.output_tokens ?? 0,
+    };
+  } catch {
+    return undefined;
+  }
+};
 
 export const implAgent = () => claude(IMPL_MODEL, IMPL_EFFORT);
 

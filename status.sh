@@ -52,6 +52,26 @@ hot=$'\e[38;5;209m'       # a container working hard
 # field because bash printf pads by bytes and they are multi-byte.
 pad() { printf '%-*s' "$2" "$1"; }
 
+# Visible width, and a cut to a width, of a string holding colour codes. The
+# terminal's own clipping (line wrap is off) cut the header mid-word in a
+# narrow pane; this cuts at the width with an ellipsis instead. Pure bash, as
+# neither macOS awk nor mawk counts multi-byte characters.
+shopt -s extglob
+ESC=$'\e'
+vis() { local p="${1//${ESC}\[*([0-9;])m/}"; printf '%s' "${#p}"; }
+fit() {
+  local s="$1" w="$2" out="" n=0 esc
+  if [ "$(vis "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
+  while [ -n "$s" ] && [ "$n" -lt $(( w - 1 )) ]; do
+    if [ "${s:0:1}" = "$ESC" ]; then
+      esc="${s%%m*}m"; out="${out}${esc}"; s="${s:${#esc}}"
+    else
+      out="${out}${s:0:1}"; s="${s:1}"; n=$((n+1))
+    fi
+  done
+  printf '%s…%s' "$out" "$off"
+}
+
 # The one place the widths are declared. ACTIVITY takes whatever is left.
 W_ISSUE=6; W_STATE=10; W_AGE=5; W_COMMITS=7; W_CPU=6; W_MEM=7
 W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 8 ))
@@ -191,9 +211,11 @@ pool_line() {
 
 # Whether the recorded run is alive (RUN_LIVE=1), and while it is, the issues
 # it covers and its "issue|#dep, #dep" lines from run.json's `waiting`.
-WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""
+# ACTIVE holds "issue|phase|since-epoch" for each issue the run is working on
+# now: gates write no log, so only the orchestrator knows a row is gating.
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
 load_waiting() {
-  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|outcome" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover.
@@ -205,7 +227,17 @@ load_waiting() {
   RUN_LIVE=1
   RUN_ISSUES=$(jq -r '(.issues // [])[]' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | "#\(.)"] | join(", "))"' "$f" 2>/dev/null)
+  ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
   return 0
+}
+# "phase|since" for an issue the live run is working on, or empty.
+active_of() { printf '%s\n' "$ACTIVE" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3; exit}'; }
+
+# Seconds as the AGE column shows them.
+ago() {
+  if   [ "$1" -lt 60 ]; then printf '%ss' "$1"
+  elif [ "$1" -lt 3600 ]; then printf '%sm' "$(( $1 / 60 ))"
+  else printf '%sh' "$(( $1 / 3600 ))"; fi
 }
 # A merged issue that is open and labelled again was re-queued after its
 # merge - or it only looks that way: landing merges before it closes the
@@ -264,7 +296,7 @@ render() {
   local now issues n phase log age commits state glyph colour activity activity_note rendered
   local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden
   local c_work=0 c_stand=0 c_merged=0 c_idle=0 c_queue=0 c_left=0 mtime q quiet act_col on qstate qglyph qtext live_wt kept_wt models
-  local grp qsort oc oc_run oc_text hidden_list group summary
+  local grp qsort oc oc_run oc_text hidden_list group summary c_block=0 act since title counts overhead
   local -a out=()
   local n_out=0
 
@@ -272,10 +304,10 @@ render() {
   # tput falls back to 80x24. The loop reads the real size from /dev/tty.
   cols="${TERM_COLS:-${COLUMNS:-}}"
   [[ "$cols" =~ ^[0-9]+$ ]] || cols=$(tput cols 2>/dev/null || echo 100)
-  [ "$cols" -lt 60 ] && cols=60
   rows="${TERM_ROWS:-}"
   [[ "$rows" =~ ^[0-9]+$ ]] || rows=$(tput lines 2>/dev/null || echo 40)
   w_act=$(( cols - W_FIXED ))
+  [ "$w_act" -lt 8 ] && w_act=8
 
   now=$(date +%H:%M:%S)
   load_container_stats
@@ -297,6 +329,9 @@ render() {
     on=$(blocked_on "$q")
     if [ -n "$on" ]; then
       qstate="blocked"; qglyph="◌"; qtext="waiting for $on to close"; qsort=0
+    elif [ "$RUN_LIVE" = 1 ] && [ -n "$(active_of "$q")" ]; then
+      # Claimed, before its first agent log: the sandbox is being set up.
+      qstate="queued"; qglyph="○"; qtext="in this run - setting up its sandbox"; qsort=1
     else
       # Only the live run's own issues wait for a sandbox. The rest of the
       # label reads as in flight otherwise, long after the run has ended.
@@ -312,9 +347,12 @@ render() {
       "$gry" "$(pad - $W_COMMITS)" "$off" \
       "$gry" "$(pad - $W_CPU)" "$off" \
       "$gry" "$(pad - $W_MEM)" "$off" \
-      "$mute" "$qtext" "$off")
+      "$mute" "$(printf '%s' "$qtext" | cut -c1-"$w_act")" "$off")
     # This run's issues sort ahead of the rest of the queue (the mtime key).
-    out[n_out]="2	$qsort	$q	queued	$rendered"; n_out=$((n_out+1)); c_queue=$((c_queue+1))
+    # A blocked row is its own group, so the overflow line does not count it
+    # as queued.
+    out[n_out]="2	$qsort	$q	$qstate	$rendered"; n_out=$((n_out+1))
+    if [ "$qstate" = blocked ]; then c_block=$((c_block+1)); else c_queue=$((c_queue+1)); fi
   done
 
   for n in $issues; do
@@ -323,10 +361,16 @@ render() {
     case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
-    age=$(( $(date +%s) - mtime ))
-    if   [ "$age" -lt 60 ]; then age="${age}s"
-    elif [ "$age" -lt 3600 ]; then age="$((age/60))m"
-    else age="$((age/3600))h"; fi
+    # AGE is how long a working row has been at its phase, from the run's own
+    # record; any other row's is how long since its log last changed.
+    act=""; [ "$RUN_LIVE" = 1 ] && act=$(active_of "$n")
+    if [ -n "$act" ]; then
+      phase="${act%%|*}"; since="${act#*|}"
+      case "$phase" in implement) phase="impl";; cross-review) phase="codex";; esac
+      age=$(ago $(( $(date +%s) - since )))
+    else
+      age=$(ago $(( $(date +%s) - mtime )))
+    fi
 
     commits=$(git rev-list --count "${BASE}..agent/issue-$n" 2>/dev/null || echo 0)
 
@@ -385,7 +429,7 @@ render() {
       [ "$commits" -gt 0 ] && activity_note="$activity_note - on its earlier branch ($commits commit(s))"
       on=$(blocked_on "$n")
       if [ -n "$on" ]; then
-        state="blocked"; glyph='◌'
+        state="blocked"; glyph='◌'; grp=blocked; c_queue=$((c_queue-1)); c_block=$((c_block+1))
         activity_note="waiting for $on to close"
       fi
     fi
@@ -444,8 +488,25 @@ render() {
     out[n_out]="$prio	$mtime	$n	$grp	$rendered"; n_out=$((n_out+1))
   done
 
+  title=" ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}"
+  counts="${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off}$([ "$c_block" -gt 0 ] && printf ' · %s%s blocked%s' "$blu" "$c_block" "$off") · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}$([ "$c_left" -gt 0 ] && printf ' · %s%s left over%s' "$gry" "$c_left" "$off")  ${rule}│${off}  ${accent}${now}${off}"
   printf '%s\n' "$line"
-  printf '%s\n' " ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${ylw}${c_work} working${off} · ${cyn}${c_stand} waiting${off} · ${blu}${c_queue} queued${off} · ${grn}${c_merged} done${off} · ${gry}${c_idle} idle${off}$([ "$c_left" -gt 0 ] && printf ' · %s%s left over%s' "$gry" "$c_left" "$off")  ${rule}│${off}  ${accent}${now}${off}"
+  # One line when it fits; in a narrow pane the counts get a line of their
+  # own rather than being cut off - they are what the header is for.
+  overhead=10
+  if [ $(( $(vis "$title") + 5 + $(vis "$counts") )) -le "$cols" ]; then
+    printf '%s\n' "${title}  ${rule}│${off}  ${counts}"
+  else
+    # Only the counts that are not zero, which is what fits in a narrow pane.
+    counts="${ylw}${c_work} working${off}"
+    [ "$c_stand" -gt 0 ] && counts="${counts} · ${cyn}${c_stand} waiting${off}"
+    [ "$c_queue" -gt 0 ] && counts="${counts} · ${blu}${c_queue} queued${off}"
+    [ "$c_block" -gt 0 ] && counts="${counts} · ${blu}${c_block} blocked${off}"
+    [ "$c_merged" -gt 0 ] && counts="${counts} · ${grn}${c_merged} done${off}"
+    [ "$c_idle" -gt 0 ] && counts="${counts} · ${gry}${c_idle} idle${off}"
+    [ "$c_left" -gt 0 ] && counts="${counts} · ${gry}${c_left} left over${off}"
+    printf '%s\n' "$title" " ${counts}  ${rule}│${off}  ${accent}${now}${off}"; overhead=11
+  fi
   # Label, then a dim pipe, then the value: the label column reads as the
   # row's title at a glance.
   printf '%s\n' " $(label run)$(run_line)"
@@ -464,9 +525,9 @@ render() {
     # group the most recent log first. The merged and idle tail is what makes
     # the list outgrow the screen, so it gets cut, oldest first.
     # Frame overhead is 10 rows: rule, title, run, models, machine, rule,
-    # headings, rule, legend, note. Every other row is a table row, and the
+    # headings, rule, legend, note - 11 when the title line splits. Every other row is a table row, and the
     # "+N hidden" line only takes one when something is actually hidden.
-    budget=$(( rows - 10 )); shown=0; hidden=0; hidden_list=""
+    budget=$(( rows - overhead )); shown=0; hidden=0; hidden_list=""
     [ "$SHOW_ALL" = "all" ] && budget="$n_out"
     [ "$budget" -lt 3 ] && budget=3
     [ "$n_out" -gt "$budget" ] && budget=$(( budget - 1 ))
@@ -486,13 +547,13 @@ render() {
           c[$1]++; if ($2+0 < lo[$1]+0) lo[$1]=$2; if ($2+0 > hi[$1]+0) hi[$1]=$2 }
         END { for (i=1; i<=k; i++) { g=order[i]
           printf "%s%d %s (#%s%s)", (i>1 ? " · " : ""), c[g], g, lo[g], (hi[g]!=lo[g] ? "-#" hi[g] : "") } }')
-      printf '%s\n' " ${gry}+${summary} - not shown, to fit the pane${off}"
+      printf '%s\n' " ${gry}+${summary} not shown${off}"
     fi
   fi
 
   printf '%s\n' "$line"
   printf '%s\n' " ${ylw}● working${off}  ${cyn}◆ waiting${off}  ${hot}! stalled${off}  ${blu}○ queued  ◌ blocked${off}  ${grn}✓ merged${off}  ${sea}✓ shipped (rebased)${off}  ${gry}◇ left over  · idle${off}"
-  printf '%s\n' " ${mute}◆ this run's branch, not merged (dry run, red gate, held) · age = since last log write · CPU in cores of ${NCPU}${off}"
+  printf '%s\n' " ${mute}◆ this run's branch, not merged (dry run, red gate, held) · age = time in phase while working, else since last log write · CPU in cores of ${NCPU}${off}"
 }
 
 if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
@@ -507,22 +568,34 @@ trap restore EXIT
 trap 'restore; exit 130' INT TERM
 printf '\e[?1049h\e[?25l\e[?7l\e[2J'
 
-# Redraw straight away on a pane resize instead of waiting out the interval.
-SLEEP_PID=""
-trap '[ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
+# Redraw on a pane resize instead of waiting out the interval. A render takes
+# seconds (docker stats, git), and a resize that lands during one used to be
+# lost: a shrunk pane then showed the old frame's tail, header scrolled off,
+# until the next refresh. So the resize is remembered, the last frame's top is
+# put back at the new height at once, and a fresh frame follows.
+SLEEP_PID=""; RESIZED=0; frame=""
+trap 'RESIZED=1; [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
 
 while true; do
   size=$(stty size </dev/tty 2>/dev/null)
   TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"
   export TERM_ROWS TERM_COLS
+  if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "$TERM_ROWS" =~ ^[0-9]+$ ]]; then
+    printf '\e[H%s\e[J' "$(printf '%s\n' "$frame" | head -n "$TERM_ROWS")"
+  fi
+  RESIZED=0
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be
   # blanked first - no flash, and no visible row-by-row repaint.
   # stderr is swallowed: a stray warning printed mid-frame lands wherever the
   # cursor happens to be and corrupts the screen.
-  frame=$(render 2>>"${STATUS_ERRLOG:-/dev/null}" | awk '{printf "%s\033[K\n", $0}')
+  frame=$(render 2>>"${STATUS_ERRLOG:-/dev/null}" | while IFS= read -r l; do
+    if [[ "$TERM_COLS" =~ ^[0-9]+$ ]]; then fit "$l" "$TERM_COLS"; else printf '%s' "$l"; fi
+    printf '\033[K\n'
+  done)
   printf '\e[H%s\e[J' "$frame"
+  [ "$RESIZED" = 1 ] && continue
   sleep "$INTERVAL" & SLEEP_PID=$!
   wait "$SLEEP_PID" 2>/dev/null
 done

@@ -23,7 +23,7 @@
 // or on any herdr error, it does nothing and the run carries on.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { KIT } from "./sandbox.ts";
@@ -141,6 +141,9 @@ export const openSandboxView = (project: Project, panes: number): SandboxView =>
     tab = created.result.tab.tab_id as string;
     statusPane = created.result.root_pane.pane_id as string;
   }
+  // Pane-log links left by an earlier run point at logs since archived, and
+  // one past this run's pane count would never be repointed.
+  for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
   const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.map((s) => s.pane) }) + "\n");
@@ -195,6 +198,7 @@ export const openSandboxView = (project: Project, panes: number): SandboxView =>
   // with the run - the outcomes are in the report and the status view.
   process.on("exit", () => {
     for (const s of slots) {
+      rmSync(link(s.pane), { force: true });
       try {
         herdr(["pane", "close", s.pane]);
       } catch {

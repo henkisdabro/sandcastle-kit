@@ -257,7 +257,8 @@ lays it out itself (below), and does not start if it cannot; elsewhere run `sand
 a second terminal. While agents work, the run prints a heartbeat line every five minutes, and the
 status view flags a sandbox whose log has been quiet for ten. Every step - image, preflight, base
 gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.jsonl`, with each
-agent pass's tokens; the report gives each issue's wall time and tokens. A dry run ends by
+agent pass's tokens and each gate's own time; the report gives each issue's wall time and tokens,
+and the base check prints its gates slowest first. A dry run ends by
 checking that its issues are unchanged on GitHub. Afterwards, push the base branch yourself when
 you are happy with it; `sandcastle clean` clears leftover worktrees and branches.
 

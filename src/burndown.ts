@@ -23,14 +23,14 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { type Gate, gateBase, gateLine, requireGreenBase, runGates as gatesIn } from "./gates.ts";
+import { type Gate, gateBase, gateLine, gateMs, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { usage, withSlot } from "./pool.ts";
 import {
   addTokens, archiveFinishedLogs, assertCleanBase, issueSnapshot, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
-  recordRun, renderPrompts, sessionTokens, type Tokens, tokenLine,
+  recordRun, renderPrompts, runTokens, type Tokens, tokenLine,
 } from "./run.ts";
 import { credentials, ensureImage, sandboxConfig, sh } from "./sandbox.ts";
 import { usageLine, usageStop } from "./usage.ts";
@@ -130,8 +130,12 @@ export const burndown = async (project: Project) => {
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) console.log(`  #${i.number} ${i.title}`);
   console.log(`Machine-wide: ${usage()}`);
-  if (TEST_RED_GATE) console.log("SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass.");
-  else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
+  if (TEST_RED_GATE) {
+    console.log(
+      "SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass. " +
+        "Each issue pays for a repair agent and another full gate run - a test switch, not for real runs.",
+    );
+  } else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
 
   // The run is on record and on screen before anything slow starts: a cold
   // image check, preflight and base gates took over three minutes with no
@@ -161,22 +165,41 @@ export const burndown = async (project: Project) => {
   const took = new Map<number, number>();
   const spent = new Map<number, Tokens>();
   const keptWorktrees: { issue: number; path: string }[] = [];
+  // Each issue's phase and its start go to run.json as well: the status view
+  // cannot tell a gate run from the review before it by the logs alone (a
+  // gate writes none), and a log's age is how long since its last line, not
+  // how long the issue has been at this step.
+  const publishActive = () =>
+    run.update({
+      active: Object.fromEntries(
+        [...active].filter(([n]) => n).map(([n, a]) => [n, { phase: a.phase, since: Math.floor(a.since / 1000) }]),
+      ),
+    });
   const timed = async <T>(issue: number, phase: string, fn: () => Promise<T> | T): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
-    if (issue) view.phase(issue, phase);
-    else run.update({ stage: phase });
+    if (issue) {
+      view.phase(issue, phase);
+      publishActive();
+    } else run.update({ stage: phase });
     let ok = false;
     let tokens: Tokens | undefined;
+    let gateTimes: Record<string, number> | undefined;
     try {
       const result = await fn();
       ok = true;
-      tokens = sessionTokens(result);
+      tokens = runTokens(result);
+      gateTimes = gateMs(result);
       if (tokens) spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
       return result;
     } finally {
       active.delete(issue);
-      const line = { ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok, ...(tokens ? { tokens } : {}) };
+      if (issue) publishActive();
+      const line = {
+        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok,
+        ...(tokens ? { tokens } : {}),
+        ...(gateTimes ? { gates: gateTimes } : {}),
+      };
       appendFileSync(timings, JSON.stringify(line) + "\n");
     }
   };

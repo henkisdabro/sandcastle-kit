@@ -54,9 +54,14 @@ Constraints:
 {{KIT_GATES}}
 ```
 
+The orchestrator runs every one of them on this branch as soon as you finish, and a red gate gets a
+repair pass. So run the tests and checks that cover what you are looking at or changing, as often as
+you need - but a full gate run of your own adds nothing when you commit nothing.
+
 # Finishing
 
-Make sure the gates pass and everything is committed, then output `<promise>COMPLETE</promise>`.
+If you committed a fix, make sure the gates it touches pass and everything is committed, then output
+`<promise>COMPLETE</promise>`.
 
 If you found nothing worth changing, commit nothing and output `<promise>COMPLETE</promise>`.
 A clean review with no commits is a perfectly good outcome and is what you should expect most of

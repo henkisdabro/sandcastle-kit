@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { IterationUsage } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
@@ -173,10 +174,9 @@ export const recordOutcomes = (project: Project, run: string, outcomes: Record<s
 };
 
 // ---------------------------------------------------------------------------
-// Tokens. Sandcastle copies each Claude Code session to the host; the sum of
-// its assistant messages' usage is what a pass really cost. (Its own
-// `usage` is the last message only - the context size, not the spend.) A
-// streamed message repeats its id, so each id is counted once.
+// Tokens. Each agent iteration reports what its process spent (agents.ts
+// reads Claude's from the stream's closing line; Codex reports its own), and
+// a pass is the sum of its iterations.
 // ---------------------------------------------------------------------------
 
 export type Tokens = { input: number; cacheWrite: number; cacheRead: number; output: number };
@@ -189,31 +189,13 @@ export const addTokens = (a: Tokens, b: Tokens): Tokens => ({
   output: a.output + b.output,
 });
 
-export const sessionTokens = (result: unknown): Tokens | undefined => {
-  const iterations = (result as { iterations?: { sessionFilePath?: string }[] } | undefined)?.iterations;
-  const files = (Array.isArray(iterations) ? iterations : []).map((i) => i.sessionFilePath).filter((f): f is string => !!f && existsSync(f));
-  if (!files.length) return undefined;
-  const seen = new Map<string, Tokens>();
-  let anon = 0;
-  for (const f of files) {
-    for (const line of readFileSync(f, "utf8").split("\n")) {
-      if (!line.includes('"usage"')) continue;
-      try {
-        const m = JSON.parse(line).message;
-        const u = m?.usage;
-        if (!u) continue;
-        seen.set(m.id ?? `anon-${anon++}`, {
-          input: u.input_tokens ?? 0,
-          cacheWrite: u.cache_creation_input_tokens ?? 0,
-          cacheRead: u.cache_read_input_tokens ?? 0,
-          output: u.output_tokens ?? 0,
-        });
-      } catch {
-        /* a partial line */
-      }
-    }
-  }
-  return [...seen.values()].reduce(addTokens, NO_TOKENS);
+export const runTokens = (result: unknown): Tokens | undefined => {
+  const iterations = (result as { iterations?: { usage?: IterationUsage }[] } | undefined)?.iterations;
+  const usages = (Array.isArray(iterations) ? iterations : []).map((i) => i.usage).filter((u): u is IterationUsage => !!u);
+  if (!usages.length) return undefined;
+  return usages
+    .map((u) => ({ input: u.inputTokens, cacheWrite: u.cacheCreationInputTokens, cacheRead: u.cacheReadInputTokens, output: u.outputTokens }))
+    .reduce(addTokens, NO_TOKENS);
 };
 
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
