@@ -3,8 +3,9 @@
 # hash of their Dockerfiles, so bumping a pin here rebuilds every project's
 # image on its next run and nothing else does.
 #
-# Node 24 LTS.
-FROM node:24-bookworm
+# Node 24 LTS on Debian 13 (trixie). Debian packages - git, python3, jq, curl - come
+# from the release this names, so an oldstable base keeps them years behind.
+FROM node:24-trixie
 
 RUN apt-get update && apt-get install -y git curl jq \
   && rm -rf /var/lib/apt/lists/*
@@ -24,7 +25,7 @@ RUN corepack enable
 
 # Codex CLI, pinned, for the opt-in cross-family review (CROSS_REVIEW=1). It
 # signs in with a copy of the host's ~/.codex/auth.json.
-ARG CODEX_VERSION=0.159.1
+ARG CODEX_VERSION=0.159.2
 RUN npm install -g @openai/codex@$CODEX_VERSION
 
 # Align the agent user with the host user, so files written in the bind-mounted

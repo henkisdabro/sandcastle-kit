@@ -97,7 +97,7 @@ const go = (root: string): Stack | undefined =>
         block: `  setup: ["go mod download"],\n${gatesBlock([["vet", "go vet ./..."], ["build", "go build ./..."], ["test", "go test ./..."]])}`,
         // go.mod's toolchain line makes this Go fetch the exact version needed.
         dockerfile: layer(
-          "# Go, which the base image lacks.\nCOPY --from=golang:1-bookworm /usr/local/go /usr/local/go\n" +
+          "# Go, which the base image lacks.\nCOPY --from=golang:1-trixie /usr/local/go /usr/local/go\n" +
             'ENV PATH="/usr/local/go/bin:/home/agent/go/bin:$PATH"',
         ),
       }
