@@ -130,6 +130,17 @@ test("recordRun twice in one process: the first run is finished in history, the 
   assert.equal(live.finishedAt, undefined);
 });
 
+test("lockRun held by another live process refuses with what to do", () => {
+  const p = project();
+  mkdirSync(join(p.root, ".sandcastle/logs"), { recursive: true });
+  // This process's parent: alive for the whole test, and not this process.
+  writeFileSync(join(p.root, ".sandcastle/logs/run.lock"), `${process.ppid} x t\n`);
+  assert.throws(
+    () => lockRun(p),
+    (e: Error) => e instanceof OperatorError && /is live \(pid \d+\)\. One run per project at a time: wait for it to end \(`sandcastle status` shows it\), or stop it with Ctrl-C/.test(e.message),
+  );
+});
+
 test("lockRun twice in one process does not refuse its own lock", () => {
   const p = project();
   lockRun(p);

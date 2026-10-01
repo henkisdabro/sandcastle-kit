@@ -264,6 +264,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   after the image check and preflight. An unknown usage reading says why - the endpoint's HTTP
   status, or no answer - instead of always "rate-limited"; a token the endpoint refuses (HTTP 403)
   is named, as the guard is then off for it.
+- "Another sandcastle run of this project is live" (from `run`, `land` or `clean`) now says what
+  to do: wait for it to end (`sandcastle status` shows it), or stop it with Ctrl-C in its
+  terminal.
 
 ### Added
 

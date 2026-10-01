@@ -129,8 +129,8 @@ export const lockRun = (project: Project) => {
   if (!mine) {
     throw new OperatorError(
       owner
-        ? `Another sandcastle run of this project is live (pid ${owner}). One run per project at a time.`
-        : "Another sandcastle run of this project is starting. One run per project at a time.",
+        ? `Another sandcastle run of this project is live (pid ${owner}). One run per project at a time: wait for it to end (\`sandcastle status\` shows it), or stop it with Ctrl-C in its terminal, then try again.`
+        : "Another sandcastle run of this project is starting. One run per project at a time: try again once it has started (`sandcastle status` shows it).",
     );
   }
   heldLocks.add(file);
