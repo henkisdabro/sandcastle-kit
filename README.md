@@ -195,7 +195,7 @@ flowchart LR
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
 | 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile changes. |
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
-| ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch gets the base merged in first (a conflict goes to the implementer, and old branches land first); a ticket closed, unqueued or sent to a human mid-run is left alone; a killed run's leftover sandboxes are stopped by the next run or `sandcastle clean`. |
+| ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch gets the base merged in first (a conflict goes to the implementer, and old branches land first); a ticket closed, unqueued or sent to a human mid-run is left alone; tickets whose existing branches change the same file do not start together (the first runs, the others wait for the next run); a killed run's leftover sandboxes are stopped by the next run or `sandcastle clean`. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
@@ -318,8 +318,10 @@ gates: [
   excluding it.
 - `OUT` is split on spaces, so paths with spaces need listing differently.
 
-This gate does not handle conflicts in generated files during landing: the kit does not yet
-resolve merge conflicts in generated files.
+Declare the same files under `generated` in `.sandcastle/config.ts`, with the command that writes
+them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an earlier run whose
+base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
+still proves the result matches the sources.
 
 ## 📋 Queue: what agents work on
 
@@ -386,6 +388,8 @@ comments whose blockers are all closed (stale).
 | `Blocked by: 01, 02` (a header line in a ticket file) | those tickets of the same feature are done | the files tracker |
 
 Several may share a line: `Blocked by #12, ENG-42 and .scratch/checkout/issues/03-pay.md`.
+
+Write the line as plain text. One inside a code block or inline code (backticks) is an example, not a blocker, so a ticket can quote blocker lines without waiting on them.
 
 ```ts
 // .sandcastle/config.ts
@@ -587,7 +591,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | Command | What it does | Calls the model? |
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent) | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
@@ -621,6 +625,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
+| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer. See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run |
 
@@ -749,7 +754,7 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
-| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve), so a queued ticket does not conflict again. Two tickets of one run that change the same lines still do; the second lands on the next run. |
+| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve), so a queued ticket does not conflict again. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 

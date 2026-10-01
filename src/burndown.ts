@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -41,6 +41,7 @@ import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
+import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -109,6 +110,30 @@ export const closeComment = (o: { branch: string; commits: number; repairs: numb
   `); ${gateNames} all green before merge.` +
   (report ? `\n\n${report}` : "");
 
+/** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
+export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
+  // Three dots: the branch's own changes since it forked or last merged the
+  // base, so work that landed on the base meanwhile is not counted against it.
+  // No branch (a new ticket) or an empty diff means no files, never held.
+  const filesOf = (id: string): string[] => {
+    try {
+      sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`], root);
+      return sh("git", ["diff", "--name-only", `${base}...agent/issue-${id}`], root).split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const kept: { id: string; files: Set<string> }[] = [];
+  const held: { id: string; with: string; files: string[] }[] = [];
+  for (const id of ids) {
+    const files = new Set(filesOf(id));
+    const first = kept.find((k) => [...files].some((f) => k.files.has(f)));
+    if (first) held.push({ id, with: first.id, files: [...files].filter((f) => first.files.has(f)).sort() });
+    else kept.push({ id, files });
+  }
+  return held;
+};
+
 export const burndown = async (project: Project) => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
@@ -169,7 +194,16 @@ export const burndown = async (project: Project) => {
   // so a run stopped early would have left all seven stuck for another run.
   // (Their dependants still wait for the next run: landing is at the end.)
   const unblocks = (i: Issue) => waiting.filter((w) => w.on.includes(ref(i.id))).length;
-  const issues = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
+  const ready = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
+  // Landing is once, after every pipeline, so two tickets whose existing
+  // branches change one file would both fork from the old base and the second
+  // would conflict. One per group starts; the rest wait for the next run.
+  const overlaps = fileOverlaps(project.root, base, ready.map((i) => i.id));
+  for (const o of overlaps) {
+    waiting.push({ issue: o.id, on: [ref(o.with)] });
+    console.log(`  ${ref(o.id)} waits for ${ref(o.with)}: both branches change ${o.files.slice(0, 3).join(", ")}${o.files.length > 3 ? ` and ${o.files.length - 3} more` : ""} - next run`);
+  }
+  const issues = ready.filter((i) => !overlaps.some((o) => o.id === i.id));
   if (issues.length === 0) {
     console.log("Every queued issue is waiting on another. Nothing to start.");
     return;
@@ -396,6 +430,18 @@ export const burndown = async (project: Project) => {
     return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
   };
 
+  // A later run skips work a branch already passed (see recordHead). A dry run's
+  // work must not change what a real run skips, and a failed write never fails
+  // the ticket: the cost is only that a re-run runs it in full.
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string }) => {
+    if (DRY_RUN) return;
+    try {
+      recordHead(project.root, id, { branch, ...fields }, runId);
+    } catch (error) {
+      console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
+    }
+  };
+
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
@@ -429,21 +475,29 @@ export const burndown = async (project: Project) => {
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
       if (behind > 0 && carried) {
-        const q = (t: string) => `'${t.replaceAll("'", "'\\''")}'`;
-        // Sandcastle sets the container's git identity when an agent run
-        // starts; this merge comes before the first one. The host's, as the
-        // agents' commits carry.
-        const who = (key: string, fallback: string) => {
-          try {
-            return sh("git", ["config", key]) || fallback;
-          } catch {
-            return fallback;
-          }
-        };
-        const identity = `-c user.name=${q(who("user.name", "Sandcastle"))} -c user.email=${q(who("user.email", "sandcastle@localhost"))}`;
-        const pull = await sandbox.exec(`git ${identity} merge --no-edit ${q(base)}`);
+        const identity = hostIdentity(project.root);
+        const merge = `git ${identity} merge --no-edit ${shq(base)}`;
+        const pull = await sandbox.exec(merge);
         const unmerged = pull.exitCode === 0 ? "" : (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.trim();
-        if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
+        const files = unmerged.split("\n").filter(Boolean);
+        if (unmerged && regensFor(files, project.generated)) {
+          // A conflict confined to declared generated files needs no agent: regenerate them.
+          const r = await resolveGenerated(sandbox, {
+            files,
+            generated: project.generated,
+            setup: project.setup,
+            message: `Merge ${base} into ${branch} (generated files regenerated)`,
+            identity,
+          });
+          if (r.ok) {
+            console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
+          } else {
+            // Back to the merge as it stood, for the implementer to resolve.
+            await sandbox.exec("git merge --abort");
+            await sandbox.exec(merge);
+            console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); the implementer resolves the merge.`);
+          }
+        } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
         else if (unmerged) console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`);
         else {
           // Refused outright (untracked files it would overwrite, say): no
@@ -527,6 +581,7 @@ export const burndown = async (project: Project) => {
             () => CROSS_REVIEW_MODEL,
           )
         : undefined;
+      noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
       let reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
       if (!tracker.agentsWrite) {
         for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
@@ -648,6 +703,7 @@ export const burndown = async (project: Project) => {
           return undefined;
         });
         if (after) {
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits += after.commits.length;
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
@@ -655,6 +711,8 @@ export const burndown = async (project: Project) => {
         }
       }
 
+      const head = sh("git", ["rev-parse", branch]);
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head });
       return {
         issue: issue.id,
         branch,
@@ -666,7 +724,7 @@ export const burndown = async (project: Project) => {
         repairs,
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
-        head: sh("git", ["rev-parse", branch]),
+        head,
         carried,
         unreviewed,
       };

@@ -458,6 +458,46 @@ export const recordOutcomes = (project: Project, run: string, outcomes: Record<s
 };
 
 // ---------------------------------------------------------------------------
+// Heads - the tip each branch was last reviewed at and last ended green on,
+// kept across runs in logs/heads.json by ticket id. A later run skips work a
+// branch already passed when its tip still equals the record; a broken or
+// missing record means no record, which runs the branch in full.
+// ---------------------------------------------------------------------------
+
+export type BranchHead = {
+  branch: string;
+  /** The tip after the last review pass that completed: everything up to here was reviewed. */
+  reviewed?: string;
+  /** The tip a pipeline ended green on, not held as unreviewed. */
+  green?: string;
+  /** run.json's startedAt of the run that wrote the record last. */
+  run: string;
+  at: string;
+};
+
+const headsFile = (root: string) => join(root, ".sandcastle/logs/heads.json");
+
+export const readHeads = (root: string): Record<string, BranchHead> => {
+  try {
+    const all = JSON.parse(readFileSync(headsFile(root), "utf8"));
+    return all && typeof all === "object" && !Array.isArray(all) ? all : {};
+  } catch {
+    return {};
+  }
+};
+
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string }, run: string): void => {
+  const file = headsFile(root);
+  mkdirSync(dirname(file), { recursive: true });
+  const all = readHeads(root);
+  all[id] = { ...all[id], ...fields, run, at: new Date().toISOString() };
+  // Written whole and renamed into place, as the run record is: a half-written
+  // file read as no record would quietly cost a later run its skip.
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+};
+
+// ---------------------------------------------------------------------------
 // Tokens. Each agent iteration reports what its process spent (agents.ts
 // reads Claude's from the stream's closing line; Codex reports its own), and
 // a pass is the sum of its iterations.

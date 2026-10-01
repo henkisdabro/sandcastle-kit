@@ -63,6 +63,13 @@ export type ProjectConfig = {
    */
   protectedPaths?: string[];
   /**
+   * Committed files a command writes (a minified stylesheet, a data file built from JSON). A merge
+   * conflict confined to these paths is resolved by taking either side and running `regen` in the
+   * sandbox, then committing; any other conflicting file still conflicts. A path is a file, or a
+   * directory (with or without a trailing `/`) covering everything under it.
+   */
+  generated?: { paths: string[]; regen: string }[];
+  /**
    * What an issue may wait for besides a GitHub issue (`Blocked by #12`), named in its body.
    * `linear`: team keys, so `Blocked by ENG-42` is read from Linear (LINEAR_API_KEY, host only).
    * `files`: a directory of ticket files (default: the files tracker's), so
@@ -100,6 +107,22 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   if (!config?.name || !config.gates?.length) {
     throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
   }
+  const generated = config.generated ?? [];
+  if (
+    !Array.isArray(generated) ||
+    generated.some(
+      (g) =>
+        !Array.isArray(g?.paths) ||
+        !g.paths.length ||
+        g.paths.some((p) => typeof p !== "string" || !p) ||
+        typeof g.regen !== "string" ||
+        !g.regen,
+    )
+  ) {
+    throw new OperatorError(
+      `${CONFIG_PATH}: each \`generated\` entry needs \`paths\` (files, or directories) and \`regen\` (the command that writes them).`,
+    );
+  }
   configureModels(config);
   return {
     root,
@@ -112,6 +135,8 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     repair: {},
     hookTests: [],
     ...config,
+    // Defaults to [] when unset; a leading ./ is stripped so a path compares equal to git's.
+    generated: generated.map((g) => ({ ...g, paths: g.paths.map((p) => p.replace(/^\.\//, "")) })),
     label: config.label ?? detectFromDocs(root).label ?? "ready-for-agent",
     tracker: resolveTracker(root, config.tracker),
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
