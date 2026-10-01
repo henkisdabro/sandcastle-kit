@@ -53,8 +53,8 @@ install ends with it; to run it again later: `sandcastle setup`.
    the token you paste is fine-grained and that GitHub accepts it.
 5. **Writes** `~/.config/sandcastle-kit/.env` with owner-only permissions (600), keeping anything
    already in it.
-6. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git) and prints the fix for
-   anything missing.
+6. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`) and prints the fix
+   for anything missing.
 
 It installs no software. Re-run it any time: finished steps show `ok`; for a credential it also asks whether to replace it (default no) - the way to put in a new token.
 
@@ -87,7 +87,12 @@ Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
   <https://github.com/settings/personal-access-tokens/new>: repository access limited to the
   repos you will run, permissions **Issues: Read and write** and **Metadata: Read**.
 
-Leave unused keys commented out: an empty value stops a run.
+- `LINEAR_API_KEY` - only if issues wait on Linear issues (README, Blockers); read-only is enough.
+  It stays on the host.
+
+Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake and an
+end-of-run notification go in an optional `~/.config/sandcastle-kit/config.json` - see the README's
+[Personal settings](../README.md#personal-settings).
 
 > [!IMPORTANT]
 > Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
@@ -99,14 +104,19 @@ GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of
 ## 🔄 Updating
 
 In a project, ask your agent for `/sandcastle update`: it pulls the kit, rebuilds the images,
-re-runs the hook check, and walks you through anything in [`CHANGELOG.md`](../CHANGELOG.md)'s
+re-runs the hook check and the base gates, and walks you through anything in [`CHANGELOG.md`](../CHANGELOG.md)'s
 **Upgrading** notes that affects that project. By hand:
 
 ```bash
 cd ~/sandcastle-kit && git pull --ff-only && pnpm install && sandcastle doctor
-cd ~/code/your-project && sandcastle build && sandcastle lean
+cd ~/code/your-project && sandcastle build && sandcastle lean && sandcastle gates
 ```
 
 Then read the Upgrading notes in `CHANGELOG.md`. Existing `.sandcastle/config.ts` files keep
 working - a new field is always optional, with a default - but a new default can change what a
 run does or spends. The skill updates with the pull, since it is a link into the kit.
+
+The sandbox image picks up new Claude Code and Codex releases by itself (README,
+[The image's agent versions](../README.md#-the-images-agent-versions)), but not Debian and Node
+security updates: run `sandcastle build --force` now and then; `sandcastle doctor` warns once a
+project's base image is more than 30 days old.

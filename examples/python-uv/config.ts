@@ -19,4 +19,9 @@ export default {
   // This repo's Claude Code hooks (a ruff-on-edit hook and a secrets guard) are kept;
   // nothing to drop. No skills or MCP servers are needed by a run.
   lean: { keep: [], dropHooks: [] },
+
+  // Proof the secrets guard blocks in a sandbox, not only that it can run.
+  hookTests: [
+    { name: "secrets guard refuses writing .env", tool: "Write", input: { file_path: ".env", content: "X=1" }, expect: "block" },
+  ],
 };

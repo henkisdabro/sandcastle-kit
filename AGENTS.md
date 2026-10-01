@@ -27,11 +27,11 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: setup, doctor, init, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean |
+| `src/cli.ts` | Commands: help, setup, doctor, init, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean; also the autonomy loop around `burndown()` |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
-| `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
+| `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land (merge or squash), verify, report; dependencies and file overlaps, re-runs of carried branches (land-only, narrow review), timings |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
@@ -45,27 +45,19 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint, protected paths, run lock |
 | `src/pool.ts` | Machine-wide sandbox and gate slots, and the lock-file helper the run lock shares (pid and token, guarded takeover) |
-| `src/run.ts` | Preconditions, preflight, prompt rendering, run record, log archive, status pane |
+| `src/run.ts` | Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent logs (with the raw `.jsonl` sidecar), run record and history, typical times and the estimate, recorded heads, log archive, status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
 | `src/generated.ts` | Generated files: `covers`, `regensFor`, and `resolveGenerated` (take a side, rerun setup and `regen` in the sandbox, commit); also the shell quoting and host git identity the base merge uses |
-| `src/config.ts` | The `ProjectConfig` type and loader |
-| `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
-| `src/versions.ts` | Which Claude Code and Codex the image gets: the `latest` channel (or `claudeCode`, `CLAUDE_CODE_VERSION`, `CODEX_VERSION`) resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag |
+| `src/config.ts` | The `ProjectConfig` type, loader and validation |
+| `src/versions.ts` | Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode` or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), Codex's npm `latest` tag (or `CODEX_VERSION`), resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag |
+| `prompts/` | Implement, review, repair and resolve (a re-run's conflicted base merge) templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{TICKET}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; its Claude Code and Codex `ARG` versions are offline defaults, the kit passes the resolved ones |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
-| `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
-| `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
-| `test/autonomy.test.ts` | The autonomy level, re-runnable tickets, turn decision and question, several run records in one process, and the CLI refusing a bad level; `pnpm test` |
-| `test/cli.test.ts` | The CLI's one catch: an unknown command, a missing config, no repository and an existing init print a message, no stack; `pnpm test` |
-| `test/layout.test.ts` | The Herdr view's proportions: the status view's share and the sandbox column's equal rows; `pnpm test` |
-| `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
-| `test/generated.test.ts` | Path matching, the resolve-by-regenerating helper against a real conflict in a temp repo, and the `generated` config validation; `pnpm test` |
-| `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
-| `test/land-command.test.ts` | `sandcastle land`: merge, gate, close and every refusal, in a temp repo with a host worktree as the sandbox; `pnpm test` |
-| `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |
+| `test/status.test.sh` | The status view against a made-up repo and run records |
+| `test/*.test.ts` | One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and this table's `skill/` row |
 | `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action) |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
@@ -100,7 +92,7 @@ A change is ready to commit when all of these pass:
 ```bash
 pnpm exec tsc --noEmit
 bash -n status.sh bin/sandcastle .githooks/pre-commit
-pnpm test            # the status view, the closing summary, gates, locks and the .git guard against fixtures (no Docker, no model calls)
+pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls)
 sandcastle doctor
 # from inside a test project (no model calls):
 sandcastle status 0

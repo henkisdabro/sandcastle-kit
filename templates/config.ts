@@ -7,10 +7,12 @@ export default {
   // label: "ready-for-agent",
   // concurrency: 4,
   // land: "merge",                         // or "squash": one commit per ticket on the base branch
+  // autonomy: 0,                           // 1 asks to re-run conflicted and unblocked tickets; 2 or 3 re-run them
 
-  // Claude Code in the sandbox image follows the "latest" release. Pin it if a release misbehaves
-  // (CLAUDE_CODE_VERSION in the environment overrides this for one command).
-  // claudeCode: "stable",                  // or an exact version: "2.1.285"
+  // Claude Code in the sandbox image follows its "stable" release channel. "latest" follows the
+  // faster one; an exact version pins it if a release misbehaves (CLAUDE_CODE_VERSION in the
+  // environment overrides this for one command).
+  // claudeCode: "latest",                  // or an exact version: "2.1.285"
 
   // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
   // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.

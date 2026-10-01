@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [After a run](#-after-a-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -64,7 +64,8 @@ tickets, and want the well-specified ones done while they are away from the keyb
 **What a day looks like:** in the morning you write or triage a handful of tickets and mark them
 ready. You start a run and go about your day. When you are back there is a report: which tickets
 merged into your local base branch (nothing is ever pushed), which are red and why, and which
-need you. You review, push what you like, and repeat.
+need you. You review and push what you like, land a branch you fixed or requeue a ticket with a
+note, and repeat.
 
 **Do I need anyone else's tools?** No, but one is recommended. The kit needs only Docker, Node, git
 and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
@@ -90,6 +91,7 @@ New to GitHub or to agents? These are the only terms you need.
 | **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
 | **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
 | **`needs-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. |
+| **`needs-triage`** | Put by agents on follow-up issues they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
 
 > [!TIP]
 > **AI coding agent?** Start at [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this), then run `sandcastle doctor`.
@@ -190,17 +192,18 @@ flowchart LR
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. |
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
 | 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
-| 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
+| 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
-| 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile or a Claude Code or Codex release changes. |
+| 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile or the Claude Code or Codex version changes - see [The image's agent versions](#-the-images-agent-versions). |
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
-| ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch gets the base merged in first (a conflict goes to the implementer, and old branches land first); a re-run on an old branch that was reviewed and green and has not moved since skips implement and review - a clean base merge goes straight to the gates, a conflicted one gets a short resolver prompt first; a re-run whose only change since its last review is the base merge gets a review of the merge alone, not a full review; a ticket closed, unqueued or sent to a human mid-run is left alone; tickets whose existing branches change the same file do not start together (the first runs, the others wait for the next run); a killed run's leftover sandboxes are stopped by the next run or `sandcastle clean`. |
+| ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch builds on it instead of starting again, and a branch that was already green costs only the gates - see [Re-runs](#-re-runs). A killed run's leftover sandboxes are stopped by the next run or `sandcastle clean`. |
+| 🛬 | **Landing you control** | Green branches land together at the end of a run, as merge commits or squashed (`land`). Between runs, `sandcastle preview` shows which unlanded branches would conflict, `sandcastle land <n>` merges and gates one by hand, and `sandcastle requeue <n>` sends one back with a note. `autonomy` lets one run re-run its conflicted and newly unblocked tickets by itself. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
 | 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab: the status view and a pane per sandbox, each shown in Herdr's agent sidebar as working, done or blocked - see [Works best in Herdr](#-works-best-in-herdr). |
-| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, issue triage, starting runs and updating. |
+| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, issue triage, starting and closing runs, and updating. |
 
 ## 🔄 How it works
 
@@ -228,7 +231,7 @@ flowchart TD
 
     G -- "green" --> PP{"🛡️ Touches hooks, CI,<br/>install scripts?"}
     G -- "still red" --> RED["🔴 Reported red"]
-    PP -- "no" --> M["✅ Merge --no-ff into base<br/>close issue with a comment"]
+    PP -- "no" --> M["✅ Merge (or squash) into base<br/>close issue with a comment"]
     PP -- "yes" --> NH["🙋 Labelled needs-human<br/>not merged"]
     M --> V["🔁 Verify: gates once more<br/>on the merged base branch"]
     V --> REP(["📊 Report: merged · red · held back<br/>Nothing is pushed"])
@@ -324,13 +327,15 @@ gates: [
 - `OUT` is split on spaces, so paths with spaces need listing differently.
 
 Declare the same files under `generated` in `.sandcastle/config.ts`, with the command that writes
-them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an earlier run whose
-base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
-still proves the result matches the sources. At landing, a branch whose merge conflicts only in
-`generated` paths is merged in a throwaway sandbox by regenerating them, committed with the usual
-`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step. Before the base moves, the host checks that the
-commit is a merge of exactly the base tip and the gated head and changes nothing beyond a plain merge
-except under `generated` paths; otherwise nothing lands and the ticket is left as a conflict.
+them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A merge that conflicts only in
+those paths is then resolved by taking either side, re-running `setup` and running `regen`, with no
+agent - both when a re-run merges the base into a branch from an earlier run, and at landing. A
+landing resolved this way happens in a throwaway sandbox (the host never runs project code), always
+as a merge commit with the usual `Merge agent/issue-N (closes #N)` message, even with
+`land: "squash"`. Before the base moves, the host checks that the commit merges exactly the base tip
+and the gated head and changes nothing beyond a plain merge outside `generated` paths; otherwise
+nothing lands and the ticket is left as a conflict. The drift gate still proves the result matches
+the sources when the merged base is gated again at the end of the run.
 
 ## 📋 Queue: what agents work on
 
@@ -343,7 +348,14 @@ labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only ag
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run skips it while #12 is open - even when #12 is in the same run, because the dependent
 would branch before #12 lands - and the next run picks it up. A blocker can also live outside
-GitHub; see [Blockers](#-blockers-github-linear-ticket-files).
+GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue
+and what holds each ticket back.
+
+A hard ticket can ask for a stronger implementer: a GitHub label `model:<id>`
+(`model:claude-opus-5-5`) and/or `effort:<level>` sets the implement and repair passes for that
+ticket only, over `IMPL_*` and `config.ts`. The run lists the override next to the ticket, refuses a
+malformed label before anything starts, and preflight asks that model for a reply too. Reviews keep
+the project's pair. Ticket files have no labels, so this is GitHub-only.
 
 ### 🏷️ How to mark a ticket ready
 
@@ -352,7 +364,8 @@ GitHub; see [Blockers](#-blockers-github-linear-ticket-files).
 1. **Create the label once per repository.** In the repo, open **Issues > Labels > New label**
    and name it exactly `ready-for-agent` (or run
    `gh label create ready-for-agent --description "Ready for an unattended agent" --color 0E8A16`).
-   If your team already uses another name, set `label` in `config.ts` instead.
+   If your team already uses another name, set `label` in `config.ts` instead. Until the label
+   exists, `sandcastle doctor` in the project prints a `FIX` line with the command that creates it.
 2. **Put it on an issue.** Open the issue, click the gear next to **Labels** in the right-hand
    sidebar and tick `ready-for-agent`. From a terminal: `gh issue edit 12 --add-label ready-for-agent`.
 3. **Take it off to pull the ticket back.** The kit removes the label itself when it finishes.
@@ -489,21 +502,25 @@ sandcastle run --dry                  # the same, as an argument
 CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
 sandcastle run --concurrency 2        # the same, as an argument
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
+AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked tickets (see autonomy)
 ```
 
-A run refuses to start on a dirty tree, off the base branch, while another run of the same
-project is live, or while any check fails. The status view opens first, before the image check,
-preflight and base gates, and its run line names the stage the run is in. Inside Herdr the run
-lays it out itself (below), and does not start if it cannot; elsewhere run `sandcastle status` in
-a second terminal. While agents work, the run prints a heartbeat line every five minutes, and the
-status view flags a sandbox whose log has been quiet for ten. Every step - image, preflight, base
-gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.jsonl`, with each
-agent pass's tokens and each gate's own time (`ok` is false for a gate run with a red gate, named
-in `red`); the report gives each issue's wall time and tokens, and the base check prints its gates
-slowest first. Tickets that others wait for start first. Each agent pass also keeps its raw stream -
-every tool call and result, as the agent printed it - in
-`.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` beside the readable `.log`, archived with it.
-Before the slow steps a run prints a rough estimate - tokens and time for the chosen tickets, from the medians of this project's earlier tickets in `.sandcastle/logs/timings.jsonl` - once the project has any; with `USAGE_CHECK=1` it also prints the plan's usage after preflight.
+**Before anything is spent.** A run refuses to start on a dirty tree, off the base branch, while
+another run of the same project is live, or while any check fails. It prints the tickets it will
+start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
+pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
+time from the medians of its earlier tickets. Tickets that others wait for start first; a ticket
+whose blocker is open, or whose existing branch changes a file another ready ticket's branch also
+changes, waits for the next run. Then come the image check, preflight, the hook check and the base
+gates; a red one stops the run before any agent starts.
+
+**While it runs.** The status view opens first, before the slow checks, and its run line names the
+stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
+cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
+every five minutes while agents work, and the status view flags a sandbox whose log has been quiet
+for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
+`.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
+`USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each issue.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
 with the run:
@@ -519,19 +536,80 @@ with the run:
 | `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 
-Green branches land when every sandbox has finished, not as each passes: landing moves the base
-branch, which the run guards against sandboxes changing, and a ticket-file tracker commits there.
-So a dependant of a ticket in this run always waits for the next run. A dry run ends by
-checking that its issues are unchanged on GitHub. Every run ends with a closing summary, in the
-order you act on it: done, held for you, needs fixing (with the files or tests, and causes several
-branches share), runnable now or still blocked (blockers re-read after landing), local state
-(commits not on the upstream - the issues are closed but the code has not left your machine) and
-the next step. `sandcastle report` prints it again. Afterwards, push the base branch yourself when
-you are happy with it; `sandcastle clean` clears leftover worktrees and branches.
+**Landing.** Green branches land when every sandbox has finished, not as each passes: landing moves
+the base branch, which the run guards against sandboxes changing, and a ticket-file tracker commits
+there. So a dependant of a ticket in this run always waits for the next run. Branches from earlier
+runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
+branch that changes hooks, CI or install scripts is held for you instead (see
+[Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
+locally and not yet pushed, and the merged base branch is gated once more. A dry run lands nothing
+and ends by checking that its tickets and the tracker are unchanged.
 
 > [!TIP]
 > Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
+
+### 📊 After a run
+
+Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
+branches, merged tickets the reviewer says no gate proves, follow-up issues agents filed); **Needs
+fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
+branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
+(commits not on the upstream - the tickets are closed but the code has not left your machine); and
+the **Next step**. `sandcastle report` prints it again at any time, with git and the blockers as they
+are now. Then:
+
+- **Push** the base branch yourself when you are happy with it. The kit never pushes.
+- **A red or conflicted branch** you have fixed on the branch itself: `sandcastle land <n>` merges it
+  the way a run does, gates the merge in a sandbox and closes the ticket - never a hand-written
+  `git merge`. Or leave it queued: its next run resumes the branch (see [Re-runs](#-re-runs)).
+- **A ticket that needs a new attempt:** `sandcastle requeue <n> --note "..."` puts it back in the
+  queue with your note as a comment, takes `needs-human` off, and makes the next run re-implement it
+  rather than land the old branch.
+- **Several unlanded branches:** `sandcastle preview` dry-merges them onto the base in landing order
+  and names the ones that would conflict, before anything is merged.
+- **Leftovers:** `sandcastle clean` removes leftover worktrees and finished branches.
+
+`autonomy` (or `AUTONOMY_LEVEL` for one run) lets one `sandcastle run` take further turns by itself:
+after a turn it re-runs only the tickets that ended in a merge conflict or whose blockers have now
+landed - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
+A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
+
+### 🔁 Re-runs
+
+A queued ticket with a branch from an earlier run builds on that branch:
+
+- The base is merged into the branch first. A conflict goes to the implementer; a conflict only in
+  [`generated`](#-a-gate-for-generated-files) paths is resolved by regenerating them, with no agent.
+- A branch that was reviewed and green, and has not moved since, skips implement and review: a clean
+  base merge goes straight to the gates, a conflicted one gets a short resolver prompt first. A
+  re-run whose only change since its last review is the base merge gets a review of the merge
+  alone. The record behind both is `.sandcastle/logs/heads.json`; `sandcastle requeue` clears a
+  ticket's entry.
+- Tickets whose existing branches change the same file do not start in the same run: the first in
+  queue order runs, the others show as blocked, "waits for #N (this run) - next run". Two new tickets
+  have no branch to compare, so they can still conflict; the second lands on its next run.
+- A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
+  merging and closing is finished by the next one.
+
+### 🗃️ What a run leaves behind
+
+Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle init`:
+
+| Path | What |
+|---|---|
+| `logs/run.json` | The live run's record: stage, versions, each ticket's state. The status view and `sandcastle report` read it |
+| `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
+| `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
+| `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log, and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` once the branch is merged |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
+| `logs/base-gates.log` | The full output of red gates on the base commit |
+| `.run/` | The rendered prompts, the lean plan and the green-base record a run skips the base check by |
+| `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
+| `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
+
+The resolved Claude Code and Codex versions are cached in `~/.cache/sandcastle-kit/` (with the
+machine-wide slot locks), never in the project.
 
 ### 😴 Sleep
 
@@ -541,7 +619,7 @@ until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and 
 helper is tied to the run's process, so it stops when the run ends, crashes or is killed.
 
 - **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
-- **Always:** add `"keepAwake": false` to `~/.config/sandcastle-kit/config.json`.
+- **Always:** `"keepAwake": false` in your [personal settings](#personal-settings).
 - **A laptop lid is the exception.** Closing it sleeps a MacBook whatever the kit does, unless it is
   on power with an external display attached. Leave the lid open, or run on a desktop machine.
 
@@ -567,7 +645,8 @@ out its own view:
   *blocked* only when a human has to act: a crash, a merge conflict, a branch held for a human
   merge. The tab and workspace badges roll the states up, so a glance at the sidebar says whether
   a run needs you.
-- 🔔 **A notification** with the run's summary when it ends. Outside Herdr too: `"notify": ["notify-send", "Sandcastle"]` (or `osascript`, `curl` to ntfy - any command, as a list of arguments, not a shell string) in `~/.config/sandcastle-kit/config.json` runs when a run ends, with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT` set. It gets ten seconds; if it fails, the run's result stands.
+- 🔔 **A notification** with the run's summary when it ends. Outside Herdr, set `notify` in
+  your [personal settings](#personal-settings) to get one.
 
 When the run ends its sandbox panes close, so nothing in the sidebar outlives it; the status view
 stays, showing each branch's outcome, and the next run replaces it rather than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
@@ -593,7 +672,7 @@ where it is.
 ## 📥 Updating
 
 In each project, ask your agent for `/sandcastle update`. It pulls the kit, rebuilds the images,
-re-runs the hook check, and walks you through anything in [`CHANGELOG.md`](CHANGELOG.md)'s
+re-runs the hook check and the base gates, and walks you through anything in [`CHANGELOG.md`](CHANGELOG.md)'s
 **Upgrading** notes that affects that project. Existing configs keep working: a new field is
 always optional. [By hand](docs/INSTALL.md#-updating).
 
@@ -602,21 +681,22 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | Command | What it does | Calls the model? |
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem as the command that applies it (doctor itself changes nothing). `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); prints the Claude Code and Codex versions the image will get (warning, never failing, when the release channel could not be reached), and, inside a project, warns when the base image was built more than 30 days ago (`sandcastle build --force` fixes it) | ➖ no |
+| `sandcastle help` | Lists every command | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, and warns - never fails - when the release channel cannot be reached or the project's base image is more than 30 days old. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call) | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
-| `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags. `--force` also pulls the base OS image afresh (Debian and Node security updates); ordinary builds and runs never pull | ➖ no |
+| `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes superseded tags. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
-| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base the way a run does (`Merge agent/issue-N (closes #N)`), gates the merge in a sandbox, then closes the ticket. Refuses a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
+| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, always a merge commit), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket and a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
-| `sandcastle report` | The last run's closing summary: done, needs you (held), needs fixing (with causes several branches share), runnable now and still blocked (re-read after landing), local state (commits not on the upstream, branches left standing) and the next step. Every run also ends with it | ➖ no |
+| `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
-| `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
-| `sandcastle blockers` | Lists open queued issues whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
+| `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
+| `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
-| `sandcastle status [secs] [all]` | Live view, fitted to its pane with the overflow summarised on one line; `0` prints every row once | ➖ no |
-| `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes leftover sandbox worktrees and finished `agent/*` branches; lists unmerged ones, which `--all` deletes too. Refuses while a run is live | ➖ no |
+| `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
+| `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
 ## 🔧 Configuration
 
@@ -630,8 +710,8 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
-| `autonomy` | `0` | Turns (runs) one `sandcastle run` may make. `0`: one, as ever. `1`: after each turn, list the re-runnable tickets and ask before running again (a yes at a terminal; with no terminal nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have landed (held tickets included). A re-run takes only those tickets, never the rest of the queue. Dry runs, stopped runs, runs that hit a usage limit and runs with red gates together never re-run |
-| `claudeCode` | `"latest"` | Which Claude Code the sandbox image installs: `"latest"` or `"stable"` (the release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` in the environment overrides it for one command |
+| `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have now landed; a re-run takes only those, never the rest of the queue. See [After a run](#-after-a-run) |
+| `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
@@ -641,10 +721,10 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `land` | `"merge"` | How green work lands: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). Held branches are never landed either way |
-| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run, and a merge at landing, that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
+| `land` | `"merge"` | How a run lands green work: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). `sandcastle land` and a landing resolved by regenerating `generated` paths always make a merge commit. Held branches are never landed either way |
+| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A merge that conflicts only in these paths - a re-run's base merge, or a landing - takes either side, reruns `setup`, runs `regen` in a sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
-| `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output (`maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a conflicted base merge on a branch already reviewed and green); up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run. A re-run whose only change since its last review is the base merge (and any conflict resolution inside it) gets a review of the merge alone, not a full review |
+| `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run. `maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a re-run's conflicted base merge (see [Re-runs](#-re-runs)) |
 
 Examples: [`examples/`](examples/).
 
@@ -655,46 +735,66 @@ Examples: [`examples/`](examples/).
 |---|---|---|
 | `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer |
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
-| `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
-| `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
+| `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
+| `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; the same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
 | `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off) |
-| `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `latest`, npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs (see "The image's agent versions") |
+| `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_HERDR_FOCUS=0` | on inside Herdr | Leave your focus where it is instead of switching to the run's tab once its status view opens |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
-| `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
-| `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say (also `"keepAwake": false` in `config.json`). [Sleep](#-sleep) |
-| `"notify": ["notify-send", "Sandcastle"]` in `config.json` | off | Outside Herdr too: runs when a run ends, with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT` set. Any command, as a list of arguments, not a shell string (`["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` if you want one). It gets ten seconds; if it fails, the run's result stands |
+| `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
+| `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
+| `NO_COLOR` | unset | Set to anything: the status view drops colour (as it does when piped) and `sandcastle report` prints plain headings without emoji |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `~/.config`, `~/.cache` | Where `sandcastle-kit/` keeps your personal settings, and the version cache and slot locks |
 
 A project that always wants different models or effort sets them in `.sandcastle/config.ts`
 (`review: { effort: "medium" }`); the env vars are for one run. Effort levels are `low`,
 `medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a
 starting point for agentic coding on both 5.5 models; the kit defaults to `high` for quality.
-Measure before changing it.
-
-One ticket can ask for a different implementer: a GitHub label `model:<id>` (`model:claude-opus-5-5`) and/or `effort:<level>` on the issue sets the implement and repair passes for that ticket only, over `IMPL_*` and `config.ts`. The run lists the override next to the ticket, checks the label before anything starts, and preflight asks that model for a reply too. Reviews keep the project's pair. Ticket files have no labels, so this is GitHub-only.
+Measure before changing it. One ticket can ask for its own implementer with a `model:` or
+`effort:` label - see [Queue](#-queue-what-agents-work-on).
 
 </details>
 
+### Personal settings
+
+What belongs to your machine, not to a project, lives in `~/.config/sandcastle-kit/`, never in the
+kit or a repository. `.env` holds every token (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`,
+`GH_TOKEN`, `LINEAR_API_KEY`); a project's `.sandcastle/.env` overrides it key by key, except
+`LINEAR_API_KEY`, which stays on the host and is refused there. `config.json` is optional:
+
+| Key | Default | |
+|---|---|---|
+| `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
+| `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
+| `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
+
+`sandcastle doctor` reports a `config.json` that is not valid JSON or holds a bad limit.
+
 ### 🐳 The image's agent versions
 
-Claude Code ships almost daily, so the base image follows its `latest` release channel instead of a
-version written into the Dockerfile: the kit resolves the version on the host when it ensures the image
-(`sandcastle build`, and the start of every run) and makes the Claude Code and Codex versions part of
-the image's tag. A release therefore triggers one rebuild, of about a minute, and every sandbox of a
-run has the same version. Codex follows npm's `latest` the same way. A run's start lines and
-`sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and `run.json` records them.
+Claude Code ships almost daily, so the base image follows a release channel instead of a version
+written into the Dockerfile: by default Claude Code's `stable` channel (`"latest"` or an exact version
+can be set), and for Codex npm's `latest` tag, which is Codex's release channel (its prereleases are
+under `alpha`). The kit resolves both versions on the host when it ensures the image (`sandcastle
+build`, and the start of every run) and makes them part of the image's tag. A release therefore
+triggers one rebuild, of about a minute, and every sandbox of a run has the same version. A run's
+start lines and `sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and
+`run.json` records them.
 
-- **Pin** if a release misbehaves: `claudeCode: "2.1.285"` in `.sandcastle/config.ts`, or
-  `CLAUDE_CODE_VERSION=2.1.285` for one command; `CODEX_VERSION=0.159.2` pins Codex. `claudeCode: "stable"`
-  follows the slower channel.
+- **Choose or pin** in `.sandcastle/config.ts`: `claudeCode: "latest"` follows the faster channel,
+  `claudeCode: "2.1.285"` pins a version if a release misbehaves. `CLAUDE_CODE_VERSION` does the same
+  for one command, and `CODEX_VERSION=0.159.2` pins Codex.
 - **Offline**: the resolved pair is cached for six hours in `~/.cache/sandcastle-kit/versions.json`
   (`$XDG_CACHE_HOME` when set). If the channel cannot be reached, the cached value is used whatever its age,
   and with no cache the defaults in `docker/base.Dockerfile`, with one line saying so. A run never fails
   for a network error here.
+- **Operating system updates**: the image's tag follows the Dockerfiles and the agent versions, not
+  the Debian and Node base it is built from. `sandcastle build --force` pulls that base afresh;
+  `sandcastle doctor` warns once a project's base image is more than 30 days old.
 
 ## 🪶 Lean sandboxes and hooks
 
@@ -759,8 +859,10 @@ and the kit narrows what can cross it:
 - 🏷️ **Who committed.** Sandbox commits and the kit's merges carry the committer
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author. `git log --format='%h %an / %cn %s'`
   tells them from your own commits. Issues and comments the agents write still show your GitHub account.
-- 🛡️ **Protected paths.** A green branch that changes hooks, CI, `.claude/` settings, `.sandcastle/`,
-  package-manager config or install scripts is labelled `needs-human` and left for you to merge.
+- 🛡️ **Protected paths.** A green branch that changes hooks (git, Claude Code, pre-commit tools), CI,
+  agent settings (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`,
+  package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
+  `needs-human` and left for you to merge; `sandcastle land` refuses it too.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.
@@ -773,7 +875,8 @@ and the kit narrows what can cross it:
 Several projects can run at once; one project runs once at a time (`run.lock`). A machine-wide
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
-CPU-heavy part, and running too many at once produces false test failures. The status header
+CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
+[personal settings](#personal-settings). The status header
 shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
 first issue that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting issues before that, once a usage window passes `USAGE_STOP` percent.
@@ -783,8 +886,13 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | Symptom | Cause and fix |
 |---|---|
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
+| `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
+| `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
+| `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
+| `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry` and `--concurrency N` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
+| `"notify" ... must be a list of strings` | `notify` in `~/.config/sandcastle-kit/config.json` is a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`. |
 | `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token with `sandcastle setup` (or as in [docs/INSTALL.md](docs/INSTALL.md#-installing-by-hand)). A project's `.sandcastle/.env` overrides the shared one - check both. |
-| `Preflight failed` naming a model | Plan limit reached, token expired, or the image's Claude Code is older than the model needs (offline, the image used a cached or default version): with the network back, `sandcastle build` follows the `latest` release, or pin one with `claudeCode` in `.sandcastle/config.ts`; the next run rebuilds. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |
+| `Preflight failed` naming a model | Plan limit reached, token expired (`sandcastle doctor --verify` checks), or the image's Claude Code is older than the model needs: a model newer than the `stable` channel needs `claudeCode: "latest"` (or a version) in `.sandcastle/config.ts`, and offline the image used a cached or default version - with the network back, `sandcastle build` picks up the channel's current release. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |
 | `A kept hook cannot run in the image` | Install what the hook calls in the project's Dockerfile, or - only for host-only conveniences - add it to `lean.dropHooks`. |
 | `placeholders Sandcastle cannot fill` | `rules.md` contains `{{SOMETHING}}`; reword it. |
 | `Another sandcastle run of this project is live` | One run per project. Wait; if that process is gone, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |
@@ -796,7 +904,8 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
-| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve - or, for a branch that was reviewed and green and has not moved since, for a short resolver prompt before the gates, with no implement or review), so a queued ticket does not conflict again. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
+| A branch conflicts at landing | Leave it queued: its next run merges the base into it first and resolves the conflict (see [Re-runs](#-re-runs)); `autonomy` can do that within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
+| `waits for #N (this run) - next run` on a ticket nobody blocks | Its existing branch changes a file that #N's branch also changes, so it waits for #N to land rather than conflict with it. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
@@ -810,8 +919,8 @@ model; `sandcastle help` lists every command.
 | Place | Holds | Edited by |
 |---|---|---|
 | **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
-| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits, keep-awake, notify) and `denylist` | The user, once. Not committed anywhere |
-| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored) | You and the user, when setting the project up |
+| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` ([personal settings](#personal-settings): machine-wide limits, keep-awake, notify) and `denylist` | The user, once. Not committed anywhere |
+| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored; [what is in them](#-what-a-run-leaves-behind)) | You and the user, when setting the project up |
 
 Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.
 
@@ -828,12 +937,14 @@ exact command under every `FIX`. Any failure later starts there too, then [Troub
 | "find work for the agents", "audit this repo", "we have no issues yet" | `/sandcastle audit`: read-only review agents per lens, findings de-duplicated and triaged by the queue criteria, filed with the user's yes. Costs interactive allowance, no sandbox. | Every finding is filed, merged or dropped with a reason |
 | "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
 | "start a run", "burn down the queue" | [Run](#-run), in a separate terminal or pane: a run takes hours. | `sandcastle run ended` is printed, and you have read the run report |
-| "is it working?" | `sandcastle status 0`; logs are in `.sandcastle/logs/`. | You can name each ticket's phase |
+| "is it working?", "how did the run go?" | `sandcastle status 0` while it runs; `sandcastle report` after. Logs are in `.sandcastle/logs/`. | You can name each ticket's phase, or have relayed the summary |
+| "land this branch", "try that ticket again" | [After a run](#-after-a-run): `sandcastle preview`, `sandcastle land <n>`, `sandcastle requeue <n> --note "..."`. Each changes the base branch or the tracker: ask first. | The ticket is closed with the kit's merge, or queued with the note |
 | "update sandcastle" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating). `CHANGELOG.md` says what changed. | The kit is pulled and `sandcastle doctor` is green in the project |
 
 **Ask the user first** for anything that spends allowance or changes their repo:
 `sandcastle run`, `preflight` and `lean --measure` call the model; a run also merges into the base
-branch locally and updates the tickets (GitHub, or commits to ticket files). It never pushes.
+branch locally and updates the tickets (GitHub, or commits to ticket files), as `land` and
+`requeue` do for one ticket. Nothing here pushes.
 
 **Keep the safety rules intact** (token type, protected paths, hook checks). When one blocks a run,
 fix its cause or ask the user.

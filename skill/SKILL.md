@@ -1,6 +1,6 @@
 ---
 name: sandcastle
-description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as issues ready to queue), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing issues for agents, or updating or upgrading sandcastle-kit."
+description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues or ticket files in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as issues ready to queue), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing issues for agents, or updating or upgrading sandcastle-kit."
 argument-hint: "[init|audit|queue|run|status|update]"
 arguments: [action]
 ---
@@ -212,11 +212,13 @@ comments, and the gates can prove it.
 
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
-   same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry run, and `sandcastle status 0`'s
-   machine line (other projects' runs share the limits) and, if the project has run before, the run prints a rough estimate at the start - quote it rather than guessing how long the run takes. Say that a red gate gets a repair pass
-   (`repair.attempts`, default 1), and a repair that turns it green a second review - more
-   allowance, fewer red branches - and offer `USAGE_CHECK=1`
-   if the plan is close to its limit. Say that the run first gates the base commit and stops if a
+   same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry
+   run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
+   guess how long it takes: once the project has run before, the run prints a rough estimate at
+   the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
+   and a repair that turns it green a second review - more allowance, fewer red branches - and
+   offer `USAGE_CHECK=1` if the plan is close to its limit. If the config sets `autonomy` (or the
+   user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run
@@ -273,8 +275,8 @@ working, ready to land, need you, queued, blocked, merged. The states:
   starts (`lands ~16:20`). `human merge: <paths>` means it will be held for a person instead.
 - **Needs you** - `gate red`, `conflict`, `held`, `crashed`, `not landed`, `stopped` (finished,
   but the run stopped before landing), `orphaned` (its run was killed and its container still
-  works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed or unqueued
-  during the run) is greyed with the leftovers.
+  works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed, unqueued or
+  marked `needs-human` during the run) is greyed with the leftovers.
 - **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
   `(this run)` when the blocker is in this run - then the next run can start it), **`merged`**,
   **`no change`**, **`skipped`** (not started because the run stopped early).
