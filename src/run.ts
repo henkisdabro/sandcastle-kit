@@ -114,12 +114,12 @@ export const assertCleanBase = (project: Project) => {
 // ---------------------------------------------------------------------------
 
 const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) =>
-  new Promise<{ ok: boolean; out: string }>((resolve) => {
+  new Promise<{ ok: boolean; out: string; stdout: string }>((resolve) => {
     const child = execFile(
       cmd, args, { ...opts, encoding: "utf8", timeout: 180_000 },
       (error, stdout, stderr) => {
-        if (!error) return resolve({ ok: true, out: stdout });
-        resolve({ ok: false, out: `${stdout ?? ""}${stderr ?? ""}`.trim() || error.message });
+        if (!error) return resolve({ ok: true, out: stdout, stdout });
+        resolve({ ok: false, out: `${stdout ?? ""}${stderr ?? ""}`.trim() || error.message, stdout: stdout ?? "" });
       },
     );
     // execFile has no stdio option: close the piped stdin so nothing waits on input (codex exec reads it).
@@ -167,7 +167,9 @@ export const preflight = async (project: Project, image: string, extra: { model:
     );
     let reply: { is_error?: boolean; result?: string } = {};
     try {
-      reply = JSON.parse(r.out);
+      // stdout alone: on an unknown model the CLI also writes a `[claude-code:unrecognized_model]`
+      // line to stderr, and parsing the two together printed the whole JSON as the reason.
+      reply = JSON.parse(r.stdout);
     } catch {
       /* not JSON - the raw output is the reason */
     }

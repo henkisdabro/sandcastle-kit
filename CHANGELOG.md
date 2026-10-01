@@ -180,6 +180,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `LINEAR_API_KEY` is refused there.
 - `SANDCASTLE_ALLOW_BROAD_TOKEN=1`, which accepts a `GH_TOKEN` that is not fine-grained, is
   documented, as an escape hatch for throwaway repos.
+- Preflight for a model the CLI does not know (a mistyped `model:` label, say) prints the CLI's
+  reason instead of its whole JSON reply.
 
 ### Added
 
