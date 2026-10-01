@@ -63,6 +63,12 @@ export type ProjectConfig = {
    */
   protectedPaths?: string[];
   /**
+   * How a green branch lands on the base branch. `merge` (default): a merge commit, the branch's
+   * own commits kept. `squash`: one commit holding the branch's whole change, with the same
+   * subject; the branch is deleted once the run has landed it.
+   */
+  land?: "merge" | "squash";
+  /**
    * Committed files a command writes (a minified stylesheet, a data file built from JSON). A merge
    * conflict confined to these paths is resolved by taking either side and running `regen` in the
    * sandbox, then committing; any other conflicting file still conflicts. A path is a file, or a
@@ -107,6 +113,9 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   if (!config?.name || !config.gates?.length) {
     throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
   }
+  if (config.land !== undefined && config.land !== "merge" && config.land !== "squash") {
+    throw new OperatorError(`${CONFIG_PATH}: land must be "merge" or "squash", not ${JSON.stringify(config.land)}.`);
+  }
   const generated = config.generated ?? [];
   if (
     !Array.isArray(generated) ||
@@ -128,6 +137,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     root,
     baseBranch: "main",
     concurrency: 4,
+    land: "merge",
     mounts: [],
     setup: [],
     implement: {},

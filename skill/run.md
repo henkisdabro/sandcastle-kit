@@ -37,7 +37,7 @@ This continues the run steps 1-3 in SKILL.md.
       branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
 
    End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
-   requeue a failed issue with a note, start a run for the unblocked issues, `sandcastle clean`
+   requeue a failed issue with a note (`sandcastle requeue <n> --note "..."`), start a run for the unblocked issues, `sandcastle clean`
    once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
 
    Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a

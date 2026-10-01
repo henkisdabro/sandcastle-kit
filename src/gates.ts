@@ -259,6 +259,13 @@ export const noteBaseResult = (root: string, key: string, green: boolean) => {
   writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString() }) + "\n");
 };
 
+/** Red on the base before any agent ran. Carries each gate's verdict so the run record, and the closing summary, can name the red ones. */
+export class BaseRedError extends OperatorError {
+  constructor(message: string, readonly baseGates: { gate: string; ok: boolean }[]) {
+    super(message);
+  }
+}
+
 /**
  * Gates the base branch and throws if any gate is red, with each red gate's
  * output in the log. `cached` skips the check when the same base, image and
@@ -299,10 +306,11 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
   const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`)];
-  throw new OperatorError(
+  throw new BaseRedError(
     `Red on ${base} before any agent ran: ${red.join(", ")}. Every branch would fail the same way, ` +
       `so no sandbox started. The cause is the image, the setup, the lean plan or a hook, not an issue: full output in ` +
       `.sandcastle/logs/base-gates.log. Fix it, then \`sandcastle gates\` to check (SKIP_BASE_GATES=1 runs anyway).`,
+    [...run.gates.map((g) => ({ gate: g.name, ok: g.pass })), ...redHooks.map((t) => ({ gate: `hook test "${t.name}"`, ok: false }))],
   );
 };
 

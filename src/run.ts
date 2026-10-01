@@ -5,7 +5,7 @@ import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { IterationUsage } from "@ai-hero/sandcastle";
+import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
 import type { Tracker } from "./tracker.ts";
@@ -203,7 +203,7 @@ export const preflight = async (project: Project, image: string) => {
 // from hand-suffixed branches (agent-issue-12-closeout-impl-...) fall back
 // to the first phase word.
 export const logOwner = (name: string) =>
-  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair|gates)-\1\.log$/)?.[1] ??
+  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair|gates)-\1\.(?:log|jsonl)$/)?.[1] ??
   name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair|gates)-/)?.[1];
 
 /** Where the orchestrator writes an issue's gate output as it runs; named like an agent log so it is archived with them. */
@@ -212,6 +212,33 @@ export const gatesLog = (project: Project, id: string) => join(project.root, `.s
 /** The log Sandcastle writes for branch `agent/issue-<id>` and run name `name`; it mirrors Sandcastle's own filename sanitising. */
 export const agentLog = (project: Project, id: string, name: string) =>
   join(project.root, ".sandcastle/logs", `agent-issue-${id}-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}.log`);
+
+/** The sidecar that keeps an agent pass's raw stream beside its readable log. */
+export const rawLog = (log: string) => log.replace(/\.log$/, ".jsonl");
+
+/**
+ * Sandcastle's `logging` option for one agent pass: the readable log goes where it always did, and every raw
+ * stdout line the agent printed (tool calls and results its parser drops) is appended to the `.jsonl` sidecar.
+ */
+export const agentLogging = (project: Project, id: string, name: string, runId: string): LoggingOption => {
+  const log = agentLog(project, id, name);
+  markLog(log, runId);
+  const raw = rawLog(log);
+  // A JSON marker, not markLog's "# run" line, so the sidecar stays valid JSONL.
+  appendFileSync(raw, JSON.stringify({ sandcastle: "run", run: runId, name, at: new Date().toISOString() }) + "\n");
+  return {
+    type: "file",
+    path: log,
+    onAgentStreamEvent: (event) => {
+      if (event.type !== "raw") return;
+      try {
+        appendFileSync(raw, event.line + "\n");
+      } catch {
+        // A full disk must not fail an agent pass; the library swallows a throwing callback too.
+      }
+    },
+  };
+};
 
 // Local time with its offset, built by hand: toLocaleString varies by locale,
 // and git and the terminal show local time where the gate headers show UTC.
@@ -512,6 +539,17 @@ export const recordHead = (root: string, id: string, fields: { branch: string; r
   // file read as no record would quietly cost a later run its skip.
   writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
   renameSync(`${file}.tmp`, file);
+};
+
+/** Drops a ticket's record, so the next run implements it afresh; true when there was one. */
+export const forgetHead = (root: string, id: string): boolean => {
+  const all = readHeads(root);
+  if (!(id in all)) return false;
+  delete all[id];
+  const file = headsFile(root);
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+  return true;
 };
 
 /**

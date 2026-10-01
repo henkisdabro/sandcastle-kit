@@ -64,6 +64,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   variants where they differ.
 - `sandcastle init` and the skill's init step ask about generated paths, no-touch paths and a
   drift gate when writing `rules.md`; the config template carries a commented `generated` example.
+- A landing by regeneration is checked on the host before the base moves: the merge must have
+  exactly the base and the gated head as parents, and change nothing outside `generated` paths
+  beyond what either side changed. Otherwise nothing lands and the ticket is a conflict, with the
+  paths named.
 
 ### Fixed
 
@@ -133,6 +137,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   as plain text.
 - Tests: the signal test sends SIGINT a second time after 5 s, as an operator would, instead of
   failing a loaded macOS suite on a rare unacted first signal.
+- A run that stops on red base gates says so in its closing summary: `Run stopped: red on <base>
+  before any agent ran`, `0 attempted`, the failing gates, and a fix-the-base next step. It used
+  to read as 'N attempted, 0 merged' with no cause.
+- `sandcastle init` no longer glues its first `.gitignore` entry onto a last line with no final
+  newline (which could leave `.env` unignored).
+- Tests: the guard test's commits keep their test identity inside a sandbox, where the agent
+  committer's environment would otherwise override it.
 
 ### Added
 
@@ -167,6 +178,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle land <n>`: merge one ticket's branch with the kit's message, gate it in the project
   image (regenerating `generated` paths if they conflict), then comment and close on green. A
   conflict outside `generated` stops with the files named.
+- `sandcastle requeue <n> [--note "..."]`: put a ticket back in the queue with `needs-human`
+  removed and the note as a comment, for GitHub and ticket files. It also forgets the ticket's
+  recorded green head, so the next run re-implements rather than landing the old branch.
+- `land: "merge" | "squash"` in `.sandcastle/config.ts` (default `merge`). Squash keeps the
+  subject `Merge agent/issue-N (closes #N)` and deletes the squashed branch after landing.
+- Each agent pass also writes its raw stream to `agent-issue-<id>-<phase>-<id>.jsonl` beside the
+  readable log, archived with it - every tool call and result, not only what the readable log
+  shows.
 
 ## [0.2.0] - 2026-09-30
 

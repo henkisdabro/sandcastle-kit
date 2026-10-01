@@ -211,6 +211,7 @@ load_queue() {
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+# The .jsonl sidecars (each pass's raw agent stream) are deliberately not matched here or by any log glob below.
 # Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log
 # (phase impl, review, review-codex, repair, or gates - the orchestrator's gate output):
 # the id appears twice, and the repeat tells a ticket called "code-review-01" from the
@@ -658,7 +659,12 @@ render() {
       state="$phase"
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
-      state="no branch"
+      # A squash-landed branch is deleted at landing, so its subject on the base is the proof.
+      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" 2>/dev/null)" ]; then
+        state="merged"; activity_note="squashed into $BASE"
+      else
+        state="no branch"
+      fi
     elif [ "$commits" -gt 0 ] && ! git cherry "$BASE" "agent/issue-$n" 2>/dev/null | grep -q '^+'; then
       # Every commit has an equivalent patch already on the base. The
       # orchestrator rebased instead of merging, so --merged cannot see it:

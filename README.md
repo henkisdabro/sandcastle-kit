@@ -327,7 +327,9 @@ them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an
 base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
 still proves the result matches the sources. At landing, a branch whose merge conflicts only in
 `generated` paths is merged in a throwaway sandbox by regenerating them, committed with the usual
-`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step.
+`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step. Before the base moves, the host checks that the
+commit is a merge of exactly the base tip and the gated head and changes nothing beyond a plain merge
+except under `generated` paths; otherwise nothing lands and the ticket is left as a conflict.
 
 ## 📋 Queue: what agents work on
 
@@ -497,7 +499,9 @@ status view flags a sandbox whose log has been quiet for ten. Every step - image
 gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.jsonl`, with each
 agent pass's tokens and each gate's own time (`ok` is false for a gate run with a red gate, named
 in `red`); the report gives each issue's wall time and tokens, and the base check prints its gates
-slowest first. Tickets that others wait for start first.
+slowest first. Tickets that others wait for start first. Each agent pass also keeps its raw stream -
+every tool call and result, as the agent printed it - in
+`.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` beside the readable `.log`, archived with it.
 Before the slow steps a run prints a rough estimate - tokens and time for the chosen tickets, from the medians of this project's earlier tickets in `.sandcastle/logs/timings.jsonl` - once the project has any; with `USAGE_CHECK=1` it also prints the plan's usage after preflight.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
@@ -605,6 +609,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base the way a run does (`Merge agent/issue-N (closes #N)`), gates the merge in a sandbox, then closes the ticket. Refuses a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle report` | The last run's closing summary: done, needs you (held), needs fixing (with causes several branches share), runnable now and still blocked (re-read after landing), local state (commits not on the upstream, branches left standing) and the next step. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
+| `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open queued issues whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
@@ -632,6 +637,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
+| `land` | `"merge"` | How green work lands: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). Held branches are never landed either way |
 | `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run, and a merge at landing, that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output (`maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a conflicted base merge on a branch already reviewed and green); up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run. A re-run whose only change since its last review is the base merge (and any conflict resolution inside it) gets a review of the merge alone, not a full review |

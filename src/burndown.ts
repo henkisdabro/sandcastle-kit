@@ -25,14 +25,14 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -123,8 +123,50 @@ export const closeComment = (
 // the agent's, the author the operator's (see AGENT_COMMITTER).
 // --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
 // green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
-export const mergeBranch = (root: string, branch: string, head: string, ticket: string) =>
-  sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
+export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge") => {
+  if (mode === "merge") {
+    return sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
+  }
+  // The branch's own commits not on the base, without the kit's merges of the base into a carried branch.
+  const subjects = sh("git", ["log", "--reverse", "--no-merges", "--format=%s", `HEAD..${head}`], root);
+  // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
+  sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
+  // --allow-empty: a green branch whose change is already on the base still gets its commit, so
+  // `mergedEarlier` and status.sh find the ticket as landed.
+  return sh(
+    "git",
+    [
+      "commit",
+      "--no-verify",
+      "--allow-empty",
+      "-m",
+      `Merge ${branch} (closes ${ticket})`,
+      ...(subjects ? ["-m", subjects.split("\n").map((s) => `- ${s}`).join("\n")] : []),
+    ],
+    root,
+    AGENT_COMMITTER,
+  );
+};
+
+// Every place that decides "landed", and why each works with a squash (whose commits are not
+// ancestors of the base, and whose branch is deleted once the loop has landed everything):
+// - `mergedEarlier`, burndown.ts: a subject `--grep` on the base - works unchanged.
+// - carried / nochange, burndown.ts (`rev-list --count base..branch`): only for a branch that
+//   exists; a squashed branch is deleted, so a reopened ticket starts fresh from the base, which
+//   holds its work - correct.
+// - `sandcastle clean`, cli.ts (`git cherry`): the deleted branch is not listed - correct.
+// - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
+// - the log archive, `archiveFinishedLogs` in run.ts: a deleted branch counts as finished, so its
+//   log is archived - correct.
+// - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
+// - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
+//   base reads `merged`, not `no branch`.
+// - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
+//   the branch exists - unaffected.
+// A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
+// staged squash and keeps unrelated local changes.
+export const abortLanding = (root: string, mode: "merge" | "squash") =>
+  sh("git", mode === "squash" ? ["reset", "--merge"] : ["merge", "--abort"], root);
 
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
 export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
@@ -356,7 +398,15 @@ export const burndown = async (project: Project) => {
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
-  else await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+  else {
+    try {
+      await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+    } catch (error) {
+      // The closing summary names the red gates from the record; the stage stays "base gates".
+      if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
+      throw error;
+    }
+  }
   // What the tracker says about each ticket now, to prove a dry run left it alone.
   const before = DRY_RUN ? tracker.snapshot(issues.map((i) => i.id)) : undefined;
   // Agents label the follow-up issues they file; the sandbox token cannot create the label.
@@ -550,9 +600,10 @@ export const burndown = async (project: Project) => {
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
         await timed(issue.id, "implement", () => {
-          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
           return sandbox.run({
             name: `impl-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.resolve,
             promptArgs: usedArgs(prompts.resolve, promptArgs),
@@ -577,6 +628,7 @@ export const burndown = async (project: Project) => {
       const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
         sandbox.run({
           name,
+          logging: agentLogging(project, issue.id, name, runId),
           agent,
           promptFile,
           promptArgs: usedArgs(promptFile, args),
@@ -592,7 +644,6 @@ export const burndown = async (project: Project) => {
           issue.id,
           "review",
           () => {
-            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               narrowModel = model;
               return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since })(agent);
@@ -615,9 +666,10 @@ export const burndown = async (project: Project) => {
       }
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
-          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
           return sandbox.run({
             name: `impl-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.implement,
             promptArgs: usedArgs(prompts.implement, promptArgs),
@@ -668,7 +720,6 @@ export const burndown = async (project: Project) => {
             issue.id,
             "review",
             () => {
-              markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
               return reviewWithFallback(ref(issue.id), (agent, model) => {
                 reviewModel = model;
                 return reviewRun(`review-${issue.id}`)(agent);
@@ -682,7 +733,6 @@ export const burndown = async (project: Project) => {
                 issue.id,
                 "cross-review",
                 () => {
-                  markLog(agentLog(project, issue.id, `review-codex-${issue.id}`), runId);
                   return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
                 },
                 undefined,
@@ -751,9 +801,10 @@ export const burndown = async (project: Project) => {
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
         const fixed = await timed(issue.id, "repair", () => {
-          markLog(agentLog(project, issue.id, `repair-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
           return sandbox.run({
             name: `repair-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.repair,
             promptArgs: usedArgs(prompts.repair, {
@@ -798,7 +849,6 @@ export const burndown = async (project: Project) => {
           issue.id,
           "review",
           () => {
-            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               afterModel = model;
               return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
@@ -868,7 +918,8 @@ export const burndown = async (project: Project) => {
     const logs = join(project.root, ".sandcastle/logs");
     if (!existsSync(logs)) return false;
     return readdirSync(logs)
-      .filter((f) => logOwner(f) === issue)
+      // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
+      .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
       .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
   };
 
@@ -1015,6 +1066,7 @@ export const burndown = async (project: Project) => {
   // Where the branches forked, to tell which merged branch a conflict is with.
   const startBase = sh("git", ["rev-parse", base]);
   const merged: string[] = [];
+  const squashed: string[] = [];
   // Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen.
   const regenerated = new Map<string, { files: string[]; regen: string[] }>();
   const conflicted: { issue: string; branch: string; files: string[]; with: string[] }[] = [];
@@ -1102,8 +1154,9 @@ export const burndown = async (project: Project) => {
     }
     try {
       // The commit the gates passed on, not whatever the branch names now.
-      mergeBranch(project.root, o.branch, o.head!, ref(o.issue));
+      mergeBranch(project.root, o.branch, o.head!, ref(o.issue), project.land);
       merged.push(o.issue);
+      if (project.land === "squash") squashed.push(o.branch);
     } catch (error) {
       // A real conflict and a merge that failed for another reason (a dirty
       // index, a full disk) are reported apart - calling both "conflict" sent us
@@ -1116,7 +1169,7 @@ export const burndown = async (project: Project) => {
         }
       })();
       try {
-        sh("git", ["merge", "--abort"]);
+        abortLanding(project.root, project.land);
       } catch {
         /* nothing to abort */
       }
@@ -1142,6 +1195,7 @@ export const burndown = async (project: Project) => {
           `${ref(o.issue)}: conflicted only in generated files (${sandboxed.files.join(", ")}); merged by regenerating them with ${sandboxed.regen.map((c) => `\`${c}\``).join(", ")}.`,
         );
       } else if (unmerged) {
+        if (sandboxed?.kind === "conflict" && sandboxed.note) console.log(`${ref(o.issue)}: ${sandboxed.note}; left as a conflict.`);
         if (sandboxed?.kind === "regen-failed") {
           console.log(`${ref(o.issue)}: regenerating ${sandboxed.files.join(", ")} failed (${sandboxed.reason}); left as a conflict.`);
         }
@@ -1186,6 +1240,19 @@ export const burndown = async (project: Project) => {
     } catch (error) {
       closeFailed.push(o.issue);
       run.ticket(o.issue, { state: "merged", note: "merged; closing the ticket failed", closeFailed: errorLine(error) });
+    }
+  }
+
+  // Deleted only now: the conflict attribution above diffs `${startBase}...agent/issue-N` for every
+  // ticket merged so far, so each branch must exist until the loop ends. A squashed branch's commits
+  // are not ancestors of the base and `git cherry` cannot match one squashed patch to several
+  // commits, so a kept branch would read as unmerged work in `sandcastle clean`, the closing
+  // summary and the status view.
+  for (const b of squashed) {
+    try {
+      sh("git", ["branch", "-D", b]);
+    } catch {
+      console.log(`${b}: squashed into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
     }
   }
 

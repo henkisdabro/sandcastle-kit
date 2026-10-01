@@ -54,6 +54,11 @@ export type Facts = {
   changed: Record<string, number>;
   /** Issues agents filed during the run, labelled needs-triage and still open (GitHub only). */
   filed?: { id: string; title: string }[];
+  /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
+  stage?: string;
+  exitCode?: number | null;
+  /** Each base gate's verdict, when the run stopped on red base gates. */
+  baseGates?: { gate: string; ok: boolean }[];
 };
 
 const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
@@ -179,6 +184,9 @@ export const gather = async (project: Project): Promise<Facts> => {
     stopped: run.stopped,
     changed,
     filed,
+    stage: run.stage,
+    exitCode: run.exitCode,
+    baseGates: run.baseGates,
   };
 };
 
@@ -205,14 +213,18 @@ export const render = (f: Facts, plain = false): string => {
   const takenBack = held.filter((id) => !handedBack.includes(id) && f.tickets[id].note?.startsWith("marked needs-human"));
   const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id));
   const fixing = ids(NEEDS_FIXING);
-  const notStarted = ids(LEFT);
+  // The gates on the base were red before any agent ran: nothing was attempted,
+  // and the queue is untouched. Said first, as nothing below it is news.
+  const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
+    !Object.values(f.tickets).some((t) => t.started);
+  const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT);
   const nochange = ids(["nochange"]);
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
   // A dry run's green branches end as "ready": they would have merged.
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
-  const attempted = Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length;
+  const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
@@ -223,12 +235,16 @@ export const render = (f: Facts, plain = false): string => {
   // was asked for, perhaps hours later, and "finished" would be untrue.
   const end = f.finished ?? (f.killed ? undefined : new Date().toISOString());
   out.push(
-    `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+    baseRed
+      ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length} need you - ${fixing.length} need fixing - ` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
-    f.verify === undefined || f.verify === null
+    baseRed
+      ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
+      : f.verify === undefined || f.verify === null
       // null: the run ended and chose not to (fewer than two merges this run - a
       // ticket closed as merged earlier merges nothing); undefined: it never got there.
       ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : "no result recorded"}).`
@@ -332,6 +348,11 @@ export const render = (f: Facts, plain = false): string => {
 
   // Next step: the first thing that unblocks the most, then the rest in order.
   const next: string[] = [];
+  if (baseRed) {
+    next.push(
+      `Fix the base: read .sandcastle/logs/base-gates.log, then \`sandcastle gates\` to check; the queue is untouched, so \`sandcastle run\` afterwards starts the same tickets.`,
+    );
+  }
   if (f.stopped) {
     next.push(
       `Check what stopped the run (above). If it is your own commit, \`sandcastle run\` again` +
@@ -342,7 +363,7 @@ export const render = (f: Facts, plain = false): string => {
   if (sameTest.length) next.push(`Fix ${sameTest.map(([test]) => test).join(", ")} once - it fails on ${new Set(sameTest.flatMap(([, w]) => w)).size} of the unmerged branches.`);
   if (sameFile.length) next.push(`Start with ${sameFile.map(([file]) => file).join(", ")}: ${new Set(sameFile.flatMap(([, w]) => w)).size} of the unmerged branches fail or conflict there.`);
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
-  if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue.`);
+  if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
@@ -351,7 +372,7 @@ export const render = (f: Facts, plain = false): string => {
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
   if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
-  if (f.standing.length) next.push("`sandcastle clean` once the branches above are resolved.");
+  if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   section(h("## 👉 Next step", "## Next step"), next.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");
 };
