@@ -127,7 +127,7 @@ try {
     }
     case "preflight": {
       const project = await loadProject(root);
-      preflight(project, ensureImage(project));
+      await preflight(project, ensureImage(project));
       break;
     }
     case "queue": {
