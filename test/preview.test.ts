@@ -164,3 +164,26 @@ test("a runner that fails is an operator error; no branches never calls the runn
   );
   assert.equal(called, false);
 });
+
+test("a clean branch that landing would hold - a protected path, a file over 50 MB - reads as held, with why", async () => {
+  const { largeFiles } = await import("../src/guard.ts");
+  const r = repo();
+  r.git("checkout", "-q", "-b", "agent/issue-30", "main");
+  mkdirSync(join(r.root, ".githooks"));
+  writeFileSync(join(r.root, ".githooks/post-merge"), "#!/bin/sh\n");
+  r.git("add", "-A");
+  r.git("commit", "-q", "-m", "hook");
+  r.git("checkout", "-q", "-b", "agent/issue-31", "main");
+  // Zeros: git stores 51 MB of them in a few kilobytes, but the blob's size is what GitHub counts.
+  writeFileSync(join(r.root, "data.bin"), Buffer.alloc(51 * 1024 * 1024));
+  r.git("add", "-A");
+  r.git("commit", "-q", "-m", "big");
+  r.git("checkout", "-q", "main");
+  assert.deepEqual(largeFiles(r.project, "agent/issue-31"), ["data.bin (51 MB)"]);
+  const row = (id: string): PreviewRow => ({ branch: `agent/issue-${id}`, id, head: "x", result: "clean", files: [] });
+  const out = previewLines(r.project, "main", [row("30"), row("31")]);
+  assert.equal(out[1], "  held      #30  agent/issue-30: merges cleanly, but needs a human merge - .githooks/post-merge");
+  assert.equal(out[2], "  held      #31  agent/issue-31: merges cleanly, but needs a human merge - data.bin (51 MB)");
+  assert.equal(out.at(-1), "2 held for a human merge.");
+  assert.ok(!out.some((l) => l.startsWith("A conflicting branch")), "no conflict note without a conflict");
+});

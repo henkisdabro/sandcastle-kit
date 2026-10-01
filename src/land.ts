@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, gitFingerprint, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
@@ -204,9 +204,11 @@ export const landTicket = async (
   const paths = protectedChanges(project, branch);
   if (paths.length) {
     throw new OperatorError(
-      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand.`,
+      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand: \`git log -p ${base}..${branch}\`, then \`git merge --no-ff ${branch}\`.`,
     );
   }
+  const large = largeFiles(project, branch);
+  if (large.length) throw new OperatorError(`${branch} ${largeFilesNote(large)}: \`git merge --no-ff ${branch}\`.`);
 
   // Counted now: once merged, none of the branch's commits are ahead of the base.
   const commits = ownCommits(base, branch, project.root);

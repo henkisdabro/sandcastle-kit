@@ -75,6 +75,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `ANTHROPIC_API_KEY` are unset for every gate command, and a value of one that still appears in
   gate output is replaced with `<redacted>`. A gate whose test read one of them now sees nothing:
   give that test its own variable in `.sandcastle/.env`. `/sandcastle update` checks for it.
+- **A branch that adds or grows a file over 50 MB is held for a human merge**, as a protected path
+  is: GitHub warns at 50 MB and refuses a push with a file over 100 MB, and such a file stays in
+  the history. `sandcastle land` refuses it with the same reason.
 
 ### Changed
 
@@ -314,6 +317,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - For contributors: the kit's pre-commit hook skips blank lines and `#` comments in the personal
   denylist. A blank line matched every staged line and blocked every commit. Its missing-gitleaks
   message now names a Linux install too.
+- `sandcastle preview` showed a branch that landing would hold for a person (a protected path such
+  as `.githooks/` or `.gitattributes`, or a file over 50 MB) as `clean`; it now shows `held` and
+  why. Its note about conflicting branches appears only when one conflicts. `sandcastle land`'s
+  refusal of a protected branch gives the review and merge commands.
 
 ### Added
 

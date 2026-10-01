@@ -119,6 +119,22 @@ export const protectedChanges = (project: Project, branch: string) => {
   return hits;
 };
 
+// GitHub warns on a file over 50 MB and refuses a push with one over 100 MB, and a blob that size
+// stays in the history for good. A branch that adds or grows one is held like a protected path.
+const LARGE_BYTES = 50 * 1024 * 1024;
+export const largeFiles = (project: Project, branch: string): string[] =>
+  sh("git", ["diff", "--name-only", "--diff-filter=AM", `${project.baseBranch}...${branch}`], project.root)
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((f) => {
+      const bytes = Number(sh("git", ["cat-file", "-s", `${branch}:${f}`], project.root));
+      return bytes > LARGE_BYTES ? [`${f} (${Math.round(bytes / 1024 / 1024)} MB)`] : [];
+    });
+
+/** Why a large file needs a person, and what else to do with it. */
+export const largeFilesNote = (files: string[]) =>
+  `adds ${files.join(", ")}, over GitHub's 50 MB file warning (it refuses a push with a file over 100 MB), and a file that size stays in the history for good. Merge it by hand if it belongs in git; otherwise keep it out (Git LFS, or a step that downloads it)`;
+
 // ---------------------------------------------------------------------------
 // One run per project at a time: two would take the same queue, the same
 // branches and merge into the same checkout.

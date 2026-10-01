@@ -12,6 +12,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { sh } from "./sandbox.ts";
 import { refOf } from "./tracker.ts";
+import { largeFiles, protectedChanges } from "./guard.ts";
 
 export type PreviewRow = { branch: string; id: string; head: string; result: "clean" | "conflict" | "error"; files: string[]; detail?: string };
 export type Runner = (script: string, args: string[], dirs: { gitDir: string; scratch: string }) => { status: number | null; stdout: string; stderr: string };
@@ -105,17 +106,31 @@ export const previewLines = (project: Project, base: string, rows: PreviewRow[])
     // A base that cannot be resolved still gets a preview line.
   }
   const lines = [`Landing preview: ${rows.length} unlanded branch(es) against ${at}, oldest first. Nothing is merged.`];
+  // A clean merge that landing would still hold for a person (a protected path, a file over 50 MB)
+  // read as "clean", as if it would land.
+  const heldFor = (r: PreviewRow) => {
+    if (r.result !== "clean") return [];
+    try {
+      return [...protectedChanges(project, r.branch), ...largeFiles(project, r.branch)];
+    } catch {
+      return [];
+    }
+  };
+  let held = 0;
   for (const r of rows) {
-    const label = { clean: "clean", conflict: "CONFLICT", error: "ERROR" }[r.result].padEnd(10);
+    const human = heldFor(r);
+    if (human.length) held++;
+    const label = (human.length ? "held" : { clean: "clean", conflict: "CONFLICT", error: "ERROR" }[r.result]).padEnd(10);
     const files = r.files.length > 5 ? `${r.files.slice(0, 5).join(", ")} and ${r.files.length - 5} more` : r.files.join(", ");
-    const tail = r.result === "conflict" ? `: ${files}` : r.result === "error" ? `: ${r.detail ?? ""}` : "";
+    const tail = human.length ? `: merges cleanly, but needs a human merge - ${human.join(", ")}` : r.result === "conflict" ? `: ${files}` : r.result === "error" ? `: ${r.detail ?? ""}` : "";
     lines.push(`  ${label}${refOf(r.id)}  ${r.branch}${tail}`);
   }
-  lines.push("A conflicting branch is left out of the merges after it, as landing would leave it out.");
+  if (rows.some((r) => r.result === "conflict")) lines.push("A conflicting branch is left out of the merges after it, as landing would leave it out.");
   const count = (n: number, what: string) => (n ? [`${n} ${what}`] : []);
   lines.push(
     `${[
-      ...count(rows.filter((r) => r.result === "clean").length, "clean"),
+      ...count(rows.filter((r) => r.result === "clean").length - held, "clean"),
+      ...count(held, "held for a human merge"),
       ...count(rows.filter((r) => r.result === "conflict").length, "conflicting"),
       ...count(rows.filter((r) => r.result === "error").length, "failed to preview"),
     ].join(", ")}.`,

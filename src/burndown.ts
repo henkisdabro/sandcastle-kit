@@ -27,7 +27,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview,
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, largeFiles, largeFilesNote, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
@@ -989,7 +989,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const settled = (o: Outcome): TicketRecord => {
     const repaired = o.repairs ? `, ${o.repairs} repair(s)` : "";
     if (o.status === "green") {
-      const held = protectedChanges(project, o.branch);
+      const held = [...protectedChanges(project, o.branch), ...largeFiles(project, o.branch)];
       if (o.unreviewed) held.push("repair not reviewed");
       return { state: "ready", note: held.length ? `human merge: ${held.join(", ")}` : `gates green${repaired}` };
     }
@@ -1192,6 +1192,14 @@ export const burndown = async (project: Project): Promise<boolean> => {
             (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""),
         );
       }
+      continue;
+    }
+    const large = largeFiles(project, o.branch);
+    if (large.length) {
+      heldBack.push({ issue: o.issue, paths: large });
+      land(o.issue, "held", `${DRY_RUN ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`);
+      run.ticket(o.issue, { files: large });
+      if (!DRY_RUN) tracker.hold(o.issue, `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it ${largeFilesNote(large)}.` + (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""));
       continue;
     }
     if (o.unreviewed) {
