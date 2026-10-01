@@ -61,7 +61,14 @@ export const confirm = async (
 ): Promise<boolean | undefined> => {
   if (input.isTTY !== true) return undefined;
   const rl = createInterface({ input, output });
-  const answer = await rl.question(question);
-  rl.close();
-  return /^y/i.test(answer.trim());
+  try {
+    return /^y/i.test((await rl.question(question)).trim());
+  } catch (error) {
+    // Ctrl-C at the question is a no, not a stack trace.
+    if ((error as Error).name !== "AbortError") throw error;
+    output.write("\n");
+    return false;
+  } finally {
+    rl.close();
+  }
 };

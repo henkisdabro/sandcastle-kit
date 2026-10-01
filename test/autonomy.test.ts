@@ -105,6 +105,14 @@ test("confirm: not a terminal is undefined and reads nothing; at a terminal only
   }
 });
 
+test("confirm: Ctrl-C at the question is a no, not a thrown AbortError", async () => {
+  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => input });
+  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+  const answer = confirm("Run? ", input, output);
+  input.write("\u0003");
+  assert.equal(await answer, false);
+});
+
 const project = (): Project => ({ root: mkdtempSync(join(tmpdir(), "sandcastle-autonomy-")), name: "t" }) as unknown as Project;
 
 test("recordRun twice in one process: the first run is finished in history, the second is live", () => {

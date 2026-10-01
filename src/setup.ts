@@ -13,11 +13,19 @@ import { parseEnv } from "node:util";
 import { doctor, probeGithubToken, run } from "./doctor.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 
+// Ctrl-C at a question rejects it with an AbortError, which reached the operator as a stack
+// trace; it ends setup, as it does at a token prompt.
 const ask = async (q: string) => {
   const rl = createInterface({ input: stdin, output: stdout });
-  const a = await rl.question(q);
-  rl.close();
-  return a.trim();
+  try {
+    return (await rl.question(q)).trim();
+  } catch (error) {
+    if ((error as Error).name !== "AbortError") throw error;
+    stdout.write("\n");
+    process.exit(130);
+  } finally {
+    rl.close();
+  }
 };
 
 const yes = async (q: string, byDefault: boolean) => {

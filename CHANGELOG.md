@@ -219,6 +219,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `GH_TOKEN` is reported as missing rather than as "not fine-grained".
 - A malformed personal `config.json` is reported in a full sentence, not run into the fix that
   follows it.
+- Ctrl-C at a `sandcastle setup` question ends setup quietly, as it already did at a token prompt,
+  instead of printing a Node `AbortError` stack trace; at the autonomy level-1 question it counts
+  as no.
 
 ### Added
 
