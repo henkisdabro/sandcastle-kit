@@ -92,6 +92,17 @@ test("unlanded lists the agent/issue-* branches with commits past the base, olde
   assert.equal(unlanded(r.project)[0].head, r.git("rev-parse", "agent/issue-1"));
 });
 
+// Name order would put issue-10 before issue-9; the older tip goes first all the same.
+test("unlanded orders by the tip's committer date before the name", () => {
+  const r = repo();
+  branch(r, "agent/issue-10", 2, { "a.txt": "A10" });
+  branch(r, "agent/issue-9", 1, { "b.txt": "B9" });
+  assert.deepEqual(
+    unlanded(r.project).map((b) => b.id),
+    ["9", "10"],
+  );
+});
+
 test("preview merges each clean branch onto the last and leaves a conflicting one out", (t) => {
   if (gitTooOld) return t.skip("host git older than 2.38");
   const r = fixture();

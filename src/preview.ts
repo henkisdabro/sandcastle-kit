@@ -131,5 +131,5 @@ export const dockerRunner =
       ["run", "--rm", "--network", "none", "-v", `${gitDir}:/repo.git:ro`, "-v", `${scratch}:/objects`, "-e", "REPO_GIT=/repo.git", "-e", "SCRATCH=/objects", "--entrypoint", "sh", image, "-c", script, "sh", ...args],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 300_000 },
     );
-    return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? r.error?.message ?? "" };
+    return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr || r.error?.message || "" };
   };
