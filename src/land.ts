@@ -37,7 +37,9 @@ export type LandResult =
 export const checkLandingMerge = (root: string, c: string, b: string, h: string, generated: Generated[]): string | undefined => {
   const notAMerge = "landing merge is not a merge of base and the gated head";
   const git = (...args: string[]) => sh("git", args, root);
-  const paths = (...args: string[]) => git("diff", "--name-only", "-z", ...args).split("\0").filter(Boolean);
+  // With rename detection a path list names only a rename's target: a stray deletion paired
+  // with a file one side added would hide behind that side's path.
+  const paths = (...args: string[]) => git("diff", "--no-renames", "--name-only", "-z", ...args).split("\0").filter(Boolean);
   let base: string, head: string, mergeBase: string;
   try {
     base = git("rev-parse", "--verify", `${b}^{commit}`);
