@@ -39,6 +39,7 @@ import { makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
+import { OperatorError } from "./errors.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -196,7 +197,7 @@ export const burndown = async (project: Project) => {
   const view = openSandboxView(project, Math.min(CONCURRENCY, issues.length), ref);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
-    throw new Error("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
+    throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
   }
   if (statusPane) console.log(`Status view: pane ${statusPane}${view.tab ? ` (tab ${view.tab})` : ""}`);
 
@@ -275,7 +276,7 @@ export const burndown = async (project: Project) => {
   // silently guards nothing. Stop before any sandbox starts.
   const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean));
   reportHookCheck(hookCheck, lean.hooks.length);
-  if (hookCheck.failures.length) throw new Error("A kept hook cannot run in the image - no sandbox started.");
+  if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else await timed("", "base gates", () => requireGreenBase(project, image, planFile));
   // What the tracker says about each ticket now, to prove a dry run left it alone.
