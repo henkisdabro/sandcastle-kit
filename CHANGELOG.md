@@ -186,6 +186,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `Unexpected end of JSON input`, and `sandcastle doctor` reports a missing queue label with its
   FIX line instead of skipping the check: `gh label list --search` prints nothing, not `[]`, when
   nothing matches.
+- The status view's AGE column no longer shows a negative age (`-1s`) for a state the run wrote
+  while the frame was being drawn.
 
 ### Added
 

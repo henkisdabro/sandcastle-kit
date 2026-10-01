@@ -205,6 +205,17 @@ row '#101' impl
 has '^#101 .* 1\.5c '
 
 # ---------------------------------------------------------------------------
+SCENARIO="a state written after the frame's clock"
+# The frame reads the clock before run.json, so a state the run wrote in between is "in the future".
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["103"], "tickets": { "103": { "state": "ready", "since": $((now + 30)), "note": "gates green" } } }
+EOF
+render "103"
+row '#103' ready
+has '^#103 .* 0s '
+
+# ---------------------------------------------------------------------------
 SCENARIO="overflow, ticket-file ids"
 # What does not fit is summed up by state. Ticket-file ids have no numeric
 # order: they are named, never made into a range like "#0-#0".

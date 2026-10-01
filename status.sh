@@ -309,7 +309,9 @@ typical_of() { printf '%s\n' "$TYPICAL" | awk -F'|' -v k="$1" '$1==k{print $2; e
 
 # Seconds as the AGE column shows them.
 ago() {
-  if   [ "$1" -lt 60 ]; then printf '%ss' "$1"
+  # The frame's clock is read before run.json, so a state written in between is a second "ahead".
+  if   [ "$1" -lt 1 ]; then printf '0s'
+  elif [ "$1" -lt 60 ]; then printf '%ss' "$1"
   elif [ "$1" -lt 3600 ]; then printf '%sm' "$(( $1 / 60 ))"
   else printf '%sh' "$(( $1 / 3600 ))"; fi
 }
