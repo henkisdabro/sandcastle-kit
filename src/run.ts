@@ -246,21 +246,36 @@ const AFTER_REPAIR =
   "cause instead. The rest of the branch was reviewed already: leave it alone unless a repair commit broke it.\n\n" +
   "!`git log -p {{REPAIR_BASE}}..HEAD --format='%h %s%n%b'`\n\n";
 
+// A re-run's only new commits can be the kit's base merge, with a conflict
+// resolved inside it. `--cc` shows a merge's resolution hunks alone and
+// `--first-parent` keeps the base's own commits out of the log.
+const AFTER_MERGE =
+  "# This is a second review, after a base merge\n\n" +
+  "This branch was reviewed in full at {{REVIEW_BASE}}. Since then the only change is that `{{TARGET_BRANCH}}` was " +
+  "merged into it, with any conflicts resolved inside the merge. Nobody has reviewed that resolution. Below is each " +
+  "merge's combined diff, which shows only the lines that differ from both sides - the resolution. Review it for what " +
+  "a hurried resolution gets wrong: one side's change dropped, both sides kept where only one belongs, a block " +
+  "duplicated, a call or import left pointing at code the other side renamed or removed. The rest of the branch was " +
+  "reviewed already: leave it alone unless the merge broke it.\n\n" +
+  "!`git log -p --cc --first-parent {{REVIEW_BASE}}..HEAD --format='%h %s%n%b'`\n\n";
+
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
     : "";
   const out = join(project.root, ".sandcastle/.run");
   mkdirSync(out, { recursive: true });
-  const paths = { implement: "", review: "", repair: "", rereview: "", resolve: "" };
+  const paths = { implement: "", review: "", repair: "", rereview: "", remerge: "", resolve: "" };
+  // `remerge` is the same prompt for a re-run whose only change since its last review is
+  // the base merge: it shows the merge's resolution, not the whole branch again.
   // `rereview` is the review prompt again, for the review after a repair pass
   // committed: it names the unreviewed repair commits and what to look for in them.
   // `resolve` finishes a conflicted base merge on a branch already reviewed and green.
-  for (const kind of ["implement", "review", "repair", "rereview", "resolve"] as const) {
+  for (const kind of ["implement", "review", "repair", "rereview", "remerge", "resolve"] as const) {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
-    const text = readFileSync(join(KIT, `prompts/${kind === "rereview" ? "review" : kind}.md`), "utf8")
-      .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : ""))
+    const text = readFileSync(join(KIT, `prompts/${kind === "rereview" || kind === "remerge" ? "review" : kind}.md`), "utf8")
+      .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : kind === "remerge" ? AFTER_MERGE : ""))
       .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|NEW_TICKET_REVIEW|NEW_TICKET|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
@@ -274,6 +289,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     if (kind === "rereview") allowed.add("REPAIR_BASE");
+    if (kind === "remerge") allowed.add("REVIEW_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
@@ -514,6 +530,27 @@ export const landOnlyHead = (root: string, base: string, id: string): string | u
     return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.green : undefined;
   } catch {
     return undefined; // no such branch, or git failed
+  }
+};
+
+/**
+ * The recorded reviewed head when everything on branch agent/issue-<id> since it is merge
+ * commits (the kit's base merge, conflict resolution inside it) or already on base; otherwise undefined.
+ * Undefined means "review in full": a missing or doubtful record never narrows a review.
+ */
+export const narrowReviewBase = (root: string, base: string, id: string): string | undefined => {
+  const branch = `agent/issue-${id}`;
+  const record = readHeads(root)[id];
+  if (!record?.reviewed || record.branch !== branch) return undefined;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    // A rewritten branch: the reviewed commit is no longer in its history.
+    sh("git", ["merge-base", "--is-ancestor", record.reviewed, branch], root);
+    // Merge commits and what base already holds are not new work; anything else is.
+    const fresh = Number(sh("git", ["rev-list", "--count", "--no-merges", `${record.reviewed}..${branch}`, `^${base}`], root));
+    return fresh > 0 ? undefined : record.reviewed;
+  } catch {
+    return undefined; // no such branch, not an ancestor, or git failed
   }
 };
 
