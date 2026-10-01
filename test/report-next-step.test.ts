@@ -49,7 +49,13 @@ test("a conflicted and a red ticket: the next step says still queued, resumes th
   assert.match(next, /Look at #101 #102: /);
   assert.match(
     next,
-    /still queued - add a comment for the implementer if it helps, and the next `sandcastle run` resumes its branch; or merge by hand: `git merge --no-ff agent\/issue-<n>`/,
+    /still queued - add a comment for the implementer if it helps, and the next `sandcastle run` resumes its branch; or fix the branch yourself and land it: `sandcastle land <n>`/,
   );
+  assert.doesNotMatch(next, /git merge/);
   assert.doesNotMatch(next, /requeue the issue with a note/);
+});
+
+test("one conflicted ticket's land command names it", () => {
+  const next = body(render(facts({ tickets: { "49": { state: "conflict", title: "snake", note: "with #48: src/text.js", files: ["src/text.js"] } }, standing: ["agent/issue-49"] })), "## 👉 Next step");
+  assert.match(next, /`sandcastle land 49`/);
 });

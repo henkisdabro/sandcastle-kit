@@ -192,6 +192,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A run stopped by a red base no longer tells you to push the base branch (it says not to until
   its gates are green), and its message counts the base branch's own code among the causes instead
   of ruling it out.
+- The closing summary's step for a red or conflicted ticket offers `sandcastle land <ticket>`
+  (naming it when there is one) instead of a hand-written `git merge`, which skipped the kit's
+  gates and close comment.
 
 ### Added
 
