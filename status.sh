@@ -49,6 +49,10 @@ cyn=$'\e[38;5;80m'        # ready to land
 blu=$'\e[38;5;111m'       # queued, not started
 gry=$'\e[38;5;242m'       # nothing there
 hot=$'\e[38;5;209m'       # needs you; a container working hard
+# No colour when NO_COLOR is set (non-empty, no-color.org) or stdout is not a
+# terminal. Top level on purpose: the live loop calls render inside $(...),
+# where stdout is always a pipe, so the check there would always strip colour.
+if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; fi
 
 # Pad on the PLAIN string, then colour it. Glyphs live outside the padded
 # field because bash printf pads by bytes and they are multi-byte.

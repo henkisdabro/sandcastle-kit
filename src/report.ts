@@ -144,7 +144,7 @@ const span = (ms: number) => {
 };
 
 /** The closing summary as Markdown-ish text, every section present. */
-export const render = (f: Facts): string => {
+export const render = (f: Facts, plain = false): string => {
   const ids = (states: string[]) => Object.entries(f.tickets).filter(([, t]) => states.includes(t.state ?? "")).map(([id]) => id);
   const name = (id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
   const list = (xs: string[]) => xs.map(refOf).join(" ") || "none";
@@ -170,13 +170,15 @@ export const render = (f: Facts): string => {
   const attempted = Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   const out: string[] = [];
+  // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
+  const h = (decorated: string, bare: string) => (plain ? bare : decorated);
   const section = (heading: string, lines: string[]) => out.push("", heading, ...(lines.length ? lines : ["none"]));
 
   // Headline. A killed run wrote no end: "now" would be whenever the report
   // was asked for, perhaps hours later, and "finished" would be untrue.
   const end = f.finished ?? (f.killed ? undefined : new Date().toISOString());
   out.push(
-    `## 🏁 Run ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+    `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length} need you - ${fixing.length} need fixing - ` +
@@ -205,11 +207,11 @@ export const render = (f: Facts): string => {
     const kept = f.standing.includes(`agent/issue-${id}`) ? ` (branch agent/issue-${id} kept)` : "";
     done.push(`Not landed, as the tracker now says: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
   }
-  section("## ✅ Done", done);
+  section(h("## ✅ Done", "## Done"), done);
 
   // Needs you
   section(
-    "## 🙋 Needs you",
+    h("## 🙋 Needs you", "## Needs you"),
     [
       ...heldWork.flatMap((id) => {
         const t = f.tickets[id];
@@ -250,7 +252,7 @@ export const render = (f: Facts): string => {
   }).filter(([file, who]) => !inSameTest(file, who));
   for (const [test, who] of sameTest) fixLines.push(`Same failing test: ${test} - on ${list(who)}. Likely one cause: fix it once.`);
   for (const [file, who] of sameFile) fixLines.push(`Same file: ${file} - ${list(who)} fail or conflict there. Check whether it is one cause.`);
-  section("## ❌ Needs fixing (failed or conflicted)", fixLines);
+  section(h("## ❌ Needs fixing (failed or conflicted)", "## Needs fixing (failed or conflicted)"), fixLines);
 
   // Runnable / blocked
   const ticketState = (label: string) => {
@@ -260,7 +262,7 @@ export const render = (f: Facts): string => {
   };
   const skipped = ids(["skipped"]);
   const anyLeft = f.runnable.length + f.blocked.length + skipped.length > 0 || !!f.blockCheck;
-  section("## ▶️ Runnable now / ⏳ Still blocked", anyLeft ? [
+  section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
@@ -268,7 +270,7 @@ export const render = (f: Facts): string => {
   ] : []);
 
   // Local state
-  section("## 📤 Local state", [
+  section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
       : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
@@ -299,7 +301,7 @@ export const render = (f: Facts): string => {
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
   if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
   if (f.standing.length) next.push("`sandcastle clean` once the branches above are resolved.");
-  section("## 👉 Next step", next.map((n, i) => `${i + 1}. ${n}`));
+  section(h("## 👉 Next step", "## Next step"), next.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");
 };
 
@@ -308,5 +310,6 @@ export const closingReport = async (project: Project) => {
   if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
   const facts = await gather(project);
   if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
-  return render(facts);
+  // NO_COLOR counts as set only when non-empty (no-color.org).
+  return render(facts, !!process.env.NO_COLOR);
 };
