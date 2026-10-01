@@ -1,7 +1,7 @@
 ---
 name: sandcastle
-description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, queueing issues for agents, or updating or upgrading sandcastle-kit."
-argument-hint: "[init|queue|run|status|update]"
+description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as issues ready to queue), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing issues for agents, or updating or upgrading sandcastle-kit."
+argument-hint: "[init|audit|queue|run|status|update]"
 arguments: [action]
 ---
 
@@ -12,6 +12,7 @@ Requested action: `$action`
 | Action | Does | Done when |
 |---|---|---|
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
+| `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as issues that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
 | `queue` | Triages every open issue into the agent queue, with the user | Every open issue is labelled, parked, or left with a stated reason |
 | `run` | Starts a burndown in a tab of its own, and closes it with a summary | The run is live in its own tab and its status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
@@ -112,6 +113,11 @@ going keeps its models; the change applies from the next one. It never needs a c
 
 Re-run `sandcastle lean` whenever the project adds skills, MCP servers or hooks. Every run repeats
 the hook check and refuses to start while a kept hook cannot run.
+
+## audit - find work and file it
+
+Read audit.md in this skill's directory (next to this file) and follow it. It files issues by
+the queue action's categories and its closed-spec test, so read the queue section below as well.
 
 ## queue - triage every open issue into the queue
 

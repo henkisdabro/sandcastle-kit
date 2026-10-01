@@ -329,7 +329,7 @@ The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ti
 the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the issue and its comments,
 and your gates could prove it. The `/sandcastle queue` skill action walks every open issue,
 gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
-labels it.
+labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run skips it while #12 is open - even when #12 is in the same run, because the dependent
@@ -782,6 +782,7 @@ exact command under every `FIX`. Any failure later starts there too, then [Troub
 | "set this up", "install sandcastle-kit", a fresh clone | Ask the user to run `./bin/sandcastle setup` in their own terminal (it asks for tokens only they can create). Then fix each `FIX` line in order. [docs/INSTALL.md](docs/INSTALL.md) has the manual steps. | `sandcastle doctor` ends "All required checks pass." |
 | "use sandcastle in this project" | [Set up a project](#-set-up-a-project), or `/sandcastle init` with the user. | `sandcastle gates` is green on the base branch |
 | "which issues can the agents do?", "triage for sandcastle" | `sandcastle queue` first: it names the tracker and queue label in use. Then `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. | Every open ticket is queued, decided with the user, or left with a reason |
+| "find work for the agents", "audit this repo", "we have no issues yet" | `/sandcastle audit`: read-only review agents per lens, findings de-duplicated and triaged by the queue criteria, filed with the user's yes. Costs interactive allowance, no sandbox. | Every finding is filed, merged or dropped with a reason |
 | "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
 | "start a run", "burn down the queue" | [Run](#-run), in a separate terminal or pane: a run takes hours. | `sandcastle run ended` is printed, and you have read the run report |
 | "is it working?" | `sandcastle status 0`; logs are in `.sandcastle/logs/`. | You can name each ticket's phase |
