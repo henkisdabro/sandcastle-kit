@@ -54,6 +54,15 @@ const secret = (q: string) =>
     stdin.on("data", onData);
   });
 
+// Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
+// rejected), which is not the same as a rejection.
+export const probeGithubToken = async (token: string): Promise<{ ok: boolean; status: number; login: string } | undefined> => {
+  const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" } }).catch(() => undefined);
+  if (!res) return undefined;
+  const login = res.ok ? ((await res.json().catch(() => ({}))) as { login?: string }).login ?? "unknown" : "";
+  return { ok: res.ok, status: res.status, login };
+};
+
 const has = (cmd: string) => !!run("sh", ["-c", `command -v ${cmd}`]);
 
 const real = (p: string) => {
@@ -148,9 +157,26 @@ export const setup = async (repoRoot?: string) => {
     else if (t) console.log("     That does not look like an Anthropic API key (sk-ant-...); not saved.");
   }
 
+  // A saved token is checked live too: a revoked or expired one would otherwise
+  // pass here and only fail when an agent first calls GitHub. No answer at all
+  // (offline, or a proxy Node's fetch ignores) proves nothing about the token.
+  let saved = false;
   if (env.GH_TOKEN?.startsWith("github_pat_")) {
-    console.log("ok   GitHub token already set");
-  } else {
+    const probe = await probeGithubToken(env.GH_TOKEN);
+    if (!probe) {
+      saved = true;
+      console.log("ok   GitHub token already set (not checked: no connection)");
+    } else if (probe.ok) {
+      saved = true;
+      console.log(`ok   GitHub token already set (${probe.login})`);
+    } else if (probe.status >= 400 && probe.status < 500) {
+      console.log(`     GitHub rejects the saved token (HTTP ${probe.status}).`);
+    } else {
+      saved = true;
+      console.log(`ok   GitHub token already set (not checked: HTTP ${probe.status})`);
+    }
+  }
+  if (!saved) {
     const login = run("gh", ["api", "user", "--jq", ".login"]);
     const url = new URL("https://github.com/settings/personal-access-tokens/new");
     url.search = new URLSearchParams({
@@ -172,10 +198,10 @@ export const setup = async (repoRoot?: string) => {
     if (t && !t.startsWith("github_pat_")) {
       console.log("     Only fine-grained tokens (github_pat_...) are accepted: a classic or `gh auth token` token could push or edit workflows. Not saved.");
     } else if (t) {
-      const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${t}`, "User-Agent": "sandcastle-kit" } }).catch(() => undefined);
+      const res = await probeGithubToken(t);
       if (res?.ok) {
         set.GH_TOKEN = t;
-        console.log(`     GitHub accepts the token (${((await res.json()) as { login: string }).login}).`);
+        console.log(`     GitHub accepts the token (${res.login}).`);
       } else {
         console.log(`     GitHub rejected the token (${res ? `HTTP ${res.status}` : "no connection"}); not saved.`);
       }
