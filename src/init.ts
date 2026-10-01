@@ -133,6 +133,20 @@ const FALLBACK = `  // Project image layer on top of sandcastle-base (toolchains
     { name: "gates-not-set", command: "echo 'No gates yet: set them in .sandcastle/config.ts' >&2; exit 1" },
   ],`;
 
+// The branch runs land on. origin/HEAD says what the remote treats as default;
+// without a remote, the checked-out branch is the best evidence (symbolic-ref
+// still answers on an unborn branch, and fails when detached or outside a repo).
+export const detectBaseBranch = (root: string): string | undefined => {
+  const ask = (ref: string[]) => {
+    try {
+      return execFileSync("git", ["symbolic-ref", "--quiet", "--short", ...ref], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return undefined;
+    }
+  };
+  return (ask(["refs/remotes/origin/HEAD"])?.replace(/^origin\//, "") || ask(["HEAD"])) || undefined;
+};
+
 export const init = (root: string) => {
   if (existsSync(join(root, CONFIG_PATH))) throw new OperatorError(`${CONFIG_PATH} already exists.`);
   mkdirSync(join(root, ".sandcastle"), { recursive: true });
@@ -146,9 +160,12 @@ export const init = (root: string) => {
     : FALLBACK;
   // Docker image names are lowercase [a-z0-9._-].
   const name = basename(root).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "") || "my-project";
-  const config = readFileSync(join(KIT, "templates/config.ts"), "utf8")
+  // A repo whose base is not main would otherwise refuse its first run with "expected main".
+  const base = detectBaseBranch(root);
+  let config = readFileSync(join(KIT, "templates/config.ts"), "utf8")
     .replace('"my-project"', () => JSON.stringify(name))
     .replace("  // {{KIT_STACK}}", () => block);
+  if (base && base !== "main") config = config.replace('  // baseBranch: "main",', () => `  baseBranch: ${JSON.stringify(base)},`);
   writeFileSync(join(root, CONFIG_PATH), config);
   if (dockerfile) writeFileSync(join(root, ".sandcastle/Dockerfile"), stack!.dockerfile!);
   if (!existsSync(join(root, ".sandcastle/rules.md"))) copyFileSync(join(KIT, "templates/rules.md"), join(root, ".sandcastle/rules.md"));

@@ -78,7 +78,9 @@ export const assertCleanBase = (project: Project) => {
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);
   if (branch !== project.baseBranch) {
-    throw new OperatorError(`NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}.`);
+    throw new OperatorError(
+      `NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}. If ${branch} is your base branch, set baseBranch: "${branch}" in .sandcastle/config.ts.`,
+    );
   }
 };
 
