@@ -8,6 +8,10 @@ export default {
   // concurrency: 4,
   // land: "merge",                         // or "squash": one commit per ticket on the base branch
 
+  // Claude Code in the sandbox image follows the "latest" release. Pin it if a release misbehaves
+  // (CLAUDE_CODE_VERSION in the environment overrides this for one command).
+  // claudeCode: "stable",                  // or an exact version: "2.1.285"
+
   // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
   // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.
   // tracker: "github",

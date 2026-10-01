@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
+import { isClaudeSetting } from "./versions.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
 
@@ -36,6 +37,12 @@ export type ProjectConfig = {
   concurrency?: number;
   /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two; `AUTONOMY_LEVEL` overrides it for one run. */
   autonomy?: 0 | 1 | 2 | 3;
+  /**
+   * Which Claude Code the sandbox image installs: `"latest"` (default) or `"stable"`, the release
+   * channels resolved on the host when the image is ensured, or an exact version such as `"2.1.285"`
+   * to pin. The `CLAUDE_CODE_VERSION` env var overrides it for one command.
+   */
+  claudeCode?: "latest" | "stable" | (string & {});
   /** Project image layer, relative to the repo root. Starts `ARG BASE` / `FROM ${BASE}`. */
   dockerfile?: string;
   /** Extra bind mounts, e.g. a package-manager store. */
@@ -101,8 +108,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
@@ -117,6 +124,11 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   }
   if (config.land !== undefined && config.land !== "merge" && config.land !== "squash") {
     throw new OperatorError(`${CONFIG_PATH}: land must be "merge" or "squash", not ${JSON.stringify(config.land)}.`);
+  }
+  if (config.claudeCode !== undefined && !isClaudeSetting(config.claudeCode)) {
+    throw new OperatorError(
+      `${CONFIG_PATH}: claudeCode must be "latest", "stable" or a version like "2.1.285", not ${JSON.stringify(config.claudeCode)}.`,
+    );
   }
   const generated = config.generated ?? [];
   if (

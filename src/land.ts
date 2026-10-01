@@ -168,7 +168,7 @@ export const landTicket = async (
   project: Project,
   tracker: Tracker,
   arg: string | undefined,
-  prepare: () => { open: Opener },
+  prepare: () => { open: Opener } | Promise<{ open: Opener }>,
 ): Promise<string> => {
   if (!arg) throw new OperatorError("Usage: sandcastle land <ticket>");
   const id = arg.replace(/^#/, "");
@@ -193,7 +193,7 @@ export const landTicket = async (
 
   // Counted now: once merged, none of the branch's commits are ahead of the base.
   const commits = ownCommits(base, branch, project.root);
-  const { open } = prepare();
+  const { open } = await prepare();
   const head = sh("git", ["rev-parse", branch], project.root);
   const log = gatesLog(project, id);
   mkdirSync(dirname(log), { recursive: true });

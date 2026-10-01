@@ -35,6 +35,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
+import { resolveVersions, versionsLine } from "./versions.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
@@ -286,6 +287,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // Only the tickets this run starts; a waiting ticket's labels are checked when it starts.
   // Before the run is recorded, the image checked or any sandbox started: a bad label costs nothing.
   const overrides = new Map(issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])]));
+  // Resolved once here: the image, the start lines and run.json all name the same versions.
+  const versions = await resolveVersions(project);
 
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) {
@@ -293,6 +296,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
     console.log(`  ${ref(i.id)} ${i.title}${own}`);
   }
+  console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(CONCURRENCY, issues.length, limit("sandboxes"));
   const rough = estimate(project, issues.length, slots);
@@ -320,6 +324,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const run = recordRun(project, {
     issues: issues.map((i) => i.id),
     dryRun: DRY_RUN,
+    versions: { claude: versions.claude, codex: versions.codex },
     waiting,
     stage: "starting",
     concurrency: slots,
@@ -395,7 +400,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
   };
 
-  const image = await timed("", "image", () => ensureImage(project));
+  const image = await timed("", "image", () => ensureImage(project, false, versions));
   const prompts = renderPrompts(project, tracker, DRY_RUN);
   // One entry per distinct override model, naming every ticket that asks for it.
   const extraModels = [...new Set([...overrides.values()].flatMap((o) => (o.model ? [o.model] : [])))].map((model) => {
