@@ -100,7 +100,17 @@ export const ensureTriageLabel = (gh = (args: string[]) => sh("gh", args)) => {
 };
 
 const github = (project: Project): Tracker => {
-  const gh = (args: string[]) => sh("gh", args);
+  // A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
+  // first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
+  const gh = (args: string[]) => {
+    try {
+      return sh("gh", args);
+    } catch (e) {
+      const err = e as { stderr?: unknown; message?: string };
+      const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
+      throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}`);
+    }
+  };
   const list = (extra: string[], withComments: boolean): Ticket[] => {
     const listed = JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[];
     // Counted before the needs-human filter below: a full page is full whatever

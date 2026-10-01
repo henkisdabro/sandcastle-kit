@@ -167,6 +167,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   newline (which could leave `.env` unignored).
 - Tests: the guard test's commits keep their test identity inside a sandbox, where the agent
   committer's environment would otherwise override it.
+- A failing `gh` call (signed out, no such issue, no network) is a one-line refusal naming the
+  call and gh's own message, not a Node stack trace - `sandcastle land 999` and `sandcastle
+  requeue 999` used to crash.
 
 ### Added
 
