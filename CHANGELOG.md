@@ -67,6 +67,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `claudeCode: "latest"` or an exact version such as `"2.1.285"` in `.sandcastle/config.ts`, or
   `CLAUDE_CODE_VERSION` / `CODEX_VERSION` for one run. Offline, the last resolved versions are
   used, then the Dockerfile's defaults. Every project rebuilds its image once after upgrading.
+- `.sandcastle/config.ts` is checked when it loads: an unknown key (a typo such as `concurency`)
+  or a wrong type (`concurrency: "two"`, `repair.attempts: -1`) is refused with the key and the
+  nearest real one, where before it was ignored and the run used the default. If a command refuses
+  your config after the update, fix the key it names; `/sandcastle update` does this step.
 
 ### Changed
 
@@ -103,6 +107,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   pane), and a short pane folds the logo to one row. What each row says, and when, is unchanged.
   Full-width lines no longer lose their last character in the refreshing view, and the frame keeps
   its bottom border on screen.
+
+### Fixed
+
 - A ticket's gate log is kept across attempts instead of being wiped at each one, and every
   agent and gate log marks the start of each run's phase with its run id and local time.
 - `init`'s placeholder gate points at `.github/workflows` and `node --test`, and says Python
@@ -232,6 +239,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   explanation of it.
 - `sandcastle init` on an existing config names the command that moves it aside, instead of saying
   git keeps the old one (it does only once committed).
+- A syntax or runtime error in `.sandcastle/config.ts` is one line naming the place, not a Node
+  loader stack trace.
 
 ### Added
 

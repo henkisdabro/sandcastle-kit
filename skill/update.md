@@ -14,6 +14,9 @@ was set up with.
    1. `sandcastle build` - or `sandcastle build --force` when doctor warns that the base image is
       more than 30 days old (it pulls Debian and Node updates) - then `sandcastle lean`: new
       images, and the hook check against them.
+      If it refuses the config instead (`unknown key`, `must be ...`: a typo or a wrong type that
+      older versions ignored), fix the key it names - it suggests the nearest real one - with
+      the user's agreement, and run it again.
       Fix a `HOOK FAIL` as in SKILL.md's init step 4. Then `sandcastle gates` (no model calls): a new image
       can turn a gate red or green on base. Fix a red gate as in SKILL.md's init step 6.
    2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field

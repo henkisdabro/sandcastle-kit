@@ -63,7 +63,7 @@ import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
-import { OperatorError } from "./errors.ts";
+import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 
@@ -72,21 +72,12 @@ const HELP = readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((
 // Every command the help names, and the internal hook. Checked before the repository is, so a
 // typo typed outside one was told "Not inside a git repository" instead of what it was.
 const COMMANDS = [...HELP.flatMap((l) => /^  ([a-z][a-z-]*)/.exec(l)?.[1] ?? []), "lean-apply"];
-const distance = (a: string, b: string) => {
-  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const next = [i];
-    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    row = next;
-  }
-  return row[b.length];
-};
 
 // A refusal the operator acts on is a message, not a crash: no stack trace. Anything else is a
 // kit bug and keeps its stack.
 try {
   if (!["help", "--help", "-h", ...COMMANDS].includes(command)) {
-    const near = COMMANDS.filter((c) => c !== "lean-apply" && distance(command, c) <= 2).sort((a, b) => distance(command, a) - distance(command, b))[0];
+    const near = nearest(command, COMMANDS.filter((c) => c !== "lean-apply"));
     throw new OperatorError(`Unknown command "${command}".${near ? ` Did you mean \`sandcastle ${near}\`?` : ""} Run \`sandcastle help\` for the list.`);
   }
   // `setup` and `doctor` also work outside a repository (fresh install). Git's own

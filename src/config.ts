@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
-import { OperatorError } from "./errors.ts";
+import { nearest, OperatorError } from "./errors.ts";
 import { isClaudeSetting } from "./versions.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
@@ -113,15 +113,73 @@ export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "pro
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
+// Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
+// `concurency` - was ignored without a word, and the run went on with the default.
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "lean", "gates",
+  "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "implement", "review", "repair"];
+const NESTED: Record<string, string[]> = {
+  lean: ["keep", "dropHooks"],
+  implement: ["model", "effort", "maxIterations", "idleTimeoutSeconds"],
+  review: ["model", "effort", "maxIterations", "idleTimeoutSeconds"],
+  repair: ["attempts", "maxIterations", "idleTimeoutSeconds"],
+  blockers: ["linear", "files"],
+};
+
+const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const isCount = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min;
+
+/** Unknown keys and wrong types, refused with the key and what it takes, before anything runs. */
+const checkShape = (config: ProjectConfig) => {
+  const refuse = (what: string) => {
+    throw new OperatorError(`${CONFIG_PATH}: ${what}`);
+  };
+  const unknown = (keys: string[], known: string[], at: string) => {
+    for (const k of keys) {
+      if (known.includes(k)) continue;
+      const near = nearest(k, known);
+      refuse(`unknown key \`${at}${k}\`${near ? ` - did you mean \`${at}${near}\`?` : ` (README -> Configuration lists the keys)`}`);
+    }
+  };
+  unknown(Object.keys(config), KEYS, "");
+  const c = config as Record<string, unknown>;
+  for (const [key, known] of Object.entries(NESTED)) {
+    if (c[key] === undefined) continue;
+    if (typeof c[key] !== "object" || c[key] === null || Array.isArray(c[key])) refuse(`\`${key}\` must be an object ({ ${known.join(", ")} }).`);
+    unknown(Object.keys(c[key] as object), known, `${key}.`);
+  }
+  for (const key of ["name", "baseBranch", "label", "dockerfile", "rules"]) {
+    if (c[key] !== undefined && (typeof c[key] !== "string" || !c[key])) refuse(`\`${key}\` must be a non-empty string, not ${JSON.stringify(c[key])}.`);
+  }
+  for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
+  for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
+  if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
+  if (config.autonomy !== undefined && ![0, 1, 2, 3].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2 or 3, not ${JSON.stringify(config.autonomy)}.`);
+  if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
+  if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
+    refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");
+  }
+  if (config.mounts !== undefined && (!Array.isArray(config.mounts) || config.mounts.some((m) => typeof m?.hostPath !== "string" || typeof m.sandboxPath !== "string"))) {
+    refuse("each mount needs a `hostPath` and a `sandboxPath`, both strings.");
+  }
+};
+
 export const loadProject = async (root = process.cwd()): Promise<Project> => {
   const file = join(root, CONFIG_PATH);
   if (!existsSync(file)) {
     throw new OperatorError(`No ${CONFIG_PATH} in ${root}. Run \`sandcastle init\` first.`);
   }
-  const config = (await import(pathToFileURL(file).href)).default as ProjectConfig;
-  if (!config?.name || !config.gates?.length) {
-    throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
+  // A syntax error reached the operator as a Node stack trace from the loader.
+  let config: ProjectConfig;
+  try {
+    config = (await import(pathToFileURL(file).href)).default as ProjectConfig;
+  } catch (error) {
+    const said = String((error as Error).message ?? error).split("\n").filter((l) => l && !/^Transform failed/.test(l)).slice(0, 2).join(" ");
+    throw new OperatorError(`${CONFIG_PATH} does not load: ${said.replace(/\S*\/\.sandcastle\/config\.ts/g, CONFIG_PATH)}`);
   }
+  if (!config?.name || !config.gates?.length) {
+    throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and at least one gate in \`gates\`.`);
+  }
+  checkShape(config);
   if (config.land !== undefined && config.land !== "merge" && config.land !== "squash") {
     throw new OperatorError(`${CONFIG_PATH}: land must be "merge" or "squash", not ${JSON.stringify(config.land)}.`);
   }

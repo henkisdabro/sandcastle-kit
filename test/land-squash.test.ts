@@ -117,7 +117,7 @@ for (const mode of ["squash", "merge"] as const) {
 const project = (config: string) => {
   const root = join(TMP, `project${n++}`);
   mkdirSync(join(root, ".sandcastle"), { recursive: true });
-  writeFileSync(join(root, ".sandcastle", "config.ts"), `export default { name: "demo", gates: [{ name: "t", cmd: "true" }]${config} };\n`);
+  writeFileSync(join(root, ".sandcastle", "config.ts"), `export default { name: "demo", gates: [{ name: "t", command: "true" }]${config} };\n`);
   return root;
 };
 
