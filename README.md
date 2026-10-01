@@ -400,7 +400,10 @@ flowchart LR
 
 Only the ticket **body** is read: a `Blocked by ...` line in a comment does nothing, and a run
 starts the ticket anyway. Both `sandcastle run` and `sandcastle blockers` warn about that, and about
-comments whose blockers are all closed (stale).
+comments whose blockers are all closed (stale). `sandcastle queue` and `sandcastle run` also warn,
+and `sandcastle blockers` lists, the queued tickets a blocker would hold for good - one that does
+not exist, tickets that wait for each other, a Linear blocker that cannot be read - and a
+`Blocked by ENG-42` whose key `blockers.linear` does not name, which is ignored.
 
 | Named in the body | Waits until | Enable |
 |---|---|---|
@@ -691,7 +694,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
-| `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
+| `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run` | The burndown (above) | 💸 yes |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |

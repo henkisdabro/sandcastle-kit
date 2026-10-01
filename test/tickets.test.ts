@@ -75,7 +75,7 @@ test("detectFromDocs reads the tracker kind from the issue-tracker title", () =>
 test("detectFromDocs reports a tracker the kit does not support", () => {
   const root = tmp();
   docs(root, "issue-tracker.md", "# Issue tracker: Jira\n\nText\n");
-  assert.deepEqual(detectFromDocs(root), { unsupported: "jira" });
+  assert.deepEqual(detectFromDocs(root), { unsupported: "Jira" });
 });
 
 test("detectFromDocs reads the ready-for-agent label from the triage table", () => {

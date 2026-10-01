@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
-import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
+import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
@@ -265,6 +265,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
   for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   // A comment is not read as a blocker; say so where the run would start the issue.
   for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
+  // A blocker that can never close (missing, a cycle) holds its ticket for good; an unnamed Linear key lets it start.
+  for (const line of await blockerProblems(project, tracker, queued)) console.log(`  warning: ${line}`);
   // A ticket others wait for starts first; otherwise the tracker's order
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.

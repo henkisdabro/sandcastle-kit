@@ -536,10 +536,11 @@ export const detectFromDocs = (root: string): { kind?: "github" | "files"; label
   const out: ReturnType<typeof detectFromDocs> = {};
   const tracker = join(root, "docs/agents/issue-tracker.md");
   if (existsSync(tracker)) {
-    const title = readFileSync(tracker, "utf8").match(/^#\s*Issue tracker:\s*(.+)$/im)?.[1].trim().toLowerCase() ?? "";
+    const named = readFileSync(tracker, "utf8").match(/^#\s*Issue tracker:\s*(.+)$/im)?.[1].trim() ?? "";
+    const title = named.toLowerCase();
     if (title.startsWith("github")) out.kind = "github";
     else if (title.startsWith("local")) out.kind = "files";
-    else if (title) out.unsupported = title;
+    else if (title) out.unsupported = named;
   }
   const labels = join(root, "docs/agents/triage-labels.md");
   if (existsSync(labels)) {

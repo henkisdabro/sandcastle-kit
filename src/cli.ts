@@ -21,8 +21,9 @@
 //   requeue <ticket> [--note TEXT]
 //                    put a ticket back in the queue (needs-human off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
-//   blockers         open queued issues whose comments say "blocked by" while the body
-//                    does not (a run reads only the body); no model calls
+//   blockers         open issues whose comments say "blocked by" while the body does not
+//                    (a run reads only the body), and queued ones whose blockers can never
+//                    close (missing, a cycle) or are ignored; no model calls
 //   gates            every gate on the base branch in a sandbox, as a run's
 //                    first phase does; no model calls
 //   land <ticket>    merge one agent branch with the kit's message, gate the merge in the
@@ -46,7 +47,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
-import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
+import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { autonomyLevel, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
@@ -222,6 +223,7 @@ try {
       else {
         console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
         for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
+        for (const line of await blockerProblems(project, tracker, queued)) console.log(`  warning: ${line}`);
         if (!rows.length) {
           // A queue is empty when nothing is labelled, not only when nothing is open: say how many
           // are waiting and where work comes from. A tracker that cannot be read keeps the bare line.
@@ -256,11 +258,16 @@ try {
       const tracker = makeTracker(project);
       // Every open ticket, not only the queued: earlier triage parked blocked ones
       // unqueued with a comment, and they need the line moved before they are queued.
-      const queuedIds = new Set(tracker.queued(false).map((t) => t.id));
+      const queued = tracker.queued(false);
+      const queuedIds = new Set(queued.map((t) => t.id));
       const open = tracker.open();
       const found = await commentOnlyBlocks(project, tracker, open.map((t) => ({ ...t, queued: queuedIds.has(t.id) })));
       for (const f of found) console.log(commentBlockLine(f));
-      console.log(found.length ? `\n${found.length} of ${open.length} open ticket(s) to look at.` : `No stale or unread blocker comments on ${open.length} open ticket(s).`);
+      // Queued tickets that would wait for ever, or start at once, because of how a blocker is written.
+      const problems = await blockerProblems(project, tracker, queued);
+      for (const line of problems) console.log(line);
+      const n = found.length + problems.length;
+      console.log(n ? `\n${n} thing(s) to look at, across ${open.length} open ticket(s).` : `No stale, unread or unworkable blockers on ${open.length} open ticket(s).`);
       break;
     }
     case "gates": {

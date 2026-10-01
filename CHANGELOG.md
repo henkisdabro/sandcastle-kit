@@ -281,6 +281,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A ticket an agent hands back is no longer always "answer it, then requeue it": the report says
   to read the agent's comment, then do work only a person can do and close the ticket, or answer a
   question and requeue it.
+- Blockers that hold a queued ticket for good, or let it start too soon, are named with the fix in
+  `sandcastle queue`, at the start of `sandcastle run` and by `sandcastle blockers`: a blocker
+  that does not exist, tickets that wait for each other, a Linear blocker that cannot be read (no
+  `LINEAR_API_KEY`), and a `Blocked by ENG-42` whose key `blockers.linear` does not name (ignored,
+  so the ticket started at once). Each was silent. `sandcastle blockers` also finds a ticket
+  file's `Blocked by: 01` written in a comment, and a tracker named in
+  `docs/agents/issue-tracker.md` keeps its own capitals in doctor's note.
 
 ### Added
 

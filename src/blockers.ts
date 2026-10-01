@@ -164,6 +164,16 @@ export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] =>
 export const openBlockers = async (project: Project, tracker: Tracker, resolve: ReturnType<typeof blockerResolver>, t: Blocked) =>
   (await Promise.all(refsOf(project, tracker, t).map(resolve))).filter((b) => b.state !== "closed");
 
+// A ticket file's own "Blocked by: 01, 02" line names siblings by number; written in a comment it
+// is read by nobody, as a body-style line in a comment is not.
+const declaredIn = (project: Project, id: string, text: string): Ref[] => {
+  if (project.tracker.kind !== "files" || !/-\d+$/.test(id)) return [];
+  const feature = id.replace(/-\d+$/, "");
+  return [...stripCode(text).matchAll(/^[ \t]*blocked by:[ \t]*(\d+(?:[ \t]*,?[ \t]*\d+)*)[ \t]*$/gim)].flatMap((m) =>
+    m[1].split(/[,\s]+/).filter(Boolean).map((n) => ({ kind: "ticket" as const, id: `${feature}-${String(Number(n)).padStart(2, "0")}` })),
+  );
+};
+
 type Commented = { id: string; body?: string; comments?: string[]; queued: boolean };
 
 /**
@@ -178,7 +188,7 @@ export const commentOnlyBlocks = async (project: Project, tracker: Tracker, tick
   for (const i of tickets) {
     const inBody = new Set(refsOf(project, tracker, i).map((r) => `${r.kind}:${r.id}`));
     const named = new Map<string, Ref>();
-    for (const c of i.comments ?? []) for (const r of parseRefs(project, c)) if (!inBody.has(`${r.kind}:${r.id}`)) named.set(`${r.kind}:${r.id}`, r);
+    for (const c of i.comments ?? []) for (const r of [...parseRefs(project, c), ...declaredIn(project, i.id, c)]) if (!inBody.has(`${r.kind}:${r.id}`)) named.set(`${r.kind}:${r.id}`, r);
     if (!named.size) continue;
     const blockers = await Promise.all([...named.values()].map(resolve));
     found.push({ issue: i.id, queued: i.queued, blockers, stale: blockers.every((b) => b.state === "closed") });
@@ -193,4 +203,62 @@ export const commentBlockLine = (f: Awaited<ReturnType<typeof commentOnlyBlocks>
   return f.queued
     ? `${who}: a comment says blocked by ${names}, but the body does not, and a run reads only the body - it would start this ticket. Move "Blocked by ..." into the body.`
     : `${who}: a comment says blocked by ${names}. When you queue it, put "Blocked by ..." in the body, or a run will start it at once.`;
+};
+
+/**
+ * Queued tickets that will never start, or start too soon, because of how their blockers are
+ * written: a blocker that does not exist or cannot be read (it counts as open, so the ticket
+ * waits for good), tickets that wait for each other, and a Linear-style id the config does not
+ * name (the line is ignored, so the ticket starts at once). Each line says what to change.
+ */
+export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
+  const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
+  const lines: string[] = [];
+  const waits = new Map<string, string[]>();
+  for (const t of queued) {
+    const who = refOf(t.id);
+    const refs = refsOf(project, tracker, t);
+    waits.set(t.id, refs.filter((r) => r.kind === "ticket" || r.kind === "github").map((r) => r.id).filter((id) => queued.some((q) => q.id === id)));
+    for (const b of await Promise.all(refs.map(resolve))) {
+      if (b.state !== "unreadable") continue;
+      const name = refLabel(b);
+      lines.push(
+        b.kind === "ticket"
+          ? `${who} waits for ${name}, which does not exist - it will never start. Fix the "Blocked by" line, or remove it.`
+          : b.kind === "linear"
+            ? `${who} waits for ${name}, which could not be read from Linear${linearKey() ? "" : " (no LINEAR_API_KEY in ~/.config/sandcastle-kit/.env)"} - a blocker that cannot be read counts as open, so it waits.`
+            : `${who} waits for ${name}, which gh could not read (no such issue, or no access) - it counts as open, so it waits.`,
+      );
+    }
+    const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
+    for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
+      if (linear.has(m[1].toUpperCase())) continue;
+      lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (README: Blockers), or remove the line.`);
+    }
+  }
+  // Tickets that wait, through each other, for themselves: none of them can ever start.
+  const seen = new Set<string>();
+  for (const start of waits.keys()) {
+    if (seen.has(start)) continue;
+    const path: string[] = [];
+    const walk = (id: string): string[] | undefined => {
+      const at = path.indexOf(id);
+      if (at >= 0) return path.slice(at);
+      if (seen.has(id)) return undefined;
+      path.push(id);
+      for (const next of waits.get(id) ?? []) {
+        const cycle = walk(next);
+        if (cycle) return cycle;
+      }
+      path.pop();
+      seen.add(id);
+      return undefined;
+    };
+    const cycle = walk(start);
+    if (cycle) {
+      cycle.forEach((id) => seen.add(id));
+      lines.push(`${cycle.map(refOf).join(", ")} wait for each other - none of them can ever start. Remove one "Blocked by" line.`);
+    }
+  }
+  return lines;
 };
