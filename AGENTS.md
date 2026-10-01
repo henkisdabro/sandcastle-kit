@@ -33,6 +33,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
+| `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
@@ -55,6 +56,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
 | `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
+| `test/autonomy.test.ts` | The autonomy level, re-runnable tickets, turn decision and question, several run records in one process, and the CLI refusing a bad level; `pnpm test` |
 | `test/cli.test.ts` | The CLI's one catch: an unknown command, a missing config, no repository and an existing init print a message, no stack; `pnpm test` |
 | `test/layout.test.ts` | The Herdr view's proportions: the status view's share and the sandbox column's equal rows; `pnpm test` |
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
