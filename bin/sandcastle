@@ -9,4 +9,11 @@ while [ -L "$src" ]; do
   [[ $src != /* ]] && src="$dir/$src"
 done
 KIT="$(cd -P "$(dirname "$src")/.." && pwd)"
+# tsx caches compiled files in the temp directory; full, it dies with a Node stack trace before the
+# kit's own code can say what is wrong.
+tmp="${TMPDIR:-/tmp}"
+if probe=$(mktemp -d "${tmp%/}/sandcastle-probe.XXXXXX" 2>/dev/null); then rmdir "$probe"; else
+  echo "sandcastle: cannot write to the temp directory ($tmp) - its disk is full, or it is read-only. Free some space there, or point TMPDIR at a directory with room, then try again." >&2
+  exit 1
+fi
 exec "$KIT/node_modules/.bin/tsx" "$KIT/src/cli.ts" "$@"

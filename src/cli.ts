@@ -60,6 +60,7 @@ import { closingReport, gather, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
+import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -124,6 +125,7 @@ try {
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
+      checkUsageSettings();
       for (let turn = 1; await burndown(project); turn++) {
         if (level === 0) break;
         const again = rerunnable(await gather(project));
@@ -369,7 +371,13 @@ try {
       throw new OperatorError(`Unknown command "${command}". Run \`sandcastle help\`.`);
   }
 } catch (error) {
-  if (!(error instanceof OperatorError)) throw error;
-  console.error(`\n${error.message}`);
+  // A full disk is the operator's to fix, wherever the write was; its stack trace says nothing more.
+  const full = (error as NodeJS.ErrnoException)?.code === "ENOSPC";
+  if (!(error instanceof OperatorError) && !full) throw error;
+  console.error(
+    full
+      ? `\nThe disk is full: writing ${(error as NodeJS.ErrnoException).path ?? "a file"} failed. Free some space (\`sandcastle clean\` removes finished worktrees; \`docker system df\` shows what Docker holds), then try again.`
+      : `\n${(error as Error).message}`,
+  );
   process.exitCode = 1;
 }

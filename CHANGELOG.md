@@ -256,6 +256,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A project Dockerfile that fails to build ends in one line naming the file to fix, under docker's
   own output, instead of a Node stack trace. A `.sandcastle/Dockerfile` the config does not name
   (`dockerfile:`) is reported as not built rather than skipped in silence.
+- A full disk is a message, not a stack trace: the launcher checks that the temp directory can be
+  written before tsx starts (tsx died there first), and a write the disk refuses anywhere else
+  says the disk is full and what frees space.
+- `USAGE_CHECK=1` with a bad `USAGE_STOP` is refused before the run does anything, instead of
+  after the image check and preflight. An unknown usage reading says why - the endpoint's HTTP
+  status, or no answer - instead of always "rate-limited"; a token the endpoint refuses (HTTP 403)
+  is named, as the guard is then off for it.
 
 ### Added
 
