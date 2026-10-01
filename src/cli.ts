@@ -58,7 +58,7 @@ import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
@@ -116,6 +116,7 @@ try {
         console.log(`sandcastle run ended (exit ${code})`);
       });
       exitOnSignal();
+      rewordLibraryLines();
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);

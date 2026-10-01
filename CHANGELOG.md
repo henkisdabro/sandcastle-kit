@@ -204,6 +204,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   early, names each ticket it cut short (with its phase) or never started, and says the next
   `sandcastle run` picks them up. The run pane says where the summary is when the run ends before
   printing one.
+- A resumed branch no longer prints "Could not fetch from origin", which read as a network fault
+  (agent branches are never pushed, so there is nothing to fetch); it says the branch is resumed
+  in its kept worktree. A worktree kept after an interrupted sandbox points at `sandcastle clean`,
+  not a hand-run `git worktree remove --force`.
 
 ### Added
 

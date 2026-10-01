@@ -31,6 +31,22 @@ export const exitOnSignal = () => {
   }
 };
 
+// Lines the library prints that are untrue or off-script for a kit run, reworded.
+// Agent branches are never pushed, so its "Could not fetch from origin" showed on
+// every resumed branch and read as a network fault; and a kept worktree is the
+// kit's to clean, which a hand-run `git worktree remove` bypasses.
+const REWORDED: [RegExp, string][] = [
+  [/^Could not fetch from origin \(reusing worktree at (.+) as-is, branch '(.+)'\)$/, "Resuming branch '$2' in its kept worktree ($1)"],
+  [/^( *)To clean up: git worktree remove --force .+$/, "$1To clean up: `sandcastle clean` - or leave it, and the next `sandcastle run` resumes it"],
+];
+export const reword = (line: string) => REWORDED.reduce((l, [re, to]) => l.replace(re, to), line);
+export const rewordLibraryLines = () => {
+  for (const method of ["log", "error"] as const) {
+    const write = console[method].bind(console);
+    console[method] = (...args: unknown[]) => write(...args.map((a) => (typeof a === "string" ? a.split("\n").map(reword).join("\n") : a)));
+  }
+};
+
 // ---------------------------------------------------------------------------
 // `sandcastle run` arguments - aliases for the ISSUES, DRY_RUN and CONCURRENCY
 // variables, which stay the one mechanism. Anything else is refused: a
