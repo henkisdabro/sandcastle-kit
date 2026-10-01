@@ -64,7 +64,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
     assert.ok(at > last, `${s} missing or out of order`);
     last = at;
   }
-  assert.match(out, /1h 48m\) - 6 attempted - 2 merged - 3 need you - 2 not started - tokens 97.5M in/);
+  assert.match(out, /1h 48m\) - 6 attempted - 2 merged - 1 need you - 2 need fixing - 2 not started - tokens 97.5M in/);
   assert.match(out, /all 2 gates green/);
   assert.match(body(out, "## ✅ Done"), /2 merged and closed on GitHub: #207 #208/);
   assert.match(body(out, "## ✅ Done"), /only on your local main until you push it/);
@@ -159,7 +159,7 @@ test("a ticket handed back with no commits asks for an answer, not a merge", () 
 
 test("a run stopped before landing says so first, with why", () => {
   const out = render(facts({ stopped: "STOPPED before landing: main moved while sandboxes ran (abc1234 T: edit).", tickets: { "5": { state: "stopped", note: "finished before the run stopped" } } }));
-  assert.match(out, /- 1 attempted - 0 merged - 1 need you -/);
+  assert.match(out, /- 1 attempted - 0 merged - 0 need you - 0 need fixing -/);
   assert.match(body(out, "## ❌ Needs fixing"), /^none$/m);
   assert.match(body(out, "## 👉 Next step"), /^1\. Check what stopped the run \(above\)\. If it is your own commit, `sandcastle run` again - #5 finished and land then\./m);
   assert.match(out, /^## 🏁 Run STOPPED before landing - nothing was merged\n.*\n.*\nSTOPPED before landing: main moved/m);

@@ -179,7 +179,7 @@ export const render = (f: Facts): string => {
     `## 🏁 Run ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length + fixing.length + stoppedIds.length} need you - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length} need you - ${fixing.length} need fixing - ` +
       `${notStarted.length} not started${f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     f.verify === undefined || f.verify === null
       // null: the run ended and chose not to (fewer than two merges this run - a
