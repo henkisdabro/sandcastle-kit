@@ -214,6 +214,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - Outside a repository, git's own `fatal: not a git repository` no longer prints above every
   command, help included, and an unknown command or a typo is called that ("Did you mean
   `sandcastle status`?") instead of "Not inside a git repository".
+- `sandcastle doctor` gives the fix for what is actually wrong: Docker or `gh` not installed is
+  told to install it (not to start it, or to sign in), a git older than 2.31 is a FIX, a missing
+  `GH_TOKEN` is reported as missing rather than as "not fine-grained".
 
 ### Added
 
@@ -269,6 +272,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `notify` in `~/.config/sandcastle-kit/config.json`: an argv command run when a run ends (also on
   Ctrl-C or a closed pane), with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` and `SANDCASTLE_EXIT` in
   its environment. It never fails the run.
+- `sandcastle doctor` checks git's `user.name` and `user.email`: the kit's merges and ticket
+  commits carry the operator as author, and without them git refuses them at landing (after the
+  run has spent its tokens) or signs them with a guessed name and hostname address.
 
 ## [0.2.0] - 2026-09-30
 

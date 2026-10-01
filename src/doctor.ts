@@ -129,15 +129,35 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   const node = Number(process.versions.node.split(".")[0]);
   check(node >= 22, `Node ${process.versions.node}`, `Install Node 22 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
   check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
+  // Not installed and not started need different fixes: "start OrbStack" to someone with no runtime sent them looking for an app they never had.
+  const dockerInstalled = run("docker", ["--version"]) !== undefined;
   check(
     !!run("docker", ["info", "--format", "{{.ServerVersion}}"]),
-    "Docker running",
-    mac
+    dockerInstalled ? "Docker running" : "Docker installed",
+    !dockerInstalled
+      ? mac
+        ? "Install a container runtime that provides `docker`: OrbStack (`brew install --cask orbstack`), Podman or Docker Desktop - see docs/INSTALL.md."
+        : "Install Docker Engine (https://docs.docker.com/engine/install/) or Podman with `podman-docker` - see docs/INSTALL.md."
+      : mac
       ? "Start your container runtime: `open -a OrbStack`, `open -a Docker` or `podman machine start` - then `docker info` must work in this shell."
       : "Start the Docker daemon: `sudo systemctl start docker` (or `podman machine start`) - then `docker info` must work in this shell.",
   );
-  check(!!run("gh", ["auth", "status"]), "GitHub CLI signed in on this machine" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "`gh auth login`", !needsGh);
-  check(!!run("git", ["--version"]), "git", mac ? "Install git 2.31 or newer: `xcode-select --install` or `brew install git`." : "Install git 2.31 or newer: `sudo apt install git` or `sudo dnf install git`.");
+  const ghInstalled = run("gh", ["--version"]) !== undefined;
+  check(
+    !!run("gh", ["auth", "status"]),
+    (ghInstalled ? "GitHub CLI signed in on this machine" : "GitHub CLI installed") + (needsGh ? "" : " (not needed: this project keeps tickets in files)"),
+    ghInstalled ? "`gh auth login`" : mac ? "`brew install gh`, then `gh auth login`" : "Install it (https://cli.github.com), then `gh auth login`",
+    !needsGh,
+  );
+  // Worktree commands the kit relies on need 2.31; an older git failed mid-run, not here.
+  const gitVersion = run("git", ["--version"])?.match(/(\d+)\.(\d+)/);
+  const gitOk = !!gitVersion && (Number(gitVersion[1]) > 2 || (Number(gitVersion[1]) === 2 && Number(gitVersion[2]) >= 31));
+  check(gitOk, gitVersion ? `git ${gitVersion[0]} (2.31 or newer)` : "git", mac ? "Install git 2.31 or newer: `xcode-select --install` or `brew install git`." : "Install git 2.31 or newer: `sudo apt install git` or `sudo dnf install git`.");
+  // The operator is the author of the kit's merges and ticket commits. Without an identity git
+  // refuses them at landing (after the run has spent its tokens) or signs them with a guessed
+  // name and a hostname address.
+  const identity = ["user.name", "user.email"].filter((k) => !run("git", ["config", k], repoRoot));
+  check(!identity.length, "git identity (user.name, user.email)", identity.map((k) => `\`git config --global ${k} ${k === "user.name" ? '"Your Name"' : "you@example.com"}\``).join(", then "));
   check(!!run("jq", ["--version"]), "jq (status view)", mac ? "`brew install jq`" : "Install jq: `sudo apt install jq` or `sudo dnf install jq`.");
 
   const onPath = run("sh", ["-c", "command -v sandcastle"]);
@@ -192,7 +212,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
   if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")} from ${envFile}, or run \`${setup}\`, which drops them whenever it writes the file.`);
   check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", `\`${setup}\` (or run \`claude setup-token\` and put the token in ${envFile} as CLAUDE_CODE_OAUTH_TOKEN=...)`);
-  check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), `\`${setup}\` (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read - and put it in ${envFile} as GH_TOKEN=...)`, !needsGh);
+  // A missing token and a classic one are different problems; "is a fine-grained token" said the second for both.
+  check(!!env.GH_TOKEN?.startsWith("github_pat_"), (env.GH_TOKEN ? "GH_TOKEN is a fine-grained token (github_pat_), not a classic one" : "GH_TOKEN set (a fine-grained token, github_pat_)") + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), `\`${setup}\` (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read - and put it in ${envFile} as GH_TOKEN=...)`, !needsGh);
   if (verify) {
     // The project's file overrides the shared one key by key, as credentials() in sandbox.ts does.
     const inProject = !!repoRoot && realpathSync(repoRoot) !== realpathSync(KIT);
