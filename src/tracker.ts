@@ -472,8 +472,8 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
 
 const REQUEUE_USAGE = 'Usage: sandcastle requeue <ticket> [--note "text for the next run"]';
 
-/** Puts a ticket back in the queue, or only adds the note to one still queued. Returns what to tell the operator. */
-export const requeueTicket = (tracker: Tracker, label: string, args: string[]): string => {
+/** The ticket id (one leading "#" dropped) and the note. The CLI reads the id from here too: the note may come first. */
+export const parseRequeueArgs = (args: string[]): { id: string; note?: string } => {
   let ticket: string | undefined;
   let note: string | undefined;
   for (let i = 0; i < args.length; i++) {
@@ -483,7 +483,12 @@ export const requeueTicket = (tracker: Tracker, label: string, args: string[]): 
     } else if (!args[i].startsWith("--") && ticket === undefined) ticket = args[i].replace(/^#/, "");
   }
   if (!ticket) throw new OperatorError(REQUEUE_USAGE);
-  const id = ticket;
+  return { id: ticket, note };
+};
+
+/** Puts a ticket back in the queue, or only adds the note to one still queued. Returns what to tell the operator. */
+export const requeueTicket = (tracker: Tracker, label: string, args: string[]): string => {
+  const { id, note } = parseRequeueArgs(args);
   const t = tracker.get(id);
   const ref = tracker.ref(id);
   if (!t.open) throw new OperatorError(`${ref} is closed. Reopen it first if it needs more work.`);

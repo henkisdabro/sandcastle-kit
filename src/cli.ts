@@ -52,7 +52,7 @@ import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { closingReport } from "./report.ts";
-import { makeTracker, requeueTicket } from "./tracker.ts";
+import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
@@ -183,7 +183,7 @@ try {
       const message = requeueTicket(tracker, project.label, args);
       console.log(message);
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
-      const id = (args.find((a) => !a.startsWith("--")) ?? "").replace(/^#/, "");
+      const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
       break;
     }

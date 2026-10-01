@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { makeTracker, requeueTicket } = await import("../src/tracker.ts");
+const { makeTracker, parseRequeueArgs, requeueTicket } = await import("../src/tracker.ts");
 const { forgetHead, readHeads } = await import("../src/run.ts");
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
@@ -80,6 +80,11 @@ test("usage errors, and a leading # is dropped", () => {
   for (const args of [[], ["--note"], ["5", "--note"]]) assert.throws(() => requeueTicket(as("plain"), "ready-for-agent", args), /Usage: sandcastle requeue/);
   requeueTicket(as("plain"), "ready-for-agent", ["#5"]);
   assert.deepEqual(writes(), ["issue edit 5 --add-label ready-for-agent"]);
+});
+
+test("the note may come before the ticket: the id the CLI forgets the head of is still the ticket", () => {
+  assert.deepEqual(parseRequeueArgs(["--note", "Use the blue.", "#5"]), { id: "5", note: "Use the blue." });
+  assert.deepEqual(parseRequeueArgs(["5"]), { id: "5", note: undefined });
 });
 
 test("ticket files: status, comment, commit subject, clean tree, queued, reopenedSince", () => {
