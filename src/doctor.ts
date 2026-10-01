@@ -52,7 +52,8 @@ export const queueLabel = (root: string, label: string): { state: "ok" | "missin
   if (out === undefined) return { state: "not checked", fix };
   let names: unknown;
   try {
-    names = JSON.parse(out);
+    // `gh label list --search` prints nothing at all, not `[]`, when no label matches.
+    names = JSON.parse(out || "[]");
   } catch {
     return { state: "not checked", fix };
   }

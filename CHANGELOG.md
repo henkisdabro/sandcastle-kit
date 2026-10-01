@@ -182,6 +182,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   documented, as an escape hatch for throwaway repos.
 - Preflight for a model the CLI does not know (a mistyped `model:` label, say) prints the CLI's
   reason instead of its whole JSON reply.
+- A run creates the `needs-triage` label on a repo that has no label like it, instead of warning
+  `Unexpected end of JSON input`, and `sandcastle doctor` reports a missing queue label with its
+  FIX line instead of skipping the check: `gh label list --search` prints nothing, not `[]`, when
+  nothing matches.
 
 ### Added
 

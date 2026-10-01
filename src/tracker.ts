@@ -90,7 +90,8 @@ const LIST_LIMIT = 500;
  */
 export const ensureTriageLabel = (gh = (args: string[]) => sh("gh", args)) => {
   try {
-    const found = JSON.parse(gh(["label", "list", "--search", "needs-triage", "--json", "name", "--limit", "100"])) as { name: string }[];
+    // `gh label list --search` prints nothing at all, not `[]`, when no label matches.
+    const found = JSON.parse(gh(["label", "list", "--search", "needs-triage", "--json", "name", "--limit", "100"]) || "[]") as { name: string }[];
     if (found.some((l) => l.name === "needs-triage")) return;
     gh(["label", "create", "needs-triage", "--color", "FBCA04", "--description", "Filed by a sandcastle agent; triage before queueing"]);
   } catch (e) {
