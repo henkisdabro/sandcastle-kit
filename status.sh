@@ -488,7 +488,7 @@ counts_lines() {
 
 render() {
   local now now_s issues n phase log age commits state glyph colour activity activity_note rendered
-  local merged_list cols rows w_act line prio cpu mem cpu_col budget shown hidden key
+  local merged_list pad cols rows w_act line prio cpu mem cpu_col budget shown hidden key
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text hidden_list group summary act since title counts overhead legend
@@ -508,7 +508,10 @@ render() {
   load_run
   merged_list=$(git branch --merged "$BASE" --list 'agent/issue-*' 2>/dev/null)
 
-  line="${rule}$(printf "%${cols}s" '' | tr ' ' '─')${off}"
+  # Not `tr ' ' '─'`: GNU tr maps bytes, so on Linux it emits a bare e2 per
+  # column, invalid UTF-8. Bash substitution is byte-safe in any locale.
+  pad=$(printf "%${cols}s" '')
+  line="${rule}${pad// /─}${off}"
 
   # Keyed by the branch slug, not the bare number: a follow-up step can run
   # on agent/issue-12-closeout while agent/issue-12 is long merged, and
