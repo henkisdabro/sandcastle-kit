@@ -59,3 +59,20 @@ test("an adopted tab with Herdr's default label is renamed", () => {
   assert.ok(calls.includes("tab rename t1 sandcastle shop"));
   assert.ok(calls.includes("pane rename p1 sandcastle run shop"));
 });
+
+test("the status view splits off at its ratio, and the run's tab takes focus", () => {
+  delete process.env.SANDCASTLE_HERDR_FOCUS;
+  const calls = adopt("3");
+  // The fake pane is 200 columns wide: the status view goes right, the run pane keeps 25%.
+  assert.ok(calls.some((c) => c.startsWith("pane split p1 --direction right --ratio 0.25")), calls.join("\n"));
+  assert.ok(calls.includes("tab focus t1"));
+});
+
+test("SANDCASTLE_HERDR_FOCUS=0 leaves focus where it is", () => {
+  process.env.SANDCASTLE_HERDR_FOCUS = "0";
+  try {
+    assert.equal(adopt("3").some((c) => c.startsWith("tab focus")), false);
+  } finally {
+    delete process.env.SANDCASTLE_HERDR_FOCUS;
+  }
+});

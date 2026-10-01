@@ -53,6 +53,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
 | `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
 | `test/cli.test.ts` | The CLI's one catch: an unknown command, a missing config, no repository and an existing init print a message, no stack; `pnpm test` |
+| `test/layout.test.ts` | The Herdr view's proportions: the status view's share and the sandbox column's equal rows; `pnpm test` |
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
 | `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
 | `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |

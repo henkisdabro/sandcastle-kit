@@ -557,6 +557,11 @@ stays, showing each branch's outcome, and the next run replaces it rather than s
 `sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
 view then opens in a pane beside yours.
 
+The status view gets about half the screen: run pane 25%, status view 50%, sandboxes 25% in one
+column of equal rows (status below the run pane on a narrow screen; 2/3 in a tab of its own).
+Once it is open, Herdr switches to the run's tab; `SANDCASTLE_HERDR_FOCUS=0` leaves your focus
+where it is.
+
 ```
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
 │ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
@@ -631,6 +636,7 @@ Examples: [`examples/`](examples/).
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
+| `SANDCASTLE_HERDR_FOCUS=0` | on inside Herdr | Leave your focus where it is instead of switching to the run's tab once its status view opens |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |

@@ -50,6 +50,19 @@ export const runsStatus = (pane: string) =>
 // Herdr labels a new tab with a bare number; any other label is the operator's. One such ('sandcastle <project> run 4') was overwritten, leaving several tabs with one name.
 export const defaultTabLabel = (label: string | undefined) => !label || /^\d+$/.test(label.trim());
 
+// Split ratios (Herdr's `--ratio` is the share the pane being split keeps). The status view is
+// what an operator watches, so it gets about half the screen; at Herdr's default halves each
+// sandbox split took from it, shrinking it as sandboxes opened. Wide: run 25%, status 50%,
+// sandbox column 25%. Narrow (status below the run): status takes 70% of the height and 5/7
+// of that width, about half the area. Own tab (no run pane): status 2/3, sandboxes 1/3.
+export const layoutRatios = (adopted: boolean, wide: boolean) =>
+  !adopted ? { column: 0.67 } : wide ? { status: 0.25, column: 0.6667 } : { status: 0.3, column: 0.7143 };
+
+// The sandbox column ends with `panes` equal rows: the pane split for the next one keeps the
+// share it will have once all are open (1/5, then 1/4 of the rest, ...). Halving the last pane
+// each time left five sandboxes at 1/2, 1/4, 1/8, 1/16, 1/16 of the column.
+export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1);
+
 type Slot = { pane: string; issue?: string; closed?: boolean };
 export type SandboxView = {
   /** The status view's pane; undefined when this view is off and the caller opens one. */
@@ -126,10 +139,12 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   const alone = myTabInfo?.pane_count === 1;
   let tab: string;
   let statusPane: string;
+  let wide = false;
   if (alone && mine && myTab) {
-    const wide = (safe(() => (herdrJson(["pane", "layout", "--pane", mine]).result.layout.panes as { pane_id: string; rect: { width: number } }[])
+    wide = (safe(() => (herdrJson(["pane", "layout", "--pane", mine]).result.layout.panes as { pane_id: string; rect: { width: number } }[])
       .find((p) => p.pane_id === mine)?.rect.width) ?? 0) >= 160;
-    const split = safe(() => herdrJson(["pane", "split", mine, "--direction", wide ? "right" : "down", "--cwd", project.root, "--no-focus"]));
+    const ratio = String(layoutRatios(true, wide).status);
+    const split = safe(() => herdrJson(["pane", "split", mine, "--direction", wide ? "right" : "down", "--ratio", ratio, "--cwd", project.root, "--no-focus"]));
     if (!split) return NONE;
     tab = myTab;
     statusPane = split.result.pane.pane_id as string;
@@ -163,6 +178,9 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
     herdr(["pane", "run", statusPane, STATUS_COMMAND]);
     return true;
   })) return NONE;
+  // Take the operator to the run, which was opened without focus; =0 for someone who starts
+  // runs while working in another pane and would rather not be moved.
+  if (process.env.SANDCASTLE_HERDR_FOCUS !== "0") safe(() => herdr(["tab", "focus", tab]));
   // A status pane an earlier kit version opened in the user's own tab is now
   // a second copy. Closed only while it still shows the status view.
   const old = statusPaneRecord(project);
@@ -236,7 +254,8 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
           // queue looked empty and its neighbours' panes closed, and a split
           // from a closed pane turned the whole view off.
           const [from, direction] = open.length ? [open[open.length - 1].pane, "down"] : [statusPane, "right"];
-          const pane = herdrJson(["pane", "split", from, "--direction", direction, "--cwd", project.root, "--no-focus"])
+          const ratio = String(open.length ? stackRatio(open.length, panes) : layoutRatios(adopted, wide).column);
+          const pane = herdrJson(["pane", "split", from, "--direction", direction, "--ratio", ratio, "--cwd", project.root, "--no-focus"])
             .result.pane.pane_id as string;
           slot = addSlot(pane);
         }
