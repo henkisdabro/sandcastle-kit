@@ -129,6 +129,14 @@ test("a red gate merges nothing and leaves the ticket alone", async () => {
   assert.equal(scratchBranches(f.root), "");
 });
 
+test("a red gate that changes the shared .git config is reported as tampering", async () => {
+  // The host worktree shares .git, as a sandbox does: `--local` writes the common config.
+  const f = fixture({ gate: "git config --local sandcastle.planted yes; false" });
+  await assert.rejects(f.land(), /STOPPED after landing agent\/issue-demo-01 in a sandbox: \.git\/config/);
+  assert.equal(git(f.root, "rev-parse", "main").out, f.mainTip);
+  assert.match(f.ticketFile(), /^Status: ready-for-agent$/m);
+});
+
 test("a failing setup command is a red merge too", async () => {
   const f = fixture();
   f.project.setup = ["exit 4"];

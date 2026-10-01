@@ -86,9 +86,10 @@ export const landInSandbox = async (
       }
       await box.close();
     }
-    if (result.kind !== "merged") return result;
     // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.
-    assertGitUnchanged(project, before, `after landing ${t.branch} in a sandbox`);
+    // A gated merge ran the branch's own code there, so a red one is checked too, as `sandcastle gates` is.
+    if (result.kind === "merged" || gate) assertGitUnchanged(project, before, `after landing ${t.branch} in a sandbox`);
+    if (result.kind !== "merged") return result;
     const commit = sh("git", ["rev-parse", scratch], project.root);
     sh("git", ["merge", "--ff-only", commit], project.root);
     return { ...result, commit };
