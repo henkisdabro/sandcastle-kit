@@ -26,9 +26,18 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   them. Add `triage/` to the project's `.sandcastle/.gitignore`; `/sandcastle update` does it.
 - **Issues are still closed on the local merge**, but the closing comment now says the work is
   merged locally and not yet pushed, and the status view shows how far the base branch is ahead.
+- **A run creates a `needs-triage` label** in a GitHub project if it is missing, and agents add
+  it to follow-up issues they file; the closing summary lists them under **Needs you**.
+- **Inside Herdr, the status view now gets about half the screen** (run pane 25%, status 50%,
+  sandboxes 25% in a column of equal rows), and Herdr switches to the run's tab once it opens.
+  `SANDCASTLE_HERDR_FOCUS=0` keeps your focus where it is.
 
 ### Fixed
 
+- A branch that conflicts at landing says so on its issue - the files and the other ticket - in
+  the one comment the run already posts, instead of only in the console.
+- Gate times under 10 seconds show one decimal (`green in 0.4s`, not `green in 0s`).
+- A test that started the kit through `.bin/tsx` failed on a Mac whose `node` is a mise shim.
 - A run closed by SIGHUP, SIGTERM or Ctrl-C outside the sandbox phase - a closed pane, say -
   now records its end and releases its lock, instead of leaving no end line.
 - Preflight's model calls run at the same time instead of one after another.
@@ -84,6 +93,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- Each run's final record is appended to `.sandcastle/logs/history.jsonl`, so earlier runs'
+  outcomes are no longer lost when the next run starts.
+- `sandcastle init` ends by naming the next steps, and an empty `sandcastle queue` counts the
+  open issues not yet queued and says how to queue them.
+- CI runs the checks on macOS as well as Linux, and the status view under macOS's bash 3.2.
 - `sandcastle doctor --verify` checks the GitHub and Claude subscription tokens live, and prints
   which file each came from with a fingerprint, never the value. Plain `doctor` stays offline.
 - `NO_COLOR` is honoured: the status view drops colour (as it now also does when piped), and

@@ -63,7 +63,9 @@ esac
   );
   chmodSync(join(bin, "gh"), 0o755);
   const run = (...args: string[]) =>
-    spawnSync(join(KIT, "node_modules/.bin/tsx"), [join(KIT, "src/cli.ts"), "queue", ...args], {
+    // This node, not .bin/tsx: that finds `node` on PATH, and a mise or asdf shim there reads
+    // its config from the XDG_CONFIG_HOME this file points at a temp dir, then exits.
+    spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "queue", ...args], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, PATH: [bin, process.env.PATH].join(delimiter), XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_CACHE_HOME: process.env.XDG_CACHE_HOME },
