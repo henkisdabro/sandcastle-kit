@@ -6,7 +6,10 @@ This continues the run steps 1-3 in SKILL.md.
    the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
    finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
    project root, with the blockers re-read and the local git state as it is now. Run it from the
-   project root and take the summary from its own stdout, not from a pane scrape. Then write your
+   project root and take the summary from its own stdout, not from a pane scrape. With `autonomy` set, one
+   `sandcastle run` can hold several turns, each printing its own closing summary; `sandcastle
+   report` shows only the last turn, so read the earlier turns' `Autonomy level` lines and
+   summaries from the run's output before writing the hand-back. Then write your
    closing message with **all seven sections, in this order, with these headings**, each one
    present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
    report` printed, emoji included** - retyping a heading is how the emoji get lost; the

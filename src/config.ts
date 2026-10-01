@@ -34,6 +34,8 @@ export type ProjectConfig = {
   label?: string;
   /** Parallel sandboxes. Default 4. */
   concurrency?: number;
+  /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two; `AUTONOMY_LEVEL` overrides it for one run. */
+  autonomy?: 0 | 1 | 2 | 3;
   /** Project image layer, relative to the repo root. Starts `ARG BASE` / `FROM ${BASE}`. */
   dockerfile?: string;
   /** Extra bind mounts, e.g. a package-manager store. */
@@ -99,8 +101,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 

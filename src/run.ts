@@ -367,7 +367,12 @@ export type TicketRecord = {
   ungated?: string;
 };
 
+let current: ((code: number | undefined) => void) | undefined;
+let exitHooked = false;
+
 export const recordRun = (project: Project, extra: Record<string, unknown> = {}) => {
+  // Before this record's first write: finishing the old one rewrites run.json.
+  current?.(0);
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   let run: Record<string, unknown> = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
@@ -379,7 +384,12 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {})
     renameSync(`${file}.tmp`, file);
   };
   write();
-  process.on("exit", (code) => {
+  // One process can hold several runs (autonomy turns): a new record finishes the one before it,
+  // and the single exit handler finishes the last. Each finishes once.
+  let finished = false;
+  const finish = (code: number | undefined) => {
+    if (finished) return;
+    finished = true;
     run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
     write();
     // run.json is overwritten by the next run, so each finished run also leaves one
@@ -389,7 +399,12 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {})
     } catch {
       /* history is a convenience; the run itself already ended */
     }
-  });
+  };
+  current = finish;
+  if (!exitHooked) {
+    exitHooked = true;
+    process.on("exit", (code) => current?.(code));
+  }
   return {
     startedAt: run.startedAt as string,
     /** `stage` is what the status view's run line shows while the run is live. */

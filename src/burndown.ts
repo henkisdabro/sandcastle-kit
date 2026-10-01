@@ -203,7 +203,10 @@ export const fileOverlaps = (root: string, base: string, ids: string[]): { id: s
   return held;
 };
 
-export const burndown = async (project: Project) => {
+let unlockOnExit = false;
+
+/** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
+export const burndown = async (project: Project): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
@@ -238,7 +241,7 @@ export const burndown = async (project: Project) => {
     : tracker.queued();
   if (queued.length === 0) {
     console.log(`No ${project.label} tickets. Queue drained.`);
-    return;
+    return false;
   }
 
   // An issue whose blocker is still open waits - including a blocker in this
@@ -275,7 +278,7 @@ export const burndown = async (project: Project) => {
   const issues = ready.filter((i) => !overlaps.some((o) => o.id === i.id));
   if (issues.length === 0) {
     console.log("Every queued issue is waiting on another. Nothing to start.");
-    return;
+    return false;
   }
 
   // Only the tickets this run starts; a waiting ticket's labels are checked when it starts.
@@ -326,7 +329,9 @@ export const burndown = async (project: Project) => {
   });
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
-  process.on("exit", unlockAll);
+  // Once per process: each turn of an autonomy run would add another listener.
+  if (!unlockOnExit) process.on("exit", unlockAll);
+  unlockOnExit = true;
   // Inside Herdr, the run's own tab: the status view and one pane per
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
@@ -1414,4 +1419,5 @@ export const burndown = async (project: Project) => {
       (withdrawn.length ? `, withdrawn ${withdrawn.length}` : "") +
       ` of ${issues.length}`,
   );
+  return true;
 };

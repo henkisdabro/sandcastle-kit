@@ -47,6 +47,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
+import { autonomyLevel, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -55,7 +56,7 @@ import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { closingReport } from "./report.ts";
+import { closingReport, gather } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
@@ -109,7 +110,50 @@ try {
       // every exit - a drained queue and a crash included.
       process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
       exitOnSignal();
-      await burndown(await loadProject(root));
+      // Read before burndown, so a bad level is refused before Docker or any spend.
+      const project = await loadProject(root);
+      const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
+      for (let turn = 1; await burndown(project); turn++) {
+        if (level === 0) break;
+        const again = rerunnable(await gather(project));
+        if (!again) break;
+        // A ticket closed by hand since the turn would make the ISSUES path throw.
+        const tracker = makeTracker(project);
+        const open = (id: string) => {
+          try {
+            return tracker.get(id).open;
+          } catch {
+            return false;
+          }
+        };
+        const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open) };
+        const ids = [...left.conflicted, ...left.unblocked];
+        const list = rerunList(left, tracker.ref);
+        const verdict = nextTurn(level, turn, left);
+        if (verdict === "stop") break;
+        const many = `${ids.length} ticket(s) can`;
+        const manual = `\`sandcastle run ${ids.join(" ")}\``;
+        if (verdict === "cap") {
+          console.log(`Autonomy level ${level}: ${level} turn(s) done, the cap; ${many} still run again - ${list}. ${manual} runs them.`);
+          break;
+        }
+        if (verdict === "ask") {
+          const yes = await confirm(`Autonomy level 1: ${many} run again - ${list}. Run again now? [y/N] `);
+          if (yes === undefined) {
+            console.log(`Autonomy level 1: ${many} run again - ${list}. Not a terminal, so nothing re-runs: ${manual} runs them.`);
+            break;
+          }
+          if (!yes) {
+            console.log(`Not running again. ${manual} runs them.`);
+            break;
+          }
+          console.log(`Running again (turn ${turn + 1}) for ${list}.`);
+        } else {
+          console.log(`Autonomy level ${level}: running again (turn ${turn + 1} of ${level}) for ${list}.`);
+        }
+        // Exactly the re-runnable tickets, never the whole queue: red ones still queued stay out.
+        process.env.ISSUES = ids.join(",");
+      }
       break;
     }
     case "status": {

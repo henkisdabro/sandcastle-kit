@@ -116,8 +116,13 @@ export const protectedChanges = (project: Project, branch: string) => {
 // branches and merge into the same checkout.
 // ---------------------------------------------------------------------------
 
+// Held by this process: a second turn of one `sandcastle run` would otherwise find its own
+// live pid in the lock and refuse.
+const heldLocks = new Set<string>();
+
 export const lockRun = (project: Project) => {
   const file = join(project.root, ".sandcastle/logs/run.lock");
+  if (heldLocks.has(file)) return;
   // A project's first run has no logs/ yet - init does not create it.
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   const { mine, owner } = takeLock(file, project.name);
@@ -128,5 +133,6 @@ export const lockRun = (project: Project) => {
         : "Another sandcastle run of this project is starting. One run per project at a time.",
     );
   }
+  heldLocks.add(file);
   process.on("exit", () => releaseLock(file, mine));
 };
