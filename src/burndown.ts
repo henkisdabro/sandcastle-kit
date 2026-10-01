@@ -25,7 +25,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
@@ -356,7 +356,15 @@ export const burndown = async (project: Project) => {
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
-  else await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+  else {
+    try {
+      await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+    } catch (error) {
+      // The closing summary names the red gates from the record; the stage stays "base gates".
+      if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
+      throw error;
+    }
+  }
   // What the tracker says about each ticket now, to prove a dry run left it alone.
   const before = DRY_RUN ? tracker.snapshot(issues.map((i) => i.id)) : undefined;
   // Agents label the follow-up issues they file; the sandbox token cannot create the label.
