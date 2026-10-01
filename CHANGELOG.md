@@ -209,6 +209,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   terminal), level 2 re-runs once, level 3 up to twice. Off by default.
 - The reviewer flags a change no gate exercises; the closing summary lists such merged tickets
   under **Needs you** as `merged - check by hand`, with what to check.
+- `notify` in `~/.config/sandcastle-kit/config.json`: an argv command run when a run ends (also on
+  Ctrl-C or a closed pane), with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` and `SANDCASTLE_EXIT` in
+  its environment. It never fails the run.
 
 ## [0.2.0] - 2026-09-30
 
