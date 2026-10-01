@@ -10,7 +10,7 @@
 
 import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
@@ -225,17 +225,38 @@ const baseKey = (project: Project, image: string, planFile: string) =>
     )
     .digest("hex");
 
+const baseRecord = (root: string) => join(root, ".sandcastle/.run/base-gates.json");
+
+// Whether the base was green at exactly this key. An unreadable record is a miss.
+export const baseCacheHit = (root: string, key: string) => {
+  try {
+    return JSON.parse(readFileSync(baseRecord(root), "utf8")).key === key;
+  } catch {
+    return false;
+  }
+};
+
+// A green result is recorded; a red one removes the record. A gate that
+// depends on the clock or the network can go red at the same key `sandcastle
+// gates` was green at, and a record left behind would have the next run skip
+// the check and fan agents out on a base known to be red.
+export const noteBaseResult = (root: string, key: string, green: boolean) => {
+  const file = baseRecord(root);
+  if (!green) return rmSync(file, { force: true });
+  mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString() }) + "\n");
+};
+
 /**
  * Gates the base branch and throws if any gate is red, with each red gate's
  * output in the log. `cached` skips the check when the same base, image and
  * config were green before.
  */
 export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true) => {
-  const record = join(project.root, ".sandcastle/.run/base-gates.json");
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
-  if (cached && existsSync(record) && JSON.parse(readFileSync(record, "utf8")).key === key) {
+  if (cached && baseCacheHit(project.root, key)) {
     console.log(`Gates on ${base}: green at this commit and image before - not re-run.`);
     return;
   }
@@ -245,8 +266,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   const redHooks = run.hookTests.filter((t) => !t.pass);
-  if (!run.failures.length && !redHooks.length) {
-    writeFileSync(record, JSON.stringify({ key, at: new Date().toISOString() }) + "\n");
+  const green = !run.failures.length && !redHooks.length;
+  noteBaseResult(project.root, key, green);
+  if (green) {
     // A log left by an earlier red run would read as this run's result.
     rmSync(log, { force: true });
     return;
