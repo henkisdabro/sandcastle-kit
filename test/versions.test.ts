@@ -195,6 +195,6 @@ test("config validation refuses claudeCode: \"newest\" and accepts a channel or 
     );
     return loadProject(root);
   };
-  await assert.rejects(project("newest"), /claudeCode/);
+  await assert.rejects(project("newest"), /\bclaudeCode\b/);
   for (const ok of ["latest", "stable", "2.1.285"]) assert.equal((await project(ok)).claudeCode, ok);
 });
