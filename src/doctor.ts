@@ -339,6 +339,14 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     if (staleImage) console.log(`warn ${staleImage}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
+    // Ignoring a file does not untrack it: a .env added before the ignore line (or with -f) is in
+    // every clone and, once pushed, on the remote.
+    const tracked = run("git", ["-C", repoRoot, "ls-files", "--error-unmatch", ".sandcastle/.env"]) !== undefined;
+    if (tracked) {
+      check(false, ".sandcastle/.env is committed", `\`git rm --cached .sandcastle/.env\` and commit, then rotate every token in it: its values stay in the git history, and on the remote if it was pushed.`);
+    } else if (hasConfig && existsSync(join(repoRoot, ".sandcastle/.env"))) {
+      check(run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/.env"]) !== undefined, ".sandcastle/.env is gitignored", gitignoreFix(repoRoot));
+    }
   } else {
     console.log("\n(not inside a project - run doctor again from one to check it too)");
   }

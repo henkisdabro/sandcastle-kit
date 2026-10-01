@@ -308,6 +308,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   full, in the gate log, the terminal and a repair agent's prompt - from where an agent's comment
   could carry them to the tracker. Gates are the project's code, on a branch code an agent wrote;
   they no longer see those tokens.
+- `sandcastle doctor` makes a committed `.sandcastle/.env` a FIX - untrack it and rotate its
+  tokens, as they stay in the history - and one that is not gitignored a FIX with the ignore line.
+  Before, it checked only the file's mode.
 
 ### Added
 
