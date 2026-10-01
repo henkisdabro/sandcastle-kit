@@ -95,12 +95,13 @@ const link = async (target: string, path: string, label: string) => {
 };
 
 // Keeps comments and other keys; drops empty `KEY=` lines, which a run
-// refuses, and replaces the keys being set.
-const writeEnv = (file: string, set: Record<string, string>) => {
+// refuses, and replaces the keys being set. `drop` removes further keys, so a
+// replaced credential of the other kind cannot keep winning over the new one.
+export const writeEnv = (file: string, set: Record<string, string>, drop: string[] = []) => {
   const lines = existsSync(file) ? readFileSync(file, "utf8").split("\n") : ["# sandcastle-kit credentials, written by `sandcastle setup`. Keep this file private."];
   const kept = lines.filter((l) => {
     const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(l);
-    return !m || (!(m[1] in set) && m[2].trim() !== "");
+    return !m || (!(m[1] in set) && !drop.includes(m[1]) && m[2].trim() !== "");
   });
   while (kept.length && kept[kept.length - 1] === "") kept.pop();
   const text = [...kept, ...Object.entries(set).map(([k, v]) => `${k}=${v}`)].join("\n") + "\n";
@@ -143,19 +144,30 @@ export const setup = async (repoRoot?: string) => {
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
   const set: Record<string, string> = {};
 
-  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
-    console.log("ok   Claude credential already set");
-  } else if (await yes("\nUse your Claude subscription for the agents? (No = an Anthropic API key, billed per token)", true)) {
-    if (!has("claude")) console.log("     Claude Code is not installed here. Install it (https://claude.com/claude-code), or run `claude setup-token` on any machine that has it.");
-    else if (await yes("Run `claude setup-token` now? It opens your browser, then prints a long-lived token.", true)) spawnSync("claude", ["setup-token"], { stdio: "inherit" });
-    const t = await secret("Paste the token (sk-ant-oat...), or press Enter to skip: ");
-    if (t.startsWith("sk-ant-")) set.CLAUDE_CODE_OAUTH_TOKEN = t;
-    else if (t) console.log("     That does not look like a Claude token (sk-ant-...); not saved.");
-  } else {
-    const t = await secret("Paste the API key (sk-ant-api...), or press Enter to skip: ");
-    if (t.startsWith("sk-ant-")) set.ANTHROPIC_API_KEY = t;
-    else if (t) console.log("     That does not look like an Anthropic API key (sk-ant-...); not saved.");
-  }
+  const drop: string[] = [];
+
+  const claudeFlow = async () => {
+    if (await yes("\nUse your Claude subscription for the agents? (No = an Anthropic API key, billed per token)", true)) {
+      if (!has("claude")) console.log("     Claude Code is not installed here. Install it (https://claude.com/claude-code), or run `claude setup-token` on any machine that has it.");
+      else if (await yes("Run `claude setup-token` now? It opens your browser, then prints a long-lived token.", true)) spawnSync("claude", ["setup-token"], { stdio: "inherit" });
+      const t = await secret("Paste the token (sk-ant-oat...), or press Enter to skip: ");
+      if (t.startsWith("sk-ant-")) {
+        set.CLAUDE_CODE_OAUTH_TOKEN = t;
+        drop.push("ANTHROPIC_API_KEY");
+      } else if (t) console.log("     That does not look like a Claude token (sk-ant-...); not saved.");
+    } else {
+      const t = await secret("Paste the API key (sk-ant-api...), or press Enter to skip: ");
+      if (t.startsWith("sk-ant-")) {
+        set.ANTHROPIC_API_KEY = t;
+        drop.push("CLAUDE_CODE_OAUTH_TOKEN");
+      } else if (t) console.log("     That does not look like an Anthropic API key (sk-ant-...); not saved.");
+    }
+  };
+  const claudeKey = env.CLAUDE_CODE_OAUTH_TOKEN ? "CLAUDE_CODE_OAUTH_TOKEN" : env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : undefined;
+  if (claudeKey) {
+    console.log(`ok   Claude credential already set (${claudeKey})`);
+    if (await yes("     Replace it?", false)) await claudeFlow();
+  } else await claudeFlow();
 
   // A saved token is checked live too: a revoked or expired one would otherwise
   // pass here and only fail when an agent first calls GitHub. No answer at all
@@ -176,7 +188,7 @@ export const setup = async (repoRoot?: string) => {
       console.log(`ok   GitHub token already set (not checked: HTTP ${probe.status})`);
     }
   }
-  if (!saved) {
+  const githubFlow = async () => {
     const login = run("gh", ["api", "user", "--jq", ".login"]);
     const url = new URL("https://github.com/settings/personal-access-tokens/new");
     url.search = new URLSearchParams({
@@ -206,10 +218,12 @@ export const setup = async (repoRoot?: string) => {
         console.log(`     GitHub rejected the token (${res ? `HTTP ${res.status}` : "no connection"}); not saved.`);
       }
     }
-  }
+  };
+  if (!saved) await githubFlow();
+  else if (await yes("     Replace it?", false)) await githubFlow();
 
   if (Object.keys(set).length || existsSync(envFile)) {
-    writeEnv(envFile, set);
+    writeEnv(envFile, set, drop);
     if (Object.keys(set).length) console.log(`done credentials saved to ${envFile}`);
   }
 

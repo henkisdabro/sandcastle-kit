@@ -56,7 +56,7 @@ install ends with it; to run it again later: `sandcastle setup`.
 6. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git) and prints the fix for
    anything missing.
 
-It installs no software. Re-run it any time: finished steps show `ok` and are skipped.
+It installs no software. Re-run it any time: finished steps show `ok`; for a credential it also asks whether to replace it (default no) - the way to put in a new token.
 
 ## 🔧 Installing by hand
 
