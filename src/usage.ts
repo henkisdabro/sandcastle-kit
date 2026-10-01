@@ -8,13 +8,15 @@
 // bogus token got 401), so the reading is cached for ten minutes and fails
 // open - an unknown reading never blocks a run.
 
+import { OperatorError } from "./errors.ts";
+
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
 
 // Read only when the check is on: a bad USAGE_STOP must not break
 // `sandcastle doctor` or `status`, which never use it.
 const usageStopPercent = () => {
   const stop = Number(process.env.USAGE_STOP || 90);
-  if (!(stop > 0 && stop <= 100)) throw new Error(`USAGE_STOP=${process.env.USAGE_STOP} - expected 1 to 100.`);
+  if (!(stop > 0 && stop <= 100)) throw new OperatorError(`USAGE_STOP=${process.env.USAGE_STOP} - expected 1 to 100.`);
   return stop;
 };
 

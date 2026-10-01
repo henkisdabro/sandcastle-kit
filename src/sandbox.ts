@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
+import { OperatorError } from "./errors.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -90,16 +91,16 @@ export const credentials = (project: Project): Record<string, string> => {
   // Sandcastle forwards every key of the project's .sandcastle/.env into the
   // container by itself, past the filter above, so a host-only key cannot live there.
   const inProject = HOST_ONLY_KEYS.filter((k) => readEnv(files[1])[k]);
-  if (inProject.length) throw new Error(`${inProject.join(", ")} in ${files[1]} would reach the sandbox. Move it to ${files[0]}.`);
+  if (inProject.length) throw new OperatorError(`${inProject.join(", ")} in ${files[1]} would reach the sandbox. Move it to ${files[0]}.`);
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
-  if (empty.length) throw new Error(`Empty ${empty.join(", ")} in ${files.join(" or ")} - remove the line or give it a value.`);
+  if (empty.length) throw new OperatorError(`Empty ${empty.join(", ")} in ${files.join(" or ")} - remove the line or give it a value.`);
   const missing = [
     ...(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY ? [] : ["CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)"]),
     ...(env.GH_TOKEN || project.tracker.kind === "files" ? [] : ["GH_TOKEN"]),
   ];
-  if (missing.length) throw new Error(`Missing ${missing.join(", ")} in ${files[0]} (see .env.example in the kit).`);
+  if (missing.length) throw new OperatorError(`Missing ${missing.join(", ")} in ${files[0]} (see .env.example in the kit).`);
   if (env.GH_TOKEN && !env.GH_TOKEN.startsWith("github_pat_") && process.env.SANDCASTLE_ALLOW_BROAD_TOKEN !== "1") {
-    throw new Error(
+    throw new OperatorError(
       "GH_TOKEN is not a fine-grained token (github_pat_...). Sandbox agents run unattended with " +
         "permission prompts off; a classic or OAuth token lets them push and edit workflows. Create one " +
         "at https://github.com/settings/personal-access-tokens/new with Issues read/write and Metadata " +

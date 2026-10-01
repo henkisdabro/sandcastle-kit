@@ -45,12 +45,14 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
+| `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
 | `src/config.ts` | The `ProjectConfig` type and loader |
 | `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
 | `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
+| `test/cli.test.ts` | The CLI's one catch: an unknown command, a missing config, no repository and an existing init print a message, no stack; `pnpm test` |
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
 | `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
 | `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |

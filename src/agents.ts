@@ -25,6 +25,7 @@
 
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
+import { OperatorError } from "./errors.ts";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type Effort = (typeof EFFORTS)[number];
@@ -32,7 +33,7 @@ export type Effort = (typeof EFFORTS)[number];
 const effort = (name: string, configured?: string, allowed: readonly string[] = EFFORTS): Effort => {
   const value = process.env[name] ?? configured ?? "high";
   if (!allowed.includes(value)) {
-    throw new Error(`${name}=${value} (env or .sandcastle/config.ts) - expected one of ${allowed.join(", ")}.`);
+    throw new OperatorError(`${name}=${value} (env or .sandcastle/config.ts) - expected one of ${allowed.join(", ")}.`);
   }
   return value as Effort;
 };

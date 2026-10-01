@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
+import { OperatorError } from "./errors.ts";
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
 
@@ -93,11 +94,11 @@ export const CONFIG_PATH = ".sandcastle/config.ts";
 export const loadProject = async (root = process.cwd()): Promise<Project> => {
   const file = join(root, CONFIG_PATH);
   if (!existsSync(file)) {
-    throw new Error(`No ${CONFIG_PATH} in ${root}. Run \`sandcastle init\` first.`);
+    throw new OperatorError(`No ${CONFIG_PATH} in ${root}. Run \`sandcastle init\` first.`);
   }
   const config = (await import(pathToFileURL(file).href)).default as ProjectConfig;
   if (!config?.name || !config.gates?.length) {
-    throw new Error(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
+    throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and \`gates\`.`);
   }
   configureModels(config);
   return {

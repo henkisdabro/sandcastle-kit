@@ -11,6 +11,7 @@ import type { Project } from "./config.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, KIT, machineSettings, sh } from "./sandbox.ts";
+import { OperatorError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
 // Keep awake - a machine that idles to sleep freezes every sandbox mid-turn,
@@ -37,7 +38,7 @@ export const keepAwake = (): string => {
 };
 
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
-// "NOT STARTED" makes the CLI print it as a message: a stack trace read as a kit bug, and
+// An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
 // without the file list the operator had to run git status to find a stray lockfile.
 export const assertCleanBase = (project: Project) => {
   // Not sh(): its trim would eat the first line's leading status column.
@@ -47,13 +48,13 @@ export const assertCleanBase = (project: Project) => {
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
     if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
-    throw new Error(
+    throw new OperatorError(
       `NOT STARTED: the working tree is dirty. The run merges into it - commit or stash first.\n${shown.join("\n")}`,
     );
   }
   const branch = sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], project.root);
   if (branch !== project.baseBranch) {
-    throw new Error(`NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}.`);
+    throw new OperatorError(`NOT STARTED: expected to be on ${project.baseBranch}, found ${branch}.`);
   }
 };
 
@@ -109,7 +110,7 @@ export const preflight = (project: Project, image: string) => {
     if (!r.ok) failures.push(`${CROSS_REVIEW_MODEL}: ${r.out.split("\n").slice(-3).join(" ").slice(0, 300)}`);
   }
   if (failures.length) {
-    throw new Error(`Preflight failed - no sandbox started:\n  ${failures.join("\n  ")}`);
+    throw new OperatorError(`Preflight failed - no sandbox started:\n  ${failures.join("\n  ")}`);
   }
   console.log(`Preflight ok: ${MODELS_LINE}`);
 };

@@ -17,6 +17,7 @@ import type { Hook } from "./lean.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, unlockWorktree } from "./worktree-lock.ts";
+import { OperatorError } from "./errors.ts";
 
 export type Gate = { name: string; pass: boolean; ms?: number };
 type Failure = { name: string; command: string; exitCode: number; output: string };
@@ -243,7 +244,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
   const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`)];
-  throw new Error(
+  throw new OperatorError(
     `Red on ${base} before any agent ran: ${red.join(", ")}. Every branch would fail the same way, ` +
       `so no sandbox started. The cause is the image, the setup, the lean plan or a hook, not an issue: full output in ` +
       `.sandcastle/logs/base-gates.log. Fix it, then \`sandcastle gates\` to check (SKIP_BASE_GATES=1 runs anyway).`,

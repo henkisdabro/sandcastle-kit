@@ -46,199 +46,201 @@ import { archiveFinishedLogs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
+import { OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
-// `setup` and `doctor` also work outside a repository (fresh install).
-const repoRoot = (() => {
-  try {
-    return sh("git", ["rev-parse", "--show-toplevel"]);
-  } catch {
-    return undefined;
+// A refusal the operator acts on is a message, not a crash: no stack trace. Anything else is a
+// kit bug and keeps its stack.
+try {
+  // `setup` and `doctor` also work outside a repository (fresh install).
+  const repoRoot = (() => {
+    try {
+      return sh("git", ["rev-parse", "--show-toplevel"]);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (command === "setup") {
+    await setup(repoRoot);
+    process.exit(0);
   }
-})();
-if (command === "setup") {
-  await setup(repoRoot);
-  process.exit(0);
-}
-if (command === "doctor") {
-  await doctor(repoRoot);
-  process.exit(0);
-}
-if (command === "help" || command === "--help" || command === "-h") {
-  console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((l) => l.startsWith("//")).map((l) => l.slice(3)).join("\n"));
-  process.exit(0);
-}
-if (!repoRoot) throw new Error("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");
-// Sandcastle resolves worktrees and logs from the working directory, so every
-// command runs from the repository root, wherever it was typed.
-const root = repoRoot;
-process.chdir(root);
+  if (command === "doctor") {
+    await doctor(repoRoot);
+    process.exit(0);
+  }
+  if (command === "help" || command === "--help" || command === "-h") {
+    console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((l) => l.startsWith("//")).map((l) => l.slice(3)).join("\n"));
+    process.exit(0);
+  }
+  if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");
+  // Sandcastle resolves worktrees and logs from the working directory, so every
+  // command runs from the repository root, wherever it was typed.
+  const root = repoRoot;
+  process.chdir(root);
 
-switch (command) {
-  case "run": {
-    // An agent that started the run in another pane (Herdr's `pane run`) is
-    // told nothing when it ends; its watcher waits for this line, printed on
-    // every exit - a drained queue and a crash included.
-    process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
-    try {
+  switch (command) {
+    case "run": {
+      // An agent that started the run in another pane (Herdr's `pane run`) is
+      // told nothing when it ends; its watcher waits for this line, printed on
+      // every exit - a drained queue and a crash included.
+      process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
       await burndown(await loadProject(root));
-    } catch (error) {
-      // A stop or a refusal to start is a message for the operator, not a crash: no stack trace.
-      if (!/^(STOPPED|NOT STARTED)/.test(String((error as Error).message))) throw error;
-      console.error(`\n${(error as Error).message}`);
-      process.exitCode = 1;
+      break;
     }
-    break;
-  }
-  case "status": {
-    const project = await loadProject(root);
-    const r = spawnSync(join(KIT, "status.sh"), args, {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        SANDCASTLE_PROJECT: root,
-        SANDCASTLE_BIN: join(KIT, "bin/sandcastle"),
-        SANDCASTLE_NAME: project.name,
-        SANDCASTLE_BASE: project.baseBranch,
-        // What the next run would use: between runs the view showed the last
-        // run's models, which read as the current setting.
-        SANDCASTLE_MODELS: MODELS_LINE,
-        SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
-        SANDCASTLE_MAX_GATES: String(limit("gates")),
-      },
-    });
-    process.exit(r.status ?? 0);
-  }
-  case "report": {
-    console.log(await closingReport(await loadProject(root)));
-    break;
-  }
-  case "build": {
-    console.log(ensureImage(await loadProject(root), args.includes("--force")));
-    break;
-  }
-  case "preflight": {
-    const project = await loadProject(root);
-    preflight(project, ensureImage(project));
-    break;
-  }
-  case "queue": {
-    // The queue and what holds each ticket back; `--json` is what the status view reads.
-    const project = await loadProject(root);
-    const tracker = makeTracker(project);
-    const queued = tracker.queued(false);
-    const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
-    const rows = await Promise.all(
-      queued.map(async (t) => ({
-        id: t.id,
-        title: t.title,
-        updated: t.updated ?? null,
-        blockedOn: (await openBlockers(project, tracker, resolve, t)).map(refLabel),
-      })),
-    );
-    if (args.includes("--json")) console.log(JSON.stringify(rows));
-    else {
-      console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
-      for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
-      if (!rows.length) console.log("  (empty)");
+    case "status": {
+      const project = await loadProject(root);
+      const r = spawnSync(join(KIT, "status.sh"), args, {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          SANDCASTLE_PROJECT: root,
+          SANDCASTLE_BIN: join(KIT, "bin/sandcastle"),
+          SANDCASTLE_NAME: project.name,
+          SANDCASTLE_BASE: project.baseBranch,
+          // What the next run would use: between runs the view showed the last
+          // run's models, which read as the current setting.
+          SANDCASTLE_MODELS: MODELS_LINE,
+          SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
+          SANDCASTLE_MAX_GATES: String(limit("gates")),
+        },
+      });
+      process.exit(r.status ?? 0);
     }
-    break;
-  }
-  case "blockers": {
-    const project = await loadProject(root);
-    const tracker = makeTracker(project);
-    // Every open ticket, not only the queued: earlier triage parked blocked ones
-    // unqueued with a comment, and they need the line moved before they are queued.
-    const queuedIds = new Set(tracker.queued(false).map((t) => t.id));
-    const open = tracker.open();
-    const found = await commentOnlyBlocks(project, tracker, open.map((t) => ({ ...t, queued: queuedIds.has(t.id) })));
-    for (const f of found) console.log(commentBlockLine(f));
-    console.log(found.length ? `\n${found.length} of ${open.length} open ticket(s) to look at.` : `No stale or unread blocker comments on ${open.length} open ticket(s).`);
-    break;
-  }
-  case "gates": {
-    // The sandbox shares the repo's .git, so the run's host guards apply.
-    disableHostGitHooks();
-    const project = await loadProject(root);
-    const fingerprint = gitFingerprint(project);
-    try {
-      await requireGreenBase(project, ensureImage(project), writePlan(project).file, false);
-    } finally {
-      assertGitUnchanged(project, fingerprint, "after the gates");
+    case "report": {
+      console.log(await closingReport(await loadProject(root)));
+      break;
     }
-    console.log("All gates green on the base branch.");
-    break;
-  }
-  case "lean": {
-    const project = await loadProject(root);
-    const p = leanPlan(project);
-    leanReport(project, p);
-    const image = ensureImage(project);
-    reportHookCheck(checkHooks(project, image, p), p.hooks.length);
-    if (args.includes("--measure")) leanMeasure(project, image, p);
-    break;
-  }
-  case "lean-apply": {
-    // Internal: the worktree hook. `root` is the fresh worktree here. Locked
-    // straight away: Sandcastle's own setup (the dependency install) runs for
-    // minutes before the pipeline gets the worktree, and an unlocked worktree
-    // can be pruned by another sandbox meanwhile.
-    leanApply(JSON.parse(readFileSync(args[0], "utf8")), root);
-    lockWorktree(root);
-    break;
-  }
-  case "init": {
-    init(root);
-    // The lean check belongs to setup: what the repo would load into every
-    // sandbox agent, all hidden until lean.keep names it.
-    const project = await loadProject(root);
-    leanReport(project, leanPlan(project));
-    break;
-  }
-  case "clean": {
-    // Leftovers a run owns nobody: worktrees an interrupted or dirty sandbox
-    // kept, and agent branches nothing reports once their row ages out. A
-    // live run's own worktrees must survive, so this takes the run lock.
-    disableHostGitHooks();
-    const project = await loadProject(root);
-    lockRun(project);
-    reapOrphans(project);
-    unlockAll();
-    const worktrees = sh("git", ["worktree", "list", "--porcelain"])
-      .split("\n\n")
-      .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
-      .filter((p): p is string => !!p && p.startsWith(join(root, ".sandcastle/worktrees/")));
-    for (const path of worktrees) {
-      sh("git", ["worktree", "remove", "--force", path]);
-      console.log(`removed worktree ${path}`);
+    case "build": {
+      console.log(ensureImage(await loadProject(root), args.includes("--force")));
+      break;
     }
-    sh("git", ["worktree", "prune"]);
-    const base = project.baseBranch;
-    const all = args.includes("--all");
-    const standing: string[] = [];
-    let deleted = 0;
-    for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"]).split("\n").filter(Boolean)) {
-      // A base-gate or verify branch is always scratch. An agent branch is
-      // finished when every commit is on base, merged or as an equal patch.
-      const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch]).split("\n").some((l) => l.startsWith("+"));
-      if (finished || all) {
-        sh("git", ["branch", "-D", branch]);
-        deleted++;
-        console.log(`deleted ${branch}${finished ? "" : " (unmerged)"}`);
-      } else {
-        standing.push(`${branch} (${sh("git", ["rev-list", "--count", `${base}..${branch}`])} commit(s) not on ${base})`);
+    case "preflight": {
+      const project = await loadProject(root);
+      preflight(project, ensureImage(project));
+      break;
+    }
+    case "queue": {
+      // The queue and what holds each ticket back; `--json` is what the status view reads.
+      const project = await loadProject(root);
+      const tracker = makeTracker(project);
+      const queued = tracker.queued(false);
+      const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
+      const rows = await Promise.all(
+        queued.map(async (t) => ({
+          id: t.id,
+          title: t.title,
+          updated: t.updated ?? null,
+          blockedOn: (await openBlockers(project, tracker, resolve, t)).map(refLabel),
+        })),
+      );
+      if (args.includes("--json")) console.log(JSON.stringify(rows));
+      else {
+        console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
+        for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
+        if (!rows.length) console.log("  (empty)");
       }
+      break;
     }
-    archiveFinishedLogs(project);
-    if (standing.length) {
-      console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
+    case "blockers": {
+      const project = await loadProject(root);
+      const tracker = makeTracker(project);
+      // Every open ticket, not only the queued: earlier triage parked blocked ones
+      // unqueued with a comment, and they need the line moved before they are queued.
+      const queuedIds = new Set(tracker.queued(false).map((t) => t.id));
+      const open = tracker.open();
+      const found = await commentOnlyBlocks(project, tracker, open.map((t) => ({ ...t, queued: queuedIds.has(t.id) })));
+      for (const f of found) console.log(commentBlockLine(f));
+      console.log(found.length ? `\n${found.length} of ${open.length} open ticket(s) to look at.` : `No stale or unread blocker comments on ${open.length} open ticket(s).`);
+      break;
     }
-    if (!worktrees.length && !deleted && !standing.length) console.log("Nothing to clean.");
-    break;
+    case "gates": {
+      // The sandbox shares the repo's .git, so the run's host guards apply.
+      disableHostGitHooks();
+      const project = await loadProject(root);
+      const fingerprint = gitFingerprint(project);
+      try {
+        await requireGreenBase(project, ensureImage(project), writePlan(project).file, false);
+      } finally {
+        assertGitUnchanged(project, fingerprint, "after the gates");
+      }
+      console.log("All gates green on the base branch.");
+      break;
+    }
+    case "lean": {
+      const project = await loadProject(root);
+      const p = leanPlan(project);
+      leanReport(project, p);
+      const image = ensureImage(project);
+      reportHookCheck(checkHooks(project, image, p), p.hooks.length);
+      if (args.includes("--measure")) leanMeasure(project, image, p);
+      break;
+    }
+    case "lean-apply": {
+      // Internal: the worktree hook. `root` is the fresh worktree here. Locked
+      // straight away: Sandcastle's own setup (the dependency install) runs for
+      // minutes before the pipeline gets the worktree, and an unlocked worktree
+      // can be pruned by another sandbox meanwhile.
+      leanApply(JSON.parse(readFileSync(args[0], "utf8")), root);
+      lockWorktree(root);
+      break;
+    }
+    case "init": {
+      init(root);
+      // The lean check belongs to setup: what the repo would load into every
+      // sandbox agent, all hidden until lean.keep names it.
+      const project = await loadProject(root);
+      leanReport(project, leanPlan(project));
+      break;
+    }
+    case "clean": {
+      // Leftovers a run owns nobody: worktrees an interrupted or dirty sandbox
+      // kept, and agent branches nothing reports once their row ages out. A
+      // live run's own worktrees must survive, so this takes the run lock.
+      disableHostGitHooks();
+      const project = await loadProject(root);
+      lockRun(project);
+      reapOrphans(project);
+      unlockAll();
+      const worktrees = sh("git", ["worktree", "list", "--porcelain"])
+        .split("\n\n")
+        .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
+        .filter((p): p is string => !!p && p.startsWith(join(root, ".sandcastle/worktrees/")));
+      for (const path of worktrees) {
+        sh("git", ["worktree", "remove", "--force", path]);
+        console.log(`removed worktree ${path}`);
+      }
+      sh("git", ["worktree", "prune"]);
+      const base = project.baseBranch;
+      const all = args.includes("--all");
+      const standing: string[] = [];
+      let deleted = 0;
+      for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"]).split("\n").filter(Boolean)) {
+        // A base-gate or verify branch is always scratch. An agent branch is
+        // finished when every commit is on base, merged or as an equal patch.
+        const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch]).split("\n").some((l) => l.startsWith("+"));
+        if (finished || all) {
+          sh("git", ["branch", "-D", branch]);
+          deleted++;
+          console.log(`deleted ${branch}${finished ? "" : " (unmerged)"}`);
+        } else {
+          standing.push(`${branch} (${sh("git", ["rev-list", "--count", `${base}..${branch}`])} commit(s) not on ${base})`);
+        }
+      }
+      archiveFinishedLogs(project);
+      if (standing.length) {
+        console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
+      }
+      if (!worktrees.length && !deleted && !standing.length) console.log("Nothing to clean.");
+      break;
+    }
+    default:
+      throw new OperatorError(`Unknown command "${command}". Run \`sandcastle help\`.`);
   }
-  default:
-    throw new Error(`Unknown command "${command}". Run \`sandcastle help\`.`);
+} catch (error) {
+  if (!(error instanceof OperatorError)) throw error;
+  console.error(`\n${error.message}`);
+  process.exitCode = 1;
 }

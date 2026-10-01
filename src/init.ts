@@ -12,6 +12,7 @@ import { homedir, platform } from "node:os";
 import { basename, join } from "node:path";
 import { CONFIG_PATH } from "./config.ts";
 import { KIT } from "./sandbox.ts";
+import { OperatorError } from "./errors.ts";
 
 type Stack = { label: string; block: string; dockerfile?: string };
 
@@ -133,7 +134,7 @@ const FALLBACK = `  // Project image layer on top of sandcastle-base (toolchains
   ],`;
 
 export const init = (root: string) => {
-  if (existsSync(join(root, CONFIG_PATH))) throw new Error(`${CONFIG_PATH} already exists.`);
+  if (existsSync(join(root, CONFIG_PATH))) throw new OperatorError(`${CONFIG_PATH} already exists.`);
   mkdirSync(join(root, ".sandcastle"), { recursive: true });
 
   const stack = [node, python, go, rust].map((detect) => detect(root)).find(Boolean);

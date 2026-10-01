@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { sh } from "./sandbox.ts";
+import { OperatorError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -52,7 +53,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   const now = gitFingerprint(project);
   const base = project.baseBranch;
   if (now.files !== before.files) {
-    throw new Error(
+    throw new OperatorError(
       `STOPPED ${when}: .git/config or .git/info/ changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
         `Inspect \`git -C ${project.root} config --local --list\` and .git/info/ before running any other git command there.`,
     );
@@ -64,7 +65,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     const range = `${before.base}..${now.base}`;
     const commits = sh("git", ["log", "--format=%h by %cn, %cr: %s", "-5", range], project.root).split("\n").filter(Boolean).map(clean);
     const files = sh("git", ["diff", "--name-only", range], project.root).split("\n").filter(Boolean).map(clean);
-    throw new Error(
+    throw new OperatorError(
       `STOPPED ${when}: ${base} moved while sandboxes ran (${commits.join("; ") || `${before.base.slice(0, 7)} -> ${now.base.slice(0, 7)}, not a fast-forward`}` +
         `${files.length ? `; changes ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` and ${files.length - 5} more` : ""}` : ""}). ` +
         `A run cannot tell a person's commit from a sandbox's, so it merged nothing. Check the commits are yours - a sandbox can ` +
@@ -121,7 +122,7 @@ export const lockRun = (project: Project) => {
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   const { mine, owner } = takeLock(file, project.name);
   if (!mine) {
-    throw new Error(
+    throw new OperatorError(
       owner
         ? `Another sandcastle run of this project is live (pid ${owner}). One run per project at a time.`
         : "Another sandcastle run of this project is starting. One run per project at a time.",
