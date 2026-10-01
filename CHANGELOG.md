@@ -14,8 +14,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`jq` is now a checked requirement.** The status view always needed it; without it the view
   went blank and wrong with no error. `sandcastle doctor` now fails without `jq`, and the status
   view says it is missing. macOS 15 and later ship it; on most Linux, `apt install jq` (or `dnf`).
-- A watcher that parsed the closing summary's headline: `N need you` now counts only the
-  **Needs you** section, and a new `N need fixing` counts the **Needs fixing** one.
+- A watcher that parses the closing summary's headline: `N need you` now counts only the **Needs
+  you** section - merged tickets the reviewer flagged as unproven by any gate included, listed as
+  `merged - check by hand` - and a new `N need fixing` counts the **Needs fixing** one.
 - **`sandcastle run` now refuses arguments it does not know.** It used to ignore them, so
   `sandcastle run 12 14` burned down the whole queue. It now takes ticket numbers, `--dry` and
   `--concurrency N` (the same as `ISSUES`, `DRY_RUN` and `CONCURRENCY`); a script passing anything
@@ -58,8 +59,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   build --force` now and then.
 - **The base image changed** (npm cache cleared, a build-time git version check), so every
   project's image rebuilds once on its next run.
-- A watcher that parses the closing summary: merged tickets the reviewer flagged as unproven by
-  any gate now count in `N need you`, listed as `merged - check by hand`.
 - **Sandboxes now follow Claude Code's stable release channel and Codex's npm release**, resolved
   on the host when the image is ensured (cached for 6 hours), instead of the versions pinned in
   `docker/base.Dockerfile`. A run that crosses a release rebuilds the base image once, and every
@@ -84,9 +83,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The skill loads less for most actions: the run action's closing hand-off and the whole
   `update` action moved into `skill/run.md` and `skill/update.md`, which `SKILL.md` names when
   they are needed.
-- Tickets whose existing branches change the same file are kept out of the same run.
-- `sandcastle doctor`: every FIX line names the command that applies it, with macOS and Linux
-  variants where they differ.
 - `sandcastle init` and the skill's init step ask about generated paths, no-touch paths and a
   drift gate when writing `rules.md`; the config template carries a commented `generated` example.
 - A landing by regeneration is checked on the host before the base moves: the merge must have
@@ -99,8 +95,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The base image clears the npm cache (about 160 MB smaller), fails its build if git is older than
   2.47, and records why it is the full `node:24-trixie` and not `-slim` or Alpine.
 - `sandcastle doctor` names the Claude Code version and channel sandboxes will get, and warns when
-  it could not reach the release channel; the warning about the host being newer than the image's
-  pin is gone with the pin.
+  it could not reach the release channel.
 - With `land: "squash"`, `sandcastle land` and a landing resolved by regenerating `generated`
   paths now squash too, and delete the branch, instead of always making a merge commit. The merge
   is still made, gated and checked in the sandbox; its tree then lands as one commit on the base
@@ -123,16 +118,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- For contributors: the test suite no longer hangs or fails only on macOS, under load, inside a
+  sandbox or with commit signing on (signal tests, mise or asdf `node` shims, BSD `script`, the
+  agent committer's identity, a locked signing agent).
 - A ticket's gate log is kept across attempts instead of being wiped at each one, and every
   agent and gate log marks the start of each run's phase with its run id and local time.
 - `init`'s placeholder gate points at `.github/workflows` and `node --test`, and says Python
   detection needs uv.
-- The signal-handling test fails after 15 seconds instead of hanging when its fixture survives
-  a signal, which once stalled the macOS suite.
 - A branch that conflicts at landing says so on its issue - the files and the other ticket - in
   the one comment the run already posts, instead of only in the console.
 - Gate times under 10 seconds show one decimal (`green in 0.4s`, not `green in 0s`).
-- A test that started the kit through `.bin/tsx` failed on a Mac whose `node` is a mise shim.
 - A run closed by SIGHUP, SIGTERM or Ctrl-C outside the sandbox phase - a closed pane, say -
   now records its end and releases its lock, instead of leaving no end line.
 - Preflight's model calls run at the same time instead of one after another.
@@ -141,8 +136,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle init` on an existing config says how to start over.
 - The help text says `clean --all` deletes unmerged branches without asking.
 - Troubleshooting covers a failed Codex cross-review preflight, which is fixed on the host.
-- Two tests failed only on macOS: BSD `script` refuses a socket as stdin, and a mise or asdf
-  `node` shim on PATH reads its config from the `XDG_CONFIG_HOME` a test points elsewhere.
 - The status view's frame lines were invalid UTF-8 on Linux (GNU `tr` maps bytes, not
   characters), so every rule showed as replacement characters. macOS was unaffected.
 - A merge that fails at landing because of the working tree names the dirty files instead of
@@ -159,7 +152,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   colour and description for it.
 - The closing summary's next step for a conflicted ticket names what exists: the next run resumes
   its branch, or merge it by hand.
-
 - Every command prints a refusal - an unknown command, a missing config, credentials, the run
   lock, a red base gate, preflight, `init` on an existing config - as a message with no stack
   trace. Only a real kit bug keeps one.
@@ -187,15 +179,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   merge; and what green gates prove - the gate commands, and nothing more.
 - Blocker phrases inside fenced or inline code are no longer read as dependencies; write a blocker
   as plain text.
-- Tests: the signal test sends SIGINT a second time after 5 s, as an operator would, instead of
-  failing a loaded macOS suite on a rare unacted first signal.
 - A run that stops on red base gates says so in its closing summary: `Run stopped: red on <base>
   before any agent ran`, `0 attempted`, the failing gates, and a fix-the-base next step. It used
   to read as 'N attempted, 0 merged' with no cause.
 - `sandcastle init` no longer glues its first `.gitignore` entry onto a last line with no final
   newline (which could leave `.env` unignored).
-- Tests: the guard test's commits keep their test identity inside a sandbox, where the agent
-  committer's environment would otherwise override it.
 - A failing `gh` call (signed out, no such issue, no network) is a one-line refusal naming the
   call and gh's own message, not a Node stack trace - `sandcastle land 999` and `sandcastle
   requeue 999` used to crash.
@@ -279,8 +267,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - "Another sandcastle run of this project is live" (from `run`, `land` or `clean`) now says what
   to do: wait for it to end (`sandcastle status` shows it), or stop it with Ctrl-C in its
   terminal.
-- The `.git` tamper stop names the file that changed (`.git/config`, or a file in `.git/info/`)
-  instead of "`.git/config` or `.git/info/`", so it can be checked without guessing.
+- The `.git` tamper stop names the file that changed (`.git/config`, a hook, or a file in
+  `.git/info/`) instead of "`.git/config` or `.git/info/`", so it can be checked without guessing.
 - A gate that hits its 45-minute bound reads as one: `test=TIMEOUT` in the gate line and the
   report, `RED (timed out after 45 min)` in the gate log, and the failure output starts by saying
   so, instead of a bare exit 124.
@@ -337,21 +325,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The closing summary shows tokens with the cached share, per model.
 - The skill's `queue` action carries a complete triage brief for its subagents.
 - README: a gate recipe that checks generated files are committed in sync with the build.
-- Tests for the protected-path check, blocker references and ticket files, and `init`'s stack
-  detection.
-- `generated: [{ paths, regen }]` in `.sandcastle/config.ts`: a base merge conflict confined to
-  those paths takes either side, runs `regen` in the sandbox and commits.
 - Each ticket's last reviewed head and last green head are recorded in
   `.sandcastle/logs/heads.json`, for re-runs to build on.
-- `sandcastle doctor` warns (without failing) when the host's Claude Code is newer than the
-  version the image pins.
 - A skill-only `audit` action (`/sandcastle audit`): review lenses run as read-only subagents on
   the host, and their findings are filed as issues by the queue's criteria. The steps live in
   `skill/audit.md`.
 - Before its slow steps, a run prints a rough token and time estimate from the medians of the
   project's earlier tickets (`timings.jsonl`), once there are any.
-- Landing resolves a conflict confined to `generated` paths by regenerating them in a throwaway
-  sandbox, then fast-forwards the base; the ticket's closing comment says so.
 - `sandcastle land <n>`: merge one ticket's branch with the kit's message, gate it in the project
   image (regenerating `generated` paths if they conflict), then comment and close on green. A
   conflict outside `generated` stops with the files named.
