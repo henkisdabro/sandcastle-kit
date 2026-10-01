@@ -253,6 +253,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   checks whether GitHub answers and, when it does not, says to check the network. A failed `gh`
   call elsewhere (`queue`, `run`, `land`) now ends with what to do: check the network, sign gh in,
   or run `sandcastle doctor`, rather than gh's bare line.
+- A project Dockerfile that fails to build ends in one line naming the file to fix, under docker's
+  own output, instead of a Node stack trace. A `.sandcastle/Dockerfile` the config does not name
+  (`dockerfile:`) is reported as not built rather than skipped in silence.
 
 ### Added
 

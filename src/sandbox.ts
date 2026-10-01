@@ -185,9 +185,16 @@ export const buildArgs = (tag: string, args: Record<string, string>, pull: boole
   "-",
 ];
 
-const build = (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean) => {
+// `fix` is the next step when the build fails: docker's own output above says what broke, but not
+// which file to change, and a stack trace under it buried that output.
+const build = (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean, fix: string) => {
   console.log(`Building ${tag} ...`);
-  execFileSync("docker", buildArgs(tag, args, pull), { input: dockerfile, stdio: ["pipe", "inherit", "inherit"] });
+  try {
+    execFileSync("docker", buildArgs(tag, args, pull), { input: dockerfile, stdio: ["pipe", "inherit", "inherit"] });
+  } catch (e) {
+    const code = (e as { status?: number | null }).status;
+    throw new OperatorError(`Building ${tag} failed${code ? ` (docker build exited ${code})` : ""} - the step that failed is in docker's output above. ${fix}`);
+  }
 };
 
 // A superseded tag of the same repository is removed once its successor is
@@ -224,18 +231,24 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
   if (force || !imageExists(baseTag)) {
     // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
     // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
-    build(baseTag, baseFile, ids, force);
+    build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
     prune("sandcastle-base", baseTag);
   }
   // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
   sh("docker", ["tag", baseTag, "sandcastle-base:latest"]);
-  if (!project.dockerfile) return baseTag;
+  if (!project.dockerfile) {
+    // Written by hand from the template, it does nothing until the config names it.
+    if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {
+      console.log('Not built: .sandcastle/Dockerfile - the config names no `dockerfile`. Add `dockerfile: ".sandcastle/Dockerfile"` to .sandcastle/config.ts to build it.');
+    }
+    return baseTag;
+  }
 
   const layerFile = readFileSync(join(project.root, project.dockerfile), "utf8");
   const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
   const tag = `${repo}:${hash(baseTag, layerFile)}`;
   if (force || !imageExists(tag)) {
-    build(tag, layerFile, { BASE: baseTag }, false);
+    build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
     prune(repo, tag);
   }
   return tag;
