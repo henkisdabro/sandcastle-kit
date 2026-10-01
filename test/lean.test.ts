@@ -13,7 +13,7 @@ import type { Project } from "../src/config.ts";
 
 // The kit's config dir is read at import; a test must not touch the real one.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { plan, report } = await import("../src/lean.ts");
+const { plan, report, unmatched } = await import("../src/lean.ts");
 
 const WARNING = /WARNING: \.claude\/settings\.json defines hooks but git does not track it/;
 const withHooks = { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node guard.js" }] }] } };
@@ -21,7 +21,7 @@ const withHooks = { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "co
 // Identity by -c flag and -b main: CI has neither a global identity nor a main default.
 const repo = (settings: object, { gitignore, commit }: { gitignore?: string; commit: boolean }) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-lean-"));
-  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8" });
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" });
   git("init", "-q", "-b", "main");
   mkdirSync(join(root, ".claude"));
   writeFileSync(join(root, ".claude/settings.json"), JSON.stringify(settings));
@@ -50,4 +50,18 @@ test("a committed settings.json with hooks is not flagged", (t) => {
 test("an untracked settings.json without hooks is not flagged", (t) => {
   const project = repo({ permissions: { allow: [] } }, { gitignore: ".claude/\n", commit: false });
   assert.doesNotMatch(output(t, project), WARNING);
+});
+
+// A typo in lean.keep or lean.dropHooks kept or dropped nothing, and nothing said so.
+test("lean.keep and dropHooks entries that match nothing are warned about; matching ones are not", (t) => {
+  const project = repo(withHooks, { commit: true });
+  mkdirSync(join(project.root, ".claude/skills/real"), { recursive: true });
+  writeFileSync(join(project.root, ".claude/skills/real/SKILL.md"), "---\nname: real\ndescription: d\n---\n");
+  execFileSync("git", ["-C", project.root, "add", "-f", ".claude"]);
+  project.lean = { keep: ["skill:real", "skill:reel"], dropHooks: ["guard.js", "rtk"] };
+  assert.deepEqual(unmatched(project, plan(project)), { keep: ["skill:reel"], dropHooks: ["rtk"] });
+  const out = output(t, project);
+  assert.match(out, /WARN lean\.keep names skill:reel, which this repo does not have/);
+  assert.match(out, /WARN lean\.dropHooks "rtk" matches no hook/);
+  assert.doesNotMatch(out, /skill:real, which|"guard\.js" matches no hook/);
 });

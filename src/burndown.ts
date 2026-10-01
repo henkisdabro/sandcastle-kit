@@ -28,7 +28,7 @@ import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
-import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
+import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -422,6 +422,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
+  for (const line of unmatchedLines(unmatched(project, lean))) console.log(`Lean: ${line}.`);
   const refs = hiddenReferences(project.root, lean, project.lean.dropHooks);
   if (refs.length) {
     console.log(

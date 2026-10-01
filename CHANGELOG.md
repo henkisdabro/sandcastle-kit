@@ -301,6 +301,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   run has spent its tokens) or signs them with a guessed name and hostname address.
 - `sandcastle doctor` flags a credentials file (the personal or the project's `.env`) that other
   local users can read, with the `chmod 600` that fixes it.
+- `sandcastle lean` and the run's Lean line warn about a `lean.keep` entry that names nothing the
+  repo has, and a `lean.dropHooks` string that matches no hook: a typo there kept or dropped
+  nothing, without a word.
 
 ## [0.2.0] - 2026-09-30
 

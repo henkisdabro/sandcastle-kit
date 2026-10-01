@@ -266,6 +266,21 @@ export const hiddenReferences = (root: string, p: Plan, dropHooks: string[] = []
   ].filter((r) => r.by.length);
 };
 
+/**
+ * `lean.keep` entries that name nothing the repo loads, and `lean.dropHooks` strings that match no
+ * hook: a typo there kept or dropped nothing, without a word - a skill a gate reads stayed hidden.
+ */
+export const unmatched = (project: Project, p: Plan) => ({
+  keep: (project.lean.keep ?? []).filter((k) => !p.items.some((i) => i.kind !== "hook" && (`${i.kind}:${i.id}` === k || (i.kind === "codex-config" && k === "codex-config")))),
+  dropHooks: (project.lean.dropHooks ?? []).filter((d) => !p.items.some((i) => i.kind === "hook" && !i.kept && i.id.includes(d))),
+});
+
+/** The warning lines for unmatched(), empty when every entry matched. */
+export const unmatchedLines = (u: { keep: string[]; dropHooks: string[] }) => [
+  ...u.keep.map((k) => `lean.keep names ${k}, which this repo does not have - check the spelling against \`sandcastle lean\`'s list (kind:id)`),
+  ...u.dropHooks.map((d) => `lean.dropHooks "${d}" matches no hook in .claude/settings.json - nothing is dropped by it`),
+];
+
 export const report = (project: Project, p: Plan) => {
   const rows = p.items.map((i) => [
     i.kept ? "keep" : i.kind === "hook" ? "drop" : "hide",
@@ -289,6 +304,7 @@ export const report = (project: Project, p: Plan) => {
   );
   const kept = p.items.filter((i) => i.kept && i.kind !== "hook");
   if (kept.length) console.log(`  Kept on purpose (lean.keep): ${kept.map((i) => `${i.kind}:${i.id}`).join(", ")}`);
+  for (const line of unmatchedLines(unmatched(project, p))) console.log(`  WARN ${line}`);
 
   const refs = hiddenReferences(project.root, p, project.lean.dropHooks);
   if (refs.length) {
