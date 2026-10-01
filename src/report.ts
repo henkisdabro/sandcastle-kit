@@ -52,6 +52,8 @@ export type Facts = {
   stopped?: string;
   /** Files changed per held branch. */
   changed: Record<string, number>;
+  /** Issues agents filed during the run, labelled needs-triage and still open (GitHub only). */
+  filed?: { id: string; title: string }[];
 };
 
 const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
@@ -137,6 +139,18 @@ export const gather = async (project: Project): Promise<Facts> => {
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
 
+  // Agent-filed follow-ups: open, labelled needs-triage, created since the run
+  // began. Dates are compared here, not with a shell `date`, which differs on macOS.
+  let filed: { id: string; title: string }[] = [];
+  if (project.tracker.kind === "github") {
+    try {
+      const open = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", "needs-triage", "--limit", "500", "--json", "number,title,createdAt"], root)) as { number: number; title: string; createdAt: string }[];
+      filed = open.filter((i) => Date.parse(i.createdAt) >= Date.parse(run.startedAt)).map((i) => ({ id: String(i.number), title: i.title }));
+    } catch {
+      filed = [];
+    }
+  }
+
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
@@ -164,6 +178,7 @@ export const gather = async (project: Project): Promise<Facts> => {
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     changed,
+    filed,
   };
 };
 
@@ -261,6 +276,7 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
+      ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - filed by an agent during this run (needs-triage): triage it, then queue or close it`),
     ],
   );
 
