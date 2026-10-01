@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -393,6 +393,18 @@ export const burndown = async (project: Project) => {
     return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
   };
 
+  // A later run skips work a branch already passed (see recordHead). A dry run's
+  // work must not change what a real run skips, and a failed write never fails
+  // the ticket: the cost is only that a re-run runs it in full.
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string }) => {
+    if (DRY_RUN) return;
+    try {
+      recordHead(project.root, id, { branch, ...fields }, runId);
+    } catch (error) {
+      console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
+    }
+  };
+
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
@@ -524,6 +536,7 @@ export const burndown = async (project: Project) => {
             () => CROSS_REVIEW_MODEL,
           )
         : undefined;
+      noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
       let reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
       if (!tracker.agentsWrite) {
         for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
@@ -645,6 +658,7 @@ export const burndown = async (project: Project) => {
           return undefined;
         });
         if (after) {
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits += after.commits.length;
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
@@ -652,6 +666,8 @@ export const burndown = async (project: Project) => {
         }
       }
 
+      const head = sh("git", ["rev-parse", branch]);
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head });
       return {
         issue: issue.id,
         branch,
@@ -663,7 +679,7 @@ export const burndown = async (project: Project) => {
         repairs,
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
-        head: sh("git", ["rev-parse", branch]),
+        head,
         carried,
         unreviewed,
       };
