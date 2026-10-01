@@ -601,7 +601,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/run.json` | The live run's record: stage, versions, each ticket's state. The status view and `sandcastle report` read it |
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
-| `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log, and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` once the branch is merged |
+| `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log, and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `.run/` | The rendered prompts, the lean plan and the green-base record a run skips the base check by |

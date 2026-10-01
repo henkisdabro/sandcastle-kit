@@ -1407,7 +1407,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   }
   const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
   if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
-  console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (moved to logs/archive/ once the branch is merged)");
+  console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
   if (limitHit !== undefined || usageHit) {
     console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${issues.length - begun.size} queued issue(s) were not started.`);
   }
