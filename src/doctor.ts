@@ -270,7 +270,12 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     if (project) {
       const t = project.tracker;
       check(!t.note, `issue tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);
-      if (t.kind === "github") {
+      // A github tracker in a repository with no GitHub remote has nothing to read: say it here,
+      // not as gh's "no git remotes found" from the first run.
+      // Any remote passes: gh also knows GitHub Enterprise hosts.
+      const remote = t.kind === "github" && !!run("git", ["-C", repoRoot, "remote"]);
+      if (t.kind === "github") check(remote, "a git remote on GitHub (the github tracker reads its issues)", `\`git remote add origin <the repository's GitHub URL>\`, or keep tickets in files: \`tracker: "files"\` in ${CONFIG_PATH}`);
+      if (t.kind === "github" && remote) {
         const q = queueLabel(repoRoot, project.label);
         const what = `queue label "${project.label}" exists on GitHub`;
         if (q.state === "not checked") console.log(`opt  queue label "${project.label}" on GitHub - not checked (gh could not list labels)`);

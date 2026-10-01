@@ -109,7 +109,11 @@ const github = (project: Project): Tracker => {
     } catch (e) {
       const err = e as { stderr?: unknown; message?: string };
       const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
-      throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}`);
+      // gh's own words name no way out of the commonest first-run case.
+      const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
+        ? ` - this repository has no GitHub remote, so the github tracker has no issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
+        : "";
+      throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
     }
   };
   const list = (extra: string[], withComments: boolean): Ticket[] => {

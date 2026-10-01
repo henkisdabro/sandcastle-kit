@@ -222,6 +222,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - Ctrl-C at a `sandcastle setup` question ends setup quietly, as it already did at a token prompt,
   instead of printing a Node `AbortError` stack trace; at the autonomy level-1 question it counts
   as no.
+- A GitHub-tracker project with no git remote is told so: `sandcastle doctor` flags it, and
+  `queue` or a run names the fix (add a remote, or `tracker: "files"`) instead of gh's bare "no
+  git remotes found". A failing `gh` or `git` call no longer echoes its raw stderr above the kit's
+  explanation of it.
+- `sandcastle init` on an existing config names the command that moves it aside, instead of saying
+  git keeps the old one (it does only once committed).
 
 ### Added
 

@@ -104,3 +104,16 @@ test("a malformed config.json says so in a sentence", () => {
   assert.match(doctor({}), /is not valid JSON: .*\. Fix the file, or delete it/);
   writeFileSync(file, "{}");
 });
+
+test("a github-tracker project with no remote is a FIX", () => {
+  const root = join(tmp, "no-remote");
+  mkdirSync(join(root, ".sandcastle"), { recursive: true });
+  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: root });
+  writeFileSync(join(root, ".sandcastle/config.ts"), 'export default { name: "t", setup: [], gates: [{ name: "ok", command: "true" }] };\n');
+  const r = spawnSync(join(KIT, "bin/sandcastle"), ["doctor"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PATH: [dirname(process.execPath), process.env.PATH].join(":"), XDG_CONFIG_HOME: join(tmp, "config"), GIT_CEILING_DIRECTORIES: tmp },
+  });
+  assert.match(r.stdout, /^FIX  a git remote on GitHub \(the github tracker reads its issues\)\n.*git remote add origin/m);
+});

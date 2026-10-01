@@ -48,3 +48,13 @@ for (const args of [["requeue", "999", "--note", "x"], ["land", "999"], ["queue"
     assert.ok(!r.stderr.split("\n").some((l) => /^\s+at /.test(l)), `stack trace in:\n${r.stderr}`);
   });
 }
+
+test("no GitHub remote: the refusal says how to add one or use ticket files, and gh's raw line is not echoed", () => {
+  const p = project();
+  writeFileSync(join(p.bin, "gh"), "#!/bin/sh\necho 'no git remotes found' >&2\nexit 1\n");
+  const r = sandcastle(p, "queue");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no git remotes found - this repository has no GitHub remote.*`git remote add origin <url>`.*`tracker: "files"`/);
+  // Once, in the kit's line: sh() captures a child's stderr rather than passing it through.
+  assert.equal(r.stderr.split("no git remotes found").length - 1, 1, r.stderr);
+});

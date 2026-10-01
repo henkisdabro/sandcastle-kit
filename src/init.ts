@@ -154,7 +154,7 @@ export const detectBaseBranch = (root: string): string | undefined => {
 export const init = (root: string) => {
   if (existsSync(join(root, CONFIG_PATH))) {
     throw new OperatorError(
-      `${CONFIG_PATH} already exists. To start over, move it aside (git keeps the old one) and run \`sandcastle init\` again; to update an existing project, use /sandcastle update.`,
+      `${CONFIG_PATH} already exists. To start over, move it aside (\`mv .sandcastle/config.ts .sandcastle/config.old.ts\`) and run \`sandcastle init\` again; to update an existing project, use /sandcastle update.`,
     );
   }
   mkdirSync(join(root, ".sandcastle"), { recursive: true });
