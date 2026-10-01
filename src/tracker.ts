@@ -71,10 +71,20 @@ const fence = (text: string) => {
 // GitHub
 // ---------------------------------------------------------------------------
 
+// `gh issue list` stops at this many and does not say so.
+const LIST_LIMIT = 500;
+
 const github = (project: Project): Tracker => {
   const gh = (args: string[]) => sh("gh", args);
-  const list = (extra: string[], withComments: boolean): Ticket[] =>
-    (JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", "500", "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[])
+  const list = (extra: string[], withComments: boolean): Ticket[] => {
+    const listed = JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[];
+    // Counted before the needs-human filter below: a full page is full whatever
+    // is dropped from it. stderr, because `queue --json` is parsed from stdout.
+    if (listed.length === LIST_LIMIT) {
+      const label = extra[extra.indexOf("--label") + 1];
+      console.warn(`gh returned the limit of ${LIST_LIMIT} open issues${extra.includes("--label") ? ` labelled ${label}` : ""}; any beyond it are not seen.`);
+    }
+    return listed
       // A person who marks a queued issue needs-human by hand leaves the queue
       // label on (hold() takes it off). Listed, it came back every run only to
       // be withdrawn unstarted; it is a human's until they requeue it.
@@ -86,6 +96,7 @@ const github = (project: Project): Tracker => {
       comments: (i.comments ?? []).map((c: { body: string }) => c.body),
       updated: i.updatedAt ? Math.floor(Date.parse(i.updatedAt) / 1000) : undefined,
     }));
+  };
   return {
     kind: "github",
     agentsWrite: true,

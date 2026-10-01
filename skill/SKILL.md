@@ -120,7 +120,8 @@ comments, and the gates can prove it.
    `docs/agents/issue-tracker.md`, its conventions win. The kit reads that file (Matt Pocock's setup
    skill writes it) but does not need it.
 1. **List every open issue**: `gh issue list --state open --limit 500 --json
-   number,title,labels,updatedAt` (files: every ticket whose `Status:` is not done). Already-queued issues get a quick sanity check only.
+   number,title,labels,updatedAt` (files: every ticket whose `Status:` is not done). If exactly 500
+   come back, the list was cut off: raise `--limit` and list again. Already-queued issues get a quick sanity check only.
 2. **Facts first.** Fan out read-only subagents, about seven issues each (without subagents, work
    through them in the same batches). Each reads the issue, its comments, the code it names,
    recent history, the repo's decision records (`docs/adr/` or similar), its label vocabulary
