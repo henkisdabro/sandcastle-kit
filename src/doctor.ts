@@ -30,10 +30,14 @@ export const shellQuote = (s: string) => /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.
  */
 export const gitignoreFix = (root: string): string => {
   const file = join(root, ".sandcastle/.gitignore");
-  const have = existsSync(file) ? readFileSync(file, "utf8").split("\n") : [];
+  const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const have = text.split("\n");
   const missing = SANDCASTLE_IGNORES.filter((w) => !have.includes(w));
   if (!missing.length) return ".sandcastle/.gitignore lists them all, but another ignore rule un-ignores logs/: `git check-ignore -v .sandcastle/logs/x` names it.";
-  return `\`printf '%s\\n' ${missing.join(" ")} >> ${shellQuote(file)}\``;
+  // A last line with no newline would swallow the first entry (".env" becoming ".envlogs/"
+  // un-ignores the credentials), so an empty first argument ends that line first.
+  const entries = text && !text.endsWith("\n") ? ["''", ...missing] : missing;
+  return `\`printf '%s\\n' ${entries.join(" ")} >> ${shellQuote(file)}\``;
 };
 
 /**

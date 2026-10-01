@@ -85,3 +85,12 @@ test("gitignoreFix names what is missing, and the command it prints completes th
 test("gitignoreFix with no file at all names all five entries", () => {
   assert.ok(gitignoreFix(project("none")).includes("'%s\\n' .env logs/ worktrees/ .run/ triage/ >>"));
 });
+
+test("gitignoreFix on a file with no final newline keeps its last line intact", () => {
+  const root = project("no newline");
+  const file = join(root, ".sandcastle/.gitignore");
+  writeFileSync(file, ".env");
+  sh(inBackticks(gitignoreFix(root)), root);
+  const lines = readFileSync(file, "utf8").split("\n");
+  for (const entry of [".env", "logs/", "worktrees/", ".run/", "triage/"]) assert.equal(lines.filter((l) => l === entry).length, 1, entry);
+});
