@@ -119,15 +119,15 @@ export const implAgent = () => claude(IMPL_MODEL, IMPL_EFFORT);
 // Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws.
 export const reviewWithFallback = <T>(
   label: string,
-  run: (agent: ReturnType<typeof claudeCode>) => Promise<T>,
+  run: (agent: ReturnType<typeof claudeCode>, model: string) => Promise<T>,
 ): Promise<T> =>
-  run(claude(REVIEW_MODEL, REVIEW_EFFORT)).catch((error) => {
+  run(claude(REVIEW_MODEL, REVIEW_EFFORT), REVIEW_MODEL).catch((error) => {
     if (REVIEW_MODEL === IMPL_MODEL) throw error;
     console.log(
       `${label}: ${REVIEW_MODEL} review failed (${String(error).slice(0, 120)}); ` +
         `the agent log's last line has the real cause. Reviewing with ${IMPL_MODEL}.`,
     );
-    return run(claude(IMPL_MODEL, REVIEW_EFFORT));
+    return run(claude(IMPL_MODEL, REVIEW_EFFORT), IMPL_MODEL);
   });
 
 // The cross-family pass is a second opinion, not a gate: if it fails, the

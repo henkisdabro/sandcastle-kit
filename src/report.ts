@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockerResolver, openBlockers, refLabel } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import type { TicketRecord } from "./run.ts";
+import { addTokens, NO_TOKENS, type TicketRecord, type Tokens, tokenLine } from "./run.ts";
 import { sh } from "./sandbox.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 
@@ -28,6 +28,10 @@ export type Facts = {
   killed?: boolean;
   dryRun: boolean;
   tokens?: string;
+  /** This run's tokens summed from timings.jsonl, with the cached share. */
+  tokenTotal?: Tokens;
+  /** The same, per model; "model not recorded" for lines written before the model was. */
+  byModel?: Record<string, Tokens>;
   verify?: { green: boolean; line: string } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
@@ -60,6 +64,27 @@ const git = (args: string[], cwd: string) => {
   } catch {
     return undefined;
   }
+};
+
+const NO_MODEL = "model not recorded";
+
+/** One run's tokens from timings.jsonl text: in total and per model. Undefined when no line of the run carries tokens. */
+export const tokensFromTimings = (text: string, runId: string): { total: Tokens; byModel: Record<string, Tokens> } | undefined => {
+  let total: Tokens | undefined;
+  const byModel: Record<string, Tokens> = {};
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; tokens?: Tokens; model?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId || !line.tokens || typeof line.tokens !== "object") continue;
+    const model = typeof line.model === "string" && line.model ? line.model : NO_MODEL;
+    total = addTokens(total ?? NO_TOKENS, line.tokens);
+    byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, line.tokens);
+  }
+  return total ? { total, byModel } : undefined;
 };
 
 export const gather = async (project: Project): Promise<Facts> => {
@@ -112,6 +137,9 @@ export const gather = async (project: Project): Promise<Facts> => {
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
 
+  const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
+  const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
+
   return {
     base,
     tracker: project.tracker.kind,
@@ -121,6 +149,8 @@ export const gather = async (project: Project): Promise<Facts> => {
     killed: !run.finishedAt && !live && pid !== process.pid,
     dryRun: !!run.dryRun,
     tokens: run.tokens,
+    tokenTotal: timed?.total,
+    byModel: timed?.byModel,
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -180,7 +210,7 @@ export const render = (f: Facts): string => {
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length} need you - ${fixing.length} need fixing - ` +
-      `${notStarted.length} not started${f.tokens ? ` - tokens ${f.tokens}` : ""}`,
+      `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     f.verify === undefined || f.verify === null
       // null: the run ended and chose not to (fewer than two merges this run - a
       // ticket closed as merged earlier merges nothing); undefined: it never got there.
@@ -189,6 +219,11 @@ export const render = (f: Facts): string => {
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green.`
         : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed.`,
   );
+  const models = Object.entries(f.byModel ?? {});
+  if (models.some(([model]) => model !== NO_MODEL)) {
+    const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
+    out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
+  }
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
