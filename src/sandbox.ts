@@ -101,6 +101,20 @@ export const HOST_ONLY_KEYS = ["LINEAR_API_KEY"];
 
 const readEnv = (file: string) => (existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {});
 
+/**
+ * Which key and file the Claude credential came from, for a message that names it (never the value):
+ * the OAuth token if set, else the API key; the project's file when it defines the key (it overrides the user file).
+ */
+export const credentialSource = (project: Project): { key: string; file: string } | undefined => {
+  const files = [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
+  const [user, local] = files.map(readEnv);
+  for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]) {
+    if (local[key]) return { key, file: files[1] };
+    if (user[key]) return { key, file: files[0] };
+  }
+  return undefined;
+};
+
 export const credentials = (project: Project): Record<string, string> => {
   const files = [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
   const env: Record<string, string | undefined> = { ...readEnv(files[0]), ...readEnv(files[1]) };
