@@ -25,8 +25,8 @@
 //                    they can run in the image; --measure runs one real turn
 //                    with and without the extras
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
-//   clean [--all]    remove leftover sandbox worktrees and finished agent branches;
-//                    --all also deletes unmerged agent branches (listed first)
+//   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
+//                    and list unmerged ones; --all deletes those too, without asking
 //
 // Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
 // environment variables, see README.md.
