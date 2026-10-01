@@ -47,6 +47,9 @@ export const runsStatus = (pane: string) =>
     p.cmdline.includes("status.sh"),
   );
 
+// Herdr labels a new tab with a bare number; any other label is the operator's. One such ('sandcastle <project> run 4') was overwritten, leaving several tabs with one name.
+export const defaultTabLabel = (label: string | undefined) => !label || /^\d+$/.test(label.trim());
+
 type Slot = { pane: string; issue?: string; closed?: boolean };
 export type SandboxView = {
   /** The status view's pane; undefined when this view is off and the caller opens one. */
@@ -118,8 +121,9 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   }
 
   // Alone in its tab: adopt it. The status view splits off the run's pane.
-  const alone = safe(() => !!myTab && herdrJson(["tab", "get", myTab]).result.tab.pane_count === 1);
+  const myTabInfo = safe(() => (myTab ? (herdrJson(["tab", "get", myTab]).result.tab as { pane_count: number; label?: string }) : undefined));
   if (failed) return NONE;
+  const alone = myTabInfo?.pane_count === 1;
   let tab: string;
   let statusPane: string;
   if (alone && mine && myTab) {
@@ -130,7 +134,7 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
     tab = myTab;
     statusPane = split.result.pane.pane_id as string;
     safe(() => {
-      herdr(["tab", "rename", tab, `sandcastle ${project.name}`]);
+      if (defaultTabLabel(myTabInfo?.label)) herdr(["tab", "rename", tab, `sandcastle ${project.name}`]);
       herdr(["pane", "rename", mine, `sandcastle run ${project.name}`]);
     });
   } else {
