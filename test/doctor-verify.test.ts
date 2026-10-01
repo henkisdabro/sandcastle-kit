@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 // Importing doctor.ts must not touch the real slots.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { fingerprint, verdict } = await import("../src/doctor.ts");
+const { fingerprint, probeApiKey, verdict } = await import("../src/doctor.ts");
 
 const day = 86_400_000;
 const now = Date.UTC(2026, 0, 10);
@@ -42,10 +42,27 @@ test("a file under the home directory is shown with ~", () => {
   assert.ok(!line.includes(homedir()));
 });
 
-test("verdict: 2xx ok, 401 and 403 rejected, everything else proves nothing", () => {
+test("verdict: 2xx ok, 401 rejected, everything else (403 included) proves nothing", () => {
   assert.equal(verdict(200), "ok");
   assert.equal(verdict(204), "ok");
   assert.equal(verdict(401), "rejected");
-  assert.equal(verdict(403), "rejected");
-  for (const s of [429, 500, 503, 302, undefined]) assert.equal(verdict(s), "not checked");
+  for (const s of [403, 429, 500, 503, 302, undefined]) assert.equal(verdict(s), "not checked");
+});
+
+test("an API key is probed on the free model list, sent as x-api-key; no connection is undefined", async () => {
+  const realFetch = globalThis.fetch;
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  try {
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      seen.push({ url: String(url), headers: init?.headers as Record<string, string> });
+      return new Response("{}", { status: 401 });
+    }) as typeof fetch;
+    assert.equal(await probeApiKey("sk-ant-api03-x"), 401);
+    assert.match(seen[0]!.url, /^https:\/\/api\.anthropic\.com\/v1\/models/);
+    assert.equal(seen[0]!.headers["x-api-key"], "sk-ant-api03-x");
+    globalThis.fetch = (async () => Promise.reject(new TypeError("fetch failed"))) as typeof fetch;
+    assert.equal(await probeApiKey("sk-ant-api03-x"), undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

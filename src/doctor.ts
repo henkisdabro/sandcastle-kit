@@ -23,10 +23,16 @@ export const run = (cmd: string, args: string[]) => {
 // Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
 // rejected), which is not the same as a rejection.
 export const probeGithubToken = async (token: string): Promise<{ ok: boolean; status: number; login: string } | undefined> => {
-  const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" } }).catch(() => undefined);
+  const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
   if (!res) return undefined;
   const login = res.ok ? ((await res.json().catch(() => ({}))) as { login?: string }).login ?? "unknown" : "";
   return { ok: res.ok, status: res.status, login };
+};
+
+/** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
+export const probeApiKey = async (key: string): Promise<number | undefined> => {
+  const res = await fetch("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+  return res?.status;
 };
 
 /** `<KEY> from <file>, <prefix>..., <n> chars, file written <N> day(s) ago` - never a character of the value past the known prefix. */
@@ -38,9 +44,14 @@ export const fingerprint = (key: string, value: string, file: string, mtimeMs: n
   return `${key} from ${shown}, ${prefix ? `${prefix}...` : "unknown prefix"}, ${value.length} chars, file written ${days} day${days === 1 ? "" : "s"} ago`;
 };
 
-/** What an HTTP status says about a token. Anything but a plain yes or no (429, 5xx, no connection, a proxy Node's fetch ignores) proves nothing. */
+/**
+ * What an HTTP status says about a token. Only 401 is a plain no. A 403 is not: GitHub answers
+ * its rate limit with one, and Anthropic's usage endpoint can answer a working token that lacks a
+ * scope it wants - telling the user to replace a good token is the false alarm this must not raise.
+ * Anything else (429, 5xx, no connection, a proxy Node's fetch ignores) proves nothing either.
+ */
 export const verdict = (status: number | undefined): "ok" | "rejected" | "not checked" =>
-  status !== undefined && status >= 200 && status < 300 ? "ok" : status === 401 || status === 403 ? "rejected" : "not checked";
+  status !== undefined && status >= 200 && status < 300 ? "ok" : status === 401 ? "rejected" : "not checked";
 
 export const doctor = async (repoRoot?: string, verify = false) => {
   let bad = 0;
@@ -122,12 +133,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       const found = source(key);
       if (!found) continue;
       const print = fingerprint(key, found.value, found.file, statSync(found.file).mtimeMs);
-      if (key === "ANTHROPIC_API_KEY") {
-        console.log(`opt  ${print} - not checked (no free probe for an API key - \`sandcastle preflight\` checks it)`);
-        continue;
-      }
       const gh = key === "GH_TOKEN" ? await probeGithubToken(found.value) : undefined;
-      const status = key === "GH_TOKEN" ? gh?.status : await probeOAuth(found.value);
+      const status = key === "GH_TOKEN" ? gh?.status : key === "ANTHROPIC_API_KEY" ? await probeApiKey(found.value) : await probeOAuth(found.value);
       const seen = verdict(status);
       if (seen === "ok") console.log(`ok   ${print} - accepted${gh?.login ? ` (${gh.login})` : ""}`);
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`sandcastle setup\``);
