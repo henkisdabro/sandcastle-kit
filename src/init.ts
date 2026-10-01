@@ -14,6 +14,9 @@ import { CONFIG_PATH } from "./config.ts";
 import { KIT } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
+/** What init writes to .sandcastle/.gitignore; doctor names the missing ones in its fix. */
+export const SANDCASTLE_IGNORES = [".env", "logs/", "worktrees/", ".run/", "triage/"];
+
 type Stack = { label: string; block: string; dockerfile?: string };
 
 const gatesBlock = (gates: [string, string][]) =>
@@ -177,7 +180,7 @@ export const init = (root: string) => {
 
   // Sandcastle's working files never belong in the repo.
   const ignore = join(root, ".sandcastle/.gitignore");
-  const want = [".env", "logs/", "worktrees/", ".run/", "triage/"];
+  const want = SANDCASTLE_IGNORES;
   const have = existsSync(ignore) ? readFileSync(ignore, "utf8").split("\n") : [];
   const add = want.filter((w) => !have.includes(w));
   if (add.length) appendFileSync(ignore, add.join("\n") + "\n");

@@ -321,7 +321,9 @@ gates: [
 Declare the same files under `generated` in `.sandcastle/config.ts`, with the command that writes
 them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an earlier run whose
 base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
-still proves the result matches the sources.
+still proves the result matches the sources. At landing, a branch whose merge conflicts only in
+`generated` paths is merged in a throwaway sandbox by regenerating them, committed with the usual
+`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step.
 
 ## 📋 Queue: what agents work on
 
@@ -329,7 +331,7 @@ The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ti
 the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the issue and its comments,
 and your gates could prove it. The `/sandcastle queue` skill action walks every open issue,
 gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
-labels it.
+labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run skips it while #12 is open - even when #12 is in the same run, because the dependent
@@ -492,6 +494,7 @@ gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.js
 agent pass's tokens and each gate's own time (`ok` is false for a gate run with a red gate, named
 in `red`); the report gives each issue's wall time and tokens, and the base check prints its gates
 slowest first. Tickets that others wait for start first.
+Before the slow steps a run prints a rough estimate - tokens and time for the chosen tickets, from the medians of this project's earlier tickets in `.sandcastle/logs/timings.jsonl` - once the project has any; with `USAGE_CHECK=1` it also prints the plan's usage after preflight.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
 with the run:
@@ -590,7 +593,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | Command | What it does | Calls the model? |
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem as the command that applies it (doctor itself changes nothing). `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
@@ -624,7 +627,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer. See [A gate for generated files](#-a-gate-for-generated-files) |
+| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run, and a merge at landing, that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output (`maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a conflicted base merge on a branch already reviewed and green); up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run |
 
@@ -753,7 +756,7 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
-| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve - or, for a branch that was reviewed and green and has not moved since, for a short resolver prompt before the gates, with no implement or review), so a queued ticket does not conflict again. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
+| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve - or, for a branch that was reviewed and green and has not moved since, for a short resolver prompt before the gates, with no implement or review), so a queued ticket does not conflict again. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
@@ -782,6 +785,7 @@ exact command under every `FIX`. Any failure later starts there too, then [Troub
 | "set this up", "install sandcastle-kit", a fresh clone | Ask the user to run `./bin/sandcastle setup` in their own terminal (it asks for tokens only they can create). Then fix each `FIX` line in order. [docs/INSTALL.md](docs/INSTALL.md) has the manual steps. | `sandcastle doctor` ends "All required checks pass." |
 | "use sandcastle in this project" | [Set up a project](#-set-up-a-project), or `/sandcastle init` with the user. | `sandcastle gates` is green on the base branch |
 | "which issues can the agents do?", "triage for sandcastle" | `sandcastle queue` first: it names the tracker and queue label in use. Then `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. | Every open ticket is queued, decided with the user, or left with a reason |
+| "find work for the agents", "audit this repo", "we have no issues yet" | `/sandcastle audit`: read-only review agents per lens, findings de-duplicated and triaged by the queue criteria, filed with the user's yes. Costs interactive allowance, no sandbox. | Every finding is filed, merged or dropped with a reason |
 | "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
 | "start a run", "burn down the queue" | [Run](#-run), in a separate terminal or pane: a run takes hours. | `sandcastle run ended` is printed, and you have read the run report |
 | "is it working?" | `sandcastle status 0`; logs are in `.sandcastle/logs/`. | You can name each ticket's phase |

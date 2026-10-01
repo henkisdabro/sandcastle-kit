@@ -33,7 +33,7 @@ import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
-  recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
+  recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
@@ -42,6 +42,7 @@ import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
+import { landInSandbox, sandboxOpener } from "./land.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -104,10 +105,17 @@ const fence = (text: string) => {
 
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
-export const closeComment = (o: { branch: string; commits: number; repairs: number }, gateNames: string, report?: string): string =>
+export const closeComment = (
+  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] } },
+  gateNames: string,
+  report?: string,
+): string =>
   `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
   (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
   `); ${gateNames} all green before merge.` +
+  (o.regenerated
+    ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
+    : "") +
   (report ? `\n\n${report}` : "");
 
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
@@ -211,6 +219,10 @@ export const burndown = async (project: Project) => {
 
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) console.log(`  ${ref(i.id)} ${i.title}`);
+  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
+  const slots = Math.min(CONCURRENCY, issues.length, limit("sandboxes"));
+  const rough = estimate(project, issues.length, slots);
+  if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
   if (TEST_RED_GATE) {
@@ -236,8 +248,7 @@ export const burndown = async (project: Project) => {
     dryRun: DRY_RUN,
     waiting,
     stage: "starting",
-    // Sandboxes at once, for the view's estimate of when landing starts.
-    concurrency: Math.min(CONCURRENCY, issues.length, limit("sandboxes")),
+    concurrency: slots,
     typical: typicalTimes(project),
     tickets: Object.fromEntries([
       ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
@@ -919,36 +930,40 @@ export const burndown = async (project: Project) => {
   // -------------------------------------------------------------------------
 
   run.update({ stage: "landing" });
-  try {
-    assertGitUnchanged(project, fingerprint, "before landing");
-  } catch (error) {
-    // The summary still prints, headed by why: a stack trace was all a
-    // stopped run left, and its report then said "Run finished".
+  // The run stops: the summary still prints, headed by why - a stack trace was all a
+  // stopped run left, and its report then said "Run finished".
+  const stopLanding = async (error: unknown, notLanded: Outcome[]) => {
     const why = String((error as Error).message ?? error);
     run.update({ stopped: why });
     // Green before the base moved: finished, and landing on a later run like
     // the ones whose own check failed - not "ready", which says this run lands it.
-    for (const r of results) {
-      if (r.status !== "fulfilled" || (r.value.status !== "green" && r.value.status !== "merged-earlier")) continue;
-      bookkeep(r.value.issue, () => {
-        run.ticket(r.value.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
-        recordOutcomes(project, runId, { [r.value.issue]: "stopped: the run stopped before landing" });
+    for (const r of notLanded) {
+      bookkeep(r.issue, () => {
+        run.ticket(r.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
+        recordOutcomes(project, runId, { [r.issue]: "stopped: the run stopped before landing" });
       });
     }
     console.log(`\n${await closingReport(project)}\n`);
     throw error;
+  };
+  const greenOutcomes = () =>
+    results.flatMap((r) => (r.status === "fulfilled" && (r.value.status === "green" || r.value.status === "merged-earlier") ? [r.value] : []));
+  try {
+    assertGitUnchanged(project, fingerprint, "before landing");
+  } catch (error) {
+    await stopLanding(error, greenOutcomes());
   }
   // A branch carried over from an earlier run lands first. In finish order it
   // came last - it had a merge to resolve - and lost a conflict to a new branch
   // of this run on the same lines, run after run. Now the new one conflicts,
   // and its next run merges the base in and lands.
-  const green = results
-    .flatMap((r) => (r.status === "fulfilled" && (r.value.status === "green" || r.value.status === "merged-earlier") ? [r.value] : []))
-    .sort((a, b) => Number(!!b.carried) - Number(!!a.carried));
+  const green = greenOutcomes().sort((a, b) => Number(!!b.carried) - Number(!!a.carried));
   const gateNames = project.gates.map((g) => g.name).join(", ");
   // Where the branches forked, to tell which merged branch a conflict is with.
   const startBase = sh("git", ["rev-parse", base]);
   const merged: string[] = [];
+  // Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen.
+  const regenerated = new Map<string, { files: string[]; regen: string[] }>();
   const conflicted: { issue: string; branch: string; files: string[]; with: string[] }[] = [];
   const heldBack: { issue: string; paths: string[] }[] = [];
   const failedToLand: { issue: string; reason: string }[] = [];
@@ -1055,10 +1070,33 @@ export const burndown = async (project: Project) => {
       } catch {
         /* nothing to abort */
       }
-      if (unmerged) {
+      const files = unmerged.split("\n").filter(Boolean);
+      // The host never runs project code, so a conflict confined to generated files is
+      // redone in a sandbox, where `regen` can run.
+      let sandboxed: Awaited<ReturnType<typeof landInSandbox>> | undefined;
+      if (unmerged && regensFor(files, project.generated)) {
+        try {
+          sandboxed = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () =>
+            landInSandbox(project, { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})` }, sandboxOpener(project, image, planFile)),
+          );
+        } catch (sandboxError) {
+          // The .git check stops the run, as before landing; a sandbox that would not start is a conflict.
+          if (sandboxError instanceof OperatorError) return await stopLanding(sandboxError, green.slice(at));
+          console.log(`${ref(o.issue)}: could not land it in a sandbox (${errorLine(sandboxError)}); left as a conflict.`);
+        }
+      }
+      if (sandboxed?.kind === "merged") {
+        merged.push(o.issue);
+        regenerated.set(o.issue, { files: sandboxed.files, regen: sandboxed.regen });
+        console.log(
+          `${ref(o.issue)}: conflicted only in generated files (${sandboxed.files.join(", ")}); merged by regenerating them with ${sandboxed.regen.map((c) => `\`${c}\``).join(", ")}.`,
+        );
+      } else if (unmerged) {
+        if (sandboxed?.kind === "regen-failed") {
+          console.log(`${ref(o.issue)}: regenerating ${sandboxed.files.join(", ")} failed (${sandboxed.reason}); left as a conflict.`);
+        }
         // Named, with the branch it collides with: "merge conflict" alone
         // left a human to find both.
-        const files = unmerged.split("\n").filter(Boolean);
         const other = merged.filter((m) => {
           const changed = sh("git", ["diff", "--name-only", `${startBase}...agent/issue-${m}`]).split("\n");
           return files.some((f) => changed.includes(f));
@@ -1066,6 +1104,7 @@ export const burndown = async (project: Project) => {
         conflicted.push({ issue: o.issue, branch: o.branch, files, with: other });
         land(o.issue, "conflict", conflictLine(conflicted.at(-1)!));
         run.ticket(o.issue, { files });
+        continue;
       } else {
         // git's own last line ("Merge with strategy ort failed.") names no file, and
         // its wording varies by version, so the reason comes from the working tree.
@@ -1082,8 +1121,8 @@ export const burndown = async (project: Project) => {
             : errorLine(error);
         failedToLand.push({ issue: o.issue, reason });
         land(o.issue, "not landed", reason);
+        continue;
       }
-      continue;
     }
     // The merge stands whatever the tracker says next: a failed close is a
     // merged ticket still open, not one that failed to land - calling it "not
@@ -1091,9 +1130,9 @@ export const burndown = async (project: Project) => {
     try {
       tracker.close(
         o.issue,
-        closeComment(o, gateNames, reports.get(o.issue)),
+        closeComment({ ...o, regenerated: regenerated.get(o.issue) }, gateNames, reports.get(o.issue)),
       );
-      land(o.issue, "merged", "merged and closed");
+      land(o.issue, "merged", regenerated.has(o.issue) ? "merged and closed (generated files regenerated)" : "merged and closed");
     } catch (error) {
       closeFailed.push(o.issue);
       run.ticket(o.issue, { state: "merged", note: "merged; closing the ticket failed", closeFailed: errorLine(error) });
@@ -1155,7 +1194,7 @@ export const burndown = async (project: Project) => {
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
-  if (merged.length > 1) verify = (await timed("", "verify", () => gateBase(project, image, planFile, "verify"))).gates;
+  if (merged.length > 1 || regenerated.size > 0) verify = (await timed("", "verify", () => gateBase(project, image, planFile, "verify"))).gates;
   run.update({ stage: "report" });
 
   // Each branch's outcome, for the status view's rows (run.ts).
