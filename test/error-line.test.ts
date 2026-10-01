@@ -14,3 +14,10 @@ test("an Error gives its message, with no Error: prefix", () => {
 test("a failed command gives its last stderr line", () => {
   assert.equal(errorLine(Object.assign(new Error("Command failed"), { stderr: "warning\nHTTP 502: Bad Gateway\n" })), "HTTP 502: Bad Gateway");
 });
+
+test("agentFailure: the library's two-line agent error reads as one line with its cause", async () => {
+  const { agentFailure } = await import("../src/agents.ts");
+  const e = new Error('(FiberFailure) AgentError: claude-code exited with code 1:\n[claude-code:unrecognized_model] {"model":"claude-nonexistent-9"}');
+  assert.equal(agentFailure(e), "claude-code exited with code 1 - unrecognized model");
+  assert.equal(agentFailure(new Error("Error: boom")), "boom");
+});

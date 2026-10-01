@@ -159,9 +159,9 @@ test("a ticket withdrawn during the run is reported as done by someone's decisio
 test("a ticket handed back with no commits asks for an answer, not a merge", () => {
   const out = render(facts({ tickets: { "demo-04": { state: "held", title: "Pick the brand colour", note: "handed back - for a human" } }, changed: { "demo-04": 0 } }));
   const needs = body(out, "## 🙋 Needs you");
-  assert.match(needs, /demo-04 Pick the brand colour - handed back - for a human, no commits - read the ticket, answer it, then requeue it/);
+  assert.match(needs, /demo-04 Pick the brand colour - handed back - for a human, no commits - read the agent's comment: do it yourself and close the ticket, or answer its question and requeue it/);
   assert.doesNotMatch(needs, /git merge|0 file/);
-  assert.match(body(out, "## 👉 Next step"), /Answer demo-04 in the tracker, then requeue/);
+  assert.match(body(out, "## 👉 Next step"), /Read the agent's comment on demo-04: work only a person can do, do it and close the ticket; a question, answer it and requeue/);
   assert.doesNotMatch(body(out, "## 👉 Next step"), /held branch/);
 });
 

@@ -276,6 +276,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   git or Docker call now ends through its exit handler - recording its end, notifying, and
   stopping its sandboxes - instead of being SIGKILLed by the tsx wrapper it ran under. The
   launcher now runs one node process with tsx's loader.
+- A review or cross-review that fails says why in one line (`claude-code exited with code 1 -
+  unrecognized model`) instead of the library's two-line error cut off mid-JSON.
+- A ticket an agent hands back is no longer always "answer it, then requeue it": the report says
+  to read the agent's comment, then do work only a person can do and close the ticket, or answer a
+  question and requeue it.
 
 ### Added
 

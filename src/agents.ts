@@ -160,6 +160,18 @@ export const ticketOverride = (ref: string, labels: string[]): Override => {
 
 export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.effort ?? IMPL_EFFORT);
 
+/**
+ * One readable line for an agent that failed. The library's error is "(FiberFailure) AgentError:
+ * claude-code exited with code 1:" with the cause on the next line as `[claude-code:<code>] {json}`;
+ * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON.
+ */
+export const agentFailure = (error: unknown) => {
+  const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
+  const first = text.split("\n")[0].replace(/:\s*$/, "");
+  const code = text.match(/\[[\w-]+:([a-z_]+)\]/)?.[1];
+  return (code ? `${first} - ${code.replace(/_/g, " ")}` : first).slice(0, 160);
+};
+
 // Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws.
 export const reviewWithFallback = <T>(
   label: string,
@@ -168,7 +180,7 @@ export const reviewWithFallback = <T>(
   run(claude(REVIEW_MODEL, REVIEW_EFFORT), REVIEW_MODEL).catch((error) => {
     if (REVIEW_MODEL === IMPL_MODEL) throw error;
     console.log(
-      `${label}: ${REVIEW_MODEL} review failed (${String(error).slice(0, 120)}); ` +
+      `${label}: ${REVIEW_MODEL} review failed (${agentFailure(error)}); ` +
         `the agent log's last line has the real cause. Reviewing with ${IMPL_MODEL}.`,
     );
     return run(claude(IMPL_MODEL, REVIEW_EFFORT), IMPL_MODEL);
@@ -185,7 +197,7 @@ export const crossReview = async <T>(
   try {
     return await run(codex(CROSS_REVIEW_MODEL, { effort: CROSS_REVIEW_EFFORT, captureSessions: false }));
   } catch (error) {
-    console.log(`${label}: ${CROSS_REVIEW_MODEL} cross-review failed (${String(error).slice(0, 120)}); continuing without it.`);
+    console.log(`${label}: ${CROSS_REVIEW_MODEL} cross-review failed (${agentFailure(error)}); continuing without it.`);
     return undefined;
   }
 };
