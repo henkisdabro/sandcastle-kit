@@ -176,7 +176,7 @@ export const init = (root: string) => {
 
   // Sandcastle's working files never belong in the repo.
   const ignore = join(root, ".sandcastle/.gitignore");
-  const want = [".env", "logs/", "worktrees/", ".run/"];
+  const want = [".env", "logs/", "worktrees/", ".run/", "triage/"];
   const have = existsSync(ignore) ? readFileSync(ignore, "utf8").split("\n") : [];
   const add = want.filter((w) => !have.includes(w));
   if (add.length) appendFileSync(ignore, add.join("\n") + "\n");

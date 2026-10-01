@@ -130,16 +130,26 @@ comments, and the gates can prove it.
    category below, the evidence, and for a decision the concrete question with options and a
    recommendation. Ask the user only what the code and history cannot answer.
 
+   **Persist each result.** The chat can be compacted and the results lost; files survive it. So
+   each subagent writes its result for each ticket, as soon as it has it, to
+   `.sandcastle/triage/<id>.json` in the project (`<id>` is the issue number, or the ticket id for
+   the files tracker; the directory is gitignored). Fields: `issue`, `category` (one of the table's
+   rows), `evidence`, `triagedAt` (an ISO 8601 timestamp), and for a decision `question`, `options`
+   (recommended first) and `recommendation`. A ticket that already has a file is not re-triaged
+   unless the issue was updated after the file was written (the issue's `updatedAt` is later than
+   the file's `triagedAt`). The subagents' file writes are the one exception to "no edits" in the
+   brief below.
+
    Write the batch's issue numbers into the `Issues:` line before sending; never send a brief with
    a placeholder left in it.
 
    ```text
    Brief for each subagent
    You are triaging issues. Read-only: read files, search, run `git log`, `git show`, `git blame`,
-   and `gh issue view N --json title,body,comments` (files tracker: read the ticket file). No
-   edits, no commits, no tracker writes (no `gh issue comment`, `gh issue edit`, `gh issue close`,
-   `gh issue create`, no `gh label`), and no `sandcastle run`, `preflight` or anything else that
-   spends model allowance.
+   and `gh issue view N --json title,body,comments,updatedAt` (files tracker: read the ticket
+   file). No edits (bar the triage file below), no commits, no tracker writes (no `gh issue
+   comment`, `gh issue edit`, `gh issue close`, `gh issue create`, no `gh label`), and no
+   `sandcastle run`, `preflight` or anything else that spends model allowance.
    Issues: <the batch's numbers>
    For each issue read: the issue and its comments, the code it names, recent history, the repo's
    decision records and label vocabulary, and any earlier decision or `PARKED:` comment.
@@ -148,6 +158,10 @@ comments, and the gates can prove it.
    Return per issue: the number, the category, and the evidence with file:line. For a decision, add
    one self-contained question with 2-4 options, recommended first. For blocked, name the blocking
    issue. For too big, list the proposed child issues.
+   Also write each result as soon as you have it to `.sandcastle/triage/<id>.json` (the only file
+   you may write): `issue`, `category`, `evidence`, `triagedAt` (ISO 8601 now) and, for a
+   decision, `question`, `options`, `recommendation`. Skip an issue whose file's `triagedAt` is
+   later than the issue's `updatedAt`.
    ```
 
    | Category | Action |
@@ -160,15 +174,17 @@ comments, and the gates can prove it.
    | Epic or too big for one agent run | propose child issues; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
-3. **Ask in batched rounds** with the harness's question tool (`AskUserQuestion` in Claude Code):
-   up to four questions a round, grouped by theme. Each question stands alone - enough context to
-   decide without opening GitHub, the issue link, the recommended option first. Continue until
-   every decision is answered. An issue the user says needs a design discussion stays unlabelled,
-   with that noted.
-4. **Close the spec, then label.** For each answer: comment the decision on the issue - the
-   implementing agent reads the issue and its comments, never this chat - then add the queue
-   label. Create a missing label with `gh label create`.
-5. **Report**: a table of what was labelled, what was decided, and what was left and why.
+3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
+   question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
+   theme. Each question stands alone - enough context to decide without opening GitHub, the issue
+   link, the recommended option first. Continue until every decision is answered. An issue the
+   user says needs a design discussion stays unlabelled, with that noted.
+4. **Close the spec, then label.** Take each decision from its file, and record the user's answer
+   in it as `answer`. Then comment the decision on the issue - the implementing agent reads the
+   issue and its comments, never this chat - then add the queue label. Create a missing label with
+   `gh label create`.
+5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
+   from the files in `.sandcastle/triage/`.
 
 ## run - start a burndown
 
@@ -329,7 +345,10 @@ was set up with.
       config covers them. Apply after the user agrees.
    5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
       `hookTests`, propose tests as in init step 4, then `sandcastle gates`.
-   6. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
+   6. **Triage directory.** If `.sandcastle/.gitignore` has no `triage/` line, append it (commit
+      it with the other project changes in step 4). Without it, triage files show as untracked and
+      a run's clean-tree check refuses to start.
+   7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
