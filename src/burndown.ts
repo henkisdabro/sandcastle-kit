@@ -510,11 +510,14 @@ export const burndown = async (project: Project) => {
           if (r.ok) {
             console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
           } else {
-            // Back to the merge as it stood, for the implementer to resolve.
+            // Back to the merge as it stood, for the implementer (or, on a green
+            // branch, the resolver) to resolve.
             await sandbox.exec("git merge --abort");
             await sandbox.exec(merge);
             mergeConflicted = true;
-            console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); the implementer resolves the merge.`);
+            console.log(
+              `${ref(issue.id)}: its ${landOnly ? "green branch" : "branch from an earlier run"} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+            );
           }
         } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
         else if (unmerged) {
