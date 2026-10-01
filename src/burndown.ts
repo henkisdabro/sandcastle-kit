@@ -77,6 +77,20 @@ const conflictLine = (c: { files: string[]; with: string[] }) =>
   (c.with.length ? `with ${c.with.map(refOf).join(", ")}: ` : "") +
   `${c.files.slice(0, 3).join(", ")}${c.files.length > 3 ? ` and ${c.files.length - 3} more` : ""}`;
 
+// The one comment a ticket that did not land gets: the conflict (the other
+// ticket and the files), the agents' report, or both - never two comments.
+export const notLandedComment = (
+  report: string | undefined,
+  conflict: { branch: string; base: string; files: string[]; with: string[] } | undefined,
+): string | undefined => {
+  if (!conflict) return report === undefined ? undefined : `Sandcastle ran this ticket and did not land it. What the agents reported:\n\n${report}`;
+  return (
+    `Sandcastle ran this ticket and did not land it: merging \`${conflict.branch}\` into \`${conflict.base}\` conflicted (${conflictLine(conflict)}). ` +
+    `The next run merges \`${conflict.base}\` into the branch and tries again.` +
+    (report === undefined ? "" : `\n\nWhat the agents reported:\n\n${report}`)
+  );
+};
+
 // What a spent plan allowance leaves at the end of an agent's log.
 const LIMIT = /out of usage credits|usage limit|limit reached/i;
 
@@ -812,7 +826,7 @@ export const burndown = async (project: Project) => {
   // Where the branches forked, to tell which merged branch a conflict is with.
   const startBase = sh("git", ["rev-parse", base]);
   const merged: string[] = [];
-  const conflicted: { issue: string; files: string[]; with: string[] }[] = [];
+  const conflicted: { issue: string; branch: string; files: string[]; with: string[] }[] = [];
   const heldBack: { issue: string; paths: string[] }[] = [];
   const failedToLand: { issue: string; reason: string }[] = [];
   const skipped: { issue: string; reason: string }[] = [];
@@ -926,7 +940,7 @@ export const burndown = async (project: Project) => {
           const changed = sh("git", ["diff", "--name-only", `${startBase}...agent/issue-${m}`]).split("\n");
           return files.some((f) => changed.includes(f));
         });
-        conflicted.push({ issue: o.issue, files, with: other });
+        conflicted.push({ issue: o.issue, branch: o.branch, files, with: other });
         land(o.issue, "conflict", conflictLine(conflicted.at(-1)!));
         run.ticket(o.issue, { files });
       } else {
@@ -982,9 +996,11 @@ export const burndown = async (project: Project) => {
 
   // Whatever the agents said about a ticket that did not land (red gate,
   // conflict, nothing to change) would otherwise live only in an archived log.
-  for (const [id, text] of reports) {
+  for (const id of new Set([...reports.keys(), ...conflicted.map((c) => c.issue)])) {
     if (merged.includes(id) || closedEarlier.includes(id) || heldBack.some((h) => h.issue === id) || notes.some((n) => n.issue === id)) continue;
-    notes.push({ issue: id, kind: "comment", text: `Sandcastle ran this ticket and did not land it. What the agents reported:\n\n${text}` });
+    const c = conflicted.find((x) => x.issue === id);
+    const text = notLandedComment(reports.get(id), c && { branch: c.branch, base, files: c.files, with: c.with });
+    if (text !== undefined) notes.push({ issue: id, kind: "comment", text });
   }
   for (const n of notes) {
     if (DRY_RUN) console.log(`[dry run] would ${n.kind === "hold" ? "hold for a human" : "comment on"} ${ref(n.issue)}: ${n.text.slice(0, 120)}`);
