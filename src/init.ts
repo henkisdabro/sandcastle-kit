@@ -181,9 +181,13 @@ export const init = (root: string) => {
   // Sandcastle's working files never belong in the repo.
   const ignore = join(root, ".sandcastle/.gitignore");
   const want = SANDCASTLE_IGNORES;
-  const have = existsSync(ignore) ? readFileSync(ignore, "utf8").split("\n") : [];
+  const text = existsSync(ignore) ? readFileSync(ignore, "utf8") : "";
+  const have = text.split("\n");
   const add = want.filter((w) => !have.includes(w));
-  if (add.length) appendFileSync(ignore, add.join("\n") + "\n");
+  // A last line with no newline would swallow the first entry (".env" becoming ".envlogs/"
+  // un-ignores the credentials), so end that line first.
+  const lead = text && !text.endsWith("\n") ? "\n" : "";
+  if (add.length) appendFileSync(ignore, lead + add.join("\n") + "\n");
 
   console.log(
     `Wrote ${CONFIG_PATH}${dockerfile ? ", .sandcastle/Dockerfile" : ""} and .sandcastle/rules.md.\n` +
