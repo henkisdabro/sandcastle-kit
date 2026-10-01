@@ -26,7 +26,7 @@ bug no gate would fail"), never as an incident from a named project.
 
 | Path | What |
 |---|---|
-| `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
+| `bin/sandcastle` | Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one node process with the kit's own tsx loader (not the tsx binary, whose child is SIGKILLed on a slow answer to SIGTERM) |
 | `src/cli.ts` | Commands: help, setup, doctor, init, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean; also the autonomy loop around `burndown()` |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
@@ -43,10 +43,10 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
-| `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint, protected paths, run lock |
+| `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint (config, info, hooks), protected paths and files over 50 MB held for a person, run lock |
 | `src/pool.ts` | Machine-wide sandbox and gate slots, and the lock-file helper the run lock shares (pid and token, guarded takeover) |
 | `src/run.ts` | Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent logs (with the raw `.jsonl` sidecar), run record and history, typical times and the estimate, recorded heads, log archive, status pane |
-| `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates |
+| `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates, run without the kit's tokens and with their values redacted from the output |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
