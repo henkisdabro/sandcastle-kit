@@ -337,10 +337,10 @@ load_pool() {
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
 WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""
+TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|outcome" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover.
@@ -359,6 +359,10 @@ load_run() {
     RECORD=1
     TICKET_IDS=$(printf '%s\n' "$TICKETS" | cut -d"$US" -f1 | sort -V)
   fi
+  # Sandboxes the run has yet to fill: queued tickets that fit in them start
+  # at once, so none of them is "behind" another.
+  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair", "landing"))] | length)), 0] | max' "$f" 2>/dev/null)
+  [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
   TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
   # When landing should start: the queued tickets at a typical issue's length
   # each, the working ones at what is left of theirs (a minute at least), over
@@ -498,7 +502,7 @@ run_cell() {
   # cell already says running.
   [ "$stage" = running ] && stage=""
   if [ -n "$finished" ]; then
-    kvl state "${mute}last one ended (exit ${code})${off}"; RUNC[0]="$REPLY"
+    kvl state "${mute}ended (exit ${code})${off}"; RUNC[0]="$REPLY"
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
   elif kill -0 "$pid" 2>/dev/null; then
     # The stage says what a run is doing before its first sandbox exists -
@@ -523,10 +527,24 @@ models_line() {
   fi
 }
 
+# How many commits a merged ticket landed: once merged, its branch has none
+# left over the base, and a 0 read as "merged nothing". Its merge commit's
+# second parent says (a squash is the one commit); "-" when none is found.
+landed_commits() {
+  local p
+  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" 2>/dev/null)
+  case "$p" in
+    *' '*) git rev-list --count "${p%% *}..${p#* }" 2>/dev/null || echo -;;
+    ?*) echo 1;;
+    *) echo -;;
+  esac
+}
+
 # One row into the frame, counted in its group - or, while a live run keeps a
 # record, as outside that run ($1 = 1), so the counts add up to the run.
 emit() {
   local age_c="$age_col" cmt_c="$head" mem_c="$head"
+  if [ "$state" = merged ] && { [ "$commits" = 0 ] || [ "$commits" = "-" ]; }; then commits=$(landed_commits "$n"); fi
   [ "$age" = "-" ] && age_c="$gry"
   [ "$commits" = "-" ] && cmt_c="$gry"
   [ "$mem" = "-" ] && mem_c="$gry"
@@ -618,7 +636,7 @@ render() {
         # Next to start first: the run takes its queue in this order.
         pos=$(printf '%s\n' "$TICKETS" | awk -F"$US" -v o="${order:-0}" '$2=="queued" && $5+0 < o+0 {c++} END{print c+1}')
         key=$(( 1000000 - ${order:-0} )); age="-"
-        if [ "$pos" = 1 ]; then activity="next to start"; else activity="$(( pos - 1 )) ahead of it"; fi;;
+        if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi;;
       blocked) age="-";;
       implement|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
@@ -833,7 +851,8 @@ render() {
   [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, lands when the run ends${off}"
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
-  NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
+  # Below 80 columns there is no CPU column to explain.
+  [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
   # columns: eight on one row from 130 columns, else rows of four, or of two
@@ -870,7 +889,10 @@ render() {
   junction '├' '┤' '─' "$tbars" "$tbars"; sep_line="$REPLY"
   up="$tbars"
   if [ "$n_out" -eq 0 ]; then
-    CELL=(); CELL[${#TW[@]}-1]="${mute}(no runs yet)${off}"; AL=("${TAL[@]}"); cells_line; put "$REPLY"
+    # A project whose merged tickets' logs were archived has had runs; the run
+    # cell above says how the last one ended.
+    local empty="(no runs yet)"; [ -f logs/run.json ] && empty="(nothing to show)"
+    CELL=(); CELL[${#TW[@]}-1]="${mute}${empty}${off}"; AL=("${TAL[@]}"); cells_line; put "$REPLY"
   else
     # Working, needing you, ready, queued, blocked, then merged and idle -
     # everything unfinished first - and within a group the most recent change

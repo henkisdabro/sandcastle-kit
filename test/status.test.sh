@@ -149,6 +149,19 @@ has 'state +running · [0-9]+m +│'
 has 'lands +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
 has 'tokens +1.2M in / 30k out +│'
 
+SCENARIO="live run, sandboxes to spare"
+# Two free sandboxes: both queued tickets start at once, neither is behind
+# the other. With one free, the second is next once a working one finishes.
+sed -i.bak 's/"concurrency": 2/"concurrency": 4/' "$L/run.json"
+render "101 102 103 104 105 106 107 108 109 110 120"
+row '#105' queued 'next to start'
+row '#106' queued 'next to start'
+hasnt 'ahead of it'
+sed -i.bak 's/"concurrency": 4/"concurrency": 3/' "$L/run.json"
+render "101 102 103 104 105 106 107 108 109 110 120"
+row '#106' queued 'next to start'
+sed -i.bak 's/"concurrency": 3/"concurrency": 2/' "$L/run.json"
+
 # ---------------------------------------------------------------------------
 SCENARIO="live run, older orchestrator"
 # A run.json with no tickets, from a run started before the record existed:
@@ -189,12 +202,20 @@ render ""
 row '#104' 'gate red' 'pytest=FAIL'
 row '#109' conflict
 row '#110' merged
+# Its commits are what it landed, not the 0 its merged branch has left over the base.
+has '^│ +#110 +│ . merged +│[^│]+│ +1 +│'
+has 'CPU in cores'
 row '#111' withdrawn
 row '#112' held 'handed back'
 git_ branch -q -D agent/issue-112 # only this scenario's
 row '#103' 'left over' 'earlier run'
 has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
 hasnt 'old-model'
+# Below 80 columns the CPU column goes, and the legend line explaining it with it.
+COLS_WAS="$COLS"; COLS=60; render ""
+hasnt 'CPU in cores'
+row '#110' merged
+COLS="$COLS_WAS"
 
 # ---------------------------------------------------------------------------
 SCENARIO="container stats, project path with a space"
@@ -248,6 +269,21 @@ done <"$TMP/live"
 [ "$erased" = 0 ] || { echo "FAIL [$SCENARIO] $erased full-width line(s) followed by an erase to the end"; fails=$((fails+1)); }
 [ "$n" -le 29 ] || { echo "FAIL [$SCENARIO] $n rows in a 30-row pane: the bottom row must stay free"; fails=$((fails+1)); }
 [[ "$last" == └*┘ ]] || { echo "FAIL [$SCENARIO] the frame does not end in its bottom border: $last"; fails=$((fails+1)); }
+
+# ---------------------------------------------------------------------------
+SCENARIO="every log archived"
+# Runs happened - the run cell says how the last ended - but merged tickets'
+# logs moved to logs/archive/, so no row is left: not "no runs yet".
+mv "$L" "$TMP/logs-kept"; mkdir -p "$L/archive"
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": 1, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0, "models": "m", "issues": [] }
+EOF
+render ""
+has '\(nothing to show\)'
+hasnt 'no runs yet'
+rm -f "$L/run.json"; render ""
+has '\(no runs yet\)'
+rm -rf "$L"; mv "$TMP/logs-kept" "$L"
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"

@@ -244,6 +244,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `CROSS_REVIEW=1` on a machine without the Codex CLI is refused before anything is spent, with
   the install command, instead of preflight reporting `spawn codex ENOENT` (or, with preflight
   skipped, every ticket's cross-review failing one by one).
+- The status view no longer tells a queued ticket it is "1 ahead of it" when the run has a free
+  sandbox for both; a merged row shows the commits it landed rather than 0; a project whose logs
+  were all archived shows "(nothing to show)" rather than "(no runs yet)"; and below 80 columns
+  the legend no longer explains a CPU column that is not there.
 
 ### Added
 
