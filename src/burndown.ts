@@ -109,6 +109,30 @@ export const closeComment = (o: { branch: string; commits: number; repairs: numb
   `); ${gateNames} all green before merge.` +
   (report ? `\n\n${report}` : "");
 
+/** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
+export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
+  // Three dots: the branch's own changes since it forked or last merged the
+  // base, so work that landed on the base meanwhile is not counted against it.
+  // No branch (a new ticket) or an empty diff means no files, never held.
+  const filesOf = (id: string): string[] => {
+    try {
+      sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`], root);
+      return sh("git", ["diff", "--name-only", `${base}...agent/issue-${id}`], root).split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  const kept: { id: string; files: Set<string> }[] = [];
+  const held: { id: string; with: string; files: string[] }[] = [];
+  for (const id of ids) {
+    const files = new Set(filesOf(id));
+    const first = kept.find((k) => [...files].some((f) => k.files.has(f)));
+    if (first) held.push({ id, with: first.id, files: [...files].filter((f) => first.files.has(f)).sort() });
+    else kept.push({ id, files });
+  }
+  return held;
+};
+
 export const burndown = async (project: Project) => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
@@ -169,7 +193,16 @@ export const burndown = async (project: Project) => {
   // so a run stopped early would have left all seven stuck for another run.
   // (Their dependants still wait for the next run: landing is at the end.)
   const unblocks = (i: Issue) => waiting.filter((w) => w.on.includes(ref(i.id))).length;
-  const issues = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
+  const ready = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
+  // Landing is once, after every pipeline, so two tickets whose existing
+  // branches change one file would both fork from the old base and the second
+  // would conflict. One per group starts; the rest wait for the next run.
+  const overlaps = fileOverlaps(project.root, base, ready.map((i) => i.id));
+  for (const o of overlaps) {
+    waiting.push({ issue: o.id, on: [ref(o.with)] });
+    console.log(`  ${ref(o.id)} waits for ${ref(o.with)}: both branches change ${o.files.slice(0, 3).join(", ")}${o.files.length > 3 ? ` and ${o.files.length - 3} more` : ""} - next run`);
+  }
+  const issues = ready.filter((i) => !overlaps.some((o) => o.id === i.id));
   if (issues.length === 0) {
     console.log("Every queued issue is waiting on another. Nothing to start.");
     return;
