@@ -27,6 +27,13 @@ export const machineSettings = (): Record<string, unknown> => {
 export const sh = (cmd: string, args: string[], cwd?: string) =>
   execFileSync(cmd, args, { encoding: "utf8", cwd }).trim();
 
+// A branch's own commits since the base: merges are left out, because the kit
+// merges the base into a carried branch on each re-run and those merge-ins are
+// not the ticket's work. Only for reporting - "carried" and "nochange" count
+// every commit, merge or not.
+export const ownCommits = (base: string, branch: string, cwd?: string) =>
+  Number(sh("git", ["rev-list", "--count", "--no-merges", `${base}..${branch}`], cwd));
+
 /**
  * Stops the sandboxes a killed run of this project left working. A run killed
  * outright (SIGKILL, a closed terminal) cannot close its containers, and their
