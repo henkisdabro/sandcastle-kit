@@ -88,3 +88,19 @@ test("a classic GH_TOKEN is reported as classic", () => {
   const out = doctor({});
   assert.match(out, /^FIX  GH_TOKEN is a fine-grained token \(github_pat_\), not a classic one$/m);
 });
+
+test("a credentials file others can read is a FIX with the chmod", () => {
+  const env = join(tmp, "config/sandcastle-kit/.env");
+  writeFileSync(env, "GH_TOKEN=github_pat_x\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x\n");
+  chmodSync(env, 0o644);
+  assert.match(doctor({}), /^FIX  .*\.env is readable only by you \(mode 644\)\n.*`chmod 600 /m);
+  chmodSync(env, 0o600);
+  assert.doesNotMatch(doctor({}), /readable only by you/);
+});
+
+test("a malformed config.json says so in a sentence", () => {
+  const file = join(tmp, "config/sandcastle-kit/config.json");
+  writeFileSync(file, '{ "notify": ["x", }');
+  assert.match(doctor({}), /is not valid JSON: .*\. Fix the file, or delete it/);
+  writeFileSync(file, "{}");
+});

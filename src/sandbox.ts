@@ -27,7 +27,7 @@ export const machineSettings = (): Record<string, unknown> => {
   try {
     settings = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
-    throw new OperatorError(`${file} is not valid JSON: ${(error as Error).message}`);
+    throw new OperatorError(`${file} is not valid JSON: ${(error as Error).message}.`);
   }
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     throw new OperatorError(`${file} is not a JSON object.`);

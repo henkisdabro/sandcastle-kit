@@ -217,6 +217,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle doctor` gives the fix for what is actually wrong: Docker or `gh` not installed is
   told to install it (not to start it, or to sign in), a git older than 2.31 is a FIX, a missing
   `GH_TOKEN` is reported as missing rather than as "not fine-grained".
+- A malformed personal `config.json` is reported in a full sentence, not run into the fix that
+  follows it.
 
 ### Added
 
@@ -275,6 +277,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle doctor` checks git's `user.name` and `user.email`: the kit's merges and ticket
   commits carry the operator as author, and without them git refuses them at landing (after the
   run has spent its tokens) or signs them with a guessed name and hostname address.
+- `sandcastle doctor` flags a credentials file (the personal or the project's `.env`) that other
+  local users can read, with the `chmod 600` that fixes it.
 
 ## [0.2.0] - 2026-09-30
 

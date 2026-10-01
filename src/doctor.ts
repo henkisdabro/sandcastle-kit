@@ -116,6 +116,12 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     if (!ok && !optional) bad++;
     console.log(`${ok ? "ok  " : optional ? "opt " : "FIX "} ${label}${ok ? "" : `\n       -> ${fix}`}`);
   };
+  // A credentials file written by hand (or copied) keeps the umask's 644: any local user reads the tokens.
+  const privateFile = (file: string) => {
+    if (!existsSync(file)) return;
+    const mode = statSync(file).mode & 0o777;
+    if (mode & 0o077) check(false, `${file} is readable only by you (mode ${mode.toString(8)})`, `\`chmod 600 ${shellQuote(file)}\``);
+  };
 
   console.log(`sandcastle-kit at ${KIT}\n`);
   // Whether this project's tickets are GitHub Issues decides what GitHub access is required.
@@ -208,6 +214,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   const envFile = join(USER_CONFIG, ".env");
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
   check(existsSync(envFile), `credentials file ${envFile}`, `\`${setup}\` (or see docs/INSTALL.md to write it by hand)`);
+  privateFile(envFile);
   // A run refuses empty values, so catch them here rather than hours later.
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
   if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")} from ${envFile}, or run \`${setup}\`, which drops them whenever it writes the file.`);
@@ -274,6 +281,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       check(!!linearKey(), `LINEAR_API_KEY set (blockers.linear: ${project.blockers.linear.join(", ")})`, `Add LINEAR_API_KEY=<a Linear personal API key, read-only> to ${envFile}. It stays on the host; without it a Linear blocker counts as open.`);
     }
     const projectEnv = join(repoRoot, ".sandcastle/.env");
+    privateFile(projectEnv);
     if (existsSync(projectEnv)) {
       const p = parseEnv(readFileSync(projectEnv, "utf8"));
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
