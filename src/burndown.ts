@@ -686,7 +686,7 @@ export const burndown = async (project: Project) => {
           issue.id,
           "review",
           () => {
-              return reviewWithFallback(ref(issue.id), (agent, model) => {
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
               afterModel = model;
               return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
             });
