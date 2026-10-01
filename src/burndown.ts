@@ -37,7 +37,7 @@ import {
 } from "./run.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { usageLine, usageStop } from "./usage.ts";
@@ -180,6 +180,14 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
 export const abortLanding = (root: string, mode: "merge" | "squash") =>
   sh("git", mode === "squash" ? ["reset", "--merge"] : ["merge", "--abort"], root);
 
+/** The tickets `ISSUES` (or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
+export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
+  list.split(",").map((n) => {
+    const t = tracker.get(n.trim());
+    if (!t.open) throw new OperatorError(`${tracker.ref(t.id)} is closed, so a run would not work on it. Leave it out, or reopen it first.`);
+    return t;
+  });
+
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
 export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
   // Three dots: the branch's own changes since it forked or last merged the
@@ -234,13 +242,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // installed its dependencies.
   const tracker = makeTracker(project);
   const ref = tracker.ref;
-  const queued: Issue[] = process.env.ISSUES
-    ? process.env.ISSUES.split(",").map((n) => {
-        const t = tracker.get(n.trim());
-        if (!t.open) throw new Error(`${ref(t.id)} is closed.`);
-        return t;
-      })
-    : tracker.queued();
+  const queued: Issue[] = process.env.ISSUES ? namedTickets(tracker, process.env.ISSUES) : tracker.queued();
   if (queued.length === 0) {
     console.log(`No ${project.label} tickets. Queue drained.`);
     return false;

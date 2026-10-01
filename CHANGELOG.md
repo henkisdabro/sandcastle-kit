@@ -174,6 +174,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A failing `gh` call (signed out, no such issue, no network) is a one-line refusal naming the
   call and gh's own message, not a Node stack trace - `sandcastle land 999` and `sandcastle
   requeue 999` used to crash.
+- A closed ticket in `ISSUES` (or `sandcastle run <n>`), and an unknown ticket-file id, are
+  refused with one line instead of a stack trace.
 
 ### Added
 

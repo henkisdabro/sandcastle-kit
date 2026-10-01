@@ -357,7 +357,7 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
   };
   const find = (id: string) => {
     const t = scan().find((x) => x.id === id);
-    if (!t) throw new Error(`No ticket ${id} under ${dir}/*/issues/.`);
+    if (!t) throw new OperatorError(`No ticket ${id} under ${dir}/*/issues/.`);
     return t;
   };
   const split = (text: string) => {
