@@ -57,7 +57,17 @@ going keeps its models; the change applies from the next one. It never needs a c
 2. Run `sandcastle init`. It detects the stack (Node with its package manager and scripts, Python
    with uv, Go, Rust), writes gates and setup from it, and writes `.sandcastle/Dockerfile` when
    the base image lacks the toolchain. Treat all of it as a draft: correct the gates to what CI
-   really runs, then write `.sandcastle/rules.md` from those facts. The kit's `examples/` has two
+   really runs, then write `.sandcastle/rules.md` from those facts.
+   Before writing it, ask the user three questions with the harness's question tool
+   (`AskUserQuestion` in Claude Code), proposing an answer for each from what you read: **generated
+   files** - committed files a command writes (minified CSS, a data file built from JSON, a
+   sitemap), with that command: write each as a `generated: [{ paths, regen }]` entry in the config
+   and a rules line telling agents to edit the source and run the command; **no-touch paths** -
+   what an agent must never change: a rules line, and `protectedPaths` for any that change how the
+   repo executes; **drift gate** - if there are generated files, propose a gate from the README's
+   "A gate for generated files" recipe and add it to `gates` once the user agrees, or record in the
+   rules why there is none. "None" is a fine answer to each; write it down so the next reader knows
+   it was asked. The kit's `examples/` has two
    worked configs. Extend the Dockerfile (from the kit's `templates/Dockerfile` if init wrote
    none) only when the base image lacks something the gates or hooks need (browsers, a pinned
    package manager).

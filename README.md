@@ -275,6 +275,10 @@ Then edit, in this order:
    the implement, review and repair prompts, and reaches only those agents: the landing merge is
    the kit's own `git merge`, so rules do not reach it (see
    [a branch conflicts at landing](#-troubleshooting)).
+   `init` leaves three questions there for you to answer - which committed files a command
+   writes (also `generated` in `config.ts`), which paths an agent must never touch, and which gate
+   catches drift in generated files (see [A gate for generated files](#-a-gate-for-generated-files)) -
+   and the `/sandcastle` skill's init action asks them for you.
 3. **`.sandcastle/Dockerfile`** - only if the gates need something the base image lacks (browsers,
    Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit.
 4. **Lean and hooks** - `sandcastle lean` lists what the repo would load into each sandbox and
