@@ -211,6 +211,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A merged ticket whose close failed is no longer reported under Done as "Closed on GitHub" when
   nothing was closed: Done says it is merged but still open, and failure reasons in the summary
   drop the `Error: ` prefix.
+- Outside a repository, git's own `fatal: not a git repository` no longer prints above every
+  command, help included, and an unknown command or a typo is called that ("Did you mean
+  `sandcastle status`?") instead of "Not inside a git repository".
 
 ### Added
 

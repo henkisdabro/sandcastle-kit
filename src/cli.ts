@@ -68,18 +68,31 @@ import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
+const HELP = readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((l) => l.startsWith("//")).map((l) => l.slice(3));
+// Every command the help names, and the internal hook. Checked before the repository is, so a
+// typo typed outside one was told "Not inside a git repository" instead of what it was.
+const COMMANDS = [...HELP.flatMap((l) => /^  ([a-z][a-z-]*)/.exec(l)?.[1] ?? []), "lean-apply"];
+const distance = (a: string, b: string) => {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+};
 
 // A refusal the operator acts on is a message, not a crash: no stack trace. Anything else is a
 // kit bug and keeps its stack.
 try {
-  // `setup` and `doctor` also work outside a repository (fresh install).
-  const repoRoot = (() => {
-    try {
-      return sh("git", ["rev-parse", "--show-toplevel"]);
-    } catch {
-      return undefined;
-    }
-  })();
+  if (!["help", "--help", "-h", ...COMMANDS].includes(command)) {
+    const near = COMMANDS.filter((c) => c !== "lean-apply" && distance(command, c) <= 2).sort((a, b) => distance(command, a) - distance(command, b))[0];
+    throw new OperatorError(`Unknown command "${command}".${near ? ` Did you mean \`sandcastle ${near}\`?` : ""} Run \`sandcastle help\` for the list.`);
+  }
+  // `setup` and `doctor` also work outside a repository (fresh install). Git's own
+  // "fatal: not a git repository" is not shown: it preceded every command, help included.
+  const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  const repoRoot = top.status === 0 ? top.stdout.trim() : undefined;
   if (command === "setup") {
     await setup(repoRoot);
     process.exit(0);
@@ -89,7 +102,7 @@ try {
     process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
-    console.log(readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((l) => l.startsWith("//")).map((l) => l.slice(3)).join("\n"));
+    console.log(HELP.join("\n"));
     process.exit(0);
   }
   if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");

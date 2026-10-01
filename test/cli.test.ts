@@ -45,7 +45,7 @@ test("a project with no config is told to run init, with no stack trace", () => 
 test("outside a git repository is a message, not a stack trace", () => {
   const dir = join(temp(), "plain");
   mkdirSync(dir);
-  refused(sandcastle(dir, "no-such-command"), "Not inside a git repository");
+  refused(sandcastle(dir, "queue"), "Not inside a git repository");
 });
 
 test("init on an existing config is a message, not a stack trace", () => {
