@@ -196,7 +196,7 @@ comments, and the gates can prove it.
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
    same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry run, and `sandcastle status 0`'s
-   machine line (other projects' runs share the limits). Say that a red gate gets a repair pass
+   machine line (other projects' runs share the limits) and, if the project has run before, the run prints a rough estimate at the start - quote it rather than guessing how long the run takes. Say that a red gate gets a repair pass
    (`repair.attempts`, default 1), and a repair that turns it green a second review - more
    allowance, fewer red branches - and offer `USAGE_CHECK=1`
    if the plan is close to its limit. Say that the run first gates the base commit and stops if a

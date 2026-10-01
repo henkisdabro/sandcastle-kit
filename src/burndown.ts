@@ -33,7 +33,7 @@ import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
-  recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
+  recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
@@ -211,6 +211,10 @@ export const burndown = async (project: Project) => {
 
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
   for (const i of issues) console.log(`  ${ref(i.id)} ${i.title}`);
+  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
+  const slots = Math.min(CONCURRENCY, issues.length, limit("sandboxes"));
+  const rough = estimate(project, issues.length, slots);
+  if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
   if (TEST_RED_GATE) {
@@ -236,8 +240,7 @@ export const burndown = async (project: Project) => {
     dryRun: DRY_RUN,
     waiting,
     stage: "starting",
-    // Sandboxes at once, for the view's estimate of when landing starts.
-    concurrency: Math.min(CONCURRENCY, issues.length, limit("sandboxes")),
+    concurrency: slots,
     typical: typicalTimes(project),
     tickets: Object.fromEntries([
       ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
