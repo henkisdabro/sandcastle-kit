@@ -245,6 +245,8 @@ flowchart TD
     class G,PP,P gate
 ```
 
+A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is checked by the review agent, not the gates, which is why every branch is reviewed before it is gated and a repaired branch is reviewed again. A live run rarely reaches the repair path, because agents run the gates themselves before they finish. `SANDCASTLE_TEST_RED_GATE=1` (see the [Configuration](#-configuration) table) counts each issue's first gate run as red to exercise it, at the cost of one repair pass per issue.
+
 ## 🧱 Set up a project
 
 From the project's root, on its base branch:
