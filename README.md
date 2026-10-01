@@ -269,7 +269,9 @@ Then edit, in this order:
    See [Configuration](#-configuration).
 2. **`.sandcastle/rules.md`** - what an agent in *this* repo must read first, must never do
    (deploys, production databases), and how a visual or data change is proven. It is added to
-   both prompts.
+   the implement, review and repair prompts, and reaches only those agents: the landing merge is
+   the kit's own `git merge`, so rules do not reach it (see
+   [a branch conflicts at landing](#-troubleshooting)).
 3. **`.sandcastle/Dockerfile`** - only if the gates need something the base image lacks (browsers,
    Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit.
 4. **Lean and hooks** - `sandcastle lean` lists what the repo would load into each sandbox and
@@ -570,7 +572,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
-| `rules` | none | Markdown file added to both prompts under "Project rules" |
+| `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
