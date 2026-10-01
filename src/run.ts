@@ -61,14 +61,18 @@ export const keepAwake = (): string => {
   return `on (${cmd})`;
 };
 
+// Porcelain lines (`XY path`) of everything staged, unstaged or untracked. Not sh(): its trim
+// would eat the first line's leading status column.
+export const dirtyFiles = (root: string): string[] =>
+  execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
 // without the file list the operator had to run git status to find a stray lockfile.
 export const assertCleanBase = (project: Project) => {
-  // Not sh(): its trim would eat the first line's leading status column.
-  const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: project.root, encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
+  const dirty = dirtyFiles(project.root);
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);
     if (dirty.length > 10) shown.push(`  ... and ${dirty.length - 10} more`);
