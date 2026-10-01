@@ -288,6 +288,38 @@ sandcastle preflight         # one reply per model (spends a little allowance)
 
 Commit `config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` in the project.
 
+### 🧪 A gate for generated files
+
+When the repo commits files that a build generates (minified CSS, a data file built from JSON, a
+sitemap), a gate should prove they match the sources. Otherwise a branch can land sources and
+generated output that disagree.
+
+Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
+names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
+only those paths and fails, listing them, if any differed:
+
+```ts
+gates: [
+  {
+    name: "generated-in-sync",
+    command:
+      "OUT='dist/site.css data/index.json dist/sitemap.xml'; pnpm run build || exit 1; diff=$(git status --porcelain -- $OUT ':!dist/sitemap.xml'); git checkout -- $(git ls-files -- $OUT); git clean -fdq -- $OUT; if [ -n \"$diff\" ]; then echo \"$diff\"; echo 'Generated files differ from the commit: run the build and commit them.' >&2; exit 1; fi",
+  },
+],
+```
+
+- Never restore with `git checkout -- .`. The gate runs in the agent's branch worktree, and that
+  would discard any other uncommitted file there. `git checkout` also stops without restoring
+  anything if a path it is given is not tracked yet, so the recipe hands it only
+  `git ls-files -- $OUT`; `git clean` removes new, untracked output.
+- The `:!path` exclusion is for output that changes on every build (a sitemap `lastmod`). Making
+  the build deterministic, for example by dating `lastmod` from the last commit, is better than
+  excluding it.
+- `OUT` is split on spaces, so paths with spaces need listing differently.
+
+This gate does not handle conflicts in generated files during landing: the kit does not yet
+resolve merge conflicts in generated files.
+
 ## 📋 Queue: what agents work on
 
 The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
