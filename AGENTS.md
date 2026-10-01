@@ -27,7 +27,7 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: setup, doctor, init, build, gates, land, lean, lean-apply (internal hook), preflight, queue, blockers, run, report, status, clean |
+| `src/cli.ts` | Commands: setup, doctor, init, build, gates, land, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |

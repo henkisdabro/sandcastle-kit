@@ -498,6 +498,17 @@ export const recordHead = (root: string, id: string, fields: { branch: string; r
   renameSync(`${file}.tmp`, file);
 };
 
+/** Drops a ticket's record, so the next run implements it afresh; true when there was one. */
+export const forgetHead = (root: string, id: string): boolean => {
+  const all = readHeads(root);
+  if (!(id in all)) return false;
+  delete all[id];
+  const file = headsFile(root);
+  writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
+  renameSync(`${file}.tmp`, file);
+  return true;
+};
+
 /**
  * The recorded green head when branch agent/issue-<id> still sits on it and has
  * work not on base; otherwise undefined. Undefined means "run it in full": a

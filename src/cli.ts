@@ -18,6 +18,9 @@
 //   preflight        one reply from every model, nothing else
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
 //                    GitHub Issues or ticket files; see README, Trackers); no model calls
+//   requeue <ticket> [--note TEXT]
+//                    put a ticket back in the queue (needs-human off) with an optional
+//                    note for the next run; on a queued ticket, only adds the note
 //   blockers         open queued issues whose comments say "blocked by" while the body
 //                    does not (a run reads only the body); no model calls
 //   gates            every gate on the base branch in a sandbox, as a run's
@@ -49,8 +52,8 @@ import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { closingReport } from "./report.ts";
-import { makeTracker } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, parseRunArgs, preflight } from "./run.ts";
+import { makeTracker, requeueTicket } from "./tracker.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -170,6 +173,18 @@ try {
           );
         }
       }
+      break;
+    }
+    case "requeue": {
+      const project = await loadProject(root);
+      const tracker = makeTracker(project);
+      // A ticket-file requeue commits to the base branch, and a live run that sees the base move lands nothing.
+      if (tracker.kind === "files") lockRun(project);
+      const message = requeueTicket(tracker, project.label, args);
+      console.log(message);
+      // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
+      const id = (args.find((a) => !a.startsWith("--")) ?? "").replace(/^#/, "");
+      if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
       break;
     }
     case "blockers": {
