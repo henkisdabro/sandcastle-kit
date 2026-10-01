@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { limit } from "./pool.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 
 export const run = (cmd: string, args: string[]) => {
@@ -59,6 +60,19 @@ export const doctor = async (repoRoot?: string) => {
     }
   })();
   check(skillOk, "Claude Code skill /sandcastle installed", `ln -sfn ${join(KIT, "skill")} ~/.claude/skills/sandcastle`, true);
+
+  // pool.ts reads the machine settings on first use, so a malformed file or a
+  // bad limit lands here as a FIX line instead of crashing every command.
+  const settingsProblem = (() => {
+    try {
+      limit("sandboxes");
+      limit("gates");
+      return undefined;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  })();
+  check(!settingsProblem, `machine-wide settings (${join(USER_CONFIG, "config.json")}, SANDCASTLE_MAX_*)`, `${settingsProblem} Fix or delete it.`);
 
   const envFile = join(USER_CONFIG, ".env");
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
