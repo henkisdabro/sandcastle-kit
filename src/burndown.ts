@@ -34,7 +34,7 @@ import {
   addTokens, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
-import { credentials, ensureImage, errorLine, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
@@ -595,8 +595,8 @@ export const burndown = async (project: Project) => {
         branch,
         status: gated.failure ? "gate-failed" : "green",
         // Branch total, so a re-run of an already-implemented branch does not
-        // report 0 commits while shipping its work.
-        commits: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])),
+        // report 0 commits while shipping its work. Without the kit's base merge-ins.
+        commits: ownCommits(base, branch),
         reviewCommits,
         repairs,
         gates: gated.gates,
