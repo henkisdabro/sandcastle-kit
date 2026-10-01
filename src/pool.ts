@@ -21,21 +21,41 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { OperatorError } from "./errors.ts";
 import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
 
 const DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "slots");
 
-const settings = (() => {
-  const json = machineSettings();
-  return {
-    sandboxes: Number(process.env.SANDCASTLE_MAX_SANDBOXES ?? json.maxSandboxes ?? 6),
-    gates: Number(process.env.SANDCASTLE_MAX_GATES ?? json.maxGates ?? 2),
-  };
-})();
+/**
+ * `raw` as a whole number of `min` or more, or an OperatorError naming it.
+ * Number() alone turns "abc" into NaN, which every `<` and Math.min then
+ * swallows: no worker starts, or a slot wait never ends.
+ */
+export const wholeNumber = (name: string, raw: unknown, min: number): number => {
+  const text = typeof raw === "string" ? raw.trim() : raw;
+  const n = typeof text === "number" || (typeof text === "string" && text !== "") ? Number(text) : NaN;
+  if (!Number.isInteger(n) || n < min) throw new OperatorError(`${name}=${raw} - expected a whole number of ${min} or more.`);
+  return n;
+};
 
-export const limit = (pool: PoolName) => settings[pool];
+// Read on first use, not at import: a bad value must break only the commands
+// that use the pool, never `sandcastle doctor`, `setup` or `help`, which have
+// to run to diagnose it.
+const settings: Partial<Record<PoolName, number>> = {};
+const SETTING = {
+  sandboxes: { env: "SANDCASTLE_MAX_SANDBOXES", key: "maxSandboxes", fallback: 6 },
+  gates: { env: "SANDCASTLE_MAX_GATES", key: "maxGates", fallback: 2 },
+} as const;
+
+export const limit = (pool: PoolName): number => {
+  const s = SETTING[pool];
+  // Name the setting the value came from: an operator told about an env var
+  // they never set looks for the wrong thing.
+  const fromEnv = process.env[s.env] !== undefined;
+  return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
+};
 
 const alive = (pid: number) => {
   try {

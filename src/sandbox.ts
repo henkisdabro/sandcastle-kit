@@ -21,7 +21,17 @@ export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), "
 // Machine-wide settings from USER_CONFIG/config.json; empty when there is none.
 export const machineSettings = (): Record<string, unknown> => {
   const file = join(USER_CONFIG, "config.json");
-  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  if (!existsSync(file)) return {};
+  let settings: unknown;
+  try {
+    settings = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new OperatorError(`${file} is not valid JSON: ${(error as Error).message}`);
+  }
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+    throw new OperatorError(`${file} is not a JSON object.`);
+  }
+  return settings as Record<string, unknown>;
 };
 
 export const sh = (cmd: string, args: string[], cwd?: string) =>

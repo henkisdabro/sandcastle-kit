@@ -30,7 +30,7 @@ import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, ref
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
-import { limit, usage, withSlot } from "./pool.ts";
+import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
@@ -98,7 +98,7 @@ export const burndown = async (project: Project) => {
   // Four by default, not one-per-issue. Twelve at once saturated a 15-core
   // machine to load 33 and starved a vitest run into a false gate failure -
   // good work withheld by resource contention rather than by a defect.
-  const CONCURRENCY = Number(process.env.CONCURRENCY ?? project.concurrency);
+  const CONCURRENCY = wholeNumber("CONCURRENCY", process.env.CONCURRENCY ?? project.concurrency, 1);
   const base = project.baseBranch;
 
   // Fail before spending a single container.
