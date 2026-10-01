@@ -46,6 +46,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
+| `src/generated.ts` | Generated files: `covers`, `regensFor`, and `resolveGenerated` (take a side, rerun setup and `regen` in the sandbox, commit); also the shell quoting and host git identity the base merge uses |
 | `src/config.ts` | The `ProjectConfig` type and loader |
 | `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
@@ -55,6 +56,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `test/cli.test.ts` | The CLI's one catch: an unknown command, a missing config, no repository and an existing init print a message, no stack; `pnpm test` |
 | `test/layout.test.ts` | The Herdr view's proportions: the status view's share and the sandbox column's equal rows; `pnpm test` |
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
+| `test/generated.test.ts` | Path matching, the resolve-by-regenerating helper against a real conflict in a temp repo, and the `generated` config validation; `pnpm test` |
 | `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
 | `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |
 | `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run) and update.md (the update action) |

@@ -41,6 +41,7 @@ import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
+import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -426,21 +427,29 @@ export const burndown = async (project: Project) => {
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
       if (behind > 0 && carried) {
-        const q = (t: string) => `'${t.replaceAll("'", "'\\''")}'`;
-        // Sandcastle sets the container's git identity when an agent run
-        // starts; this merge comes before the first one. The host's, as the
-        // agents' commits carry.
-        const who = (key: string, fallback: string) => {
-          try {
-            return sh("git", ["config", key]) || fallback;
-          } catch {
-            return fallback;
-          }
-        };
-        const identity = `-c user.name=${q(who("user.name", "Sandcastle"))} -c user.email=${q(who("user.email", "sandcastle@localhost"))}`;
-        const pull = await sandbox.exec(`git ${identity} merge --no-edit ${q(base)}`);
+        const identity = hostIdentity(project.root);
+        const merge = `git ${identity} merge --no-edit ${shq(base)}`;
+        const pull = await sandbox.exec(merge);
         const unmerged = pull.exitCode === 0 ? "" : (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.trim();
-        if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
+        const files = unmerged.split("\n").filter(Boolean);
+        if (unmerged && regensFor(files, project.generated)) {
+          // A conflict confined to declared generated files needs no agent: regenerate them.
+          const r = await resolveGenerated(sandbox, {
+            files,
+            generated: project.generated,
+            setup: project.setup,
+            message: `Merge ${base} into ${branch} (generated files regenerated)`,
+            identity,
+          });
+          if (r.ok) {
+            console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
+          } else {
+            // Back to the merge as it stood, for the implementer to resolve.
+            await sandbox.exec("git merge --abort");
+            await sandbox.exec(merge);
+            console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); the implementer resolves the merge.`);
+          }
+        } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
         else if (unmerged) console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`);
         else {
           // Refused outright (untracked files it would overwrite, say): no
