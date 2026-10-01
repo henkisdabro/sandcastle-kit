@@ -114,7 +114,51 @@ const resultUsage = (line: string) => {
   }
 };
 
-export const implAgent = () => claude(IMPL_MODEL, IMPL_EFFORT);
+export const implEffort = () => IMPL_EFFORT;
+
+/** A ticket's own choice of implementer, from its `model:` and `effort:` labels. */
+export type Override = { model?: string; effort?: Effort };
+
+// The model id ends up in the agent command that runs in the container, so
+// only characters a shell reads as plain text get through.
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$/;
+
+// Refuses on the host, before any sandbox starts: a bad label costs nothing then.
+export const ticketOverride = (ref: string, labels: string[]): Override => {
+  const out: Override = {};
+  let modelLabel: string | undefined;
+  let effortLabel: string | undefined;
+  for (const label of labels) {
+    if (label.startsWith("effort:")) {
+      const level = label.slice("effort:".length);
+      if (!(EFFORTS as readonly string[]).includes(level)) {
+        throw new OperatorError(
+          `NOT STARTED: ${ref} has the label "${label}" - expected effort:low, effort:medium, effort:high, effort:xhigh or effort:max. Fix or remove the label.`,
+        );
+      }
+      if (effortLabel !== undefined && effortLabel !== label) {
+        throw new OperatorError(`NOT STARTED: ${ref} has the labels "${effortLabel}" and "${label}" - keep one.`);
+      }
+      effortLabel = label;
+      out.effort = level as Effort;
+    } else if (label.startsWith("model:")) {
+      const id = label.slice("model:".length);
+      if (!MODEL_ID.test(id)) {
+        throw new OperatorError(
+          `NOT STARTED: ${ref} has the label "${label}" - it names no usable model. Use a model id such as model:claude-opus-5-5, or remove the label.`,
+        );
+      }
+      if (modelLabel !== undefined && modelLabel !== label) {
+        throw new OperatorError(`NOT STARTED: ${ref} has the labels "${modelLabel}" and "${label}" - keep one.`);
+      }
+      modelLabel = label;
+      out.model = id;
+    }
+  }
+  return out;
+};
+
+export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.effort ?? IMPL_EFFORT);
 
 // Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws.
 export const reviewWithFallback = <T>(

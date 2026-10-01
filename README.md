@@ -668,6 +668,8 @@ A project that always wants different models or effort sets them in `.sandcastle
 starting point for agentic coding on both 5.5 models; the kit defaults to `high` for quality.
 Measure before changing it.
 
+One ticket can ask for a different implementer: a GitHub label `model:<id>` (`model:claude-opus-5-5`) and/or `effort:<level>` on the issue sets the implement and repair passes for that ticket only, over `IMPL_*` and `config.ts`. The run lists the override next to the ticket, checks the label before anything starts, and preflight asks that model for a reply too. Reviews keep the project's pair. Ticket files have no labels, so this is GitHub-only.
+
 </details>
 
 ## 🪶 Lean sandboxes and hooks

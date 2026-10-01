@@ -23,7 +23,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
@@ -267,8 +267,16 @@ export const burndown = async (project: Project) => {
     return;
   }
 
+  // Only the tickets this run starts; a waiting ticket's labels are checked when it starts.
+  // Before the run is recorded, the image checked or any sandbox started: a bad label costs nothing.
+  const overrides = new Map(issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])]));
+
   console.log(`${issues.length} issue(s), ${CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:`);
-  for (const i of issues) console.log(`  ${ref(i.id)} ${i.title}`);
+  for (const i of issues) {
+    const o = overrides.get(i.id)!;
+    const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
+    console.log(`  ${ref(i.id)} ${i.title}${own}`);
+  }
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(CONCURRENCY, issues.length, limit("sandboxes"));
   const rough = estimate(project, issues.length, slots);
@@ -371,7 +379,12 @@ export const burndown = async (project: Project) => {
 
   const image = await timed("", "image", () => ensureImage(project));
   const prompts = renderPrompts(project, tracker, DRY_RUN);
-  await timed("", "preflight", () => preflight(project, image));
+  // One entry per distinct override model, naming every ticket that asks for it.
+  const extraModels = [...new Set([...overrides.values()].flatMap((o) => (o.model ? [o.model] : [])))].map((model) => {
+    const labelled = issues.filter((i) => overrides.get(i.id)?.model === model).map((i) => ref(i.id));
+    return { model, from: `label model:${model} on ${labelled.join(", ")}` };
+  });
+  await timed("", "preflight", () => preflight(project, image, extraModels));
   const env = credentials(project);
   const usageNote = await usageLine(env);
   if (usageNote) console.log(usageNote);
@@ -510,6 +523,9 @@ export const burndown = async (project: Project) => {
 
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
+    // The ticket's own implementer, for the implement and repair passes only.
+    const own = overrides.get(issue.id) ?? {};
+    const implModel = own.model ?? IMPL_MODEL;
     const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
@@ -604,7 +620,7 @@ export const burndown = async (project: Project) => {
           return sandbox.run({
             name: `impl-${issue.id}`,
             logging,
-            agent: implAgent(),
+            agent: implAgent(own),
             promptFile: prompts.resolve,
             promptArgs: usedArgs(prompts.resolve, promptArgs),
             maxIterations: project.repair.maxIterations ?? 4,
@@ -612,7 +628,7 @@ export const burndown = async (project: Project) => {
           });
         },
           "resolving the base merge",
-          () => IMPL_MODEL,
+          () => implModel,
         ).catch((error) => {
           if (hitLimit(issue.id)) throw error;
           console.log(`${ref(issue.id)}: the resolver failed (${String(error).slice(0, 120)}).`);
@@ -642,7 +658,7 @@ export const burndown = async (project: Project) => {
           return sandbox.run({
             name: `impl-${issue.id}`,
             logging,
-            agent: implAgent(),
+            agent: implAgent(own),
             promptFile: prompts.implement,
             promptArgs: usedArgs(prompts.implement, promptArgs),
             maxIterations: project.implement.maxIterations ?? 8,
@@ -650,7 +666,7 @@ export const burndown = async (project: Project) => {
           });
         },
           undefined,
-          () => IMPL_MODEL,
+          () => implModel,
         );
 
         if (!tracker.agentsWrite) {
@@ -764,7 +780,7 @@ export const burndown = async (project: Project) => {
           return sandbox.run({
             name: `repair-${issue.id}`,
             logging,
-            agent: implAgent(),
+            agent: implAgent(own),
             promptFile: prompts.repair,
             promptArgs: usedArgs(prompts.repair, {
               ...promptArgs,
@@ -777,7 +793,7 @@ export const burndown = async (project: Project) => {
           });
         },
           `${why} - pass ${repairs}`,
-          () => IMPL_MODEL,
+          () => implModel,
         ).then(
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
