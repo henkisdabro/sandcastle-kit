@@ -19,7 +19,9 @@ Requested action: `$action`
 
 With no action (blank, or the literal `$action` in a harness that does not fill it in), take it
 from the user's request; if that names none either, run `sandcastle status 0` and suggest the
-action that fits what it shows.
+action that fits what it shows. When it shows no runs and `sandcastle queue` is empty, say so and
+name the next step (file issues or ticket files for the work, then the `queue` action) rather than
+stopping.
 
 ## Before every action
 

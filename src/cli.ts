@@ -151,7 +151,20 @@ try {
       else {
         console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
         for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
-        if (!rows.length) console.log("  (empty)");
+        if (!rows.length) {
+          // A queue is empty when nothing is labelled, not only when nothing is open: say how many
+          // are waiting and where work comes from. A tracker that cannot be read keeps the bare line.
+          let open: number | undefined;
+          try {
+            open = tracker.open(false).length;
+          } catch {}
+          const noun = tracker.kind === "files" ? "ticket(s)" : "issue(s)";
+          console.log(
+            open === undefined
+              ? "  (empty)"
+              : `  (empty) - ${open} open ${noun} not in the queue. File issues for the work, or run /sandcastle queue to triage the open ones.`,
+          );
+        }
       }
       break;
     }

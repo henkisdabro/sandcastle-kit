@@ -187,6 +187,8 @@ export const init = (root: string) => {
         ? `Detected ${stack.label} - gates and setup are filled in from it; check them against what CI runs.`
         : "No known stack detected (package.json, pyproject.toml + uv.lock, go.mod, Cargo.toml). The gates are a placeholder that " +
           "fails, so no run starts until you fill in gates and setup.") +
-      "\nThen `sandcastle build`.\n",
+      "\nNext, in order: `sandcastle build`, `sandcastle lean`, `sandcastle gates`." +
+      "\nAgents only work on queued tickets, so file issues (or ticket files) for the work, then triage them into the queue with " +
+      "`/sandcastle queue` (the queue label is `label` in .sandcastle/config.ts, default ready-for-agent).\n",
   );
 };
