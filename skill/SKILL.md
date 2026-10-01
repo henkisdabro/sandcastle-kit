@@ -197,9 +197,12 @@ comments, and the gates can prove it.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
    finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
-   project root, with the blockers re-read and the local git state as it is now. Run it, then write
-   your closing message with **all seven sections, in this order, with these headings**, each one
-   present and saying "none" when empty:
+   project root, with the blockers re-read and the local git state as it is now. Run it from the
+   project root and take the summary from its own stdout, not from a pane scrape. Then write your
+   closing message with **all seven sections, in this order, with these headings**, each one
+   present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
+   report` printed, emoji included** - retyping a heading is how the emoji get lost; the
+   headings below are the ones it prints:
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
