@@ -165,7 +165,7 @@ const github = (project: Project): Tracker => {
       NOCHANGE: "Comment on the issue with the evidence.",
       BLOCKED:
         "Comment on issue {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
-        "```\ngh issue edit {{ISSUE_NUMBER}} --add-label agent-blocked --add-label needs-human --remove-label {{KIT_LABEL}}\n```",
+        "```\ngh label create needs-human --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label needs-human --remove-label {{KIT_LABEL}}\n```",
       SAY: "in a comment on the issue",
     },
     dryRunNote:
