@@ -14,6 +14,30 @@ import { credentials, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
+// `sandcastle run` arguments - aliases for the ISSUES, DRY_RUN and CONCURRENCY
+// variables, which stay the one mechanism. Anything else is refused: a
+// silently ignored `run 12 14` burned down the whole queue.
+// ---------------------------------------------------------------------------
+
+const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N]";
+
+export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean; concurrency?: number } => {
+  const out: { issues?: string[]; dry: boolean; concurrency?: number } = { dry: false };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--dry") out.dry = true;
+    else if (arg === "--concurrency") {
+      const n = args[++i];
+      if (n === undefined || !/^[1-9]\d*$/.test(n)) throw new OperatorError(`--concurrency needs a whole number of 1 or more. ${RUN_USAGE}`);
+      out.concurrency = Number(n);
+    } else if (arg.startsWith("-")) throw new OperatorError(`Unknown argument "${arg}" for sandcastle run. ${RUN_USAGE}`);
+    // Ticket-file ids are slugs, so an id is not required to be numeric.
+    else (out.issues ??= []).push(arg);
+  }
+  return out;
+};
+
+// ---------------------------------------------------------------------------
 // Keep awake - a machine that idles to sleep freezes every sandbox mid-turn,
 // and an unattended run is the one nobody is there to wake. On by default;
 // KEEP_AWAKE=0 for one run, or "keepAwake": false in the machine's

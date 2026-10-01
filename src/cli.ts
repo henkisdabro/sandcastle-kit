@@ -4,8 +4,10 @@
 //                    the credentials file, then run doctor
 //   doctor           check this machine and (inside a repo) this project are
 //                    set up; prints what is missing and how to fix it
-//   run              burn down the queue: build images if stale, preflight,
-//                    open the status pane (Herdr), implement/review/gate/merge
+//   run [TICKET ...] [--dry] [--concurrency N]
+//                    burn down the queue: build images if stale, preflight,
+//                    open the status pane (Herdr), implement/review/gate/merge;
+//                    the arguments are the same as ISSUES, DRY_RUN and CONCURRENCY
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -42,7 +44,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { limit } from "./pool.ts";
 import { closingReport } from "./report.ts";
 import { makeTracker } from "./tracker.ts";
-import { archiveFinishedLogs, preflight } from "./run.ts";
+import { archiveFinishedLogs, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -83,6 +85,12 @@ try {
 
   switch (command) {
     case "run": {
+      // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
+      // An argument overrides the variable of the same name; burndown() reads them all at call time.
+      const given = parseRunArgs(args);
+      if (given.issues) process.env.ISSUES = given.issues.join(",");
+      if (given.dry) process.env.DRY_RUN = "1";
+      if (given.concurrency !== undefined) process.env.CONCURRENCY = String(given.concurrency);
       // An agent that started the run in another pane (Herdr's `pane run`) is
       // told nothing when it ends; its watcher waits for this line, printed on
       // every exit - a drained queue and a crash included.
