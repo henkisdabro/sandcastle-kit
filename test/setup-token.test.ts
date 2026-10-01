@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-// Importing setup.ts must not touch the real slots.
+// Importing doctor.ts must not touch the real slots.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { probeGithubToken } = await import("../src/setup.ts");
+const { probeGithubToken } = await import("../src/doctor.ts");
 
 const realFetch = globalThis.fetch;
 const stub = (reply: () => Response | Promise<Response>) => {
