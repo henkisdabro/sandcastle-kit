@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -482,6 +482,16 @@ export const burndown = async (project: Project) => {
       // driver that a host git in the worktree would execute.
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
+      // Read before the base merge, which moves the tip. A branch still at the
+      // head it was reviewed and gated green on needs no implement or review:
+      // only the merge and the gates stand between it and landing.
+      const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
+      let landOnly = greenHead !== undefined;
+      if (greenHead !== undefined) {
+        console.log(`${ref(issue.id)}: reviewed and green at ${greenHead.slice(0, 7)} in an earlier run - no implement or review; the gates decide.`);
+        run.ticket(issue.id, { note: "land only - reviewed earlier" });
+      }
+      let mergeConflicted = false;
       if (behind > 0 && carried) {
         const identity = hostIdentity(project.root);
         const merge = `git ${identity} merge --no-edit ${shq(base)}`;
@@ -500,13 +510,24 @@ export const burndown = async (project: Project) => {
           if (r.ok) {
             console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
           } else {
-            // Back to the merge as it stood, for the implementer to resolve.
+            // Back to the merge as it stood, for the implementer (or, on a green
+            // branch, the resolver) to resolve.
             await sandbox.exec("git merge --abort");
             await sandbox.exec(merge);
-            console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); the implementer resolves the merge.`);
+            mergeConflicted = true;
+            console.log(
+              `${ref(issue.id)}: its ${landOnly ? "green branch" : "branch from an earlier run"} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+            );
           }
         } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
-        else if (unmerged) console.log(`${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`);
+        else if (unmerged) {
+          mergeConflicted = true;
+          console.log(
+            landOnly
+              ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
+              : `${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
+          );
+        }
         else {
           // Refused outright (untracked files it would overwrite, say): no
           // merge in progress, so nothing for the prompt to name.
@@ -514,43 +535,34 @@ export const burndown = async (project: Project) => {
           console.log(`${ref(issue.id)}: could not merge ${base} into its branch (${(pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160)}); it may conflict at landing.`);
         }
       }
-      const impl = await timed(issue.id, "implement", () => {
-        markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
-        return sandbox.run({
-          name: `impl-${issue.id}`,
-          agent: implAgent(),
-          promptFile: prompts.implement,
-          promptArgs: usedArgs(prompts.implement, promptArgs),
-          maxIterations: project.implement.maxIterations ?? 8,
-          idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
+      // A conflicted merge on a branch that is already reviewed and green needs
+      // only the merge resolved, not the issue implemented again: a short prompt
+      // on the same sandbox. A resolver that leaves the merge in progress could
+      // not resolve it without changing what the ticket does, so the full
+      // implementer takes the branch, as it does for any carried branch.
+      if (landOnly && mergeConflicted) {
+        await timed(issue.id, "implement", () => {
+          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          return sandbox.run({
+            name: `impl-${issue.id}`,
+            agent: implAgent(),
+            promptFile: prompts.resolve,
+            promptArgs: usedArgs(prompts.resolve, promptArgs),
+            maxIterations: project.repair.maxIterations ?? 4,
+            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
+          });
+        },
+          "resolving the base merge",
+          () => IMPL_MODEL,
+        ).catch((error) => {
+          if (hitLimit(issue.id)) throw error;
+          console.log(`${ref(issue.id)}: the resolver failed (${String(error).slice(0, 120)}).`);
         });
-      },
-        undefined,
-        () => IMPL_MODEL,
-      );
-
-      if (!tracker.agentsWrite) {
-        const { blocked, report } = tags(impl.stdout);
-        if (blocked) {
-          notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
-          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+        if ((await sandbox.exec("git rev-parse -q --verify MERGE_HEAD")).exitCode === 0) {
+          console.log(`${ref(issue.id)}: the merge is still unresolved - the full implement and review run.`);
+          landOnly = false;
         }
-        if (report) addReport(issue.id, "Implementer", report);
       }
-
-      // `impl.commits` counts what THIS run added, which is zero in two very
-      // different cases: the agent found nothing to do, and the agent found the
-      // work already done on the branch from an earlier run. Only the first is
-      // `nochange`. How far the branch is ahead of the base tells them apart -
-      // without it, a branch whose review died could never be reviewed by
-      // re-running the issue: it came straight back as `nochange` with the work
-      // still standing, unreviewed and unmerged.
-      const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`]));
-      if (impl.commits.length === 0 && branchCommits === 0) {
-        // Nothing lands for a nochange, so nothing else would carry the report.
-        return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
-      }
-
       // Review passes run on the same warm sandbox and branch. Their commits
       // ride the same gates as the implementer's, so a review that breaks the
       // build cannot merge either. Log names keep `-review-` for status.sh.
@@ -563,38 +575,78 @@ export const burndown = async (project: Project) => {
           maxIterations: project.review.maxIterations ?? 3,
           idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
         });
-      let reviewModel: string | undefined;
-      const review = await timed(
-        issue.id,
-        "review",
-        () => {
-          markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
-          return reviewWithFallback(ref(issue.id), (agent, model) => {
-            reviewModel = model;
-            return reviewRun(`review-${issue.id}`)(agent);
+      let reviewCommits = 0;
+      if (!landOnly) {
+        const impl = await timed(issue.id, "implement", () => {
+          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          return sandbox.run({
+            name: `impl-${issue.id}`,
+            agent: implAgent(),
+            promptFile: prompts.implement,
+            promptArgs: usedArgs(prompts.implement, promptArgs),
+            maxIterations: project.implement.maxIterations ?? 8,
+            idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
           });
         },
-        undefined,
-        () => reviewModel,
-      );
-      const cross = CROSS_REVIEW
-        ? await timed(
-            issue.id,
-            "cross-review",
-            () => {
-              markLog(agentLog(project, issue.id, `review-codex-${issue.id}`), runId);
-              return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
-            },
-            undefined,
-            () => CROSS_REVIEW_MODEL,
-          )
-        : undefined;
-      noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-      let reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
-      if (!tracker.agentsWrite) {
-        for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
-          const said = r && tags(r.stdout).report;
-          if (said) addReport(issue.id, who, said);
+          undefined,
+          () => IMPL_MODEL,
+        );
+
+        if (!tracker.agentsWrite) {
+          const { blocked, report } = tags(impl.stdout);
+          if (blocked) {
+            notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
+            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+          }
+          if (report) addReport(issue.id, "Implementer", report);
+        }
+
+        // `impl.commits` counts what THIS run added, which is zero in two very
+        // different cases: the agent found nothing to do, and the agent found the
+        // work already done on the branch from an earlier run. Only the first is
+        // `nochange`. How far the branch is ahead of the base tells them apart -
+        // without it, a branch whose review died could never be reviewed by
+        // re-running the issue: it came straight back as `nochange` with the work
+        // still standing, unreviewed and unmerged.
+        const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`]));
+        if (impl.commits.length === 0 && branchCommits === 0) {
+          // Nothing lands for a nochange, so nothing else would carry the report.
+          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+        }
+
+        let reviewModel: string | undefined;
+        const review = await timed(
+          issue.id,
+          "review",
+          () => {
+            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              reviewModel = model;
+              return reviewRun(`review-${issue.id}`)(agent);
+            });
+          },
+          undefined,
+          () => reviewModel,
+        );
+        const cross = CROSS_REVIEW
+          ? await timed(
+              issue.id,
+              "cross-review",
+              () => {
+                markLog(agentLog(project, issue.id, `review-codex-${issue.id}`), runId);
+                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
+              },
+              undefined,
+              () => CROSS_REVIEW_MODEL,
+            )
+          : undefined;
+        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
+        reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+        if (!tracker.agentsWrite) {
+          for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
+            const said = r && tags(r.stdout).report;
+            if (said) addReport(issue.id, who, said);
+          }
         }
       }
 

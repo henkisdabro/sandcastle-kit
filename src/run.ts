@@ -252,10 +252,11 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     : "";
   const out = join(project.root, ".sandcastle/.run");
   mkdirSync(out, { recursive: true });
-  const paths = { implement: "", review: "", repair: "", rereview: "" };
+  const paths = { implement: "", review: "", repair: "", rereview: "", resolve: "" };
   // `rereview` is the review prompt again, for the review after a repair pass
   // committed: it names the unreviewed repair commits and what to look for in them.
-  for (const kind of ["implement", "review", "repair", "rereview"] as const) {
+  // `resolve` finishes a conflicted base merge on a branch already reviewed and green.
+  for (const kind of ["implement", "review", "repair", "rereview", "resolve"] as const) {
     // Function replacements: a `$&` or `$'` in a rule or gate is text, not a
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind === "rereview" ? "review" : kind}.md`), "utf8")
@@ -495,6 +496,25 @@ export const recordHead = (root: string, id: string, fields: { branch: string; r
   // file read as no record would quietly cost a later run its skip.
   writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
   renameSync(`${file}.tmp`, file);
+};
+
+/**
+ * The recorded green head when branch agent/issue-<id> still sits on it and has
+ * work not on base; otherwise undefined. Undefined means "run it in full": a
+ * missing or doubtful record never skips work.
+ */
+export const landOnlyHead = (root: string, base: string, id: string): string | undefined => {
+  const branch = `agent/issue-${id}`;
+  const record = readHeads(root)[id];
+  if (!record?.green || record.branch !== branch) return undefined;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    if (sh("git", ["rev-parse", branch], root) !== record.green) return undefined;
+    // Everything already on base: a reopened ticket, which runs as today.
+    return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.green : undefined;
+  } catch {
+    return undefined; // no such branch, or git failed
+  }
 };
 
 // ---------------------------------------------------------------------------
