@@ -54,7 +54,7 @@ ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
 
-# Claude Code. The kit passes the version it resolved on the host (the `latest` channel
+# Claude Code. The kit passes the version it resolved on the host (the `stable` channel
 # unless the project's `claudeCode` or CLAUDE_CODE_VERSION says otherwise) and tags the image
 # by it. An install left to float is cached as a layer at whatever version was current when
 # the image was built, and a model newer than that CLI is refused at the first call ("Claude

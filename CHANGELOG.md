@@ -61,13 +61,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   project's image rebuilds once on its next run.
 - A watcher that parses the closing summary: merged tickets the reviewer flagged as unproven by
   any gate now count in `N need you`, listed as `merged - check by hand`.
-- **Sandboxes now run the latest Claude Code and Codex**, resolved on the host when the image is
-  ensured (cached for 6 hours), instead of the versions pinned in `docker/base.Dockerfile`. A run
-  that crosses a release rebuilds the base image once, and every sandbox of a run has the same
-  version; the start line and `run.json` record which. Pin with `claudeCode: "x.y.z"` (or
-  `"stable"`) in `.sandcastle/config.ts`, or `CLAUDE_CODE_VERSION` / `CODEX_VERSION` for one run.
-  Offline, the last resolved versions are used, then the Dockerfile's defaults. Every project
-  rebuilds its image once after upgrading.
+- **Sandboxes now follow Claude Code's stable release channel and Codex's npm release**, resolved
+  on the host when the image is ensured (cached for 6 hours), instead of the versions pinned in
+  `docker/base.Dockerfile`. A run that crosses a release rebuilds the base image once, and every
+  sandbox of a run has the same version; the start line and `run.json` record which. Set
+  `claudeCode: "latest"` or an exact version such as `"2.1.285"` in `.sandcastle/config.ts`, or
+  `CLAUDE_CODE_VERSION` / `CODEX_VERSION` for one run. Offline, the last resolved versions are
+  used, then the Dockerfile's defaults. Every project rebuilds its image once after upgrading.
 
 ### Changed
 

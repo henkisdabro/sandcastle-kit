@@ -50,12 +50,12 @@ const fresh = () => {
   return join(process.env.XDG_CACHE_HOME, "sandcastle-kit", "versions.json");
 };
 
-test("latest resolves from the fetched body, Codex from npm", async () => {
+test("the stable channel is the default; it resolves from the fetched body, Codex from npm", async () => {
   fresh();
-  const { fetcher, urls } = fake({ latest: "2.2.0\n" });
+  const { fetcher, urls } = fake({ stable: "2.2.0\n" });
   const v = await resolveVersions({}, fetcher);
-  assert.deepEqual(v, { claude: "2.2.0", codex: "0.200.0", channel: "latest", source: "network" });
-  assert.deepEqual(urls, ["https://downloads.claude.ai/claude-code-releases/latest", "https://registry.npmjs.org/@openai/codex/latest"]);
+  assert.deepEqual(v, { claude: "2.2.0", codex: "0.200.0", channel: "stable", source: "network" });
+  assert.deepEqual(urls, ["https://downloads.claude.ai/claude-code-releases/stable", "https://registry.npmjs.org/@openai/codex/latest"]);
 });
 
 test("stable hits the /stable URL", async () => {
@@ -91,7 +91,7 @@ test("CLAUDE_CODE_VERSION overrides the config; CODEX_VERSION skips npm", async 
 
 test("a second call within six hours fetches nothing; after six hours it fetches again", async () => {
   const file = fresh();
-  const { fetcher, urls } = fake({ latest: "2.2.0" });
+  const { fetcher, urls } = fake({ stable: "2.2.0" });
   await resolveVersions({}, fetcher);
   assert.equal(urls.length, 2);
   const again = await resolveVersions({}, fetcher);
@@ -102,7 +102,7 @@ test("a second call within six hours fetches nothing; after six hours it fetches
   const age = (hours: number) => {
     const c = JSON.parse(readFileSync(file, "utf8"));
     const at = Date.now() - hours * 3_600_000;
-    c.claude.latest.at = at;
+    c.claude.stable.at = at;
     c.codex.at = at;
     writeFileSync(file, JSON.stringify(c));
   };
@@ -110,23 +110,23 @@ test("a second call within six hours fetches nothing; after six hours it fetches
   await resolveVersions({}, fetcher);
   assert.equal(urls.length, 2);
   age(6.1);
-  const next = fake({ latest: "2.3.0" });
+  const next = fake({ stable: "2.3.0" });
   assert.equal((await resolveVersions({}, next.fetcher)).claude, "2.3.0");
   assert.equal(next.urls.length, 2);
 });
 
 test("channels are cached separately", async () => {
   fresh();
-  const { fetcher } = fake({ latest: "2.2.0", stable: "2.1.0" });
+  const { fetcher } = fake({ stable: "2.2.0", latest: "2.3.0" });
   await resolveVersions({}, fetcher);
-  assert.equal((await resolveVersions({ claudeCode: "stable" }, fetcher)).claude, "2.1.0");
+  assert.equal((await resolveVersions({ claudeCode: "latest" }, fetcher)).claude, "2.3.0");
 });
 
 test("a failing fetch serves the cache whatever its age, and says so", async () => {
   const file = fresh();
-  await resolveVersions({}, fake({ latest: "2.2.0" }).fetcher);
+  await resolveVersions({}, fake({ stable: "2.2.0" }).fetcher);
   const c = JSON.parse(readFileSync(file, "utf8"));
-  c.claude.latest.at = 1;
+  c.claude.stable.at = 1;
   c.codex.at = 1;
   writeFileSync(file, JSON.stringify(c));
   const { lines, log } = quiet();
@@ -146,14 +146,14 @@ test("no cache and no network gives the Dockerfile's defaults", async () => {
 test("a network success prints nothing", async () => {
   fresh();
   const { lines, log } = quiet();
-  await resolveVersions({}, fake({ latest: "2.2.0" }).fetcher, log);
+  await resolveVersions({}, fake({ stable: "2.2.0" }).fetcher, log);
   assert.deepEqual(lines, []);
 });
 
 test("a body that is not a version is a failure", async () => {
   for (const body of ["<html><body>Not found</body></html>", "", "latest", "2.1"]) {
     fresh();
-    const v = await resolveVersions({}, fake({ latest: body }).fetcher, () => {});
+    const v = await resolveVersions({}, fake({ stable: body }).fetcher, () => {});
     assert.equal(v.source, "fallback", JSON.stringify(body));
     assert.equal(v.claude, arg("CLAUDE_CODE_VERSION"));
   }
@@ -167,7 +167,7 @@ test("an HTTP error status is a failure", async () => {
 
 test("a pre-release version is a version", async () => {
   fresh();
-  assert.equal((await resolveVersions({}, fake({ latest: "2.2.0-beta.1" }).fetcher)).claude, "2.2.0-beta.1");
+  assert.equal((await resolveVersions({}, fake({ stable: "2.2.0-beta.1" }).fetcher)).claude, "2.2.0-beta.1");
 });
 
 test("a bad CLAUDE_CODE_VERSION is refused, naming the variable", async () => {

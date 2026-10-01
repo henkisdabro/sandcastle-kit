@@ -107,8 +107,8 @@ const resolvePart = async (
 };
 
 /**
- * Claude Code from `claudeCode` in the project config (default `latest`; `CLAUDE_CODE_VERSION`
- * overrides it), Codex from `CODEX_VERSION` or npm's `latest`. Never throws for a network failure:
+ * Claude Code from `claudeCode` in the project config (default `stable`; `CLAUDE_CODE_VERSION`
+ * overrides it), Codex from `CODEX_VERSION` or npm's `latest` (Codex's release channel; prereleases are `alpha`). Never throws for a network failure:
  * the cached value is used whatever its age, then the Dockerfile's defaults. A bad setting is an
  * OperatorError. `log` gets the one line printed when a value did not come from the network.
  */
@@ -118,7 +118,8 @@ export const resolveVersions = async (
   log: (line: string) => void = console.log,
 ): Promise<Versions> => {
   const fromEnv = process.env.CLAUDE_CODE_VERSION || undefined;
-  const setting = fromEnv ?? project.claudeCode ?? "latest";
+  // The stable channel trails latest and skips releases that regressed; a sandbox runs unattended.
+  const setting = fromEnv ?? project.claudeCode ?? "stable";
   if (!isClaudeSetting(setting)) {
     throw new OperatorError(
       fromEnv
