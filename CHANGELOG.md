@@ -190,6 +190,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   while the frame was being drawn.
 - The closing summary says a ticket with nothing to change is left open, and its next step says to
   read the agent's comment and close it, since a still-queued ticket is tried again by every run.
+- A run stopped by a red base no longer tells you to push the base branch (it says not to until
+  its gates are green), and its message counts the base branch's own code among the causes instead
+  of ruling it out.
 
 ### Added
 

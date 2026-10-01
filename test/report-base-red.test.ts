@@ -60,6 +60,12 @@ test("a run stopped on red base gates says so, with the red gate and the way out
   for (const s of ["## ✅ Done", "## 🙋 Needs you", "## ❌ Needs fixing", "## ▶️ Runnable now"]) assert.match(body(out, s), /^none$/m, `${s} should say none`);
 });
 
+test("a red base with local commits says not to push, never to push", () => {
+  const next = body(render({ ...redBase(), ahead: 6, upstream: "origin/main" }), "## 👉 Next step");
+  assert.match(next, /^2\. Do not push main \(6 commit\(s\)\) until its gates are green\.$/m);
+  assert.doesNotMatch(next, /Push main/);
+});
+
 test("the headline has no emoji under NO_COLOR", () => {
   assert.match(render(redBase(), true), /^## Run stopped: red on main before any agent ran - nothing was started$/m);
 });

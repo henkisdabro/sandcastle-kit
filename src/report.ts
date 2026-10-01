@@ -378,7 +378,8 @@ export const render = (f: Facts, plain = false): string => {
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
-  if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
+  // A red base is red for whoever pulls it too.
+  if (f.ahead) next.push(baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   section(h("## 👉 Next step", "## Next step"), next.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");

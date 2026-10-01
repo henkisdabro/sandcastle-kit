@@ -308,7 +308,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`)];
   throw new BaseRedError(
     `Red on ${base} before any agent ran: ${red.join(", ")}. Every branch would fail the same way, ` +
-      `so no sandbox started. The cause is the image, the setup, the lean plan or a hook, not an issue: full output in ` +
+      `so no sandbox started. The cause is on ${base} itself - its code, or the image, setup, lean plan or a hook - not in a ticket: full output in ` +
       `.sandcastle/logs/base-gates.log. Fix it, then \`sandcastle gates\` to check (SKIP_BASE_GATES=1 runs anyway).`,
     [...run.gates.map((g) => ({ gate: g.name, ok: g.pass })), ...redHooks.map((t) => ({ gate: `hook test "${t.name}"`, ok: false }))],
   );
