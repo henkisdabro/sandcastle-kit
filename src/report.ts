@@ -270,7 +270,7 @@ export const render = (f: Facts, plain = false): string => {
     if (f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   }
   if (wouldMerge.length) done.push(`Dry run - would merge: ${list(wouldMerge)}. Nothing was merged or closed.`);
-  if (nochange.length) done.push(`Nothing to change: ${list(nochange)}`);
+  if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {
     const kept = f.standing.includes(`agent/issue-${id}`) ? ` (branch agent/issue-${id} kept)` : "";
@@ -374,6 +374,8 @@ export const render = (f: Facts, plain = false): string => {
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.
   if (lone.length) next.push(`Look at ${list(lone)}: still queued - add a comment for the implementer if it helps, and the next \`sandcastle run\` resumes its branch; or merge by hand: \`git merge --no-ff agent/issue-<n>\`.`);
+  // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
+  if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
   if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);

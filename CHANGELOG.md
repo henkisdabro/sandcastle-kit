@@ -188,6 +188,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   nothing matches.
 - The status view's AGE column no longer shows a negative age (`-1s`) for a state the run wrote
   while the frame was being drawn.
+- The closing summary says a ticket with nothing to change is left open, and its next step says to
+  read the agent's comment and close it, since a still-queued ticket is tried again by every run.
 
 ### Added
 
