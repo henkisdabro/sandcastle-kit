@@ -1,6 +1,7 @@
 # sandcastle-base: what every project's sandbox needs. A project adds its own
 # toolchain in a layer (`ARG BASE` / `FROM ${BASE}`); the kit tags both by a
-# hash of their Dockerfiles, so bumping a pin here rebuilds every project's
+# hash of their Dockerfiles and of the agent versions the kit passes in (src/versions.ts),
+# so a new Claude Code or Codex release, or a change here, rebuilds every project's
 # image on its next run and nothing else does.
 #
 # Node 24 LTS on Debian 13 (trixie). Debian packages - git, python3, jq, curl - come
@@ -38,9 +39,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # /usr/local/bin.
 RUN corepack enable
 
-# Codex CLI, pinned, for the opt-in cross-family review (CROSS_REVIEW=1). It
+# Codex CLI, for the opt-in cross-family review (CROSS_REVIEW=1). It
 # signs in with a copy of the host's ~/.codex/auth.json. The cache clean drops
 # about 164 MB of /root/.npm that `npm install -g` leaves in the layer.
+# The kit passes the version it resolved (npm's `latest`, or CODEX_VERSION); this default is
+# the offline fallback, used only when there is no network and no cached value.
 ARG CODEX_VERSION=0.159.2
 RUN npm install -g @openai/codex@$CODEX_VERSION && npm cache clean --force
 
@@ -51,10 +54,12 @@ ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
 
-# Claude Code, pinned. An unpinned install is cached as a layer at whatever
-# version was current when the image was built, and a model newer than that
-# CLI is refused at the first call ("Claude Code 2.1.272 does not support this
-# model; version 2.1.280 or newer is required" - claude-opus-5-5, 20260923).
+# Claude Code. The kit passes the version it resolved on the host (the `latest` channel
+# unless the project's `claudeCode` or CLAUDE_CODE_VERSION says otherwise) and tags the image
+# by it. An install left to float is cached as a layer at whatever version was current when
+# the image was built, and a model newer than that CLI is refused at the first call ("Claude
+# Code 2.1.272 does not support this model; version 2.1.280 or newer is required"). This
+# default is the offline fallback, used only when there is no network and no cached value.
 ARG CLAUDE_CODE_VERSION=2.1.285
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
 ENV PATH="/home/agent/.local/bin:$PATH"

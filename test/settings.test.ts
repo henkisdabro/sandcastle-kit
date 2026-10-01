@@ -87,11 +87,12 @@ test("doctor reports a malformed config.json as a FIX line instead of crashing",
   writeFileSync(join(config, "sandcastle-kit", "config.json"), "{ not json");
   // This node, not bin/sandcastle: its tsx finds `node` on PATH, and a mise or
   // asdf shim there reads its own config from XDG_CONFIG_HOME, which this test
-  // points at a temp dir - the shim then exits before the kit runs.
+  // points at a temp dir - the shim then exits before the kit runs. Both agent versions pinned:
+  // doctor resolves them, and unpinned that is a fetch of the release channel and npm.
   const r = spawnSync(process.execPath, [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, "src/cli.ts"), "doctor"], {
     cwd: temp(),
     encoding: "utf8",
-    env: { ...process.env, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: temp() },
+    env: { ...process.env, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: temp(), CLAUDE_CODE_VERSION: "2.1.0", CODEX_VERSION: "0.1.0" },
   });
   assert.match(r.stdout, /FIX +machine-wide settings[\s\S]*is not valid JSON/);
   assert.doesNotMatch(r.stderr, /SyntaxError/);

@@ -11,6 +11,7 @@ import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -200,15 +201,22 @@ const prune = (repo: string, keep: string) => {
 };
 
 /** The base image's tag and what it builds from, in one place so doctor finds the image `ensureImage` made. */
-export const baseImage = () => {
+export const baseImage = (versions: Pick<Versions, "claude" | "codex">) => {
   const file = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
-  // The user ids are baked into the image, so they are part of its identity.
-  const ids = { AGENT_UID: sh("id", ["-u"]), AGENT_GID: sh("id", ["-g"]) };
-  return { file, ids, tag: `sandcastle-base:${hash(file, ids.AGENT_UID, ids.AGENT_GID)}` };
+  // The user ids and the agents' versions are baked into the image, so they are part of its identity:
+  // a release rebuilds once, and a Dockerfile that never changes still gets a new tag.
+  const ids = {
+    AGENT_UID: sh("id", ["-u"]),
+    AGENT_GID: sh("id", ["-g"]),
+    CLAUDE_CODE_VERSION: versions.claude,
+    CODEX_VERSION: versions.codex,
+  };
+  return { file, ids, tag: `sandcastle-base:${hash(file, ...Object.values(ids))}` };
 };
 
-export const ensureImage = (project: Project, force = false): string => {
-  const { file: baseFile, ids, tag: baseTag } = baseImage();
+/** `versions` is what the caller already resolved and showed; left out, they are resolved here. */
+export const ensureImage = async (project: Project, force = false, versions?: Versions): Promise<string> => {
+  const { file: baseFile, ids, tag: baseTag } = baseImage(versions ?? (await resolveVersions(project)));
   if (force || !imageExists(baseTag)) {
     // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
     // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.

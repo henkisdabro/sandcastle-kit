@@ -60,6 +60,7 @@ import { closingReport, gather } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
+import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
@@ -180,12 +181,15 @@ try {
       break;
     }
     case "build": {
-      console.log(ensureImage(await loadProject(root), args.includes("--force")));
+      const project = await loadProject(root);
+      const versions = await resolveVersions(project);
+      console.log(versionsLine(versions));
+      console.log(await ensureImage(project, args.includes("--force"), versions));
       break;
     }
     case "preflight": {
       const project = await loadProject(root);
-      await preflight(project, ensureImage(project));
+      await preflight(project, await ensureImage(project));
       break;
     }
     case "queue": {
@@ -253,7 +257,7 @@ try {
       const project = await loadProject(root);
       const fingerprint = gitFingerprint(project);
       try {
-        await requireGreenBase(project, ensureImage(project), writePlan(project).file, false);
+        await requireGreenBase(project, await ensureImage(project), writePlan(project).file, false);
       } finally {
         assertGitUnchanged(project, fingerprint, "after the gates");
       }
@@ -267,8 +271,8 @@ try {
       assertCleanBase(project);
       lockRun(project);
       console.log(
-        await landTicket(project, makeTracker(project), args[0], () => {
-          const image = ensureImage(project);
+        await landTicket(project, makeTracker(project), args[0], async () => {
+          const image = await ensureImage(project);
           return { open: sandboxOpener(project, image, writePlan(project).file) };
         }),
       );
@@ -281,14 +285,14 @@ try {
         console.log(previewLines(project, project.baseBranch, []).join("\n"));
         break;
       }
-      console.log(previewLines(project, project.baseBranch, preview(project, dockerRunner(ensureImage(project)))).join("\n"));
+      console.log(previewLines(project, project.baseBranch, preview(project, dockerRunner(await ensureImage(project)))).join("\n"));
       break;
     }
     case "lean": {
       const project = await loadProject(root);
       const p = leanPlan(project);
       leanReport(project, p);
-      const image = ensureImage(project);
+      const image = await ensureImage(project);
       reportHookCheck(checkHooks(project, image, p), p.hooks.length);
       if (args.includes("--measure")) leanMeasure(project, image, p);
       break;

@@ -12,6 +12,7 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
 import { probeOAuth } from "./usage.ts";
+import { resolveVersions } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string) => {
   try {
@@ -93,24 +94,6 @@ export const fingerprint = (key: string, value: string, file: string, mtimeMs: n
  */
 export const verdict = (status: number | undefined): "ok" | "rejected" | "not checked" =>
   status !== undefined && status >= 200 && status < 300 ? "ok" : status === 401 ? "rejected" : "not checked";
-
-/**
- * A warning when the host's Claude Code is newer than the pin in docker/base.Dockerfile, else
- * undefined (also when either version cannot be read). Compared part by part as numbers: 2.1.1000
- * is newer than 2.1.285, which a string comparison gets wrong.
- */
-export const claudePinWarning = (dockerfile: string, hostVersion: string | undefined): string | undefined => {
-  const pin = dockerfile.match(/^ARG CLAUDE_CODE_VERSION=(\d+(?:\.\d+)*)\s*$/m)?.[1];
-  const host = hostVersion?.match(/\d+\.\d+\.\d+/)?.[0];
-  if (!pin || !host) return undefined;
-  const a = host.split(".").map(Number);
-  const b = pin.split(".").map(Number);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const diff = (a[i] ?? 0) - (b[i] ?? 0);
-    if (diff !== 0) return diff > 0 ? `Claude Code here is ${host}, newer than the sandbox image's pin ${pin} (docker/base.Dockerfile)` : undefined;
-  }
-  return undefined;
-};
 
 const STALE_IMAGE_DAYS = 30;
 
@@ -236,15 +219,18 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     console.log();
   }
   check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "`npm install -g @openai/codex && codex login`", true);
-  // A warning, never a FIX: host and sandbox need not match, so it does not touch `bad`.
-  const pinWarning = (() => {
-    try {
-      return claudePinWarning(readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8"), run("claude", ["--version"]));
-    } catch {
-      return undefined;
+  // Info, and a warning on a fallback: never a FIX, since a run works with either. Resolved quietly,
+  // as the fallback gets its own `warn` line here.
+  const versions = await resolveVersions(project ?? {}, undefined, () => {}).catch((error: Error) => {
+    console.log(`warn ${error.message}`);
+    return undefined;
+  });
+  if (versions) {
+    console.log(`info Sandbox images get Claude Code ${versions.claude} (${versions.channel}) and Codex ${versions.codex}`);
+    if (versions.source !== "network") {
+      console.log(`warn Could not reach the release channel; using ${versions.source === "cache" ? "the cached" : "the Dockerfile's default"} versions.\n       -> Fine while runs work. If preflight says a model needs a newer Claude Code, check the network and run \`sandcastle build\`, or pin one with \`claudeCode: "x.y.z"\` in ${CONFIG_PATH}.`);
     }
-  })();
-  if (pinWarning) console.log(`warn ${pinWarning}\n       -> Fine while runs work: host and sandbox need not match. If preflight says a model needs a newer Claude Code, update the kit (/sandcastle update), or raise CLAUDE_CODE_VERSION in docker/base.Dockerfile, then \`sandcastle build\`.`);
+  }
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
 
   // The kit's own clone is not a project; checking it would print a false FIX.
@@ -274,7 +260,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     // A warning, never a FIX. Silent when Docker is down or the image is not built yet.
     const staleImage = (() => {
       try {
-        const tag = baseImage().tag;
+        if (!versions) return undefined;
+        const tag = baseImage(versions).tag;
         const created = run("docker", ["image", "inspect", tag, "--format", "{{.Created}}"]);
         return created ? staleImageWarning(created, new Date(), tag) : undefined;
       } catch {

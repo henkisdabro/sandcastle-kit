@@ -193,7 +193,7 @@ flowchart LR
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
-| 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile changes. |
+| 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile or a Claude Code or Codex release changes. |
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
 | ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch gets the base merged in first (a conflict goes to the implementer, and old branches land first); a re-run on an old branch that was reviewed and green and has not moved since skips implement and review - a clean base merge goes straight to the gates, a conflicted one gets a short resolver prompt first; a re-run whose only change since its last review is the base merge gets a review of the merge alone, not a full review; a ticket closed, unqueued or sent to a human mid-run is left alone; tickets whose existing branches change the same file do not start together (the first runs, the others wait for the next run); a killed run's leftover sandboxes are stopped by the next run or `sandcastle clean`. |
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
@@ -602,7 +602,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | Command | What it does | Calls the model? |
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem as the command that applies it (doctor itself changes nothing). `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one, or, inside a project, when the base image was built more than 30 days ago (`sandcastle build --force` fixes it) | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem as the command that applies it (doctor itself changes nothing). `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); prints the Claude Code and Codex versions the image will get (warning, never failing, when the release channel could not be reached), and, inside a project, warns when the base image was built more than 30 days ago (`sandcastle build --force` fixes it) | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags. `--force` also pulls the base OS image afresh (Debian and Node security updates); ordinary builds and runs never pull | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
@@ -631,6 +631,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
 | `autonomy` | `0` | Turns (runs) one `sandcastle run` may make. `0`: one, as ever. `1`: after each turn, list the re-runnable tickets and ask before running again (a yes at a terminal; with no terminal nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have landed (held tickets included). A re-run takes only those tickets, never the rest of the queue. Dry runs, stopped runs, runs that hit a usage limit and runs with red gates together never re-run |
+| `claudeCode` | `"latest"` | Which Claude Code the sandbox image installs: `"latest"` or `"stable"` (the release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` in the environment overrides it for one command |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
@@ -657,6 +658,7 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json` |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run |
 | `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off) |
+| `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `latest`, npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs (see "The image's agent versions") |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
@@ -676,6 +678,23 @@ Measure before changing it.
 One ticket can ask for a different implementer: a GitHub label `model:<id>` (`model:claude-opus-5-5`) and/or `effort:<level>` on the issue sets the implement and repair passes for that ticket only, over `IMPL_*` and `config.ts`. The run lists the override next to the ticket, checks the label before anything starts, and preflight asks that model for a reply too. Reviews keep the project's pair. Ticket files have no labels, so this is GitHub-only.
 
 </details>
+
+### 🐳 The image's agent versions
+
+Claude Code ships almost daily, so the base image follows its `latest` release channel instead of a
+version written into the Dockerfile: the kit resolves the version on the host when it ensures the image
+(`sandcastle build`, and the start of every run) and makes the Claude Code and Codex versions part of
+the image's tag. A release therefore triggers one rebuild, of about a minute, and every sandbox of a
+run has the same version. Codex follows npm's `latest` the same way. A run's start lines and
+`sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and `run.json` records them.
+
+- **Pin** if a release misbehaves: `claudeCode: "2.1.285"` in `.sandcastle/config.ts`, or
+  `CLAUDE_CODE_VERSION=2.1.285` for one command; `CODEX_VERSION=0.159.2` pins Codex. `claudeCode: "stable"`
+  follows the slower channel.
+- **Offline**: the resolved pair is cached for six hours in `~/.cache/sandcastle-kit/versions.json`
+  (`$XDG_CACHE_HOME` when set). If the channel cannot be reached, the cached value is used whatever its age,
+  and with no cache the defaults in `docker/base.Dockerfile`, with one line saying so. A run never fails
+  for a network error here.
 
 ## 🪶 Lean sandboxes and hooks
 
@@ -765,7 +784,7 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 |---|---|
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
 | `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token with `sandcastle setup` (or as in [docs/INSTALL.md](docs/INSTALL.md#-installing-by-hand)). A project's `.sandcastle/.env` overrides the shared one - check both. |
-| `Preflight failed` naming a model | Plan limit reached, token expired, or the image's Claude Code is older than the model needs: bump `CLAUDE_CODE_VERSION` in `docker/base.Dockerfile`; the next run rebuilds. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |
+| `Preflight failed` naming a model | Plan limit reached, token expired, or the image's Claude Code is older than the model needs (offline, the image used a cached or default version): with the network back, `sandcastle build` follows the `latest` release, or pin one with `claudeCode` in `.sandcastle/config.ts`; the next run rebuilds. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |
 | `A kept hook cannot run in the image` | Install what the hook calls in the project's Dockerfile, or - only for host-only conveniences - add it to `lean.dropHooks`. |
 | `placeholders Sandcastle cannot fill` | `rules.md` contains `{{SOMETHING}}`; reword it. |
 | `Another sandcastle run of this project is live` | One run per project. Wait; if that process is gone, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |

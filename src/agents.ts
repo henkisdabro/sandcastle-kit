@@ -21,7 +21,7 @@
 // that shares the implementer's blind spots is worth less.
 //
 // A model newer than the image's Claude Code is refused at the first call -
-// see the CLAUDE_CODE_VERSION pin in docker/base.Dockerfile.
+// the image follows Claude Code's `latest` release unless the project pins `claudeCode` (src/versions.ts).
 
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";

@@ -53,7 +53,8 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/generated.ts` | Generated files: `covers`, `regensFor`, and `resolveGenerated` (take a side, rerun setup and `regen` in the sandbox, commit); also the shell quoting and host git identity the base merge uses |
 | `src/config.ts` | The `ProjectConfig` type and loader |
 | `prompts/` | Implement, review and repair templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
-| `docker/base.Dockerfile` | The shared base image; pins Claude Code and Codex |
+| `src/versions.ts` | Which Claude Code and Codex the image gets: the `latest` channel (or `claudeCode`, `CLAUDE_CODE_VERSION`, `CODEX_VERSION`) resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag |
+| `docker/base.Dockerfile` | The shared base image; its Claude Code and Codex `ARG` versions are offline defaults, the kit passes the resolved ones |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/status.test.sh` | The status view against a made-up repo and run records; `pnpm test` |
 | `test/report.test.ts` | The closing summary's sections from made-up facts; `pnpm test` |
