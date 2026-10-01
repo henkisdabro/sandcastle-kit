@@ -55,6 +55,18 @@ test("node:test spec: durations are dropped and the 'failing tests:' header is n
   assert.deepEqual(failingTests(out), ["breaks"]);
 });
 
+test("eslint: its '✖ N problems' summary is not a test", () => {
+  const out = [
+    "/src/a.ts",
+    "  3:7  error  'x' is assigned a value but never used  no-unused-vars",
+    "",
+    "✖ 1 problem (1 error, 0 warnings)",
+    "",
+    "✖ 12 problems (10 errors, 2 warnings)",
+  ].join("\n");
+  assert.deepEqual(failingTests(out), []);
+});
+
 test("go test: --- FAIL lines name the test, subtests included, and a bare FAIL line adds nothing", () => {
   const out = [
     "=== RUN   TestSum",

@@ -177,11 +177,13 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // cargo's "test path::name ... FAILED". Three branches red on the same test
 // once read as three separate mysteries; named, they group. Matched line by
 // line so a bare "FAIL" line (Go prints one) cannot borrow the next line's word.
+// ESLint ends a red lint gate with "✖ N problems (...)": not a test, and two
+// lint-red branches would otherwise read as one failing test.
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
   /^\s*FAIL\s+(\S+)/,
   /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
-  /^\s*✖ (?!failing tests:)(.+?)(?: \([\d.]+m?s\))?$/,
+  /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/,
   /^\s*--- FAIL: (\S+)/,
   /^test (\S+) \.\.\. FAILED$/,
 ];
