@@ -267,6 +267,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - "Another sandcastle run of this project is live" (from `run`, `land` or `clean`) now says what
   to do: wait for it to end (`sandcastle status` shows it), or stop it with Ctrl-C in its
   terminal.
+- The `.git` tamper stop names the file that changed (`.git/config`, or a file in `.git/info/`)
+  instead of "`.git/config` or `.git/info/`", so it can be checked without guessing.
 
 ### Added
 

@@ -3,8 +3,8 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { sh } from "./sandbox.ts";
@@ -34,15 +34,19 @@ export const disableHostGitHooks = () => {
 // the host runs another git command in the repo.
 // ---------------------------------------------------------------------------
 
-export type Fingerprint = { files: string; base: string };
+// `files` maps each fingerprinted path to its content's hash, so a change can name the file.
+export type Fingerprint = { files: Record<string, string>; base: string };
 
 export const gitFingerprint = (project: Project): Fingerprint => {
   const dir = sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], project.root);
-  const files = [join(dir, "config"), ...(existsSync(join(dir, "info")) ? readdirSync(join(dir, "info")).map((f) => join(dir, "info", f)) : [])];
-  const h = createHash("sha256");
-  for (const f of files.sort()) h.update(f).update(existsSync(f) ? readFileSync(f) : "");
-  return { files: h.digest("hex"), base: sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root) };
+  const paths = [join(dir, "config"), ...(existsSync(join(dir, "info")) ? readdirSync(join(dir, "info")).map((f) => join(dir, "info", f)) : [])];
+  const files: Record<string, string> = {};
+  for (const f of paths) files[f] = createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  return { files, base: sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root) };
 };
+
+const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =>
+  [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f]).sort();
 
 // The two are told apart. A changed config can run a command on the host's
 // next git call, so nothing reads the repo after it. A moved base branch is
@@ -52,9 +56,10 @@ export const gitFingerprint = (project: Project): Fingerprint => {
 export const assertGitUnchanged = (project: Project, before: Fingerprint, when: string) => {
   const now = gitFingerprint(project);
   const base = project.baseBranch;
-  if (now.files !== before.files) {
+  const changed = changedFiles(before.files, now.files);
+  if (changed.length) {
     throw new OperatorError(
-      `STOPPED ${when}: .git/config or .git/info/ changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
+      `STOPPED ${when}: ${changed.map((f) => relative(realpathSync(project.root), f)).join(", ")} changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
         `Inspect \`git -C ${project.root} config --local --list\` and .git/info/ before running any other git command there.`,
     );
   }

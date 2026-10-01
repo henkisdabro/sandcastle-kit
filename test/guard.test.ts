@@ -50,7 +50,7 @@ test("a changed .git/config is tampering", () => {
   const { project, git } = repo();
   const before = gitFingerprint(project);
   git("config", "core.fsmonitor", "touch /tmp/owned");
-  assert.throws(() => assertGitUnchanged(project, before, "after #1"), /STOPPED after #1: .git\/config or .git\/info\/ changed .* tampered/);
+  assert.throws(() => assertGitUnchanged(project, before, "after #1"), /STOPPED after #1: \.git\/config changed .* tampered/);
 });
 
 test("a new file under .git/info is tampering", () => {
