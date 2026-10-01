@@ -358,6 +358,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle lean` and the run's Lean line warn about a `lean.keep` entry that names nothing the
   repo has, and a `lean.dropHooks` string that matches no hook: a typo there kept or dropped
   nothing, without a word.
+- `sandcastle doctor --verify` in a GitHub project checks that `GH_TOKEN` cannot push there, with
+  a probe that writes nothing, and makes a token with Contents: write a FIX. The sandboxes get
+  that token, so a ticket that talks an agent into pushing is stopped by its scope; before, only
+  its prefix was checked.
 
 ## [0.2.0] - 2026-09-30
 

@@ -72,6 +72,21 @@ export const probeGithubToken = async (token: string): Promise<{ ok: boolean; st
   return { ok: res.ok, status: res.status, login };
 };
 
+/**
+ * Whether a token can write a repository's code, without writing anything: creating a branch at a
+ * commit that cannot exist is refused with 403 when the token lacks Contents: write, and with 422
+ * (no such object) when it has it. The sandbox's token is meant to do nothing worse than comment.
+ */
+export const probeGithubWrite = async (token: string, repo: string): Promise<number | undefined> => {
+  const res = await fetch(`${process.env.SANDCASTLE_TEST_GITHUB_API || "https://api.github.com"}/repos/${repo}/git/refs`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit", "content-type": "application/json" },
+    body: JSON.stringify({ ref: "refs/heads/sandcastle-doctor-probe-never-created", sha: "0".repeat(40) }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined);
+  return res?.status;
+};
+
 /** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
 /** Whether GitHub's API answers at all, signed in or not. SANDCASTLE_TEST_GITHUB_API points it elsewhere in tests. */
 const githubReachable = async () =>
@@ -252,6 +267,14 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       const status = key === "GH_TOKEN" ? gh?.status : key === "ANTHROPIC_API_KEY" ? await probeApiKey(found.value) : await probeOAuth(found.value);
       const seen = verdict(status);
       if (seen === "ok") console.log(`ok   ${print} - accepted${gh?.login ? ` (${gh.login})` : ""}`);
+      // In a project: the sandboxes get this token, and a prompt-injected agent has it too.
+      const repo = key === "GH_TOKEN" && seen === "ok" && inProject ? run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot) : undefined;
+      if (repo) {
+        const write = await probeGithubWrite(found.value, repo);
+        if (write === 422) check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.`);
+        else if (write === 403 || write === 404) console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
+        else console.log(`opt  GH_TOKEN push access to ${repo} - not checked (${write === undefined ? "no connection" : `HTTP ${write}`})`);
+      }
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
     }

@@ -100,7 +100,8 @@ end-of-run notification go in an optional `~/.config/sandcastle-kit/config.json`
 > `SANDCASTLE_ALLOW_BROAD_TOKEN=1` lifts the refusal, for a throwaway repo only.
 
 Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --verify` also asks
-GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value).
+GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value),
+and, inside a GitHub project, whether `GH_TOKEN` can push there - it should not.
 
 ## 🔄 Updating
 

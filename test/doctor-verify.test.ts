@@ -66,3 +66,32 @@ test("an API key is probed on the free model list, sent as x-api-key; no connect
     globalThis.fetch = realFetch;
   }
 });
+
+test("probeGithubWrite asks to create a ref at a commit that cannot exist, and returns GitHub's status", async () => {
+  const { createServer } = await import("node:http");
+  const { probeGithubWrite } = await import("../src/doctor.ts");
+  const seen: { method?: string; url?: string; body: string }[] = [];
+  for (const status of [422, 403]) {
+    const api = createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => (body += d));
+      req.on("end", () => {
+        seen.push({ method: req.method, url: req.url, body });
+        res.statusCode = status;
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((done) => api.listen(0, "127.0.0.1", done));
+    process.env.SANDCASTLE_TEST_GITHUB_API = `http://127.0.0.1:${(api.address() as import("node:net").AddressInfo).port}`;
+    try {
+      assert.equal(await probeGithubWrite("t", "o/r"), status);
+    } finally {
+      delete process.env.SANDCASTLE_TEST_GITHUB_API;
+      api.close();
+    }
+  }
+  assert.equal(seen[0].method, "POST");
+  assert.equal(seen[0].url, "/repos/o/r/git/refs");
+  // Nothing can be written: the sha names no object.
+  assert.deepEqual(JSON.parse(seen[0].body), { ref: "refs/heads/sandcastle-doctor-probe-never-created", sha: "0".repeat(40) });
+});
