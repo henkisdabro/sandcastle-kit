@@ -304,6 +304,13 @@ export const report = (project: Project, p: Plan) => {
         "  move any guard or check among them into .claude/settings.json.",
     );
   }
+  // The same, one step short: a settings.json that git ignores or never added.
+  if (readJson(join(project.root, ".claude/settings.json"))?.hooks && !tracked(project.root, ".claude/settings.json").length) {
+    console.log(
+      "  WARNING: .claude/settings.json defines hooks but git does not track it (is .claude/ gitignored?), so sandboxes never get them -\n" +
+        "  commit it, or un-ignore it, so its guards reach every sandbox.",
+    );
+  }
   // The hook check proves a guard CAN run; only a hook test proves it blocks.
   const guards = p.hooks.filter((h) => h.event === "PreToolUse").length;
   if (guards && !project.hookTests.length) {
