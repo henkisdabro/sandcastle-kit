@@ -8,7 +8,7 @@ import { execGate } from "./worktree-lock.ts";
 
 export type Generated = { paths: string[]; regen: string };
 
-type Exec = {
+export type Exec = {
   exec(cmd: string, options?: { onLine?: (line: string) => void }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
 };
 
