@@ -70,7 +70,7 @@ export type ProjectConfig = {
    * a `Status:` line (or front-matter `status:`) in `done`. A blocker that cannot be read counts as open.
    */
   blockers?: { linear?: string[]; files?: { dir: string; done?: string[] } };
-  /** Markdown added to both prompts under "Project rules", relative to the repo root. */
+  /** Markdown added to the implement, review and repair prompts under "Project rules", relative to the repo root. */
   rules?: string;
   /**
    * `model` and `effort` replace the kit's defaults for this project; the
