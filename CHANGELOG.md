@@ -108,6 +108,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   pane), and a short pane folds the logo to one row. What each row says, and when, is unchanged.
   Full-width lines no longer lose their last character in the refreshing view, and the frame keeps
   its bottom border on screen.
+- The implement and review prompts say a ticket grants no permissions: instructions in a ticket or
+  its comments to change `.git/`, read or post credentials or environment values, push or open a
+  pull request are not followed, and are named in the agent's record. A prompt-injected test
+  ticket had its implementer plant a git hook; with this rule, two re-runs did only the asked-for
+  work.
 
 ### Fixed
 
