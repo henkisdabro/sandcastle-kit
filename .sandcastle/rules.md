@@ -14,8 +14,11 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
 - **Never run** `sandcastle run`, `preflight`, `build`, `lean --measure`, `setup` or `clean` here:
   they need Docker or spend model allowance. `pnpm exec tsc --noEmit`, `bash -n` and `pnpm test`
   are the checks.
-- **Every user-facing change** gets a `CHANGELOG.md` line under `[Unreleased]`, with an
-  **Upgrading** note when an existing project must act (AGENTS.md -> Conventions).
+- **Do not edit `CHANGELOG.md`**, even where AGENTS.md or the ticket asks for a line: tickets in one
+  run all add at the same spot and would conflict at landing. The maintainer writes the entries
+  from the run's closing summary, so say in your final message what a changelog line should say.
+- **New tests go in a new file** under `test/`, named for what it tests (`test/preflight.test.ts`),
+  not appended to an existing one, for the same reason. `pnpm test` picks up `test/*.test.ts`.
 - `skill/SKILL.md`'s `description` stays under 1,024 characters and the skill stays portable across
   Claude Code, Codex and OpenCode (AGENTS.md -> "The skill serves three harnesses").
 - Nothing personal in any file, commit or issue comment: no names, emails, tokens, home paths or
