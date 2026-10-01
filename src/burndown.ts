@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -550,9 +550,10 @@ export const burndown = async (project: Project) => {
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
         await timed(issue.id, "implement", () => {
-          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
           return sandbox.run({
             name: `impl-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.resolve,
             promptArgs: usedArgs(prompts.resolve, promptArgs),
@@ -577,6 +578,7 @@ export const burndown = async (project: Project) => {
       const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
         sandbox.run({
           name,
+          logging: agentLogging(project, issue.id, name, runId),
           agent,
           promptFile,
           promptArgs: usedArgs(promptFile, args),
@@ -586,9 +588,10 @@ export const burndown = async (project: Project) => {
       let reviewCommits = 0;
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
-          markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
           return sandbox.run({
             name: `impl-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.implement,
             promptArgs: usedArgs(prompts.implement, promptArgs),
@@ -627,7 +630,6 @@ export const burndown = async (project: Project) => {
           issue.id,
           "review",
           () => {
-            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               reviewModel = model;
               return reviewRun(`review-${issue.id}`)(agent);
@@ -641,7 +643,6 @@ export const burndown = async (project: Project) => {
               issue.id,
               "cross-review",
               () => {
-                markLog(agentLog(project, issue.id, `review-codex-${issue.id}`), runId);
                 return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
               },
               undefined,
@@ -709,9 +710,10 @@ export const burndown = async (project: Project) => {
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
         const fixed = await timed(issue.id, "repair", () => {
-          markLog(agentLog(project, issue.id, `repair-${issue.id}`), runId);
+          const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
           return sandbox.run({
             name: `repair-${issue.id}`,
+            logging,
             agent: implAgent(),
             promptFile: prompts.repair,
             promptArgs: usedArgs(prompts.repair, {
@@ -756,7 +758,6 @@ export const burndown = async (project: Project) => {
           issue.id,
           "review",
           () => {
-            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               afterModel = model;
               return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
@@ -826,7 +827,8 @@ export const burndown = async (project: Project) => {
     const logs = join(project.root, ".sandcastle/logs");
     if (!existsSync(logs)) return false;
     return readdirSync(logs)
-      .filter((f) => logOwner(f) === issue)
+      // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
+      .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
       .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
   };
 

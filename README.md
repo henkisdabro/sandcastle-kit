@@ -497,7 +497,9 @@ status view flags a sandbox whose log has been quiet for ten. Every step - image
 gates, each agent pass and gate run - is timed into `.sandcastle/logs/timings.jsonl`, with each
 agent pass's tokens and each gate's own time (`ok` is false for a gate run with a red gate, named
 in `red`); the report gives each issue's wall time and tokens, and the base check prints its gates
-slowest first. Tickets that others wait for start first.
+slowest first. Tickets that others wait for start first. Each agent pass also keeps its raw stream -
+every tool call and result, as the agent printed it - in
+`.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl` beside the readable `.log`, archived with it.
 Before the slow steps a run prints a rough estimate - tokens and time for the chosen tickets, from the medians of this project's earlier tickets in `.sandcastle/logs/timings.jsonl` - once the project has any; with `USAGE_CHECK=1` it also prints the plan's usage after preflight.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees

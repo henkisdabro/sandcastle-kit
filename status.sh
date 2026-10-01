@@ -211,6 +211,7 @@ load_queue() {
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+# The .jsonl sidecars (each pass's raw agent stream) are deliberately not matched here or by any log glob below.
 # Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log
 # (phase impl, review, review-codex, repair, or gates - the orchestrator's gate output):
 # the id appears twice, and the repeat tells a ticket called "code-review-01" from the
