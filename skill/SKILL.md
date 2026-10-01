@@ -28,7 +28,8 @@ stopping.
 1. Run `sandcastle doctor`. Its first line is the kit's location; that kit's `README.md` covers
    anything this file does not. If `sandcastle` is not found, the kit is not installed: have the
    user clone it and run `./bin/sandcastle setup` in their own terminal (it asks for tokens).
-2. Fix every `FIX` line doctor prints before going further. Tokens are the user's to create. When a
+2. Fix every `FIX` line doctor prints before going further. A `warn` line is not a failure; mention it
+   to the user. Tokens are the user's to create. When a
    run or preflight fails on auth, `sandcastle doctor --verify` asks GitHub and Anthropic whether the
    tokens are accepted (no model call).
 
