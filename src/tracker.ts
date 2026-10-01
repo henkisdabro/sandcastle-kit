@@ -22,7 +22,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { sh } from "./sandbox.ts";
 
-export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string };
+export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string; labels?: string[] };
 export type TicketState = Ticket & { open: boolean; held: boolean };
 
 export type TrackerConfig = "github" | "files" | { type: "github" } | { type: "files"; dir?: string; done?: string[] };
@@ -120,6 +120,7 @@ const github = (project: Project): Tracker => {
       body: i.body ?? "",
       comments: (i.comments ?? []).map((c: { body: string }) => c.body),
       updated: i.updatedAt ? Math.floor(Date.parse(i.updatedAt) / 1000) : undefined,
+      labels: (i.labels ?? []).map((l: { name: string }) => l.name),
     }));
   };
   return {
@@ -137,6 +138,7 @@ const github = (project: Project): Tracker => {
         title: i.title,
         body: i.body ?? "",
         comments: i.comments.map((c: { body: string }) => c.body),
+        labels: (i.labels ?? []).map((l: { name: string }) => l.name),
         open: i.state === "OPEN",
         held: i.labels.some((l: { name: string }) => l.name === "needs-human"),
         status: i.labels.some((l: { name: string }) => l.name === project.label) ? project.label : undefined,

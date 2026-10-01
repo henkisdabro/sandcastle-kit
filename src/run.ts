@@ -148,13 +148,14 @@ export const preflightFailure = (
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
 
-export const preflight = async (project: Project, image: string) => {
+// `extra` is a model only some tickets ask for (a label), with where it came from.
+export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = []) => {
   if (process.env.SKIP_PREFLIGHT === "1") return;
   const env = credentials(project);
   type Failure = { model: string; reply: string } | undefined;
   // Every model is asked at once; failures are read back in this array's order, not completion order,
   // so the message is the same on every run.
-  const probes: Promise<Failure>[] = [...new Set([IMPL_MODEL, REVIEW_MODEL])].map(async (model): Promise<Failure> => {
+  const probes: Promise<Failure>[] = [...new Set([IMPL_MODEL, REVIEW_MODEL, ...extra.map((e) => e.model)])].map(async (model): Promise<Failure> => {
     const r = await ask(
       "docker",
       [
@@ -170,7 +171,11 @@ export const preflight = async (project: Project, image: string) => {
     } catch {
       /* not JSON - the raw output is the reason */
     }
-    return !r.ok || reply.is_error !== false ? { model, reply: (reply.result ?? r.out).slice(0, 300) } : undefined;
+    // A model only a label names is reported with the ticket that asked for it.
+    const from = model === IMPL_MODEL || model === REVIEW_MODEL ? undefined : extra.find((e) => e.model === model)?.from;
+    return !r.ok || reply.is_error !== false
+      ? { model: from ? `${model} (${from})` : model, reply: (reply.result ?? r.out).slice(0, 300) }
+      : undefined;
   });
   if (CROSS_REVIEW) {
     // On the HOST, not in the image: this also refreshes the host's ChatGPT

@@ -203,7 +203,8 @@ comments, and the gates can prove it.
 4. **Close the spec, then label.** Take each decision from its file, and record the user's answer
    in it as `answer`. Then comment the decision on the issue - the implementing agent reads the
    issue and its comments, never this chat - then add the queue label. Create a missing label with
-   `gh label create`.
+   `gh label create`. A hard ticket can carry `model:`/`effort:` labels (GitHub) for a stronger
+   implementer; offer it, do not add it unasked.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
    from the files in `.sandcastle/triage/`.
 
