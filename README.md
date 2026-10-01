@@ -567,7 +567,7 @@ out its own view:
   *blocked* only when a human has to act: a crash, a merge conflict, a branch held for a human
   merge. The tab and workspace badges roll the states up, so a glance at the sidebar says whether
   a run needs you.
-- 🔔 **A notification** with the run's summary when it ends.
+- 🔔 **A notification** with the run's summary when it ends. Outside Herdr too: `"notify": ["notify-send", "Sandcastle"]` (or `osascript`, `curl` to ntfy - any command, as a list of arguments, not a shell string) in `~/.config/sandcastle-kit/config.json` runs when a run ends, with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT` set. It gets ten seconds; if it fails, the run's result stands.
 
 When the run ends its sandbox panes close, so nothing in the sidebar outlives it; the status view
 stays, showing each branch's outcome, and the next run replaces it rather than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
@@ -665,6 +665,7 @@ Examples: [`examples/`](examples/).
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits (also `~/.config/sandcastle-kit/config.json`: `{"maxSandboxes": 6, "maxGates": 2}`) |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say (also `"keepAwake": false` in `config.json`). [Sleep](#-sleep) |
+| `"notify": ["notify-send", "Sandcastle"]` in `config.json` | off | Outside Herdr too: runs when a run ends, with `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT` set. Any command, as a list of arguments, not a shell string (`["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` if you want one). It gets ten seconds; if it fails, the run's result stands |
 
 A project that always wants different models or effort sets them in `.sandcastle/config.ts`
 (`review: { effort: "medium" }`); the env vars are for one run. Effort levels are `low`,
@@ -790,7 +791,7 @@ model; `sandcastle help` lists every command.
 | Place | Holds | Edited by |
 |---|---|---|
 | **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
-| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits, keep-awake) and `denylist` | The user, once. Not committed anywhere |
+| **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits, keep-awake, notify) and `denylist` | The user, once. Not committed anywhere |
 | **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored) | You and the user, when setting the project up |
 
 Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.

@@ -61,7 +61,7 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
 };
 
-const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
+export const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
 const LEFT = ["blocked", "skipped"];
 
 // Git is asked, never assumed: a repo with no upstream, a deleted branch.

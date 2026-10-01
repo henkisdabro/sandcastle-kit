@@ -38,6 +38,7 @@ import {
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
+import { notifyCommand, runNotify } from "./notify.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
@@ -221,6 +222,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const base = project.baseBranch;
 
   // Fail before spending a single container.
+  const notify = notifyCommand();
   disableHostGitHooks();
   assertCleanBase(project);
   lockRun(project);
@@ -326,7 +328,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
       ...waiting.map((w) => [w.issue, { state: "blocked", note: blockedNote(w.on), title: queued.find((q) => q.id === w.issue)?.title }]),
     ]),
-  });
+  }, notify && ((r) => runNotify(notify, project.name, r)));
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
