@@ -160,7 +160,7 @@ const row7 = (root: string) => {
     },
   });
   const frame = (r.stdout + r.stderr).replace(/\u001b\[[0-9;]*m/g, "");
-  return frame.split("\n").find((l) => /^#7\b/.test(l));
+  return frame.split("\n").find((l) => /^ #7\b/.test(l));
 };
 const withLog = (root: string) => {
   mkdirSync(join(root, ".sandcastle", "logs"), { recursive: true });

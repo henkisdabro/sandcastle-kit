@@ -71,14 +71,14 @@ const render = (queue: string, env: Record<string, string> = {}, shadow?: string
 
 test("a read that works lists the queue and says nothing of a failure", () => {
   const { frame } = render("101");
-  assert.match(frame, /^#101 .* queued/m);
+  assert.match(frame, /^ #101 .* queued/m);
   assert.doesNotMatch(frame, /queue: could not read/);
 });
 
 test("a failed read shows why, and is not shown as an empty queue", () => {
   const { frame } = render("101", { FAKE_QUEUE_FAIL: "gh: not logged in" });
   assert.match(frame, /queue: could not read - gh: not logged in/);
-  assert.doesNotMatch(frame, /^#101 .* queued/m);
+  assert.doesNotMatch(frame, /^ #101 .* queued/m);
 });
 
 test("a long failure message is cut to the pane", () => {

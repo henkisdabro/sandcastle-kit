@@ -94,6 +94,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   paths now squash too, and delete the branch, instead of always making a merge commit. The merge
   is still made, gated and checked in the sandbox; its tree then lands as one commit on the base
   tip.
+- The status view's table (headings and ticket rows) is indented one column, in line with the
+  header and legend above and below it.
 
 ### Fixed
 

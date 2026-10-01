@@ -75,8 +75,8 @@ render() {
 # A row's state: the ticket, its glyph and state word, in that order.
 row() { # ticket state [activity pattern]
   local line
-  line=$(grep -E "^$1 " "$TMP/frame")
-  if ! grep -qE "^$1 +. $2( |$)" <<<"$line"; then
+  line=$(grep -E "^ $1 " "$TMP/frame")
+  if ! grep -qE "^ $1 +. $2( |$)" <<<"$line"; then
     echo "FAIL [$SCENARIO] $1: want state '$2', row is: ${line:-(missing)}"; fails=$((fails+1)); return
   fi
   if [ -n "${3:-}" ] && ! grep -qE "$3" <<<"$line"; then
@@ -124,7 +124,7 @@ cat >"$L/run.json" <<EOF
 EOF
 render "101 102 103 104 105 106 107 108 109 110 120"
 row '#101' impl 'Bash|\$ pnpm test'
-row '#102' gates 'usually 1m - 2/3 pytest - tests/test_a'
+row '#102' gates 'usually 1m - 2/3 pytest - tests/test_'
 row '#103' ready 'gates green'
 row '#104' 'gate red' 'pytest red'
 row '#105' queued 'next to start'
@@ -202,7 +202,7 @@ cat >"$L/run.json" <<EOF
 EOF
 FAKE_DOCKER="$REPO" render "101"
 row '#101' impl
-has '^#101 .* 1\.5c '
+has '^ #101 .* 1\.5c '
 
 # ---------------------------------------------------------------------------
 SCENARIO="a state written after the frame's clock"
@@ -213,7 +213,7 @@ cat >"$L/run.json" <<EOF
 EOF
 render "103"
 row '#103' ready
-has '^#103 .* 0s '
+has '^ #103 .* 0s '
 
 # ---------------------------------------------------------------------------
 SCENARIO="overflow, ticket-file ids"

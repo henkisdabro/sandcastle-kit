@@ -93,7 +93,7 @@ wrap() {
 
 # The one place the widths are declared. ACTIVITY takes whatever is left.
 W_ISSUE=6; W_STATE=10; W_AGE=5; W_COMMITS=7; W_CPU=6; W_MEM=7
-W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 8 ))
+W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 9 ))
 
 # macOS ships bash 3.2, which has neither associative arrays nor mapfile, and
 # this script has to run under whatever bash the pane's PATH finds first.
@@ -454,7 +454,8 @@ emit() {
   local mem_col="$head" mem_cell=""
   [ "$mem" = "-" ] && mem_col="$gry"
   [ "$W_MEM" -gt 0 ] && mem_cell="${mem_col}$(pad "$mem" $W_MEM)${off} "
-  rendered=$(printf '%s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s%s' \
+  # One column in, as the header and legend are.
+  rendered=$(printf ' %s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s%s' \
     "$head" "$(pad "$(disp "$n" | cut -c1-"$W_ISSUE")" $W_ISSUE)" "$off" \
     "$colour" "$glyph" "$(pad "$state" $W_STATE)" "$off" \
     "$age_c" "$(pad "$age" $W_AGE)" "$off" \
@@ -534,7 +535,7 @@ render() {
   # In a narrow pane MEM gives its width to ACTIVITY, where the notes are:
   # at 80 columns every note was cut to 30 characters.
   W_MEM=7; [ "$cols" -lt 100 ] && W_MEM=0
-  W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 8 ))
+  W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 9 ))
   w_act=$(( cols - W_FIXED ))
   [ "$w_act" -lt 8 ] && w_act=8
 
@@ -762,7 +763,7 @@ $(wrap "$cols" "${mute} · ${off}" "${mute}ready = gates green, lands when the r
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
   printf '%s\n' " $(label machine)${mute}$(pool_line)$([ "$gate_wait" -gt 0 ] && printf ' · %s waiting for a gates slot' "$gate_wait")${off}"
   printf '%s\n' "$line"
-  printf '%s%s %s %s %s %s %s%s%s\n' "$head" \
+  printf ' %s%s %s %s %s %s %s%s%s\n' "$head" \
     "$(pad ISSUE $W_ISSUE)" "  $(pad STATE $W_STATE)" "$(pad AGE $W_AGE)" \
     "$(pad COMMITS $W_COMMITS)" "$(pad CPU $W_CPU)" "$([ "$W_MEM" -gt 0 ] && printf '%s ' "$(pad MEM $W_MEM)")" ACTIVITY "$off"
 
