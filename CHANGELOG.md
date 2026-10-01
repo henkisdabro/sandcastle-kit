@@ -100,13 +100,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   tip.
 - The status view has a new look: one window whose bands - a logo cell with the project, base
   branch and clock; the run, machine and models cells; the table; the legend, which now carries
-  each group's count; and a note - are split into cells across the pane, with joined rules, a
-  midnight palette, slot gauges for the machine, a light rule between state groups, and ASCII
-  state marks (`>` ready, `~` blocked, `+` merged, `-` left over) that every terminal font draws.
-  The columns grow with the pane and ACTIVITY takes the rest (CPU, like MEM, gives way in a narrow
-  pane), and a short pane folds the logo to one row. What each row says, and when, is unchanged.
-  Full-width lines no longer lose their last character in the refreshing view, and the frame keeps
-  its bottom border on screen.
+  each group's count; and a note - are split into cells across the pane, with joined rules, a sand
+  palette (dark browns and sand tones), slot gauges for the machine, a light rule between state
+  groups, and ASCII state marks (`>` ready, `~` blocked, `+` merged, `-` left over) that every
+  terminal font draws. The columns grow with the pane and ACTIVITY takes the rest (CPU, like MEM,
+  gives way in a narrow pane), and a short pane folds the logo to one row. What each row says, and
+  when, is unchanged. Full-width lines no longer lose their last character in the refreshing view,
+  and the frame keeps its bottom border on screen.
 
 ### Fixed
 
