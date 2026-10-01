@@ -258,7 +258,8 @@ sandcastle init      # writes .sandcastle/config.ts, rules.md, .gitignore; print
 `init` reads the stack from the repo root - `package.json` (with its lockfile and scripts),
 `pyproject.toml` + `uv.lock`, `go.mod` or `Cargo.toml` - and fills in the gates and setup from it.
 Where the base image lacks the toolchain (uv, Go, Rust, Bun) it also writes
-`.sandcastle/Dockerfile`. Treat what it writes as a starting point.
+`.sandcastle/Dockerfile`. Treat what it writes as a starting point. Anything else, poetry and pipenv
+included, gets a placeholder gate that fails until you copy in what CI runs.
 
 Then edit, in this order:
 

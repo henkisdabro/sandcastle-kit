@@ -128,9 +128,10 @@ const FALLBACK = `  // Project image layer on top of sandcastle-base (toolchains
   // Commands run once in each fresh sandbox before any agent, e.g. installing dependencies.
   setup: [],
 
-  // What CI runs, in order. Until these are filled in, every run stops at its base check.
+  // What CI runs, in order: copy the run: steps from .github/workflows/*.yml (for a Node project
+  // with no package.json, often \`node --test\`). Until these are filled in, every run stops at its base check.
   gates: [
-    { name: "gates-not-set", command: "echo 'No gates yet: set them in .sandcastle/config.ts' >&2; exit 1" },
+    { name: "gates-not-set", command: "echo 'No gates yet: set them in .sandcastle/config.ts from what CI runs (.github/workflows)' >&2; exit 1" },
   ],`;
 
 // The branch runs land on. origin/HEAD says what the remote treats as default;
@@ -185,8 +186,10 @@ export const init = (root: string) => {
     `Wrote ${CONFIG_PATH}${dockerfile ? ", .sandcastle/Dockerfile" : ""} and .sandcastle/rules.md.\n` +
       (stack
         ? `Detected ${stack.label} - gates and setup are filled in from it; check them against what CI runs.`
-        : "No known stack detected (package.json, pyproject.toml + uv.lock, go.mod, Cargo.toml). The gates are a placeholder that " +
-          "fails, so no run starts until you fill in gates and setup.") +
+        : "No known stack detected (package.json, pyproject.toml + uv.lock, go.mod, Cargo.toml). Python is detected only with uv (a uv.lock); " +
+          "a poetry or pipenv project needs its gates written by hand. The gates are a placeholder that fails, so no run starts until " +
+          "you fill in gates and setup - copy the commands CI runs from .github/workflows/*.yml, or use `node --test` for a Node project " +
+          "with no package.json.") +
       "\nNext, in order: `sandcastle build`, `sandcastle lean`, `sandcastle gates`." +
       "\nAgents only work on queued tickets, so file issues (or ticket files) for the work, then triage them into the queue with " +
       "`/sandcastle queue` (the queue label is `label` in .sandcastle/config.ts, default ready-for-agent).\n",
