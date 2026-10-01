@@ -73,6 +73,10 @@ export const probeGithubToken = async (token: string): Promise<{ ok: boolean; st
 };
 
 /** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
+/** Whether GitHub's API answers at all, signed in or not. SANDCASTLE_TEST_GITHUB_API points it elsewhere in tests. */
+const githubReachable = async () =>
+  !!(await fetch(process.env.SANDCASTLE_TEST_GITHUB_API || "https://api.github.com", { method: "HEAD", signal: AbortSignal.timeout(5_000) }).catch(() => undefined));
+
 export const probeApiKey = async (key: string): Promise<number | undefined> => {
   const res = await fetch("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
   return res?.status;
@@ -149,10 +153,16 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       : "Start the Docker daemon: `sudo systemctl start docker` (or `podman machine start`) - then `docker info` must work in this shell.",
   );
   const ghInstalled = run("gh", ["--version"]) !== undefined;
+  const ghSignedIn = !!run("gh", ["auth", "status"]);
+  // Offline, `gh auth status` calls a good token invalid; `gh auth login` would not help.
+  const githubDown = ghInstalled && !ghSignedIn && !(await githubReachable());
   check(
-    !!run("gh", ["auth", "status"]),
-    (ghInstalled ? "GitHub CLI signed in on this machine" : "GitHub CLI installed") + (needsGh ? "" : " (not needed: this project keeps tickets in files)"),
-    ghInstalled ? "`gh auth login`" : mac ? "`brew install gh`, then `gh auth login`" : "Install it (https://cli.github.com), then `gh auth login`",
+    ghSignedIn,
+    (githubDown ? "GitHub reachable (gh's sign-in could not be checked)" : ghInstalled ? "GitHub CLI signed in on this machine" : "GitHub CLI installed") +
+      (needsGh ? "" : " (not needed: this project keeps tickets in files)"),
+    githubDown
+      ? "Check the network (or proxy) - api.github.com did not answer - then `sandcastle doctor` again."
+      : ghInstalled ? "`gh auth login`" : mac ? "`brew install gh`, then `gh auth login`" : "Install it (https://cli.github.com), then `gh auth login`",
     !needsGh,
   );
   // Worktree commands the kit relies on need 2.31; an older git failed mid-run, not here.

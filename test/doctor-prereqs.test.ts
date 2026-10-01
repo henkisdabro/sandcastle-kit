@@ -6,8 +6,10 @@
 //   pnpm exec tsx --test test/doctor-prereqs.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -17,7 +19,7 @@ const tmp = mkdtempSync(join(tmpdir(), "sc-prereq-"));
 const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 
 // One PATH per case: node, a real git unless shimmed, and the given shims; nothing else of the host's.
-const doctor = (shims: Record<string, string>, env: Record<string, string> = {}) => {
+const setup = (shims: Record<string, string>, env: Record<string, string> = {}) => {
   const bin = mkdtempSync(join(tmp, "bin-"));
   const all = { git: `#!/bin/sh\nexec ${realGit} "$@"\n`, gh: "#!/bin/sh\nexit 0\n", jq: "#!/bin/sh\nexit 0\n", ...shims };
   for (const [name, body] of Object.entries(all)) {
@@ -29,9 +31,8 @@ const doctor = (shims: Record<string, string>, env: Record<string, string> = {})
   mkdirSync(join(config, "sandcastle-kit"), { recursive: true });
   const gitconfig = join(tmp, "gitconfig");
   writeFileSync(gitconfig, "[user]\n\tname = T\n\temail = t@example.com\n");
-  const r = spawnSync(join(KIT, "bin/sandcastle"), ["doctor"], {
+  return {
     cwd: tmp,
-    encoding: "utf8",
     env: {
       PATH: [bin, dirname(process.execPath), "/usr/bin", "/bin"].join(":"),
       HOME: tmp,
@@ -42,9 +43,21 @@ const doctor = (shims: Record<string, string>, env: Record<string, string> = {})
       GIT_CEILING_DIRECTORIES: tmp,
       ...env,
     },
-  });
+  };
+};
+const doctor = (shims: Record<string, string>, env: Record<string, string> = {}) => {
+  const r = spawnSync(join(KIT, "bin/sandcastle"), ["doctor"], { ...setup(shims, env), encoding: "utf8" });
   return r.stdout + r.stderr;
 };
+// Not spawnSync: a server in this process has to answer the doctor's probe while it runs.
+const doctorAsync = (shims: Record<string, string>, env: Record<string, string> = {}) =>
+  new Promise<string>((done) => {
+    const child = spawn(join(KIT, "bin/sandcastle"), ["doctor"], setup(shims, env));
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("close", () => done(out));
+  });
 const line = (out: string, label: RegExp) => {
   const i = out.split("\n").findIndex((l) => label.test(l));
   return i < 0 ? "(missing)" : out.split("\n").slice(i, i + 2).join("\n");
@@ -61,9 +74,25 @@ test("docker installed, daemon stopped: start it", () => {
   assert.match(line(out, /Docker running/), /^FIX  Docker running\n.*Start/);
 });
 
-test("no gh: install it; gh signed out: sign in", () => {
+test("no gh: install it; gh signed out: sign in", async () => {
   assert.match(line(doctor({ gh: "#!/bin/sh\nexit 127\n" }), /GitHub CLI/), /^FIX  GitHub CLI installed\n.*(brew install gh|cli\.github\.com)/);
-  assert.match(line(doctor({ gh: '#!/bin/sh\n[ "$1" = --version ] && exit 0\nexit 1\n' }), /GitHub CLI/), /^FIX  GitHub CLI signed in on this machine\n.*`gh auth login`$/);
+  // GitHub answers (a local stand-in), so the failed `gh auth status` is a sign-in problem.
+  const api = createServer((_req, res) => res.end());
+  await new Promise<void>((done) => api.listen(0, "127.0.0.1", done));
+  try {
+    const url = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+    const out = await doctorAsync({ gh: '#!/bin/sh\n[ "$1" = --version ] && exit 0\nexit 1\n' }, { SANDCASTLE_TEST_GITHUB_API: url });
+    assert.match(line(out, /GitHub CLI/), /^FIX  GitHub CLI signed in on this machine\n.*`gh auth login`$/);
+  } finally {
+    api.close();
+  }
+});
+
+test("gh fails because GitHub is unreachable: check the network, not sign in again", () => {
+  // Offline, `gh auth status` calls a good token invalid.
+  const out = doctor({ gh: '#!/bin/sh\n[ "$1" = --version ] && exit 0\nexit 1\n' }, { SANDCASTLE_TEST_GITHUB_API: "http://127.0.0.1:9" });
+  assert.match(line(out, /GitHub reachable/), /^FIX  GitHub reachable \(gh's sign-in could not be checked\)\n.*Check the network/);
+  assert.doesNotMatch(out, /gh auth login/);
 });
 
 test("git older than 2.31 is a FIX", () => {

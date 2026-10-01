@@ -248,6 +248,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   sandbox for both; a merged row shows the commits it landed rather than 0; a project whose logs
   were all archived shows "(nothing to show)" rather than "(no runs yet)"; and below 80 columns
   the legend no longer explains a CPU column that is not there.
+- Offline, `sandcastle doctor` said "GitHub CLI signed in" was the problem and told a signed-in
+  user to run `gh auth login` (gh calls a good token invalid when it cannot reach GitHub). It now
+  checks whether GitHub answers and, when it does not, says to check the network. A failed `gh`
+  call elsewhere (`queue`, `run`, `land`) now ends with what to do: check the network, sign gh in,
+  or run `sandcastle doctor`, rather than gh's bare line.
 
 ### Added
 

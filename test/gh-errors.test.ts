@@ -58,3 +58,18 @@ test("no GitHub remote: the refusal says how to add one or use ticket files, and
   // Once, in the kit's line: sh() captures a child's stderr rather than passing it through.
   assert.equal(r.stderr.split("no git remotes found").length - 1, 1, r.stderr);
 });
+
+// gh's own words for a dropped network or a signed-out token name no way out; the kit's line does.
+for (const [said, fix] of [
+  ['Post "https://api.github.com/graphql": dial tcp: lookup api.github.com: no such host', /GitHub could not be reached\. Check the network \(or proxy\)/],
+  ["HTTP 401: Bad credentials (https://api.github.com/graphql)", /gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in/],
+  ["something gh has never said before", /`sandcastle doctor` checks gh's sign-in and the GitHub remote/],
+] as const) {
+  test(`gh failing with "${said.slice(0, 40)}" says what to do next`, () => {
+    const p = project();
+    writeFileSync(join(p.bin, "gh"), `#!/bin/sh\necho '${said}' >&2\nexit 1\n`);
+    const r = sandcastle(p, "queue");
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, fix);
+  });
+}

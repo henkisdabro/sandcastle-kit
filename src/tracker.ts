@@ -109,10 +109,16 @@ const github = (project: Project): Tracker => {
     } catch (e) {
       const err = e as { stderr?: unknown; message?: string };
       const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
-      // gh's own words name no way out of the commonest first-run case.
+      // gh's own words name no way out: a Go dial error, or a signed-out token.
       const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
         ? ` - this repository has no GitHub remote, so the github tracker has no issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
-        : "";
+        : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
+        ? " - GitHub could not be reached. Check the network (or proxy), then try again."
+        : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
+        ? " - gh is not signed in to GitHub: `gh auth status` says why, `gh auth login` signs it in."
+        : /Could not resolve to an? /i.test(why)
+        ? ""
+        : " - `sandcastle doctor` checks gh's sign-in and the GitHub remote.";
       throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
     }
   };
