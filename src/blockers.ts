@@ -32,12 +32,37 @@ const tokens = (project: Project) => {
   return alts.join("|");
 };
 
+// A ticket that quotes example blocker lines (a spec for this parser's own tests, say) was held
+// back by issues it never depended on, so code is removed before blockers are read: fenced
+// blocks first (a fence line closes only on the same character, at least as long as the
+// opener; an unclosed fence runs to the end, as GitHub renders it), then inline spans (a run of
+// N backticks to the next run of exactly N, never across a blank line). Not stripped: indented
+// (four-space) code blocks and HTML <code>/<pre> - the decision names fenced and inline code only.
+export const stripCode = (text: string): string => {
+  let fence: { char: string; len: number } | undefined;
+  const lines = text.split("\n").map((line) => {
+    if (fence) {
+      const close = line.match(/^[ \t]*(`+|~+)[ \t]*\r?$/);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.len) fence = undefined;
+      return "";
+    }
+    const open = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
+    // A backtick fence's info string has no backtick: "```foo```" is inline code.
+    if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
+      fence = { char: open[1][0], len: open[1].length };
+      return "";
+    }
+    return line;
+  });
+  return lines.join("\n").replace(/(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g, " ");
+};
+
 /** Every blocker named after a trigger phrase; a list ("#1, #2 and ENG-3") counts each. */
 export const parseRefs = (project: Project, text: string): Ref[] => {
   const token = tokens(project);
   const phrase = new RegExp(`${TRIGGER}((?:${token})(?:\\s*(?:,|and|&)\\s*(?:${token}))*)`, "gi");
   const seen = new Map<string, Ref>();
-  for (const m of text.matchAll(phrase)) {
+  for (const m of stripCode(text).matchAll(phrase)) {
     for (const t of m[1].match(new RegExp(token, "gi")) ?? []) {
       const ref: Ref = t.startsWith("#")
         ? { kind: "github", id: t.slice(1) }
