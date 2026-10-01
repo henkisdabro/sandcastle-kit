@@ -269,6 +269,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   terminal.
 - The `.git` tamper stop names the file that changed (`.git/config`, or a file in `.git/info/`)
   instead of "`.git/config` or `.git/info/`", so it can be checked without guessing.
+- A gate that hits its 45-minute bound reads as one: `test=TIMEOUT` in the gate line and the
+  report, `RED (timed out after 45 min)` in the gate log, and the failure output starts by saying
+  so, instead of a bare exit 124.
 
 ### Added
 

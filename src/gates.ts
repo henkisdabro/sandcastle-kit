@@ -16,10 +16,11 @@ import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
-import { execGate, unlockWorktree } from "./worktree-lock.ts";
+import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 
-export type Gate = { name: string; pass: boolean; ms?: number };
+// `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
+export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
 type Failure = { name: string; command: string; exitCode: number; output: string };
 export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[] };
 
@@ -62,10 +63,12 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       const since = Date.now();
       const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
       const ms = Date.now() - since;
-      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
-      gates.push({ name: g.name, pass: r.exitCode === 0, ms });
+      const timedOut = r.exitCode === 124;
+      const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
+      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+      gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
       if (r.exitCode === 0) continue;
-      const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+      const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
       failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
       // A timed-out gate may still be running in this container (or Docker
       // may not be answering): a later gate would run beside it, or wait out
@@ -167,14 +170,14 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     }
   });
 
-export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : "FAIL"}`).join(" ");
+export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}`).join(" ");
 
 // One line per gate result with the command that ran, in full: a gate that
 // reached the network went green unnoticed because only its name and verdict
 // were printed. runGates stops early, so `results` is a prefix of `configured`
 // and the command is found by position.
 export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[]): string[] =>
-  results.map((g, i) => `  ${g.pass ? "pass" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
+  results.map((g, i) => `  ${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
 
 // Where gate time goes, per gate. A slow gate runs on every branch, its
 // repair passes and the base check, so it is the first place to look when

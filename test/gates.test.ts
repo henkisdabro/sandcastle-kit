@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 // The machine-wide slots live under the cache dir; a test must not take real ones.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { failureKey, runGates, runHookTests } = await import("../src/gates.ts");
+const { failureKey, gateLine, gateResultLines, runGates, runHookTests } = await import("../src/gates.ts");
 
 type Result = { exitCode: number; stdout: string; stderr: string };
 // Each command answers with the first entry whose key it contains.
@@ -70,6 +70,10 @@ test("running every gate still stops at one that timed out", async () => {
   assert.deepEqual(run.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", false]]);
   assert.ok(!box.ran.some((c) => c.includes("run-build")), "build ran beside a timed-out test gate");
   assert.match(box.ran[0], /^timeout -k \d+ /);
+  // Said as a timeout wherever the operator reads it, not as a bare exit 124.
+  assert.equal(gateLine(run.gates), "lint=pass test=TIMEOUT");
+  assert.match(run.failure?.output ?? "", /^The gate timed out after 45 min and was stopped/);
+  assert.match(gateResultLines(project.gates, run.gates)[1], /^ {2}TIMEOUT {2}test {2}\$ run-tests$/);
 });
 
 test("a repair that turns up a different failure is told apart, even when no line says fail or error", () => {

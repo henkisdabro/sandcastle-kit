@@ -73,7 +73,7 @@ export const unlockAll = () => {
 // `-k`: a gate that ignores TERM is killed, not left running in the container
 // after its slot is freed. The host race cancels nothing - Sandcastle's exec
 // takes no signal - and only the sandbox's close ends what it started.
-const GATE_TIMEOUT_SECONDS = 45 * 60;
+export const GATE_TIMEOUT_SECONDS = 45 * 60;
 const HOST_GRACE_MS = 5 * 60 * 1000;
 
 type ExecResult = { exitCode: number; stdout: string; stderr: string };
