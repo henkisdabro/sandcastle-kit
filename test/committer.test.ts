@@ -23,6 +23,8 @@ type Project = import("../src/config.ts").Project;
 const cleanEnv = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !/^GIT_(COMMITTER|AUTHOR)_/.test(k)),
 ) as Record<string, string>;
+// mergeBranch passes process.env through to git, so an exported author would win over config there too.
+for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const git = (root: string, ...args: string[]) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8", env: cleanEnv }).trim();
 
