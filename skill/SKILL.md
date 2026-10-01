@@ -130,6 +130,26 @@ comments, and the gates can prove it.
    category below, the evidence, and for a decision the concrete question with options and a
    recommendation. Ask the user only what the code and history cannot answer.
 
+   Write the batch's issue numbers into the `Issues:` line before sending; never send a brief with
+   a placeholder left in it.
+
+   ```text
+   Brief for each subagent
+   You are triaging issues. Read-only: read files, search, run `git log`, `git show`, `git blame`,
+   and `gh issue view N --json title,body,comments` (files tracker: read the ticket file). No
+   edits, no commits, no tracker writes (no `gh issue comment`, `gh issue edit`, `gh issue close`,
+   `gh issue create`, no `gh label`), and no `sandcastle run`, `preflight` or anything else that
+   spends model allowance.
+   Issues: <the batch's numbers>
+   For each issue read: the issue and its comments, the code it names, recent history, the repo's
+   decision records and label vocabulary, and any earlier decision or `PARKED:` comment.
+   Classify each issue as exactly one of: ready, needs a decision, human-only, blocked by another
+   issue, already fixed or false, epic or too big, parked.
+   Return per issue: the number, the category, and the evidence with file:line. For a decision, add
+   one self-contained question with 2-4 options, recommended first. For blocked, name the blocking
+   issue. For too big, list the proposed child issues.
+   ```
+
    | Category | Action |
    |---|---|
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the issue is stale or half-fixed |
