@@ -311,6 +311,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle doctor` makes a committed `.sandcastle/.env` a FIX - untrack it and rotate its
   tokens, as they stay in the history - and one that is not gitignored a FIX with the ignore line.
   Before, it checked only the file's mode.
+- For contributors: the kit's pre-commit hook skips blank lines and `#` comments in the personal
+  denylist. A blank line matched every staged line and blocked every commit. Its missing-gitleaks
+  message now names a Linux install too.
 
 ### Added
 
