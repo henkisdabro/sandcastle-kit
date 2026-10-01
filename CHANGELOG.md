@@ -59,6 +59,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   build --force` now and then.
 - **The base image changed** (npm cache cleared, a build-time git version check), so every
   project's image rebuilds once on its next run.
+- A watcher that parses the closing summary: merged tickets the reviewer flagged as unproven by
+  any gate now count in `N need you`, listed as `merged - check by hand`.
 
 ### Changed
 
@@ -202,6 +204,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   written to the repository.
 - `model:<id>` and `effort:<level>` GitHub labels set the implementer's model and effort for one
   ticket, checked (and preflighted) before any sandbox starts.
+- `autonomy` (config) and `AUTONOMY_LEVEL` (env): one `sandcastle run` re-runs its conflicted and
+  newly unblocked tickets. Level 1 asks first (and only prints the command when stdin is not a
+  terminal), level 2 re-runs once, level 3 up to twice. Off by default.
+- The reviewer flags a change no gate exercises; the closing summary lists such merged tickets
+  under **Needs you** as `merged - check by hand`, with what to check.
 
 ## [0.2.0] - 2026-09-30
 
