@@ -5,10 +5,25 @@
 #
 # Node 24 LTS on Debian 13 (trixie). Debian packages - git, python3, jq, curl - come
 # from the release this names, so an oldstable base keeps them years behind.
+#
+# Full `node:24-trixie`, not `-slim`: the toolchain it carries is load-bearing.
+# - `src/lean.ts` runs python3 in the container for the hook check.
+# - node-gyp and Python sdist builds need gcc, make and the -dev libraries.
+# - `sandcastle init`'s Rust scaffold needs a linker.
+# - glibc, which Claude Code's native binary and Playwright both need.
+# Alpine (musl) is out too: Playwright does not support it, and Claude Code needs
+# workarounds there. Switching to `-slim` to save space breaks projects' gates.
 FROM node:24-trixie
 
 RUN apt-get update && apt-get install -y git curl jq \
   && rm -rf /var/lib/apt/lists/*
+
+# `sandcastle preview` needs git 2.47 (`git merge-tree --write-tree`). Fail the
+# build here, not a run later. POSIX sh: the major and minor of `git --version`.
+RUN v=$(git --version | sed 's/^git version //') \
+  && major=${v%%.*} && rest=${v#*.} && minor=${rest%%.*} \
+  && { [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 47 ]; }; } \
+  || { echo "git $v is older than 2.47 (git merge-tree --write-tree): sandcastle preview needs it" >&2; exit 1; }
 
 # GitHub CLI - agents read, comment on and label issues with it.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -24,9 +39,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN corepack enable
 
 # Codex CLI, pinned, for the opt-in cross-family review (CROSS_REVIEW=1). It
-# signs in with a copy of the host's ~/.codex/auth.json.
+# signs in with a copy of the host's ~/.codex/auth.json. The cache clean drops
+# about 164 MB of /root/.npm that `npm install -g` leaves in the layer.
 ARG CODEX_VERSION=0.159.2
-RUN npm install -g @openai/codex@$CODEX_VERSION
+RUN npm install -g @openai/codex@$CODEX_VERSION && npm cache clean --force
 
 # Align the agent user with the host user, so files written in the bind-mounted
 # worktree belong to the host user without a runtime chown.
