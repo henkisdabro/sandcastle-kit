@@ -11,6 +11,7 @@ import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { hideFromGates, KIT_CREDENTIALS } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -158,6 +159,7 @@ export const credentials = (project: Project): Record<string, string> => {
         "read on the repositories you run, and put it in " + files[0] + ".",
     );
   }
+  hideFromGates(KIT_CREDENTIALS.map((k) => env[k]));
   return env as Record<string, string>;
 };
 

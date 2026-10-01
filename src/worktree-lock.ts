@@ -81,12 +81,31 @@ type Execs = {
   exec(cmd: string, options?: { onLine?: (line: string) => void }): Promise<ExecResult>;
 };
 
+// The kit's own credentials. A gate is the project's code - on a branch, code an agent wrote - and
+// never needs them: run with them in its environment, a test that printed its environment put both
+// tokens in the gate log, the terminal and the repair agent's prompt. So gates run without them, and
+// any value that still turns up in their output is replaced.
+export const KIT_CREDENTIALS = ["GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+const secrets = new Set<string>();
+/** Registers credential values to cut out of gate output (credentials() calls it). */
+export const hideFromGates = (values: (string | undefined)[]) => {
+  for (const v of values) if (v && v.length >= 8) secrets.add(v);
+};
+export const redact = (text: string) => {
+  let out = text;
+  for (const v of secrets) out = out.split(v).join("<redacted>");
+  return out;
+};
+
 export const execGate = async (
   sandbox: Execs,
   cmd: string,
   options?: { onLine?: (line: string) => void },
 ): Promise<ExecResult> => {
-  const bounded = `timeout -k 30 ${GATE_TIMEOUT_SECONDS} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
+  const unset = KIT_CREDENTIALS.map((k) => `-u ${k}`).join(" ");
+  const bounded = `timeout -k 30 ${GATE_TIMEOUT_SECONDS} env ${unset} sh -c '${cmd.replace(/'/g, "'\\''")}'`;
+  const onLine = options?.onLine;
+  options = onLine ? { ...options, onLine: (line) => onLine(redact(line)) } : options;
   let timer: NodeJS.Timeout | undefined;
   const hostBound = new Promise<ExecResult>((resolve) => {
     timer = setTimeout(() => {
@@ -96,7 +115,8 @@ export const execGate = async (
   });
   const since = Date.now();
   try {
-    const r = await Promise.race([sandbox.exec(bounded, options), hostBound]);
+    const raw = await Promise.race([sandbox.exec(bounded, options), hostBound]);
+    const r = { ...raw, stdout: redact(raw.stdout), stderr: redact(raw.stderr) };
     // `timeout` exits 137, not 124, when it had to follow up with KILL. It is
     // still a timeout: nothing a repair pass could fix, and it would hang again.
     return r.exitCode === 137 && Date.now() - since >= GATE_TIMEOUT_SECONDS * 1000 ? { ...r, exitCode: 124 } : r;

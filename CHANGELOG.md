@@ -71,6 +71,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   or a wrong type (`concurrency: "two"`, `repair.attempts: -1`) is refused with the key and the
   nearest real one, where before it was ignored and the run used the default. If a command refuses
   your config after the update, fix the key it names; `/sandcastle update` does this step.
+- **Gates run without the kit's tokens.** `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
+  `ANTHROPIC_API_KEY` are unset for every gate command, and a value of one that still appears in
+  gate output is replaced with `<redacted>`. A gate whose test read one of them now sees nothing:
+  give that test its own variable in `.sandcastle/.env`. `/sandcastle update` checks for it.
 
 ### Changed
 
@@ -300,6 +304,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A landing or `sandcastle land` that fails because git could not sign the merge commit (commit
   signing on, its agent locked) says so and what to do, instead of git's bare "failed to write
   commit object".
+- **Security:** a gate that printed its environment put `GH_TOKEN` and the Claude OAuth token, in
+  full, in the gate log, the terminal and a repair agent's prompt - from where an agent's comment
+  could carry them to the tracker. Gates are the project's code, on a branch code an agent wrote;
+  they no longer see those tokens.
 
 ### Added
 

@@ -848,13 +848,18 @@ Agents run unattended with permission prompts off, inside Docker. The container 
 and the kit narrows what can cross it:
 
 - 🔑 **Tokens.** Only a fine-grained GitHub token (issues and metadata on chosen repos) enters the
-  sandbox. It cannot push, edit workflows or change settings. Empty values are refused so a host
-  `ANTHROPIC_API_KEY` cannot leak in.
+  sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it
+  cannot push). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
+  without the kit's tokens, and a token value in gate output is replaced with `<redacted>`.
+- 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
+  `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an
+  agent follows them anyway.
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.
-- 🧬 **`.git` fingerprint.** `.git/config`, `.git/info/` and the base branch are fingerprinted; if a
-  sandbox changes them, the run stops before the host runs another git command there.
+- 🧬 **`.git` fingerprint.** `.git/config`, `.git/info/`, `.git/hooks/` and the base branch are
+  fingerprinted; if a sandbox changes them, the run stops before the host runs another git command
+  there, naming the file. A hook planted there would otherwise run on your next checkout or commit.
 - 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
   labelled `needs-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.

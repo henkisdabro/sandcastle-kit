@@ -45,5 +45,10 @@ was set up with.
       generated files" recipe, or any gate that runs a build and diffs its output) and `generated`
       is not set in `.sandcastle/config.ts`, propose declaring those paths with the command that
       writes them. Apply after the user agrees.
+   9. **Gates and the kit's tokens.** Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
+      `ANTHROPIC_API_KEY`. Run `git grep -nE 'GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY'`
+      in the project: if a gate's command or a test it runs reads one, it now sees nothing. Propose
+      giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
+      needs), and run `sandcastle gates` after the user agrees.
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
