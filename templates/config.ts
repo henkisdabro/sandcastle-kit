@@ -17,6 +17,10 @@ export default {
 
   // {{KIT_STACK}}
 
+  // Committed files a command writes. A merge conflict only in these is resolved by taking
+  // either side and running `regen` in a sandbox. README -> A gate for generated files.
+  // generated: [{ paths: ["dist/site.css"], regen: "pnpm run build:css" }],
+
   rules: ".sandcastle/rules.md",
 
   // Models and effort differ from the kit's defaults only when set here, per agent.
