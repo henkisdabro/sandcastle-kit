@@ -87,6 +87,14 @@ const fence = (text: string) => {
   return `${f}\n${text}\n${f}`;
 };
 
+// The ticket closes on the local merge, so the comment says the work is not on
+// the remote yet: a repo that deploys on push has nothing live when this reads "done".
+export const closeComment = (o: { branch: string; commits: number; repairs: number }, gateNames: string, report?: string): string =>
+  `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
+  (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
+  `); ${gateNames} all green before merge.` +
+  (report ? `\n\n${report}` : "");
+
 export const burndown = async (project: Project) => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
@@ -924,10 +932,7 @@ export const burndown = async (project: Project) => {
     try {
       tracker.close(
         o.issue,
-        `Merged by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
-          (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
-          `); ${gateNames} all green before merge.` +
-          (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""),
+        closeComment(o, gateNames, reports.get(o.issue)),
       );
       land(o.issue, "merged", "merged and closed");
     } catch (error) {
