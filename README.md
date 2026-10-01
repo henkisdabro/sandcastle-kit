@@ -321,7 +321,9 @@ gates: [
 Declare the same files under `generated` in `.sandcastle/config.ts`, with the command that writes
 them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an earlier run whose
 base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
-still proves the result matches the sources.
+still proves the result matches the sources. At landing, a branch whose merge conflicts only in
+`generated` paths is merged in a throwaway sandbox by regenerating them, committed with the usual
+`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step.
 
 ## 📋 Queue: what agents work on
 
@@ -624,7 +626,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer. See [A gate for generated files](#-a-gate-for-generated-files) |
+| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run, and a merge at landing, that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run |
 
@@ -753,7 +755,7 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
-| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve), so a queued ticket does not conflict again. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
+| A branch conflicts at landing | Its next run merges the base into it first (a conflict is left for the implementer to resolve), so a queued ticket does not conflict again. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Tickets whose existing branches change the same file do not start in the same run: the first in queue order runs, the others wait for the next run (shown as blocked, "waits for #N (this run) - next run"). Two new tickets have no branch to compare, so they can still conflict, and the second lands on its next run. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
