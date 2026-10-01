@@ -49,12 +49,12 @@ test("importing pool.ts with a bad limit does not throw; limit() does", () => {
   assert.match(r.out, /imported\nSANDCASTLE_MAX_SANDBOXES=abc - expected a whole number of 1 or more\.\n2\n/);
 });
 
-test("a bad maxGates in config.json is refused with its name", () => {
+test("a bad maxGates in config.json is refused under its own key, not the env var", () => {
   const config = temp();
   mkdirSync(join(config, "sandcastle-kit"));
   writeFileSync(join(config, "sandcastle-kit", "config.json"), '{"maxGates": 0}');
   const r = probe({ XDG_CONFIG_HOME: config }, `const pool = await import("./src/pool.ts"); try { pool.limit("gates"); } catch (e) { console.log(e.message); }`);
-  assert.match(r.out, /SANDCASTLE_MAX_GATES=0 - expected a whole number of 1 or more/);
+  assert.match(r.out, /^maxGates=0 - expected a whole number of 1 or more/);
 });
 
 test("a malformed config.json names the file, and importing pool.ts still works", () => {

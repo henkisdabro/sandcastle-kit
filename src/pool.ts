@@ -51,7 +51,10 @@ const SETTING = {
 
 export const limit = (pool: PoolName): number => {
   const s = SETTING[pool];
-  return (settings[pool] ??= wholeNumber(s.env, process.env[s.env] ?? machineSettings()[s.key] ?? s.fallback, 1));
+  // Name the setting the value came from: an operator told about an env var
+  // they never set looks for the wrong thing.
+  const fromEnv = process.env[s.env] !== undefined;
+  return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
 };
 
 const alive = (pid: number) => {
