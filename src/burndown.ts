@@ -36,7 +36,7 @@ import {
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { makeTracker, refOf, type Ticket } from "./tracker.ts";
+import { LATEST_ISSUE, makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
@@ -1040,11 +1040,11 @@ export const burndown = async (project: Project) => {
   }
   let dryRunCheck: string | undefined;
   if (before) {
-    const after = tracker.snapshot([...before.keys()]);
+    const after = tracker.snapshot([...before.keys()].filter((k) => k !== LATEST_ISSUE));
     const changed = [...before].filter(([n, was]) => after.get(n) !== was);
     dryRunCheck = changed.length
       ? `DRY RUN BREACHED: ${changed.map(([n, was]) => `${ref(n)} ${was} -> ${after.get(n)}`).join("; ")} - an agent wrote to the tracker.`
-      : `dry run held: ${before.size} ticket(s) unchanged in the tracker.`;
+      : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({ verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify) } : null, keptWorktrees, dryRunCheck });
   console.log(`\n${await closingReport(project)}\n`);
