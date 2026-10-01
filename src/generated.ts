@@ -30,7 +30,7 @@ export const regensFor = (files: string[], generated: Generated[]): Generated[] 
 export const shq = (t: string) => `'${t.replaceAll("'", "'\\''")}'`;
 
 // Sandcastle sets the container's git identity when an agent run starts; a merge made
-// before the first one needs it too. The host's, as the agents' commits carry.
+// before the first one needs it too. The host's is the author; the container's AGENT_COMMITTER env (sandboxEnv) is the committer.
 export const hostIdentity = (root: string) => {
   const who = (key: string, fallback: string) => {
     try {

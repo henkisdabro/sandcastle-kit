@@ -719,6 +719,9 @@ and the kit narrows what can cross it:
 - 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
   labelled `needs-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
+- 🏷️ **Who committed.** Sandbox commits and the kit's merges carry the committer
+  `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author. `git log --format='%h %an / %cn %s'`
+  tells them from your own commits. Issues and comments the agents write still show your GitHub account.
 - 🛡️ **Protected paths.** A green branch that changes hooks, CI, `.claude/` settings, `.sandcastle/`,
   package-manager config or install scripts is labelled `needs-human` and left for you to merge.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
