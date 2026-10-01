@@ -44,6 +44,10 @@ export type GateProgress = {
   log?: string;
 };
 
+// One decimal under 10 s: gates average a few seconds, and "green in 0s" says
+// nothing. The cut-off at 9.95 s stops 9.96 s printing as "10.0s".
+export const seconds = (ms: number) => (ms < 9_950 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`);
+
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
@@ -57,8 +61,9 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
       const since = Date.now();
       const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
-      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : `RED (exit ${r.exitCode})`} in ${Math.round((Date.now() - since) / 1000)}s\n`);
-      gates.push({ name: g.name, pass: r.exitCode === 0, ms: Date.now() - since });
+      const ms = Date.now() - since;
+      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+      gates.push({ name: g.name, pass: r.exitCode === 0, ms });
       if (r.exitCode === 0) continue;
       const output = clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim());
       failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
@@ -213,7 +218,7 @@ export const gateRed = (result: unknown): string[] | undefined => {
   return Array.isArray(gates) ? gates.filter((g) => !g.pass).map((g) => g.name) : undefined;
 };
 const gateTimeLine =(gates: Gate[]) =>
-  [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${Math.round(g.ms! / 1000)}s`).join(", ");
+  [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
 
 // A green result holds for as long as nothing it depended on changes: the
 // base commit, the image, and the config that shapes a sandbox.
