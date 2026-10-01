@@ -288,6 +288,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   so the ticket started at once). Each was silent. `sandcastle blockers` also finds a ticket
   file's `Blocked by: 01` written in a comment, and a tracker named in
   `docs/agents/issue-tracker.md` keeps its own capitals in doctor's note.
+- **Security:** a hook a sandbox writes into the shared `.git/hooks/` now stops the run like a
+  changed `.git/config` does. The run itself has hooks off, but such a hook ran on the operator's
+  next `git checkout` or `git commit` in that repository; a prompt-injected implementer wrote one
+  in a test, and only its reviewer happened to remove it.
+- A landing or `sandcastle land` that fails because git could not sign the merge commit (commit
+  signing on, its agent locked) says so and what to do, instead of git's bare "failed to write
+  commit object".
 
 ### Added
 

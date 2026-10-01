@@ -29,7 +29,9 @@ export const disableHostGitHooks = () => {
 // ---------------------------------------------------------------------------
 // 2. The shared `.git`. A container can rewrite `.git/config` (a
 // `core.fsmonitor` command runs on the host's next `git status`), the files in
-// `.git/info/`, or move the base branch. Fingerprinted at start and checked
+// `.git/info/`, plant a hook in `.git/hooks/` (it runs on the operator's next
+// checkout or commit, long after the run's own hooks-off environment is gone),
+// or move the base branch. Fingerprinted at start and checked
 // after every pipeline and before landing; any change stops the run before
 // the host runs another git command in the repo.
 // ---------------------------------------------------------------------------
@@ -39,7 +41,8 @@ export type Fingerprint = { files: Record<string, string>; base: string };
 
 export const gitFingerprint = (project: Project): Fingerprint => {
   const dir = sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], project.root);
-  const paths = [join(dir, "config"), ...(existsSync(join(dir, "info")) ? readdirSync(join(dir, "info")).map((f) => join(dir, "info", f)) : [])];
+  const inside = (sub: string) => (existsSync(join(dir, sub)) ? readdirSync(join(dir, sub)).map((f) => join(dir, sub, f)) : []);
+  const paths = [join(dir, "config"), ...inside("info"), ...inside("hooks")];
   const files: Record<string, string> = {};
   for (const f of paths) files[f] = createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
   return { files, base: sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root) };

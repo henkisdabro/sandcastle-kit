@@ -18,7 +18,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GI
 
 const repo = () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-guard-"));
-  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8", env });
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8", env });
   git("init", "-q", "-b", "main");
   git("commit", "-q", "--allow-empty", "-m", "start");
   return { project: { root, baseBranch: "main" } as Project, git };
@@ -51,6 +51,14 @@ test("a changed .git/config is tampering", () => {
   const before = gitFingerprint(project);
   git("config", "core.fsmonitor", "touch /tmp/owned");
   assert.throws(() => assertGitUnchanged(project, before, "after #1"), /STOPPED after #1: \.git\/config changed .* tampered/);
+});
+
+test("a hook planted in .git/hooks is tampering, named", () => {
+  // It would run on the operator's next checkout, after the run's hooks-off environment is gone.
+  const { project } = repo();
+  const before = gitFingerprint(project);
+  writeFileSync(join(project.root, ".git/hooks/post-checkout"), "#!/bin/sh\ntouch /tmp/owned\n", { mode: 0o755 });
+  assert.throws(() => assertGitUnchanged(project, before, "after #1"), /STOPPED after #1: \.git\/hooks\/post-checkout changed .* tampered/);
 });
 
 test("a new file under .git/info is tampering", () => {
