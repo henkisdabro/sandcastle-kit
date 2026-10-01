@@ -269,7 +269,11 @@ export const render = (f: Facts, plain = false): string => {
   if (merged.length) {
     if (f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   }
-  if (wouldMerge.length) done.push(`Dry run - would merge: ${list(wouldMerge)}. Nothing was merged or closed.`);
+  if (wouldMerge.length) {
+    // Each branch was gated alone; whether they merge together is a separate question.
+    const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
+    done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
+  }
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {

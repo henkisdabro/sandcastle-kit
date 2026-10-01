@@ -195,6 +195,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The closing summary's step for a red or conflicted ticket offers `sandcastle land <ticket>`
   (naming it when there is one) instead of a hand-written `git merge`, which skipped the kit's
   gates and close comment.
+- A dry run with several green branches no longer reads as if they would all merge together: the
+  summary says each was gated on its own and points at `sandcastle preview`.
 
 ### Added
 
