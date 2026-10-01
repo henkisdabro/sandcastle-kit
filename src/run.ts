@@ -4,7 +4,7 @@
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { IterationUsage } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
@@ -208,6 +208,24 @@ export const logOwner = (name: string) =>
 
 /** Where the orchestrator writes an issue's gate output as it runs; named like an agent log so it is archived with them. */
 export const gatesLog = (project: Project, id: string) => join(project.root, `.sandcastle/logs/agent-issue-${id}-gates-${id}.log`);
+
+/** The log Sandcastle writes for branch `agent/issue-<id>` and run name `name`; it mirrors Sandcastle's own filename sanitising. */
+export const agentLog = (project: Project, id: string, name: string) =>
+  join(project.root, ".sandcastle/logs", `agent-issue-${id}-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}.log`);
+
+// Local time with its offset, built by hand: toLocaleString varies by locale,
+// and git and the terminal show local time where the gate headers show UTC.
+export const localStamp = (d = new Date()) => {
+  const p = (n: number) => String(Math.abs(n)).padStart(2, "0");
+  const offset = -d.getTimezoneOffset();
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} ${offset < 0 ? "-" : "+"}${p(Math.trunc(offset / 60))}:${p(offset % 60)}`;
+};
+
+/** Separates one run's output from the last in a log that accumulates across attempts and runs. */
+export const markLog = (file: string, runId: string) => {
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `\n# run ${runId}, ${localStamp()}\n`);
+};
 
 // Sandcastle warns about an argument its prompt never mentions, so each run
 // gets only the ones its rendered prompt uses.
