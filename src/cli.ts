@@ -44,7 +44,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { limit } from "./pool.ts";
 import { closingReport } from "./report.ts";
 import { makeTracker } from "./tracker.ts";
-import { archiveFinishedLogs, parseRunArgs, preflight } from "./run.ts";
+import { archiveFinishedLogs, exitOnSignal, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -95,6 +95,7 @@ try {
       // told nothing when it ends; its watcher waits for this line, printed on
       // every exit - a drained queue and a crash included.
       process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
+      exitOnSignal();
       await burndown(await loadProject(root));
       break;
     }

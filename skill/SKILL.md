@@ -223,7 +223,7 @@ comments, and the gates can prove it.
    closing message with **all seven sections, in this order, with these headings**, each one
    present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
    report` printed, emoji included** - retyping a heading is how the emoji get lost; the
-   headings below are the ones it prints:
+   headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.

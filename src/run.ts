@@ -3,7 +3,7 @@
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants as osConstants, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IterationUsage } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
@@ -12,6 +12,24 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+
+// Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
+// running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
+// finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
+// only while a sandbox is live: while it listens, leave the teardown to it (a SIGHUP
+// is handed over as a SIGTERM); otherwise exit, so the exit handlers fire.
+export const exitOnSignal = () => {
+  const mapped = { SIGHUP: "SIGTERM", SIGINT: "SIGINT", SIGTERM: "SIGTERM" } as const;
+  for (const sig of Object.keys(mapped) as (keyof typeof mapped)[]) {
+    process.on(sig, () => {
+      if (process.listenerCount(mapped[sig]) > 1) {
+        if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
+        return;
+      }
+      process.exit(128 + osConstants.signals[sig]);
+    });
+  }
+};
 
 // ---------------------------------------------------------------------------
 // `sandcastle run` arguments - aliases for the ISSUES, DRY_RUN and CONCURRENCY
