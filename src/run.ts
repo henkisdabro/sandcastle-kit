@@ -389,6 +389,53 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   return out;
 };
 
+const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
+
+/**
+ * A rough estimate for a run about to start: the median tokens and time of
+ * this project's earlier tickets (from timings.jsonl) times `tickets`, with
+ * the time divided across `slots`. Undefined until an earlier ticket has
+ * recorded tokens, so a new project prints nothing rather than a guess. It
+ * covers the tickets' own pipelines only - not the image check, preflight,
+ * base gates, landing or verify. A line that does not parse is skipped.
+ */
+export const estimate = (project: Project, tickets: number, slots: number): string | undefined => {
+  let text: string;
+  try {
+    text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
+  } catch {
+    return undefined;
+  }
+  type Line = { project?: string; run?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  const groups = new Map<string, { ms: number; tokened: boolean; inTokens: number; out: number }>();
+  for (const raw of text.split("\n").filter(Boolean)) {
+    let l: Line;
+    try {
+      l = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!l || typeof l !== "object" || l.project !== project.name) continue;
+    if (!l.issue || String(l.issue) === "0" || typeof l.ms !== "number") continue;
+    const key = `${l.run}|${l.issue}`;
+    const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0 };
+    g.ms += l.ms;
+    if (l.tokens && typeof l.tokens === "object") {
+      g.tokened = true;
+      g.inTokens += (l.tokens.input ?? 0) + (l.tokens.cacheWrite ?? 0) + (l.tokens.cacheRead ?? 0);
+      g.out += l.tokens.output ?? 0;
+    }
+    groups.set(key, g);
+  }
+  const counted = [...groups.values()].filter((g) => g.tokened);
+  if (!counted.length) return undefined;
+  const inAll = median(counted.map((g) => g.inTokens))! * tickets;
+  const outAll = median(counted.map((g) => g.out))! * tickets;
+  const m = Math.round((median(counted.map((g) => g.ms))! * Math.ceil(tickets / slots)) / 60_000);
+  const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  return `Estimate (rough, from ${counted.length} earlier ticket(s) in this project): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time.`;
+};
+
 // ---------------------------------------------------------------------------
 // Outcomes - what each branch's last run decided, kept across runs in
 // logs/outcomes.json by branch slug. The status view shows it on the row, so
@@ -435,7 +482,6 @@ export const runTokens = (result: unknown): Tokens | undefined => {
     .reduce(addTokens, NO_TOKENS);
 };
 
-const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in (${k(t.cacheRead)} cached) / ${k(t.output)} out`;
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
