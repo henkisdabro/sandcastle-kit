@@ -15,6 +15,10 @@
 # visible characters, never bytes: padding a string that already holds escape
 # codes, or one holding a multi-byte glyph, is what used to skew the columns.
 set -uo pipefail
+# Every record the view reads is parsed with jq. Without it each read failed
+# silently and the view showed an empty queue and no runs. `--version` rather
+# than `command -v`: a jq that is on PATH but does not run is as good as none.
+jq --version >/dev/null 2>&1 || { echo "status needs jq (apt install jq / brew install jq)" >&2; exit 1; }
 cd "${SANDCASTLE_PROJECT:-$PWD}/.sandcastle" || exit 1
 
 export LC_ALL="${LC_ALL:-en_US.UTF-8}"
@@ -167,20 +171,39 @@ load_container_stats() {
 # "issue|#dep, #dep" lines for the dependencies still open, and QUEUE_UPDATED
 # "issue|epoch" lines for when each issue last changed.
 QUEUE=""; QUEUE_DEPS=""; QUEUE_UPDATED=""; QUEUE_AT=0; QUEUE_RUN=""
+# Why the queue could not be read, or empty. A signed-out gh or a stale token
+# used to blank the queue with no word, which read as "nothing is queued".
+QUEUE_ERR=""
 load_queue() {
-  local t run json
+  local t run json errf
   t=$(date +%s)
   # A run rewrites run.json when it starts and when it exits, having closed
   # what it landed: refetch then, rather than show a stale queue for a minute.
   run=$(mtime_of logs/run.json)
   [ $(( t - QUEUE_AT )) -lt 60 ] && [ "$run" = "$QUEUE_RUN" ] && return 0
-  QUEUE_AT="$t"; QUEUE_RUN="$run"; QUEUE_DEPS=""
+  QUEUE_AT="$t"; QUEUE_RUN="$run"; QUEUE_DEPS=""; QUEUE_ERR=""
   # The kit reads whichever tracker the project uses, and resolves each
   # ticket's blockers the way a run does (GitHub, Linear, ticket files).
-  json=$("${SANDCASTLE_BIN:-sandcastle}" queue --json 2>/dev/null) || { QUEUE=""; QUEUE_UPDATED=""; return 0; }
-  QUEUE=$(jq -r '.[].id' <<<"$json" 2>/dev/null | sort -V)
-  QUEUE_UPDATED=$(jq -r '.[] | select(.updated) | "\(.id)|\(.updated)"' <<<"$json" 2>/dev/null)
-  QUEUE_DEPS=$(jq -r '.[] | select(.blockedOn | length > 0) | "\(.id)|\(.blockedOn | join(", "))"' <<<"$json" 2>/dev/null)
+  # stderr goes to a file, not into the JSON: a warning on a good read must not
+  # spoil it, and on a failed one it is the reason to show.
+  errf=$(mktemp "${TMPDIR:-/tmp}/sandcastle-status.XXXXXX" 2>/dev/null) || errf=/dev/null
+  if json=$("${SANDCASTLE_BIN:-sandcastle}" queue --json 2>"$errf"); then
+    if jq -e 'type == "array"' <<<"$json" >/dev/null 2>&1; then
+      QUEUE=$(jq -r '.[].id' <<<"$json" 2>/dev/null | sort -V)
+      QUEUE_UPDATED=$(jq -r '.[] | select(.updated) | "\(.id)|\(.updated)"' <<<"$json" 2>/dev/null)
+      QUEUE_DEPS=$(jq -r '.[] | select(.blockedOn | length > 0) | "\(.id)|\(.blockedOn | join(", "))"' <<<"$json" 2>/dev/null)
+      [ "$errf" = /dev/null ] || rm -f "$errf"
+      return 0
+    fi
+    QUEUE_ERR="the queue was not a list of tickets"
+  else
+    # The first line that says something; control characters out, so an
+    # escape code in a message cannot move the cursor mid-frame.
+    QUEUE_ERR=$(tr -d '\000-\010\013-\037' <"$errf" 2>/dev/null | grep -m1 '[^[:space:]]')
+    [ -n "$QUEUE_ERR" ] || QUEUE_ERR="sandcastle queue failed"
+  fi
+  QUEUE=""; QUEUE_UPDATED=""
+  [ "$errf" = /dev/null ] || rm -f "$errf"
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
@@ -469,7 +492,7 @@ render() {
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text hidden_list group summary act since title counts overhead legend
-  local tstate started order note typ pos
+  local tstate started order note typ pos qmsg
   local -a out=()
   local n_out=0
 
@@ -699,11 +722,17 @@ $(wrap "$cols" "${mute} · ${off}" "${mute}ready = gates green, lands when the r
     "${mute}age = time in state (red: twice the usual)${off}" "${mute}CPU in cores of ${NCPU}${off}")"
 
   printf '%s\n' "$line"
-  overhead=$(( 8 + $(printf '%s\n' "$legend" | wc -l) + $(printf '%s\n' "$counts" | wc -l) ))
+  overhead=$(( 8 + $(printf '%s\n' "$legend" | wc -l) + $(printf '%s\n' "$counts" | wc -l) + $([ -n "$QUEUE_ERR" ] && echo 1 || echo 0) ))
   printf '%s\n' "$title" "$counts"
   # Label, then a dim pipe, then the value: the label column reads as the
   # row's title at a glance.
   printf '%s\n' " $(label run)$(run_line)"
+  # An unreadable queue is not an empty one: say so, under the run line.
+  if [ -n "$QUEUE_ERR" ]; then
+    qmsg="queue: could not read - ${QUEUE_ERR}"
+    [ "${#qmsg}" -gt $(( cols - 2 )) ] && qmsg="${qmsg:0:$(( cols - 3 ))}…"
+    printf '%s\n' "  ${mute}${qmsg}${off}"
+  fi
   models=$(models_line)
   [ -n "$models" ] && printf '%s\n' " $(label models)${mute}${models}${off}"
   # Tickets queued for a gates slot: gates are what the machine is busy with

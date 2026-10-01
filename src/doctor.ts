@@ -38,6 +38,7 @@ export const doctor = async (repoRoot?: string) => {
   check(!!run("docker", ["info", "--format", "{{.ServerVersion}}"]), "Docker running", "Start your container runtime (OrbStack, Podman machine, Docker Desktop or the Docker daemon) - `docker info` must work in this shell.");
   check(!!run("gh", ["auth", "status"]), "GitHub CLI signed in on this machine" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "gh auth login", !needsGh);
   check(!!run("git", ["--version"]), "git", "Install git 2.31 or newer.");
+  check(!!run("jq", ["--version"]), "jq (status view)", "Install jq: apt install jq, dnf install jq, or brew install jq.");
 
   const onPath = run("sh", ["-c", "command -v sandcastle"]);
   const linked = (() => {
