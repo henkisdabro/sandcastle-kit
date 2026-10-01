@@ -313,6 +313,13 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {})
   process.on("exit", (code) => {
     run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
     write();
+    // run.json is overwritten by the next run, so each finished run also leaves one
+    // line here. A failed append must never change the process's exit.
+    try {
+      appendFileSync(join(project.root, ".sandcastle/logs/history.jsonl"), JSON.stringify(run) + "\n");
+    } catch {
+      /* history is a convenience; the run itself already ended */
+    }
   });
   return {
     startedAt: run.startedAt as string,
