@@ -172,10 +172,28 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
   return timed.length ? Object.fromEntries(timed.map((g) => [g.name, g.ms!])) : undefined;
 };
 // The failing tests a red gate names, for the closing summary: pytest's
-// "FAILED path::test", vitest's and jest's "FAIL path". Three branches red on
-// the same test once read as three separate mysteries; named, they group.
+// "FAILED path::test", vitest's and jest's "FAIL path", node:test's TAP
+// "not ok N - name" and spec "✖ name (1.2ms)", Go's "--- FAIL: TestName" and
+// cargo's "test path::name ... FAILED". Three branches red on the same test
+// once read as three separate mysteries; named, they group. Matched line by
+// line so a bare "FAIL" line (Go prints one) cannot borrow the next line's word.
+const FAILING_TEST_LINE = [
+  /^(?:FAILED|ERROR)\s+(\S+)/,
+  /^\s*FAIL\s+(\S+)/,
+  /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
+  /^\s*✖ (?!failing tests:)(.+?)(?: \([\d.]+m?s\))?$/,
+  /^\s*--- FAIL: (\S+)/,
+  /^test (\S+) \.\.\. FAILED$/,
+];
 export const failingTests = (output: string) =>
-  [...new Set([...output.matchAll(/^(?:FAILED|ERROR)\s+(\S+)|^\s*FAIL\s+(\S+)/gm)].map((m) => m[1] ?? m[2]))].slice(0, 5);
+  [
+    ...new Set(
+      output
+        .split("\n")
+        .map((line) => line.replace(/\r$/, ""))
+        .flatMap((line) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined)),
+    ),
+  ].slice(0, 5);
 
 // The red gates of a result, or undefined for a step that is not a gate run.
 // A timings line once said `ok: true` for a red gate run, because `ok` meant
