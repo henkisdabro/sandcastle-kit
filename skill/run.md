@@ -1,0 +1,55 @@
+# sandcastle run - closing the run
+
+This continues the run steps 1-3 in SKILL.md.
+
+4. **Close the run - required, even mid-way through another request.** Relaying the report is not
+   the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
+   finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
+   project root, with the blockers re-read and the local git state as it is now. Run it from the
+   project root and take the summary from its own stdout, not from a pane scrape. Then write your
+   closing message with **all seven sections, in this order, with these headings**, each one
+   present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
+   report` printed, emoji included** - retyping a heading is how the emoji get lost; the
+   headings below are the ones it prints (without the emoji when NO_COLOR is set):
+
+   1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
+      merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
+   2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the issues are
+      closed in the tracker but the code is only on the local base branch until pushed - the pair of
+      facts operators most often misread.
+   3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
+      held, its size, the review and merge commands, and anything that needs a decision.
+   4. `## ❌ Needs fixing` - each red, conflicted, crashed or unlanded branch: the cause in one line,
+      the file or test, whether it shares a cause with another, and the concrete fix path. The
+      summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
+      place to look - read both branches' failures before calling it one cause. For a red gate, read the gate log
+      (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate
+      run with `-x` shows only its first failure.
+   5. `## ▶️ Runnable now / ⏳ Still blocked` - the unblocked list is computed after landing; for
+      each still blocked, what it waits for and whether that blocker is itself held or red.
+   6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
+      and the push that fits the repo's own shipping rules (read its AGENTS.md or CONTRIBUTING).
+      Say plainly that Sandcastle pushed nothing.
+   7. `## 👉 Next step` - **one** recommended action and why, then the short list after it, then
+      **one** question where a human decision is needed (for example: "Three of the unmerged
+      branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
+
+   End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
+   requeue a failed issue with a note, start a run for the unblocked issues, `sandcastle clean`
+   once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
+
+   Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
+   person marked the ticket `needs-human` during the run; `held` with "no commits" is a ticket an
+   agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
+   unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
+   after its gates or the merge failed for a reason other than a conflict. A run headed **Run
+   STOPPED** merged nothing: it names what moved - for a moved base branch, show the user the
+   commits it lists and ask whether they are theirs before offering a re-run; for a changed
+   `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
+   no commit usually means the repair agent judged the failure outside the branch - read the repair
+   log and its issue comment, then check that gate with `sandcastle gates` before blaming the
+   branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the cause
+   is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`). A dry
+   run ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote to the
+   tracker; show the user what changed. Unmerged branches are cleared with `sandcastle clean
+   --all` only after asking - their work is lost.
