@@ -22,9 +22,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   else to `run` now stops with a usage line.
 - `sandcastle init` on a repo whose base branch is not `main` now writes `baseBranch` for it.
   Existing projects are unchanged; a run on the wrong branch now says to set `baseBranch`.
+- **Triage results now live in `.sandcastle/triage/`**, so a compacted session no longer loses
+  them. Add `triage/` to the project's `.sandcastle/.gitignore`; `/sandcastle update` does it.
+- **Issues are still closed on the local merge**, but the closing comment now says the work is
+  merged locally and not yet pushed, and the status view shows how far the base branch is ahead.
 
 ### Fixed
 
+- A run closed by SIGHUP, SIGTERM or Ctrl-C outside the sandbox phase - a closed pane, say -
+  now records its end and releases its lock, instead of leaving no end line.
+- Preflight's model calls run at the same time instead of one after another.
+- Dry runs also catch a new issue or an edited issue body, not only changes to the run's own
+  tickets.
+- `sandcastle init` on an existing config says how to start over.
+- The help text says `clean --all` deletes unmerged branches without asking.
+- Troubleshooting covers a failed Codex cross-review preflight, which is fixed on the host.
+- Two tests failed only on macOS: BSD `script` refuses a socket as stdin, and a mise or asdf
+  `node` shim on PATH reads its config from the `XDG_CONFIG_HOME` a test points elsewhere.
 - The status view's frame lines were invalid UTF-8 on Linux (GNU `tr` maps bytes, not
   characters), so every rule showed as replacement characters. macOS was unaffected.
 - A merge that fails at landing because of the working tree names the dirty files instead of
@@ -70,6 +84,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- `sandcastle doctor --verify` checks the GitHub and Claude subscription tokens live, and prints
+  which file each came from with a fingerprint, never the value. Plain `doctor` stays offline.
+- `NO_COLOR` is honoured: the status view drops colour (as it now also does when piped), and
+  `sandcastle report` uses plain headings without emoji.
+- `sandcastle gates` and the run's base check print each gate's command next to its result.
+- The closing summary shows tokens with the cached share, per model.
 - The skill's `queue` action carries a complete triage brief for its subagents.
 - README: a gate recipe that checks generated files are committed in sync with the build.
 - Tests for the protected-path check, blocker references and ticket files, and `init`'s stack

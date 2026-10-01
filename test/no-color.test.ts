@@ -99,7 +99,9 @@ test("status.sh piped with NO_COLOR=1 has no colour codes", () => {
 const onPty = (extra: Record<string, string> = {}) => {
   const cmd = join(KIT, "status.sh");
   const args = process.platform === "linux" ? ["-qec", `bash '${cmd}' 0`, "/dev/null"] : ["-q", "/dev/null", "bash", cmd, "0"];
-  return spawnSync("script", args, { encoding: "utf8", env: env(extra) });
+  // No stdin: Node's default is a socket, and BSD script refuses one
+  // ("tcgetattr/ioctl: Operation not supported on socket") - util-linux does not mind.
+  return spawnSync("script", args, { encoding: "utf8", env: env(extra), stdio: ["ignore", "pipe", "pipe"] });
 };
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;
 
