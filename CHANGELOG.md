@@ -29,8 +29,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A run creates a `needs-triage` label** in a GitHub project if it is missing, and agents add
   it to follow-up issues they file; the closing summary lists them under **Needs you**.
 - **Inside Herdr, the status view now gets about half the screen** (run pane 25%, status 50%,
-  sandboxes 25% in a column of equal rows), and Herdr switches to the run's tab once it opens.
-  `SANDCASTLE_HERDR_FOCUS=0` keeps your focus where it is.
+  sandboxes 25% in a column of equal rows). The run never moves your focus to its tab.
 - **Tickets whose existing branches change the same file no longer start in the same run.** Before
   the pool starts, a run compares each ready ticket's existing `agent/issue-N` branch against the
   base; of an overlapping group the first in queue order starts and the rest show as blocked,

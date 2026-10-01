@@ -178,9 +178,6 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
     herdr(["pane", "run", statusPane, STATUS_COMMAND]);
     return true;
   })) return NONE;
-  // Take the operator to the run, which was opened without focus; =0 for someone who starts
-  // runs while working in another pane and would rather not be moved.
-  if (process.env.SANDCASTLE_HERDR_FOCUS !== "0") safe(() => herdr(["tab", "focus", tab]));
   // A status pane an earlier kit version opened in the user's own tab is now
   // a second copy. Closed only while it still shows the status view.
   const old = statusPaneRecord(project);
