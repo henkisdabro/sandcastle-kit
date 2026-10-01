@@ -85,7 +85,10 @@ test("doctor reports a malformed config.json as a FIX line instead of crashing",
   const config = temp();
   mkdirSync(join(config, "sandcastle-kit"));
   writeFileSync(join(config, "sandcastle-kit", "config.json"), "{ not json");
-  const r = spawnSync(join(root, "bin/sandcastle"), ["doctor"], {
+  // This node, not bin/sandcastle: its tsx finds `node` on PATH, and a mise or
+  // asdf shim there reads its own config from XDG_CONFIG_HOME, which this test
+  // points at a temp dir - the shim then exits before the kit runs.
+  const r = spawnSync(process.execPath, [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, "src/cli.ts"), "doctor"], {
     cwd: temp(),
     encoding: "utf8",
     env: { ...process.env, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: temp() },

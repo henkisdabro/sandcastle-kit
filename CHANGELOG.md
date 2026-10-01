@@ -16,8 +16,31 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   view says it is missing. macOS 15 and later ship it; on most Linux, `apt install jq` (or `dnf`).
 - A watcher that parsed the closing summary's headline: `N need you` now counts only the
   **Needs you** section, and a new `N need fixing` counts the **Needs fixing** one.
+- **`sandcastle run` now refuses arguments it does not know.** It used to ignore them, so
+  `sandcastle run 12 14` burned down the whole queue. It now takes ticket numbers, `--dry` and
+  `--concurrency N` (the same as `ISSUES`, `DRY_RUN` and `CONCURRENCY`); a script passing anything
+  else to `run` now stops with a usage line.
+- `sandcastle init` on a repo whose base branch is not `main` now writes `baseBranch` for it.
+  Existing projects are unchanged; a run on the wrong branch now says to set `baseBranch`.
 
 ### Fixed
+
+- The status view's frame lines were invalid UTF-8 on Linux (GNU `tr` maps bytes, not
+  characters), so every rule showed as replacement characters. macOS was unaffected.
+- A merge that fails at landing because of the working tree names the dirty files instead of
+  "Merge with strategy ort failed".
+- `preflight` with a rejected credential prints the reply once for all models that gave it, names
+  the key and the file it came from, and shows no stack trace.
+- `sandcastle setup` offers to replace a credential that is already set (default: keep it).
+- Bad numbers (`CONCURRENCY=abc`, `SANDCASTLE_MAX_SANDBOXES=0`) are refused instead of starting
+  no workers or waiting forever; a malformed `~/.config/sandcastle-kit/config.json` no longer
+  crashes every command, and `doctor` reports it.
+- A red base check clears the cached green result, so the next run cannot skip a base known to be
+  red.
+- `needs-human` is no longer re-created with `--force` on every hold, which reset a repo's own
+  colour and description for it.
+- The closing summary's next step for a conflicted ticket names what exists: the next run resumes
+  its branch, or merge it by hand.
 
 - Every command prints a refusal - an unknown command, a missing config, credentials, the run
   lock, a red base gate, preflight, `init` on an existing config - as a message with no stack
@@ -47,6 +70,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- The skill's `queue` action carries a complete triage brief for its subagents.
+- README: a gate recipe that checks generated files are committed in sync with the build.
 - Tests for the protected-path check, blocker references and ticket files, and `init`'s stack
   detection.
 
