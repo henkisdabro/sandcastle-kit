@@ -10,7 +10,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import type { Project } from "./config.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { credentials, KIT, machineSettings, sh } from "./sandbox.ts";
+import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
@@ -77,10 +77,32 @@ const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
   }
 };
 
+// What a failed preflight says. Every model rejecting a bad token returns the same reply, so one line
+// names them all; a reply that looks like an auth rejection also names the credential's key and file
+// (never the value), since finding a stale token cost a field report about ten tool calls.
+const AUTH_REJECTION = /\b401\b|authenticat|invalid.*(api.key|token)|oauth|400 \(no body\)/i;
+
+export const preflightFailure = (
+  failures: { model: string; reply: string }[],
+  credential: { key: string; file: string } | undefined,
+): string => {
+  const same = failures.every((f) => f.reply === failures[0]!.reply);
+  const lines = same
+    ? [`${failures.map((f) => f.model).join(", ")}: ${failures[0]!.reply}`]
+    : failures.map((f) => `${f.model}: ${f.reply}`);
+  if (same && credential && AUTH_REJECTION.test(failures[0]!.reply)) {
+    lines.push(
+      `The credential was likely rejected: ${credential.key} from ${credential.file}. ` +
+        `Make a new one (\`claude setup-token\` for a subscription) and replace that value in ${credential.file}.`,
+    );
+  }
+  return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
+};
+
 export const preflight = (project: Project, image: string) => {
   if (process.env.SKIP_PREFLIGHT === "1") return;
   const env = credentials(project);
-  const failures: string[] = [];
+  const failures: { model: string; reply: string }[] = [];
   for (const model of new Set([IMPL_MODEL, REVIEW_MODEL])) {
     const r = ask(
       "docker",
@@ -97,7 +119,7 @@ export const preflight = (project: Project, image: string) => {
     } catch {
       /* not JSON - the raw output is the reason */
     }
-    if (!r.ok || reply.is_error !== false) failures.push(`${model}: ${(reply.result ?? r.out).slice(0, 300)}`);
+    if (!r.ok || reply.is_error !== false) failures.push({ model, reply: (reply.result ?? r.out).slice(0, 300) });
   }
   if (CROSS_REVIEW) {
     // On the HOST, not in the image: this also refreshes the host's ChatGPT
@@ -107,10 +129,10 @@ export const preflight = (project: Project, image: string) => {
       ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-m", CROSS_REVIEW_MODEL, "Reply OK"],
       { cwd: tmpdir() },
     );
-    if (!r.ok) failures.push(`${CROSS_REVIEW_MODEL}: ${r.out.split("\n").slice(-3).join(" ").slice(0, 300)}`);
+    if (!r.ok) failures.push({ model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) });
   }
   if (failures.length) {
-    throw new OperatorError(`Preflight failed - no sandbox started:\n  ${failures.join("\n  ")}`);
+    throw new OperatorError(preflightFailure(failures, credentialSource(project)));
   }
   console.log(`Preflight ok: ${MODELS_LINE}`);
 };
