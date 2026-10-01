@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bash test/status.test.sh && tsx --test test/*.test.ts"
+    "test": "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && bash test/status.test.sh && tsx --test test/*.test.ts"
   },
   "packageManager": "pnpm@12.3.4",
   "dependencies": {
