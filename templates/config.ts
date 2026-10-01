@@ -6,6 +6,7 @@ export default {
   // baseBranch: "main",
   // label: "ready-for-agent",
   // concurrency: 4,
+  // land: "merge",                         // or "squash": one commit per ticket on the base branch
 
   // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
   // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.
