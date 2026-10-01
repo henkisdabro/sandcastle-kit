@@ -36,7 +36,7 @@ import {
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { LATEST_ISSUE, makeTracker, refOf, type Ticket } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
@@ -306,6 +306,8 @@ export const burndown = async (project: Project) => {
   else await timed("", "base gates", () => requireGreenBase(project, image, planFile));
   // What the tracker says about each ticket now, to prove a dry run left it alone.
   const before = DRY_RUN ? tracker.snapshot(issues.map((i) => i.id)) : undefined;
+  // Agents label the follow-up issues they file; the sandbox token cannot create the label.
+  if (tracker.kind === "github" && !DRY_RUN) ensureTriageLabel();
   run.update({ stage: "running" });
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.

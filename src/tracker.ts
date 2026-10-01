@@ -78,6 +78,24 @@ const fence = (text: string) => {
 // `gh issue list` stops at this many and does not say so.
 const LIST_LIMIT = 500;
 
+/**
+ * Makes sure the `needs-triage` label exists, so agents can put it on the
+ * follow-up issues they file. Created here, on the host with its own `gh`
+ * login: the sandbox token can add a label but not create one. No --force, so a
+ * label a person already made keeps its colour and description. A failure only
+ * costs the label, never the run.
+ */
+export const ensureTriageLabel = (gh = (args: string[]) => sh("gh", args)) => {
+  try {
+    const found = JSON.parse(gh(["label", "list", "--search", "needs-triage", "--json", "name", "--limit", "100"])) as { name: string }[];
+    if (found.some((l) => l.name === "needs-triage")) return;
+    gh(["label", "create", "needs-triage", "--color", "FBCA04", "--description", "Filed by a sandcastle agent; triage before queueing"]);
+  } catch (e) {
+    const why = (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 160);
+    console.log(`  warning: could not create the needs-triage label: ${why}; agent-filed issues will be unlabelled`);
+  }
+};
+
 const github = (project: Project): Tracker => {
   const gh = (args: string[]) => sh("gh", args);
   const list = (extra: string[], withComments: boolean): Ticket[] => {
@@ -191,8 +209,8 @@ const github = (project: Project): Tracker => {
       LOST: "comment on the issue that the sandbox's git record was lost",
       TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
       COMMENTS_VIEW: "# Comments on the issue\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
-      NEW_TICKET: "GitHub issue (`gh issue create`)",
-      NEW_TICKET_REVIEW: "open a new GitHub issue\n  (`gh issue create`)",
+      NEW_TICKET: "GitHub issue (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
+      NEW_TICKET_REVIEW: "open a new GitHub issue\n  (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
       RECORD:
         "**Before you finish, comment on the issue** with what you changed, the commit(s), and anything a\n" +
         "human must still do. The issue is closed automatically when your branch merges, so that comment is\n" +
