@@ -97,6 +97,7 @@ end-of-run notification go in an optional `~/.config/sandcastle-kit/config.json`
 > [!IMPORTANT]
 > Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
 > agents run with permission prompts off and such a token could push or edit workflows.
+> `SANDCASTLE_ALLOW_BROAD_TOKEN=1` lifts the refusal, for a throwaway repo only.
 
 Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --verify` also asks
 GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value).

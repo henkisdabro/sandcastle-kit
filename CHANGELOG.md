@@ -176,6 +176,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   requeue 999` used to crash.
 - A closed ticket in `ISSUES` (or `sandcastle run <n>`), and an unknown ticket-file id, are
   refused with one line instead of a stack trace.
+- `.env.example` no longer says a project's `.sandcastle/.env` can override every key:
+  `LINEAR_API_KEY` is refused there.
+- `SANDCASTLE_ALLOW_BROAD_TOKEN=1`, which accepts a `GH_TOKEN` that is not fine-grained, is
+  documented, as an escape hatch for throwaway repos.
 
 ### Added
 
