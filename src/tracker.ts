@@ -15,6 +15,7 @@
 // A ticket id is a string that is safe in a branch and file name: "12" for
 // GitHub, "checkout-03" for .scratch/checkout/issues/03-*.md.
 
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
@@ -44,7 +45,7 @@ export interface Tracker {
   close(id: string, text: string): void;
   /** Out of the queue and marked for a human, with the reason. */
   hold(id: string, text: string): void;
-  /** State, labels and comment count, to prove a dry run wrote nothing. */
+  /** State, labels, comment count and a title/body hash (GitHub also keys LATEST_ISSUE), to prove a dry run wrote nothing. */
   snapshot(ids: string[]): Map<string, string>;
   /** Whether the ticket was reopened / requeued by someone after `at` (ms). */
   reopenedSince(id: string, at: number): boolean;
@@ -57,6 +58,9 @@ export interface Tracker {
   /** Prompt wording that differs by tracker; fills the prompts' {{KIT_<NAME>}}. */
   readonly words: Record<"LOST" | "TICKET_VIEW" | "COMMENTS_VIEW" | "NEW_TICKET" | "NEW_TICKET_REVIEW" | "RECORD" | "NOCHANGE" | "BLOCKED" | "SAY", string>;
 }
+
+/** The snapshot key for the GitHub repo's highest issue number: a new issue moves it. Not a ticket id. */
+export const LATEST_ISSUE = "latest issue";
 
 export const isNumeric = (id: string) => /^\d+$/.test(id);
 export const refOf = (id: string) => (isNumeric(id) ? `#${id}` : id);
@@ -146,17 +150,30 @@ const github = (project: Project): Tracker => {
       gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", "needs-human"]);
       gh(["issue", "comment", id, "--body", text]);
     },
-    snapshot: (ids) =>
-      new Map(
+    snapshot: (ids) => {
+      const seen = new Map(
         ids.map((n) => {
           try {
-            const i = JSON.parse(gh(["issue", "view", n, "--json", "state,labels,comments"]));
-            return [n, `${i.state} [${i.labels.map((l: { name: string }) => l.name).sort().join(",")}] ${i.comments.length} comment(s)`];
+            const i = JSON.parse(gh(["issue", "view", n, "--json", "state,labels,comments,title,body"]));
+            // A hash, not the text: an edited title or body changes the entry
+            // without a whole issue body landing in the breach line.
+            const text = createHash("sha256").update(`${i.title}\n${i.body ?? ""}`).digest("hex").slice(0, 12);
+            return [n, `${i.state} [${i.labels.map((l: { name: string }) => l.name).sort().join(",")}] ${i.comments.length} comment(s) text ${text}`];
           } catch {
             return [n, "unreadable"];
           }
         }),
-      ),
+      );
+      // The highest issue number, newest first: a `gh issue create` by an agent
+      // is in no run ticket's snapshot, but it moves this.
+      try {
+        const [latest] = JSON.parse(gh(["issue", "list", "--state", "all", "--limit", "1", "--json", "number"])) as { number: number }[];
+        seen.set(LATEST_ISSUE, latest ? `#${latest.number}` : "none");
+      } catch {
+        seen.set(LATEST_ISSUE, "unreadable");
+      }
+      return seen;
+    },
     // A reopen changes the issue after the merge. On an error, assume it was
     // reopened: the run then does the work normally instead of closing an
     // issue that may want more.
