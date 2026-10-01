@@ -35,7 +35,7 @@ import {
   addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
-import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket } from "./tracker.ts";
 import { closingReport } from "./report.ts";
 import { usageLine, usageStop } from "./usage.ts";
@@ -117,6 +117,14 @@ export const closeComment = (
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
   (report ? `\n\n${report}` : "");
+
+// The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
+// `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
+// the agent's, the author the operator's (see AGENT_COMMITTER).
+// --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
+// green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
+export const mergeBranch = (root: string, branch: string, head: string, ticket: string) =>
+  sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
 
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
 export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
@@ -999,11 +1007,8 @@ export const burndown = async (project: Project) => {
       continue;
     }
     try {
-      // --no-verify: a pre-commit hook re-running what the gates covered only
-      // adds a way for a green branch to fail to land. (Hooks are off for the
-      // whole host process anyway - see guard.ts.)
       // The commit the gates passed on, not whatever the branch names now.
-      sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${o.branch} (closes ${ref(o.issue)})`, o.head!]);
+      mergeBranch(project.root, o.branch, o.head!, ref(o.issue));
       merged.push(o.issue);
     } catch (error) {
       // A real conflict and a merge that failed for another reason (a dirty
