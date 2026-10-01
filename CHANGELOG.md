@@ -31,12 +31,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Inside Herdr, the status view now gets about half the screen** (run pane 25%, status 50%,
   sandboxes 25% in a column of equal rows), and Herdr switches to the run's tab once it opens.
   `SANDCASTLE_HERDR_FOCUS=0` keeps your focus where it is.
+- **Tickets whose existing branches change the same file no longer start in the same run.** Before
+  the pool starts, a run compares each ready ticket's existing `agent/issue-N` branch against the
+  base; of an overlapping group the first in queue order starts and the rest show as blocked,
+  "waits for #N (this run) - next run". A run with overlapping carried branches therefore takes
+  more runs and fewer conflicts.
+- **A new `generated` config key** declares generated files and the command that regenerates them
+  (`generated: [{ paths, regen }]`). A carried branch whose base merge conflicts only in those
+  files is regenerated in its sandbox instead of handed to the implementer. Nothing changes until
+  a project sets it; `/sandcastle update` asks about lockfiles, codegen output and similar.
 
 ### Changed
 
 - The skill loads less for most actions: the run action's closing hand-off and the whole
   `update` action moved into `skill/run.md` and `skill/update.md`, which `SKILL.md` names when
   they are needed.
+- Tickets whose existing branches change the same file are kept out of the same run.
 
 ### Fixed
 
@@ -102,6 +112,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   emoji included, instead of rewriting them.
 - Docs: `rules.md` reaches the implement, review and repair prompts but not the kit's own landing
   merge; and what green gates prove - the gate commands, and nothing more.
+- Blocker phrases inside fenced or inline code are no longer read as dependencies; write a blocker
+  as plain text.
 
 ### Added
 
@@ -120,6 +132,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - README: a gate recipe that checks generated files are committed in sync with the build.
 - Tests for the protected-path check, blocker references and ticket files, and `init`'s stack
   detection.
+- `generated: [{ paths, regen }]` in `.sandcastle/config.ts`: a base merge conflict confined to
+  those paths takes either side, runs `regen` in the sandbox and commits.
+- Each ticket's last reviewed head and last green head are recorded in
+  `.sandcastle/logs/heads.json`, for re-runs to build on.
+- `sandcastle doctor` warns (without failing) when the host's Claude Code is newer than the
+  version the image pins.
 
 ## [0.2.0] - 2026-09-30
 
