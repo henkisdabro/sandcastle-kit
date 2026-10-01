@@ -330,11 +330,11 @@ Declare the same files under `generated` in `.sandcastle/config.ts`, with the co
 them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A merge that conflicts only in
 those paths is then resolved by taking either side, re-running `setup` and running `regen`, with no
 agent - both when a re-run merges the base into a branch from an earlier run, and at landing. A
-landing resolved this way happens in a throwaway sandbox (the host never runs project code), always
-as a merge commit with the usual `Merge agent/issue-N (closes #N)` message, even with
-`land: "squash"`. Before the base moves, the host checks that the commit merges exactly the base tip
-and the gated head and changes nothing beyond a plain merge outside `generated` paths; otherwise
-nothing lands and the ticket is left as a conflict. The drift gate still proves the result matches
+landing resolved this way happens in a throwaway sandbox (the host never runs project code), as a
+merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base moves, the host checks
+that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
+merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
+`land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources when the merged base is gated again at the end of the run.
 
 ## 📋 Queue: what agents work on
@@ -687,7 +687,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes superseded tags. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
-| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, always a merge commit), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket and a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
+| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket and a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
@@ -721,7 +721,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `land` | `"merge"` | How a run lands green work: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). `sandcastle land` and a landing resolved by regenerating `generated` paths always make a merge commit. Held branches are never landed either way |
+| `land` | `"merge"` | How green work lands: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). A landing resolved by regenerating `generated` paths and `sandcastle land` follow it too. Held branches are never landed either way |
 | `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A merge that conflicts only in these paths - a re-run's base merge, or a landing - takes either side, reruns `setup`, runs `regen` in a sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run. `maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a re-run's conflicted base merge (see [Re-runs](#-re-runs)) |

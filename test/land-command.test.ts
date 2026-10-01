@@ -164,6 +164,30 @@ test("a conflict only in a generated file is resolved by regenerating it", async
   assert.equal(git(f.root, "log", "-1", "--format=%s", "main~1").out, `Merge ${BRANCH} (closes ${ID})`);
 });
 
+test('with land: "squash", the gated merge lands as one commit on the base tip and the branch is deleted', async () => {
+  const f = fixture();
+  (f.project as { land?: string }).land = "squash";
+  const said = await f.land();
+  assert.match(said, /^Landed demo-01: squashed agent\/issue-demo-01 into main and closed it\./);
+  assert.equal(git(f.root, "log", "-1", "--format=%s%n%b", "main~1").out, `Merge ${BRANCH} (closes ${ID})\n- branch`);
+  assert.equal(git(f.root, "rev-list", "--parents", "-n", "1", "main~1").out.split(" ").slice(1).join(" "), f.mainTip);
+  assert.equal(git(f.root, "log", "-1", "--format=%cn", "main~1").out, "Sandcastle agent");
+  assert.equal(readFileSync(join(f.root, "feature.txt"), "utf8"), "the feature\n");
+  assert.equal(git(f.root, "branch", "--list", BRANCH).out, "");
+  assert.match(f.ticketFile(), /Squashed locally, not yet pushed, by `sandcastle land`/);
+  assert.equal(scratchBranches(f.root), "");
+});
+
+test('with land: "squash", a regenerated landing is squashed too', async () => {
+  const f = fixture({ mainChange: "other-line", generated: true });
+  (f.project as { land?: string }).land = "squash";
+  assert.match(await f.land(), /^Landed demo-01: squashed/);
+  assert.equal(readFileSync(join(f.root, "out.txt"), "utf8"), "A b C ");
+  assert.equal(git(f.root, "rev-list", "--parents", "-n", "1", "main~1").out.split(" ").length, 2);
+  assert.equal(git(f.root, "rev-parse", "main~2").out, f.mainTip);
+  assert.equal(git(f.root, "branch", "--list", BRANCH).out, "");
+});
+
 test("refusals come before prepare, which would build an image", async () => {
   const f = fixture();
   const refuse = (arg: string | undefined, pattern: RegExp) =>

@@ -44,7 +44,7 @@ import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { landInSandbox, sandboxOpener } from "./land.ts";
+import { landInSandbox, sandboxOpener, squashBody } from "./land.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -140,8 +140,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
   if (mode === "merge") {
     return sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
   }
-  // The branch's own commits not on the base, without the kit's merges of the base into a carried branch.
-  const subjects = sh("git", ["log", "--reverse", "--no-merges", "--format=%s", `HEAD..${head}`], root);
+  const body = squashBody(root, "HEAD", head);
   // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
   sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
   // --allow-empty: a green branch whose change is already on the base still gets its commit, so
@@ -154,7 +153,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
       "--allow-empty",
       "-m",
       `Merge ${branch} (closes ${ticket})`,
-      ...(subjects ? ["-m", subjects.split("\n").map((s) => `- ${s}`).join("\n")] : []),
+      ...(body ? ["-m", body] : []),
     ],
     root,
     AGENT_COMMITTER,
@@ -1229,7 +1228,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       if (unmerged && regensFor(files, project.generated)) {
         try {
           sandboxed = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () =>
-            landInSandbox(project, { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})` }, sandboxOpener(project, image, planFile)),
+            landInSandbox(project, { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})`, squash: project.land === "squash" }, sandboxOpener(project, image, planFile)),
           );
         } catch (sandboxError) {
           // The .git check stops the run, as before landing; a sandbox that would not start is a conflict.
@@ -1239,6 +1238,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       }
       if (sandboxed?.kind === "merged") {
         merged.push(o.issue);
+        if (project.land === "squash") squashed.push(o.branch);
         regenerated.set(o.issue, { files: sandboxed.files, regen: sandboxed.regen });
         console.log(
           `${ref(o.issue)}: conflicted only in generated files (${sandboxed.files.join(", ")}); merged by regenerating them with ${sandboxed.regen.map((c) => `\`${c}\``).join(", ")}.`,

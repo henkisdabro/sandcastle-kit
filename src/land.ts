@@ -13,7 +13,7 @@ import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGene
 import { assertGitUnchanged, gitFingerprint, protectedChanges } from "./guard.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog } from "./run.ts";
-import { errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
+import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 
@@ -61,18 +61,27 @@ export const checkLandingMerge = (root: string, c: string, b: string, h: string,
   return `landing merge changed paths outside generated: ${[...new Set(stray)].slice(0, 5).join(", ")}`;
 };
 
+/** A squash landing's commit body: the branch's own subjects, without the kit's merges of the base into it. */
+export const squashBody = (root: string, base: string, head: string) =>
+  sh("git", ["log", "--reverse", "--no-merges", "--format=%s", `${base}..${head}`], root)
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => `- ${s}`)
+    .join("\n");
+
 /**
  * Merge `t.head` into the base branch in a sandbox and, when the conflict is confined to
  * generated paths, resolve it there. `merged` means the host base is already fast-forwarded
  * to `commit`; the others leave the host untouched. A landing commit that is not a merge of
  * the base tip and `head` plus `generated` changes (`checkLandingMerge`) is a `conflict` with
- * a `note`, and nothing is fast-forwarded. With `gate`, the merge is gated in the
+ * a `note`, and nothing is fast-forwarded. With `squash`, the checked merge's tree is committed
+ * on the base tip with that one parent instead, as a run's squash landing would. With `gate`, the merge is gated in the
  * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
  * throws `OperatorError`, as after any sandbox.
  */
 export const landInSandbox = async (
   project: Project,
-  t: { branch: string; head: string; message: string },
+  t: { branch: string; head: string; message: string; squash?: boolean },
   open: Opener,
   gate?: (box: Box) => Promise<GateRun>,
 ): Promise<LandResult> => {
@@ -132,8 +141,16 @@ export const landInSandbox = async (
     const commit = sh("git", ["rev-parse", scratch], project.root);
     const note = checkLandingMerge(project.root, commit, baseTip, t.head, project.generated);
     if (note) return { kind: "conflict", files: result.files, note };
-    sh("git", ["merge", "--ff-only", commit], project.root);
-    return { ...result, commit };
+    // The merge is what the sandbox gated and the host checked; a squash keeps its tree exactly.
+    const landed = t.squash
+      ? (() => {
+          const body = squashBody(project.root, baseTip, t.head);
+          const message = ["-m", t.message, ...(body ? ["-m", body] : [])];
+          return sh("git", ["commit-tree", `${commit}^{tree}`, "-p", baseTip, ...message], project.root, AGENT_COMMITTER);
+        })()
+      : commit;
+    sh("git", ["merge", "--ff-only", landed], project.root);
+    return { ...result, commit: landed };
   } finally {
     try {
       sh("git", ["branch", "-D", scratch], project.root);
@@ -198,7 +215,7 @@ export const landTicket = async (
   const log = gatesLog(project, id);
   mkdirSync(dirname(log), { recursive: true });
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
-    landInSandbox(project, { branch, head, message: `Merge ${branch} (closes ${ref})` }, open, (box) =>
+    landInSandbox(project, { branch, head, message: `Merge ${branch} (closes ${ref})`, squash: project.land === "squash" }, open, (box) =>
       runGates(project, box, `${ref} land gates`, false, { log }),
     ),
   );
@@ -206,16 +223,27 @@ export const landTicket = async (
   switch (result.kind) {
     case "merged": {
       const { files, regen } = result;
+      const squash = project.land === "squash";
+      const how = squash ? "squashed" : "merged";
+      // A squashed branch's commits never reach the base, so it is deleted as a run deletes it.
+      let kept = "";
+      if (squash) {
+        try {
+          sh("git", ["branch", "-D", branch], project.root);
+        } catch {
+          kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
+        }
+      }
       const comment =
-        `Merged locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +
+        `${squash ? "Squashed" : "Merged"} locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +
         `${project.gates.map((g) => g.name).join(", ")} all green on the merge.` +
         (files.length ? ` Conflicts in generated files (${files.join(", ")}) were resolved by running ${regen.map((c) => `\`${c}\``).join(", ")}.` : "");
       try {
         tracker.close(id, comment);
       } catch (error) {
-        return `Landed ${ref}: merged ${branch} into ${base}, but closing it failed (${errorLine(error)}) - close it by hand.`;
+        return `Landed ${ref}: ${how} ${branch} into ${base}, but closing it failed (${errorLine(error)}) - close it by hand.${kept}`;
       }
-      return `Landed ${ref}: merged ${branch} into ${base} and closed it. Not pushed - push under this repo's rules.`;
+      return `Landed ${ref}: ${how} ${branch} into ${base} and closed it. Not pushed - push under this repo's rules.${kept}`;
     }
     case "conflict":
       throw new OperatorError(

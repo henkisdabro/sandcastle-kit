@@ -91,6 +91,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - `sandcastle doctor` names the Claude Code version and channel sandboxes will get, and warns when
   it could not reach the release channel; the warning about the host being newer than the image's
   pin is gone with the pin.
+- With `land: "squash"`, `sandcastle land` and a landing resolved by regenerating `generated`
+  paths now squash too, and delete the branch, instead of always making a merge commit. The merge
+  is still made, gated and checked in the sandbox; its tree then lands as one commit on the base
+  tip.
 
 ### Fixed
 
