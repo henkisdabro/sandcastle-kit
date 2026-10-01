@@ -705,16 +705,16 @@ export const openStatusPane = (project: Project): string | undefined => {
     return undefined;
   }
   const record = statusPaneRecord(project);
-  const current = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
-  if (current) {
+  const previous = existsSync(record) ? readFileSync(record, "utf8").trim() : "";
+  if (previous) {
     try {
       // Open but idle (the view was stopped with Ctrl-C): restart it there.
-      if (!runsStatus(current)) herdr(["pane", "run", current, STATUS_COMMAND]);
-      return current;
+      if (!runsStatus(previous)) herdr(["pane", "run", previous, STATUS_COMMAND]);
+      return previous;
     } catch (error) {
       // Replace only a pane that is really gone. After a transient herdr
       // error the pane may be alive: opening another would show two views.
-      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return current;
+      if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return previous;
       unlinkSync(record);
     }
   }
