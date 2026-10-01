@@ -23,7 +23,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { CROSS_REVIEW, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
@@ -215,7 +215,7 @@ export const burndown = async (project: Project) => {
   // status view cannot tell a gate run from the review before it by the logs
   // alone, and a log's age is how long since its last line, not how long the
   // issue has been at this step.
-  const timed = async <T>(issue: string, phase: string, fn: () => Promise<T> | T, note?: string): Promise<T> => {
+  const timed = async <T>(issue: string, phase: string, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
     if (issue) {
@@ -240,8 +240,10 @@ export const burndown = async (project: Project) => {
       return result;
     } finally {
       active.delete(issue);
+      const m = model?.();
       const line = {
         ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok,
+        ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(red?.length ? { red } : {}),
@@ -430,6 +432,8 @@ export const burndown = async (project: Project) => {
           maxIterations: project.implement.maxIterations ?? 8,
           idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
         }),
+        undefined,
+        () => IMPL_MODEL,
       );
 
       if (!tracker.agentsWrite) {
@@ -466,12 +470,24 @@ export const burndown = async (project: Project) => {
           maxIterations: project.review.maxIterations ?? 3,
           idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
         });
-      const review = await timed(issue.id, "review", () =>
-        reviewWithFallback(ref(issue.id), reviewRun(`review-${issue.id}`)),
+      let reviewModel: string | undefined;
+      const review = await timed(
+        issue.id,
+        "review",
+        () => reviewWithFallback(ref(issue.id), (agent, model) => {
+          reviewModel = model;
+          return reviewRun(`review-${issue.id}`)(agent);
+        }),
+        undefined,
+        () => reviewModel,
       );
       const cross = CROSS_REVIEW
-        ? await timed(issue.id, "cross-review", () =>
-            crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`)),
+        ? await timed(
+            issue.id,
+            "cross-review",
+            () => crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`)),
+            undefined,
+            () => CROSS_REVIEW_MODEL,
           )
         : undefined;
       let reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
@@ -548,6 +564,7 @@ export const burndown = async (project: Project) => {
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
           }),
           `${why} - pass ${repairs}`,
+          () => IMPL_MODEL,
         ).then(
           (fixedRun) => {
             const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
@@ -573,11 +590,16 @@ export const burndown = async (project: Project) => {
       if (!gated.failure && sh("git", ["rev-parse", branch]) !== preRepair) {
         // A review that dies leaves the branch held, not the ticket crashed:
         // like a failed repair, only a spent allowance stops the queue.
+        let afterModel: string | undefined;
         const after = await timed(
           issue.id,
           "review",
-          () => reviewWithFallback(ref(issue.id), reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })),
+          () => reviewWithFallback(ref(issue.id), (agent, model) => {
+            afterModel = model;
+            return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
+          }),
           "after repair",
+          () => afterModel,
         ).catch((error) => {
           if (hitLimit(issue.id)) throw error;
           console.log(`${ref(issue.id)}: the review after repair failed (${String(error).slice(0, 120)}); holding the branch for a human.`);
