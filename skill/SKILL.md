@@ -235,57 +235,9 @@ comments, and the gates can prove it.
    ended; no `finishedAt` and a live `pid` means it is still going) and, if it is still going,
    start the wait again. When the line arrives, read the report (`herdr pane read <pane> --source
    recent-unwrapped`) and tell the user.
-4. **Close the run - required, even mid-way through another request.** Relaying the report is not
-   the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
-   finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
-   project root, with the blockers re-read and the local git state as it is now. Run it from the
-   project root and take the summary from its own stdout, not from a pane scrape. Then write your
-   closing message with **all seven sections, in this order, with these headings**, each one
-   present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
-   report` printed, emoji included** - retyping a heading is how the emoji get lost; the
-   headings below are the ones it prints (without the emoji when NO_COLOR is set):
-
-   1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
-      merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
-   2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the issues are
-      closed in the tracker but the code is only on the local base branch until pushed - the pair of
-      facts operators most often misread.
-   3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
-      held, its size, the review and merge commands, and anything that needs a decision.
-   4. `## ❌ Needs fixing` - each red, conflicted, crashed or unlanded branch: the cause in one line,
-      the file or test, whether it shares a cause with another, and the concrete fix path. The
-      summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
-      place to look - read both branches' failures before calling it one cause. For a red gate, read the gate log
-      (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate
-      run with `-x` shows only its first failure.
-   5. `## ▶️ Runnable now / ⏳ Still blocked` - the unblocked list is computed after landing; for
-      each still blocked, what it waits for and whether that blocker is itself held or red.
-   6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
-      and the push that fits the repo's own shipping rules (read its AGENTS.md or CONTRIBUTING).
-      Say plainly that Sandcastle pushed nothing.
-   7. `## 👉 Next step` - **one** recommended action and why, then the short list after it, then
-      **one** question where a human decision is needed (for example: "Three of the unmerged
-      branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
-
-   End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
-   requeue a failed issue with a note, start a run for the unblocked issues, `sandcastle clean`
-   once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
-
-   Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
-   person marked the ticket `needs-human` during the run; `held` with "no commits" is a ticket an
-   agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
-   unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
-   after its gates or the merge failed for a reason other than a conflict. A run headed **Run
-   STOPPED** merged nothing: it names what moved - for a moved base branch, show the user the
-   commits it lists and ask whether they are theirs before offering a re-run; for a changed
-   `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
-   no commit usually means the repair agent judged the failure outside the branch - read the repair
-   log and its issue comment, then check that gate with `sandcastle gates` before blaming the
-   branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the cause
-   is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`). A dry
-   run ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote to the
-   tracker; show the user what changed. Unmerged branches are cleared with `sandcastle clean
-   --all` only after asking - their work is lost.
+4. **Close the run - required, even mid-way through another request.** When the run ends, read
+   run.md in this skill's directory (next to this file) and follow it before writing your closing
+   message.
 
 ## status - what a run is doing
 
@@ -319,41 +271,4 @@ pass's tokens, is in `.sandcastle/logs/timings.jsonl`.
 
 ## update - bring the kit and this project up to date
 
-Every step is a check that is safe to repeat, so it does not matter which kit version the project
-was set up with.
-
-1. **The kit.** Its location is doctor's first line. If `git -C <kit> status --porcelain` shows
-   local changes, stop and tell the user - never discard them. Otherwise
-   `git -C <kit> pull --ff-only && pnpm -C <kit> install`, then `sandcastle doctor`. This skill is
-   a link into the kit, so the pull may have changed it: re-read it before going on.
-2. **What changed.** Read the kit's `CHANGELOG.md` - `[Unreleased]` and the releases since the
-   last update, if the user knows when that was. Its **Upgrading** notes name what an existing
-   project may act on.
-3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise stop after 2):
-   1. `sandcastle build`, then `sandcastle lean` - new images, and the hook check against them.
-      Fix a `HOOK FAIL` as in init step 4. Then `sandcastle gates` (no model calls): a new image
-      can turn a gate red or green on base. Fix a red gate as in init step 6.
-   2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
-      it leaves out takes the kit's default, so nothing breaks - but name every new default that
-      changes what a run does or spends (the Upgrading notes list them) and ask whether to set it
-      explicitly. Edit only what the user agrees to; never rewrite the config wholesale.
-   3. **Gates.** Check they still match what CI runs; CI drifts. Run `sandcastle queue`: it names
-      the tracker and queue label the kit chose (`docs/agents/` can change either). If that is not where this project's tickets live (a repo that
-      moved to `.scratch/` files, or back), set `tracker` in the config.
-   4. **Blocked issues recorded the old way.** Earlier triage left blocked issues with a "blocked
-      by" comment, which runs do not read. Run `sandcastle blockers`: it lists open tickets - queued
-      or not - whose comment names a blocker the body does not, and marks those whose blockers are
-      all closed as stale. For each that is not stale, propose moving the line into the body as `Blocked by ...`
-      (and, for an unlabelled issue, adding the queue label - only if its spec is otherwise closed,
-      see queue). If the project tracks work in Linear or task files, check `blockers` in its
-      config covers them. Apply after the user agrees.
-   5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
-      `hookTests`, propose tests as in init step 4, then `sandcastle gates`.
-   6. **Triage directory.** If `.sandcastle/.gitignore` has no `triage/` line, append it (commit
-      it with the other project changes in step 4). Without it, triage files show as untracked and
-      a run's clean-tree check refuses to start.
-   7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
-      entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
-      yes).
-4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
-   before and after, what changed for this project, and what the user decided.
+Read update.md in this skill's directory (next to this file) and follow it.

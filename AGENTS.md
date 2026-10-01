@@ -16,7 +16,7 @@ bug no gate would fail"), never as an incident from a named project.
 
 - Personal things live in `~/.config/sandcastle-kit/` (`.env`, `config.json`, `denylist`);
   project things live in each project's `.sandcastle/`. A user's preference ("always keep skill
-  X") belongs in their memory or project config, not in `skill/SKILL.md` or the README.
+  X") belongs in their memory or project config, not in `skill/` or the README.
 - At runtime the kit writes only to the project's `.sandcastle/` (gitignored there) or a temp
   directory - its own directory stays read-only.
 - The pre-commit hook (`git config core.hooksPath .githooks`) runs gitleaks and the user's
@@ -57,7 +57,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
 | `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
 | `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |
-| `skill/SKILL.md` | The `sandcastle` agent skill - one file shared by Claude Code, Codex and OpenCode |
+| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run) and update.md (the update action) |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
@@ -68,9 +68,10 @@ bug no gate would fail"), never as an incident from a named project.
 
 ## The skill serves three harnesses
 
-`skill/SKILL.md` is symlinked into `~/.claude/skills/` (Claude Code, also scanned by OpenCode)
-and `~/.agents/skills/` (Codex). One file works in all three because each ignores frontmatter it
-does not know. Keep it portable:
+The `skill/` directory (not the file - `src/setup.ts` links the directory) is symlinked into
+`~/.claude/skills/sandcastle` (Claude Code, also scanned by OpenCode) and
+`~/.agents/skills/sandcastle` (Codex). `SKILL.md` works in all three because each ignores
+frontmatter it does not know. Keep it portable:
 
 - `name` stays `sandcastle`, matching the directory the user links it as.
 - `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger:
@@ -79,6 +80,9 @@ does not know. Keep it portable:
   `$action` for the other two.
 - Name harness-specific tools by what they do, with the Claude Code name as an example
   ("the harness's question tool (`AskUserQuestion` in Claude Code)").
+- `SKILL.md` loads whole for every action, so a long section that only one action needs lives in a
+  sibling file that `SKILL.md` names in prose ("read run.md in this skill's directory") - Codex and
+  OpenCode do not fill `$action`, so they find the file from the text.
 
 ## Verifying a change
 
@@ -109,5 +113,5 @@ directory, never in a real project.
 - Every user-facing change gets a `CHANGELOG.md` line under `[Unreleased]`. One an existing
   project may need to act on - a new default that changes what a run does or spends, a new
   convention, anything `sandcastle init` now writes differently - also gets an **Upgrading**
-  note, and if a project needs a check or a fix, a step in the skill's `update` action. Write
+  note, and if a project needs a check or a fix, a step in the skill's `update` action (`skill/update.md`). Write
   that step as a check that is safe to repeat, never as "since version X".

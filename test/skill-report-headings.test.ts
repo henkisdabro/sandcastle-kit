@@ -12,10 +12,12 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const skill = readFileSync(join(root, "skill", "SKILL.md"), "utf8");
+// The close-the-run step lives in run.md, which SKILL.md's run action points to.
+const closing = readFileSync(join(root, "skill", "run.md"), "utf8");
 const report = readFileSync(join(root, "src", "report.ts"), "utf8");
 
-// The "Close the run" step, up to the next numbered step or heading.
-const step = skill.match(/\*\*Close the run[\s\S]*?(?=\n\d+\. \*\*|\n## )/)?.[0] ?? "";
+// The "Close the run" step in run.md, up to the next numbered step or heading.
+const step = closing.match(/\*\*Close the run[\s\S]*?(?=\n\d+\. \*\*|\n## |(?![\s\S]))/)?.[0] ?? "";
 
 test("the close-the-run step is found", () => {
   assert.ok(step.length > 0);
