@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -635,7 +635,35 @@ export const burndown = async (project: Project) => {
           maxIterations: project.review.maxIterations ?? 3,
           idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
         });
+      // The narrow review, as after a repair: only what is new since `since`, which
+      // is a base merge and its conflict resolution. No cross-review. A review that
+      // throws behaves as the full one does.
+      const narrowReview = (since: string, note: string) => {
+        let narrowModel: string | undefined;
+        return timed(
+          issue.id,
+          "review",
+          () => {
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              narrowModel = model;
+              return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since })(agent);
+            });
+          },
+          note,
+          () => narrowModel,
+        );
+      };
       let reviewCommits = 0;
+      if (landOnly && mergeConflicted && greenHead !== undefined) {
+        // The resolver finished the merge on a branch reviewed and green at greenHead:
+        // nobody has seen its resolution. A clean land-only merge needs no review.
+        console.log(`${ref(issue.id)}: conflict resolved - reviewing the resolution only.`);
+        const resolved = await narrowReview(greenHead, "after conflict resolution");
+        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
+        reviewCommits = resolved.commits.length;
+        const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
+        if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
+      }
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
@@ -675,36 +703,49 @@ export const burndown = async (project: Project) => {
           return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
         }
 
-        let reviewModel: string | undefined;
-        const review = await timed(
-          issue.id,
-          "review",
-          () => {
-            return reviewWithFallback(ref(issue.id), (agent, model) => {
-              reviewModel = model;
-              return reviewRun(`review-${issue.id}`)(agent);
-            });
-          },
-          undefined,
-          () => reviewModel,
-        );
-        const cross = CROSS_REVIEW
-          ? await timed(
-              issue.id,
-              "cross-review",
-              () => {
-                return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
-              },
-              undefined,
-              () => CROSS_REVIEW_MODEL,
-            )
-          : undefined;
-        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-        reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
-        if (!tracker.agentsWrite) {
-          for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
-            const said = r && tags(r.stdout).report;
-            if (said) addReport(issue.id, who, said);
+        // Only a base merge since the last completed review: review the merge, not the branch.
+        const since = narrowReviewBase(project.root, base, issue.id);
+        if (since !== undefined && since === sh("git", ["rev-parse", branch])) {
+          console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
+        } else if (since !== undefined) {
+          console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
+          const merged = await narrowReview(since, "after base merge");
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
+          reviewCommits = merged.commits.length;
+          const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
+          if (said) addReport(issue.id, "Reviewer (after base merge)", said);
+        } else {
+          let reviewModel: string | undefined;
+          const review = await timed(
+            issue.id,
+            "review",
+            () => {
+              return reviewWithFallback(ref(issue.id), (agent, model) => {
+                reviewModel = model;
+                return reviewRun(`review-${issue.id}`)(agent);
+              });
+            },
+            undefined,
+            () => reviewModel,
+          );
+          const cross = CROSS_REVIEW
+            ? await timed(
+                issue.id,
+                "cross-review",
+                () => {
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
+                },
+                undefined,
+                () => CROSS_REVIEW_MODEL,
+              )
+            : undefined;
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
+          reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+          if (!tracker.agentsWrite) {
+            for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
+              const said = r && tags(r.stdout).report;
+              if (said) addReport(issue.id, who, said);
+            }
           }
         }
       }
