@@ -35,6 +35,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
+| `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore |

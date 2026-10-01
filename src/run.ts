@@ -370,7 +370,7 @@ export type TicketRecord = {
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
 
-export const recordRun = (project: Project, extra: Record<string, unknown> = {}) => {
+export const recordRun = (project: Project, extra: Record<string, unknown> = {}, onEnd?: (run: Record<string, unknown>) => void) => {
   // Before this record's first write: finishing the old one rewrites run.json.
   current?.(0);
   const file = join(project.root, ".sandcastle/logs/run.json");
@@ -398,6 +398,12 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {})
       appendFileSync(join(project.root, ".sandcastle/logs/history.jsonl"), JSON.stringify(run) + "\n");
     } catch {
       /* history is a convenience; the run itself already ended */
+    }
+    // After the history line, so a notifier that hangs or throws cannot cost the record.
+    try {
+      onEnd?.(run);
+    } catch {
+      /* a callback must not change the exit */
     }
   };
   current = finish;
