@@ -21,7 +21,7 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, reviewWithFallback } from "./agents.ts";
 import type { Project } from "./config.ts";
@@ -32,7 +32,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  addTokens, agentLog, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, markLog, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -319,12 +319,14 @@ export const burndown = async (project: Project) => {
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string) =>
-    gatesIn(project, sandbox, `${ref(id)} gates`, false, {
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string) => {
+    markLog(gatesLog(project, id), runId);
+    return gatesIn(project, sandbox, `${ref(id)} gates`, false, {
       wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
       gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
       log: gatesLog(project, id),
     });
+  };
 
   const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
 
@@ -447,15 +449,17 @@ export const burndown = async (project: Project) => {
           console.log(`${ref(issue.id)}: could not merge ${base} into its branch (${(pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160)}); it may conflict at landing.`);
         }
       }
-      const impl = await timed(issue.id, "implement", () =>
-        sandbox.run({
+      const impl = await timed(issue.id, "implement", () => {
+        markLog(agentLog(project, issue.id, `impl-${issue.id}`), runId);
+        return sandbox.run({
           name: `impl-${issue.id}`,
           agent: implAgent(),
           promptFile: prompts.implement,
           promptArgs: usedArgs(prompts.implement, promptArgs),
           maxIterations: project.implement.maxIterations ?? 8,
           idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
-        }),
+        });
+      },
         undefined,
         () => IMPL_MODEL,
       );
@@ -498,10 +502,13 @@ export const burndown = async (project: Project) => {
       const review = await timed(
         issue.id,
         "review",
-        () => reviewWithFallback(ref(issue.id), (agent, model) => {
-          reviewModel = model;
-          return reviewRun(`review-${issue.id}`)(agent);
-        }),
+        () => {
+          markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
+          return reviewWithFallback(ref(issue.id), (agent, model) => {
+            reviewModel = model;
+            return reviewRun(`review-${issue.id}`)(agent);
+          });
+        },
         undefined,
         () => reviewModel,
       );
@@ -509,7 +516,10 @@ export const burndown = async (project: Project) => {
         ? await timed(
             issue.id,
             "cross-review",
-            () => crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`)),
+            () => {
+              markLog(agentLog(project, issue.id, `review-codex-${issue.id}`), runId);
+              return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
+            },
             undefined,
             () => CROSS_REVIEW_MODEL,
           )
@@ -524,7 +534,6 @@ export const burndown = async (project: Project) => {
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
-      rmSync(gatesLog(project, issue.id), { force: true });
       let gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
       // The forced red is named as such everywhere it shows: "ruff red" for a
       // gate that passed sent a reader looking for a ruff failure.
@@ -573,8 +582,9 @@ export const burndown = async (project: Project) => {
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
-        const fixed = await timed(issue.id, "repair", () =>
-          sandbox.run({
+        const fixed = await timed(issue.id, "repair", () => {
+          markLog(agentLog(project, issue.id, `repair-${issue.id}`), runId);
+          return sandbox.run({
             name: `repair-${issue.id}`,
             agent: implAgent(),
             promptFile: prompts.repair,
@@ -586,7 +596,8 @@ export const burndown = async (project: Project) => {
             }),
             maxIterations: project.repair.maxIterations ?? 4,
             idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-          }),
+          });
+        },
           `${why} - pass ${repairs}`,
           () => IMPL_MODEL,
         ).then(
@@ -618,10 +629,13 @@ export const burndown = async (project: Project) => {
         const after = await timed(
           issue.id,
           "review",
-          () => reviewWithFallback(ref(issue.id), (agent, model) => {
-            afterModel = model;
-            return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
-          }),
+          () => {
+            markLog(agentLog(project, issue.id, `review-${issue.id}`), runId);
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              afterModel = model;
+              return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
+            });
+          },
           "after repair",
           () => afterModel,
         ).catch((error) => {
