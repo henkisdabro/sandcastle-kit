@@ -53,6 +53,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Sandbox commits and the kit's landing merges now have a distinct git committer**, `Sandcastle
   agent <agent@sandcastle.invalid>`; you stay the author. Anything that filters history by
   committer will see the change.
+- **`sandcastle build --force` now pulls the base OS image afresh**, and `sandcastle doctor` in a
+  project warns when its base image is more than 30 days old. Image tags follow the Dockerfile
+  text, so Debian and Node security updates only arrived with a pin bump before; run `sandcastle
+  build --force` now and then.
+- **The base image changed** (npm cache cleared, a build-time git version check), so every
+  project's image rebuilds once on its next run.
 
 ### Changed
 
@@ -68,6 +74,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   exactly the base and the gated head as parents, and change nothing outside `generated` paths
   beyond what either side changed. Otherwise nothing lands and the ticket is a conflict, with the
   paths named.
+- A re-run whose only change since its last review is the base merge gets a review of the merge's
+  resolution, not a full review; with nothing new since the review, none. A conflict the land-only
+  resolver fixed gets the same narrow review.
+- The base image clears the npm cache (about 160 MB smaller), fails its build if git is older than
+  2.47, and records why it is the full `node:24-trixie` and not `-slim` or Alpine.
 
 ### Fixed
 
@@ -186,6 +197,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - Each agent pass also writes its raw stream to `agent-issue-<id>-<phase>-<id>.jsonl` beside the
   readable log, archived with it - every tool call and result, not only what the readable log
   shows.
+- `sandcastle preview`: dry-merges each unlanded agent branch against the base in landing order
+  with `git merge-tree`, inside the project image, and names the conflicting paths. Nothing is
+  written to the repository.
+- `model:<id>` and `effort:<level>` GitHub labels set the implementer's model and effort for one
+  ticket, checked (and preflighted) before any sandbox starts.
 
 ## [0.2.0] - 2026-09-30
 
