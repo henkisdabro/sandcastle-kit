@@ -292,7 +292,9 @@ export const render = (f: Facts): string => {
   if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
-  if (lone.length) next.push(`Look at ${list(lone)}; once fixed, merge the branch or requeue the issue with a note.`);
+  // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
+  // looking for a step that does not exist; the next run resumes the kept branch instead.
+  if (lone.length) next.push(`Look at ${list(lone)}: still queued - add a comment for the implementer if it helps, and the next \`sandcastle run\` resumes its branch; or merge by hand: \`git merge --no-ff agent/issue-<n>\`.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
   if (f.ahead) next.push(`Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
