@@ -584,7 +584,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
-| `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
+| `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
 | `sandcastle report` | The last run's closing summary: done, needs you (held), needs fixing (with causes several branches share), runnable now and still blocked (re-read after landing), local state (commits not on the upstream, branches left standing) and the next step. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
 | `sandcastle blockers` | Lists open queued issues whose comments say "blocked by" while the body does not (a run would start them), and comments whose blockers are all closed. Reads GitHub, and Linear if configured | ➖ no |
