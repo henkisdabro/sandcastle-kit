@@ -496,7 +496,7 @@ render() {
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text hidden_list group summary act since title counts overhead legend
-  local tstate started order note typ pos qmsg
+  local tstate started order note typ pos qmsg upstream ahead unpushed=
   local -a out=()
   local n_out=0
 
@@ -720,7 +720,14 @@ render() {
     emit "$RECORD"
   done
 
-  title=" ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}  ${rule}│${off}  ${accent}${now}${off}"
+  # Commits the base branch holds that its upstream lacks, by the last fetch:
+  # closed tickets are merged locally, and a repo that deploys on push has
+  # shipped nothing until they go out. No fetch here - no network.
+  if upstream=$(git rev-parse --abbrev-ref "${BASE}@{upstream}" 2>/dev/null) && [ -n "$upstream" ]; then
+    ahead=$(git rev-list --count "${upstream}..${BASE}" 2>/dev/null || echo 0)
+    [ "$ahead" -gt 0 ] 2>/dev/null && unpushed=" ${hot}${ahead} unpushed${off}"
+  fi
+  title=" ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}${unpushed}  ${rule}│${off}  ${accent}${now}${off}"
   counts=$(counts_lines "$RUN_LIVE" "$cols")
   legend=$(wrap "$cols" "  " "${ylw}● working${off}" "${hot}! needs you${off}" "${cyn}◆ ready to land${off}" "${blu}○ queued${off}" \
     "${blu}◌ blocked${off}" "${grn}✓ merged${off}" "${gry}◇ left over${off}" "${gry}· idle${off}")
