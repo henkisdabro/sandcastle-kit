@@ -38,7 +38,7 @@ export type ProjectConfig = {
   /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two; `AUTONOMY_LEVEL` overrides it for one run. */
   autonomy?: 0 | 1 | 2 | 3;
   /**
-   * Which Claude Code the sandbox image installs: `"latest"` (default) or `"stable"`, the release
+   * Which Claude Code the sandbox image installs: `"stable"` (default) or `"latest"`, the release
    * channels resolved on the host when the image is ensured, or an exact version such as `"2.1.285"`
    * to pin. The `CLAUDE_CODE_VERSION` env var overrides it for one command.
    */
@@ -74,7 +74,7 @@ export type ProjectConfig = {
   /**
    * How a green branch lands on the base branch. `merge` (default): a merge commit, the branch's
    * own commits kept. `squash`: one commit holding the branch's whole change, with the same
-   * subject; the branch is deleted once the run has landed it.
+   * subject; the branch is deleted once landed. `sandcastle land` and a regenerating landing follow it too.
    */
   land?: "merge" | "squash";
   /**
