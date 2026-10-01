@@ -1100,6 +1100,7 @@ export const burndown = async (project: Project) => {
           `${ref(o.issue)}: conflicted only in generated files (${sandboxed.files.join(", ")}); merged by regenerating them with ${sandboxed.regen.map((c) => `\`${c}\``).join(", ")}.`,
         );
       } else if (unmerged) {
+        if (sandboxed?.kind === "conflict" && sandboxed.note) console.log(`${ref(o.issue)}: ${sandboxed.note}; left as a conflict.`);
         if (sandboxed?.kind === "regen-failed") {
           console.log(`${ref(o.issue)}: regenerating ${sandboxed.files.join(", ")} failed (${sandboxed.reason}); left as a conflict.`);
         }

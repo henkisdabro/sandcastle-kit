@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
-import { type Exec, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
+import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, gitFingerprint, protectedChanges } from "./guard.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog } from "./run.ts";
@@ -21,14 +21,50 @@ export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<u
 export type Opener = (branch: string) => Promise<Box>;
 export type LandResult =
   | { kind: "merged"; commit: string; files: string[]; regen: string[] }
-  | { kind: "conflict"; files: string[] }
+  | { kind: "conflict"; files: string[]; note?: string }
   | { kind: "regen-failed"; files: string[]; reason: string }
   | { kind: "red"; run: GateRun };
 
 /**
+ * What the host checks on the sandbox's landing commit `c` before fast-forwarding to it: `b`
+ * is the base tip the sandbox started from, `h` the gated branch head. `regen` and `setup` are
+ * the branch's own code and run with the worktree's index, so a `git add -A` or a committing
+ * build could put changes outside `generated` into the merge; those appear in neither parent's
+ * diff, so `protectedChanges` never saw them. `c` must merge exactly `b` and `h`, and what it
+ * changes beyond a plain merge of them must be under `generated`. Returns the note for the
+ * conflict report, or `undefined` when the commit is fine.
+ */
+export const checkLandingMerge = (root: string, c: string, b: string, h: string, generated: Generated[]): string | undefined => {
+  const notAMerge = "landing merge is not a merge of base and the gated head";
+  const git = (...args: string[]) => sh("git", args, root);
+  const paths = (...args: string[]) => git("diff", "--name-only", "-z", ...args).split("\0").filter(Boolean);
+  let base: string, head: string, mergeBase: string;
+  try {
+    base = git("rev-parse", "--verify", `${b}^{commit}`);
+    head = git("rev-parse", "--verify", `${h}^{commit}`);
+    const parents = git("rev-list", "--parents", "-n", "1", c).split(" ").slice(1);
+    if (parents.length !== 2 || parents[0] !== base || parents[1] !== head) return notAMerge;
+    mergeBase = git("merge-base", base, head);
+  } catch {
+    return notAMerge;
+  }
+  const inGenerated = (f: string) => generated.some((g) => g.paths.some((p) => covers(p, f)));
+  const byBranch = new Set(paths(mergeBase, head));
+  const onBase = new Set(paths(mergeBase, base));
+  const stray = [
+    ...paths(base, c).filter((f) => !byBranch.has(f) && !inGenerated(f)),
+    ...paths(head, c).filter((f) => !onBase.has(f) && !inGenerated(f)),
+  ];
+  if (!stray.length) return undefined;
+  return `landing merge changed paths outside generated: ${[...new Set(stray)].slice(0, 5).join(", ")}`;
+};
+
+/**
  * Merge `t.head` into the base branch in a sandbox and, when the conflict is confined to
  * generated paths, resolve it there. `merged` means the host base is already fast-forwarded
- * to `commit`; the others leave the host untouched. With `gate`, the merge is gated in the
+ * to `commit`; the others leave the host untouched. A landing commit that is not a merge of
+ * the base tip and `head` plus `generated` changes (`checkLandingMerge`) is a `conflict` with
+ * a `note`, and nothing is fast-forwarded. With `gate`, the merge is gated in the
  * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
  * throws `OperatorError`, as after any sandbox.
  */
@@ -40,6 +76,7 @@ export const landInSandbox = async (
 ): Promise<LandResult> => {
   // Before any container starts: it runs with the shared .git mounted.
   const before = gitFingerprint(project);
+  const baseTip = sh("git", ["rev-parse", project.baseBranch], project.root);
   // The `sandcastle/` prefix is what `sandcastle clean` already treats as scratch.
   const scratch = `sandcastle/land-${t.branch.replace(/\W+/g, "-")}-${Date.now()}`;
   try {
@@ -91,6 +128,8 @@ export const landInSandbox = async (
     if (result.kind === "merged" || gate) assertGitUnchanged(project, before, `after landing ${t.branch} in a sandbox`);
     if (result.kind !== "merged") return result;
     const commit = sh("git", ["rev-parse", scratch], project.root);
+    const note = checkLandingMerge(project.root, commit, baseTip, t.head, project.generated);
+    if (note) return { kind: "conflict", files: result.files, note };
     sh("git", ["merge", "--ff-only", commit], project.root);
     return { ...result, commit };
   } finally {
@@ -178,7 +217,9 @@ export const landTicket = async (
     }
     case "conflict":
       throw new OperatorError(
-        result.files.length
+        result.note
+          ? `Refused to land ${branch} into ${base}: ${result.note}. Nothing was merged. Review what \`regen\` and \`setup\` write: only \`generated\` paths may differ from a plain merge.`
+          : result.files.length
           ? `${branch} conflicts with ${base} in ${result.files.join(", ")}. Nothing was merged. If these files are written by a command (a build, a minifier), ` +
             `declare them under \`generated\` in .sandcastle/config.ts with that command and land again: the conflict is then resolved by regenerating them. ` +
             `Otherwise the ticket's next run merges ${base} into its branch first.`

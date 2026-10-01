@@ -327,7 +327,9 @@ them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an
 base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
 still proves the result matches the sources. At landing, a branch whose merge conflicts only in
 `generated` paths is merged in a throwaway sandbox by regenerating them, committed with the usual
-`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step.
+`Merge agent/issue-N (closes #N)` message, and the merged base is gated again in the verify step. Before the base moves, the host checks that the
+commit is a merge of exactly the base tip and the gated head and changes nothing beyond a plain merge
+except under `generated` paths; otherwise nothing lands and the ticket is left as a conflict.
 
 ## 📋 Queue: what agents work on
 
