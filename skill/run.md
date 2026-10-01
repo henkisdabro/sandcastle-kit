@@ -26,7 +26,8 @@ This continues the run steps 1-3 in SKILL.md.
       (`.sandcastle/logs/agent-issue-<n>-gates-<n>.log`) and the repair log's last lines; a gate
       run with `-x` shows only its first failure. Once a person has fixed a red or conflicted branch
       (on the branch itself), land it with `sandcastle land <n>`, never with a hand-written
-      `git merge`, so the merge message and the close comment are the kit's.
+      `git merge`, so the merge message and the close comment are the kit's. With several branches
+      unlanded, `sandcastle preview` shows which of them conflict before anything is merged.
    5. `## ▶️ Runnable now / ⏳ Still blocked` - the unblocked list is computed after landing; for
       each still blocked, what it waits for and whether that blocker is itself held or red.
    6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
