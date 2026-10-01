@@ -756,7 +756,7 @@ model; `sandcastle help` lists every command.
 |---|---|---|
 | **The kit** - this repository, cloned once per machine | Orchestrator, prompts, base image, status view, the `/sandcastle` skill. Shared by every project and possibly public, so it stays generic: no credentials, names or project details. | Nobody, in normal use |
 | **User config** - `~/.config/sandcastle-kit/` | `.env` (every token, including `LINEAR_API_KEY`), optional `config.json` (machine-wide limits, keep-awake) and `denylist` | The user, once. Not committed anywhere |
-| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/` (gitignored) | You and the user, when setting the project up |
+| **Each project** - the repository the agents work on | `.sandcastle/config.ts`, `rules.md`, optional `Dockerfile`; generated `logs/`, `worktrees/`, `.run/`, `triage/` (gitignored) | You and the user, when setting the project up |
 
 Run `sandcastle` from inside a project. `sandcastle doctor` also works anywhere.
 
