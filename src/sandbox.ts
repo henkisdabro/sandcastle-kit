@@ -129,7 +129,7 @@ export const credentials = (project: Project): Record<string, string> => {
     ...(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY ? [] : ["CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)"]),
     ...(env.GH_TOKEN || project.tracker.kind === "files" ? [] : ["GH_TOKEN"]),
   ];
-  if (missing.length) throw new OperatorError(`Missing ${missing.join(", ")} in ${files[0]} (see .env.example in the kit).`);
+  if (missing.length) throw new OperatorError(`Missing ${missing.join(", ")} in ${files[0]}. Run \`sandcastle setup\`, or \`sandcastle doctor\` to see what is set (docs/INSTALL.md covers writing it by hand).`);
   if (env.GH_TOKEN && !env.GH_TOKEN.startsWith("github_pat_") && process.env.SANDCASTLE_ALLOW_BROAD_TOKEN !== "1") {
     throw new OperatorError(
       "GH_TOKEN is not a fine-grained token (github_pat_...). Sandbox agents run unattended with " +

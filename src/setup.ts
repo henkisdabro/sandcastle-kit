@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
-import { doctor, run } from "./doctor.ts";
+import { doctor, probeGithubToken, run } from "./doctor.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 
 const ask = async (q: string) => {
@@ -53,15 +53,6 @@ const secret = (q: string) =>
     };
     stdin.on("data", onData);
   });
-
-// Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
-// rejected), which is not the same as a rejection.
-export const probeGithubToken = async (token: string): Promise<{ ok: boolean; status: number; login: string } | undefined> => {
-  const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" } }).catch(() => undefined);
-  if (!res) return undefined;
-  const login = res.ok ? ((await res.json().catch(() => ({}))) as { login?: string }).login ?? "unknown" : "";
-  return { ok: res.ok, status: res.status, login };
-};
 
 const has = (cmd: string) => !!run("sh", ["-c", `command -v ${cmd}`]);
 

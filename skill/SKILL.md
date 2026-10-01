@@ -26,7 +26,9 @@ action that fits what it shows.
 1. Run `sandcastle doctor`. Its first line is the kit's location; that kit's `README.md` covers
    anything this file does not. If `sandcastle` is not found, the kit is not installed: have the
    user clone it and run `./bin/sandcastle setup` in their own terminal (it asks for tokens).
-2. Fix every `FIX` line doctor prints before going further. Tokens are the user's to create.
+2. Fix every `FIX` line doctor prints before going further. Tokens are the user's to create. When a
+   run or preflight fails on auth, `sandcastle doctor --verify` asks GitHub and Anthropic whether the
+   tokens are accepted (no model call).
 
 **Where things are written.** The kit is shared by all the user's projects and may be public, so
 its files (this skill, the README, prompts) stay generic. Project facts go in the project's

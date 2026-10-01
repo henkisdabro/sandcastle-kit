@@ -93,7 +93,8 @@ Leave unused keys commented out: an empty value stops a run.
 > Classic (`ghp_`) and OAuth (`gho_`, e.g. `gh auth token`) tokens are refused, because sandbox
 > agents run with permission prompts off and such a token could push or edit workflows.
 
-Run `sandcastle doctor` until it reports no `FIX` lines.
+Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --verify` also asks
+GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value).
 
 ## 🔄 Updating
 

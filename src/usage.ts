@@ -51,6 +51,19 @@ const fetchWindows = async (token: string): Promise<Window[] | undefined> => {
   }
 };
 
+/** The HTTP status the usage endpoint gives a token (401 for a bad one), undefined when there was no answer. `sandcastle doctor --verify` uses it; the status says nothing else. */
+export const probeOAuth = async (token: string): Promise<number | undefined> => {
+  try {
+    const r = await fetch("https://api.anthropic.com/api/oauth/usage", {
+      headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return r.status;
+  } catch {
+    return undefined;
+  }
+};
+
 const read = (token: string) => {
   if (!cache || Date.now() - cache.at >= 10 * 60_000) cache = { at: Date.now(), windows: fetchWindows(token) };
   return cache.windows;

@@ -2,14 +2,15 @@
 // to be read by a person or by a coding agent helping them set up.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
 import { limit } from "./pool.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
+import { probeOAuth } from "./usage.ts";
 
 export const run = (cmd: string, args: string[]) => {
   try {
@@ -19,7 +20,40 @@ export const run = (cmd: string, args: string[]) => {
   }
 };
 
-export const doctor = async (repoRoot?: string) => {
+// Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
+// rejected), which is not the same as a rejection.
+export const probeGithubToken = async (token: string): Promise<{ ok: boolean; status: number; login: string } | undefined> => {
+  const res = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+  if (!res) return undefined;
+  const login = res.ok ? ((await res.json().catch(() => ({}))) as { login?: string }).login ?? "unknown" : "";
+  return { ok: res.ok, status: res.status, login };
+};
+
+/** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
+export const probeApiKey = async (key: string): Promise<number | undefined> => {
+  const res = await fetch("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+  return res?.status;
+};
+
+/** `<KEY> from <file>, <prefix>..., <n> chars, file written <N> day(s) ago` - never a character of the value past the known prefix. */
+export const fingerprint = (key: string, value: string, file: string, mtimeMs: number, now = Date.now()) => {
+  const prefix = value.match(/^(sk-ant-[a-z]+\d*-|github_pat_)/)?.[0];
+  const home = homedir();
+  const shown = file === home || file.startsWith(home + sep) ? "~" + file.slice(home.length) : file;
+  const days = Math.max(0, Math.floor((now - mtimeMs) / 86_400_000));
+  return `${key} from ${shown}, ${prefix ? `${prefix}...` : "unknown prefix"}, ${value.length} chars, file written ${days} day${days === 1 ? "" : "s"} ago`;
+};
+
+/**
+ * What an HTTP status says about a token. Only 401 is a plain no. A 403 is not: GitHub answers
+ * its rate limit with one, and Anthropic's usage endpoint can answer a working token that lacks a
+ * scope it wants - telling the user to replace a good token is the false alarm this must not raise.
+ * Anything else (429, 5xx, no connection, a proxy Node's fetch ignores) proves nothing either.
+ */
+export const verdict = (status: number | undefined): "ok" | "rejected" | "not checked" =>
+  status !== undefined && status >= 200 && status < 300 ? "ok" : status === 401 ? "rejected" : "not checked";
+
+export const doctor = async (repoRoot?: string, verify = false) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
     if (!ok && !optional) bad++;
@@ -82,6 +116,32 @@ export const doctor = async (repoRoot?: string) => {
   if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")}, or run sandcastle setup.`);
   check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", "sandcastle setup   (or run `claude setup-token` and put the token in the credentials file)");
   check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "sandcastle setup   (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read)", !needsGh);
+  if (verify) {
+    // The project's file overrides the shared one key by key, as credentials() in sandbox.ts does.
+    const inProject = !!repoRoot && realpathSync(repoRoot) !== realpathSync(KIT);
+    const files = [envFile, ...(inProject ? [join(repoRoot, ".sandcastle/.env")] : [])];
+    const source = (key: string) => {
+      let found: { value: string; file: string } | undefined;
+      for (const file of files) {
+        const value = existsSync(file) ? parseEnv(readFileSync(file, "utf8"))[key] : undefined;
+        if (value) found = { value, file };
+      }
+      return found;
+    };
+    console.log("\ncredentials (live)");
+    for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "GH_TOKEN"]) {
+      const found = source(key);
+      if (!found) continue;
+      const print = fingerprint(key, found.value, found.file, statSync(found.file).mtimeMs);
+      const gh = key === "GH_TOKEN" ? await probeGithubToken(found.value) : undefined;
+      const status = key === "GH_TOKEN" ? gh?.status : key === "ANTHROPIC_API_KEY" ? await probeApiKey(found.value) : await probeOAuth(found.value);
+      const seen = verdict(status);
+      if (seen === "ok") console.log(`ok   ${print} - accepted${gh?.login ? ` (${gh.login})` : ""}`);
+      else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`sandcastle setup\``);
+      else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
+    }
+    console.log();
+  }
   check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "npm install -g @openai/codex && codex login", true);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
 

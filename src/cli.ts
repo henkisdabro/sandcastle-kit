@@ -2,8 +2,10 @@
 //
 //   setup            interactive install: link the command and skill, write
 //                    the credentials file, then run doctor
-//   doctor           check this machine and (inside a repo) this project are
-//                    set up; prints what is missing and how to fix it
+//   doctor [--verify]
+//                    check this machine and (inside a repo) this project are
+//                    set up; prints what is missing and how to fix it;
+//                    --verify also asks GitHub and Anthropic whether the tokens are accepted
 //   run [TICKET ...] [--dry] [--concurrency N]
 //                    burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge;
@@ -70,7 +72,7 @@ try {
     process.exit(0);
   }
   if (command === "doctor") {
-    await doctor(repoRoot);
+    await doctor(repoRoot, args.includes("--verify"));
     process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
