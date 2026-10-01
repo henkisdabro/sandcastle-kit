@@ -94,11 +94,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   paths now squash too, and delete the branch, instead of always making a merge commit. The merge
   is still made, gated and checked in the sandbox; its tree then lands as one commit on the base
   tip.
-- The status view's table (headings and ticket rows) is indented one column, in line with the
-  header and legend above and below it.
-
-### Fixed
-
+- The status view has a new look: one window whose bands - a logo cell with the project, base
+  branch and clock; the run, machine and models cells; the table; the legend, which now carries
+  each group's count; and a note - are split into cells across the pane, with joined rules, a
+  midnight palette, slot gauges for the machine, a light rule between state groups, and ASCII
+  state marks (`>` ready, `~` blocked, `+` merged, `-` left over) that every terminal font draws.
+  The columns grow with the pane and ACTIVITY takes the rest (CPU, like MEM, gives way in a narrow
+  pane), and a short pane folds the logo to one row. What each row says, and when, is unchanged.
+  Full-width lines no longer lose their last character in the refreshing view, and the frame keeps
+  its bottom border on screen.
 - A ticket's gate log is kept across attempts instead of being wiped at each one, and every
   agent and gate log marks the start of each run's phase with its run id and local time.
 - `init`'s placeholder gate points at `.github/workflows` and `node --test`, and says Python

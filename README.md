@@ -514,7 +514,7 @@ whose blocker is open, or whose existing branch changes a file another ready tic
 changes, waits for the next run. Then come the image check, preflight, the hook check and the base
 gates; a red one stops the run before any agent starts.
 
-**While it runs.** The status view opens first, before the slow checks, and its run line names the
+**While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
 every five minutes while agents work, and the status view flags a sandbox whose log has been quiet

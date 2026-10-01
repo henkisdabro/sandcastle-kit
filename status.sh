@@ -21,7 +21,13 @@ set -uo pipefail
 jq --version >/dev/null 2>&1 || { echo "status needs jq (apt install jq / brew install jq)" >&2; exit 1; }
 cd "${SANDCASTLE_PROJECT:-$PWD}/.sandcastle" || exit 1
 
-export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+# Widths are counted in characters, which bash does only in a UTF-8 locale:
+# under C every box-drawing character counted three and the grid came apart.
+# The view writes UTF-8 whatever the locale, so it measures in one too.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) ;;
+  *) LC_ALL=$(locale -a 2>/dev/null | grep -iE '^(c|en_US)\.utf-?8$' | head -1); export LC_ALL="${LC_ALL:-en_US.UTF-8}";;
+esac
 
 INTERVAL="${1:-10}"
 # A live frame taller than its pane scrolls its own top - the header and the
@@ -38,25 +44,26 @@ mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 
 utc_to_epoch() { date -j -u -f '%Y-%m-%dT%H:%M:%S' "$1" '+%s' 2>/dev/null || date -u -d "$1" '+%s' 2>/dev/null || echo 0; }
 epoch_fmt() { date -r "$1" "$2" 2>/dev/null || date -d "@$1" "$2" 2>/dev/null; }
 
+# "Midnight": the frame and its text in blue-greys, so the state colours,
+# which carry meaning, stand out against it.
 bold=$'\e[1m'; off=$'\e[0m'
-rule=$'\e[38;5;238m'      # frame lines
-mute=$'\e[38;5;244m'      # activity text, legend
-head=$'\e[38;5;250m'      # column headings, numbers
-accent=$'\e[38;5;81m'     # base branch, clock
+rule=$'\e[38;5;60m'       # frame lines
+mute=$'\e[38;5;103m'      # activity text, labels
+head=$'\e[38;5;153m'      # column headings, numbers
+accent=$'\e[38;5;147m'    # base branch, clock, stage
+wht=$'\e[38;5;189m'       # ticket ids
 grn=$'\e[38;5;77m'        # merged
 ylw=$'\e[38;5;221m'       # working
 cyn=$'\e[38;5;80m'        # ready to land
 blu=$'\e[38;5;111m'       # queued, not started
-gry=$'\e[38;5;242m'       # nothing there
+gry=$'\e[38;5;61m'        # nothing there
 hot=$'\e[38;5;209m'       # needs you; a container working hard
+# The logo: moonlight at the top, indigo at the base, stars.
+moon=$'\e[38;5;189m'; dusk=$'\e[38;5;147m'; night=$'\e[38;5;104m'; deep=$'\e[38;5;61m'; star=$'\e[38;5;60m'
 # No colour when NO_COLOR is set (non-empty, no-color.org) or stdout is not a
 # terminal. Top level on purpose: the live loop calls render inside $(...),
 # where stdout is always a pipe, so the check there would always strip colour.
-if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; fi
-
-# Pad on the PLAIN string, then colour it. Glyphs live outside the padded
-# field because bash printf pads by bytes and they are multi-byte.
-pad() { printf '%-*s' "$2" "$1"; }
+if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; wht=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; moon=''; dusk=''; night=''; deep=''; star=''; fi
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -78,22 +85,89 @@ fit() {
   printf '%s…%s' "$out" "$off"
 }
 
-# Items joined by a separator, as many lines as the width needs. The legend's
-# last clause was cut off in any pane narrower than the whole legend.
-wrap() {
-  local w="$1" sep="$2" line="" item
-  shift 2
-  for item in "$@"; do
-    if [ -z "$line" ]; then line=" $item"
-    elif [ $(( $(vis "$line") + $(vis "$sep") + $(vis "$item") )) -le "$w" ]; then line="${line}${sep}${item}"
-    else printf '%s\n' "$line"; line=" $item"; fi
-  done
-  printf '%s\n' "$line"
-}
+# ---------------------------------------------------------------------------
+# The grid. The whole view is one window: every band is split into cells that
+# span the pane, and the rules between bands join the bars above and below.
+# The helpers return in REPLY rather than print, so a frame of a few hundred
+# cells costs no subshell per cell.
 
-# The one place the widths are declared. ACTIVITY takes whatever is left.
-W_ISSUE=6; W_STATE=10; W_AGE=5; W_COMMITS=7; W_CPU=6; W_MEM=7
-W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 9 ))
+# Visible width into VN, as vis gives it, without a subshell.
+vlen() { local p="${1//${ESC}\[*([0-9;])m/}"; VN=${#p}; }
+# A coloured string aligned in $2 columns (l, c or r), cut with … when longer.
+align() {
+  local s="$1" w="$2" l
+  [ "$w" -le 0 ] && { REPLY=""; return 0; }
+  vlen "$s"
+  if [ "$VN" -gt "$w" ]; then REPLY=$(fit "$s" "$w"); return 0; fi
+  case "${3:-l}" in
+    r) printf -v REPLY '%*s%s' $(( w - VN )) '' "$s";;
+    c) l=$(( (w - VN) / 2 )); printf -v REPLY '%*s%s%*s' "$l" '' "$s" $(( w - VN - l )) '';;
+    *) printf -v REPLY '%s%*s' "$s" $(( w - VN )) '';;
+  esac
+}
+# $1 repeated $2 times. Not `tr`: GNU tr maps bytes, so a multi-byte glyph
+# came out as a bare e2 per column on Linux. Bash substitution is byte-safe.
+rep() { local p; printf -v p '%*s' "$2" ''; REPLY="${p// /$1}"; }
+# Split $1 columns by the weights that follow into OW (each cell's width).
+# Cumulative rounding spreads the remainder over the cells.
+split_w() {
+  local total=$1 sum=0 w i=0 cum=0 prev=0 at; shift
+  for w in "$@"; do sum=$(( sum + w )); done
+  OW=()
+  for w in "$@"; do cum=$(( cum + w )); at=$(( (total * cum * 2 + sum) / (sum * 2) )); OW[i]=$(( at - prev )); prev=$at; i=$((i+1)); done
+}
+# The same across the window: its width less the n+1 bars of n cells.
+split_cols() { split_w $(( WIN - $# - 1 )) "$@"; }
+# One row of cells - OW widths, CELL contents, AL alignments - into REPLY.
+cells_line() {
+  local i out="${rule}│${off}"
+  for (( i=0; i<${#OW[@]}; i++ )); do
+    align "${CELL[i]:-}" $(( OW[i] - 2 )) "${AL[i]:-l}"
+    out="${out} ${REPLY} ${rule}│${off}"
+  done
+  REPLY="$out"
+}
+# The inner bar positions of the current OW, computed once per band.
+bars_of() { local p=0 i; BARS=""; for (( i=0; i<${#OW[@]}-1; i++ )); do p=$(( p + OW[i] + 1 )); BARS="$BARS $p"; done; BARS="${BARS# }"; }
+# A rule across the window whose joints meet the bars above ($4) and below
+# ($5): $1 left end, $2 right end, $3 fill (─ or ═). Into REPLY.
+junction() {
+  local f="$3" up=" $4 " dn=" $5 " i out="" a b x y z
+  if [ "$f" = ═ ]; then x='╪'; y='╧'; z='╤'; else x='┼'; y='┴'; z='┬'; fi
+  for (( i=1; i<WIN-1; i++ )); do
+    a=0; b=0; [[ "$up" == *" $i "* ]] && a=1; [[ "$dn" == *" $i "* ]] && b=1
+    if [ $a = 1 ] && [ $b = 1 ]; then out="$out$x"
+    elif [ $a = 1 ]; then out="$out$y"
+    elif [ $b = 1 ]; then out="$out$z"
+    else out="$out$f"; fi
+  done
+  REPLY="${rule}$1${out}$2${off}"
+}
+# A muted key in a 10-column field, then its value.
+kvl() { local k="$1"; printf -v k '%-10s' "$k"; REPLY="${mute}${k}${off}$2"; }
+# A slot gauge, █████░ 5/6; only the count past a dozen slots.
+gauge() {
+  local g=""
+  if [ "$2" -le 12 ] 2>/dev/null; then rep █ "$1"; g="${ylw}${REPLY}"; rep ░ $(( $2 - $1 )); g="${g}${rule}${REPLY}${off} "; fi
+  REPLY="${g}${head}$1/$2${off}"
+}
+# The frame being built: each line appended and counted, written in one go.
+put() { BUF="${BUF}$1
+"; BUF_N=$((BUF_N+1)); }
+# Items joined by " · " into as few lines of $1 columns as they fit, into the
+# WRAPPED array: the note's last clause was cut off in a narrow pane.
+wrap_items() {
+  local w="$1" sep="${gry} · ${off}" line="" item; shift
+  WRAPPED=()
+  for item in "$@"; do
+    vlen "$line$sep$item"
+    if [ -z "$line" ]; then line="$item"
+    elif [ "$VN" -le "$w" ]; then line="$line$sep$item"
+    else WRAPPED[${#WRAPPED[@]}]="$line"; line="$item"; fi
+  done
+  [ -n "$line" ] && WRAPPED[${#WRAPPED[@]}]="$line"
+  return 0
+}
 
 # macOS ships bash 3.2, which has neither associative arrays nor mapfile, and
 # this script has to run under whatever bash the pane's PATH finds first.
@@ -233,8 +307,8 @@ disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1";
 
 # Machine-wide slots (pool.ts): one lock file per slot, holding its owner's
 # pid. Counts live ones only; the limits come from the CLI.
-pool_line() {
-  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/slots" pool used f pid out=""
+load_pool() {
+  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/slots" pool used f pid
   for pool in sandboxes gates; do
     used=0
     for f in "$dir/$pool"-*.lock; do
@@ -243,9 +317,8 @@ pool_line() {
       kill -0 "$pid" 2>/dev/null && used=$((used+1))
     done
     case "$pool" in sandboxes) lim="${SANDCASTLE_MAX_SANDBOXES:-6}";; gates) lim="${SANDCASTLE_MAX_GATES:-2}";; esac
-    out="${out}${out:+ · }${pool} ${used}/${lim}"
+    printf -v "USED_$pool" '%s' "$used"; printf -v "LIM_$pool" '%s' "$lim"
   done
-  printf '%s' "$out"
 }
 
 # The orchestrator writes logs/run.json: which run, since when, which models,
@@ -371,11 +444,11 @@ style_of() {
   case "$1" in
     setup|impl|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
     stalled|orphaned|stopped|"gate red"|conflict|held|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
-    ready|finished) glyph='◆'; colour="$cyn"; prio=2; grp=ready;;
+    ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
     queued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
-    blocked) glyph='◌'; colour="$blu"; prio=4; grp=blocked;;
-    merged) glyph='✓'; colour="$grn"; prio=5; grp=merged;;
-    "left over"|withdrawn) glyph='◇'; colour="$gry"; prio=6; grp="left over";;
+    blocked) glyph='~'; colour="$blu"; prio=4; grp=blocked;;
+    merged) glyph='+'; colour="$grn"; prio=5; grp=merged;;
+    "left over"|withdrawn) glyph='-'; colour="$gry"; prio=6; grp="left over";;
     *) glyph='·'; colour="$gry"; prio=6; grp=idle;;
   esac
 }
@@ -409,31 +482,36 @@ cpu_cols() {
   elif [ "$S_HOT" = "1" ]; then cpu_col="$hot"; fi
 }
 
-label() { printf '%s%s%s %s│%s ' "$accent" "$(pad "$1" 7)" "$off" "$rule" "$off"; }
-
-run_line() {
+# The run's state, its times and its tokens, as the run cell's three rows (RUNC).
+run_cell() {
   local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta
-  [ -f "$f" ] || { printf '%s' "${mute}no run recorded yet${off}"; return 0; }
+  RUNC=("" "" "")
+  [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
   # empty finishedAt would shift every later field.
   IFS="$US" read -r orch pid started finished code models stage dry tokens < <(jq -r \
     '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end), (.tokens // "")] | join("\u001f")' "$f")
   t0=$(utc_to_epoch "${started%%.*}")
-  # The date only when it is not today: the run line has to fit 80 columns.
+  # The date only when it is not today: the run cell has to fit 80 columns.
   if [ "$(epoch_fmt "$t0" +%F)" = "$(date +%F)" ]; then started=$(epoch_fmt "$t0" '+%H:%M'); else started=$(epoch_fmt "$t0" '+%d %b %H:%M'); fi
   # "running" is the stage between the start-up steps and landing; the run
-  # line already says running.
+  # cell already says running.
   [ "$stage" = running ] && stage=""
   if [ -n "$finished" ]; then
-    printf '%s' "${mute}last one from ${started}, ended (exit ${code})${tokens:+ · ${tokens}}${off}"
+    kvl state "${mute}last one ended (exit ${code})${off}"; RUNC[0]="$REPLY"
+    kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
   elif kill -0 "$pid" 2>/dev/null; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
-    eta=""; [ -n "$RUN_ETA" ] && eta=" ${rule}·${off} ${mute}lands ~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off}"
-    printf '%s' "${ylw}running${off}${dry:+ ${dry}} ${mute}since ${started} ($(dur $(( $(date +%s) - t0 ))))${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}${eta}${tokens:+ ${rule}·${off} ${mute}${tokens}${off}}"
+    kvl state "${ylw}running${off}${dry:+ ${accent}${dry}${off}} ${mute}· $(dur $(( $(date +%s) - t0 )))${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}"; RUNC[0]="$REPLY"
+    if [ -n "$RUN_ETA" ]; then kvl lands "${accent}~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off} ${mute}· since ${started}${off}"
+    else kvl since "${mute}${started}${off}"; fi
+    RUNC[1]="$REPLY"
   else
-    printf '%s' "${hot}killed${off} ${mute}from ${started}, no clean exit${off}"
+    kvl state "${hot}killed${off} ${mute}· no clean exit${off}"; RUNC[0]="$REPLY"
+    kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
   fi
+  kvl tokens "${tokens:-${gry}-${off}}"; RUNC[2]="$REPLY"
 }
 
 # The models a live run uses; otherwise the ones the next run would, from the
@@ -446,22 +524,18 @@ models_line() {
 }
 
 # One row into the frame, counted in its group - or, while a live run keeps a
-# record, as outside that run ($1 = 1), so the header adds up to the run.
+# record, as outside that run ($1 = 1), so the counts add up to the run.
 emit() {
-  local age_c="$age_col" cmt_c="$head"
+  local age_c="$age_col" cmt_c="$head" mem_c="$head"
   [ "$age" = "-" ] && age_c="$gry"
   [ "$commits" = "-" ] && cmt_c="$gry"
-  local mem_col="$head" mem_cell=""
-  [ "$mem" = "-" ] && mem_col="$gry"
-  [ "$W_MEM" -gt 0 ] && mem_cell="${mem_col}$(pad "$mem" $W_MEM)${off} "
-  # One column in, as the header and legend are.
-  rendered=$(printf ' %s%s%s %s%s %s%s %s%s%s %s%s%s %s%s%s %s%s%s%s' \
-    "$head" "$(pad "$(disp "$n" | cut -c1-"$W_ISSUE")" $W_ISSUE)" "$off" \
-    "$colour" "$glyph" "$(pad "$state" $W_STATE)" "$off" \
-    "$age_c" "$(pad "$age" $W_AGE)" "$off" \
-    "$cmt_c" "$(pad "$commits" $W_COMMITS)" "$off" \
-    "$cpu_col" "$(pad "$cpu" $W_CPU)" "$off" \
-    "$mem_cell" "$act_col" "$(printf '%s' "$activity" | cut -c1-"$w_act")" "$off")
+  [ "$mem" = "-" ] && mem_c="$gry"
+  CELL=("${bold}${wht}$(disp "$n")${off}" "${colour}${glyph} ${state}${off}" "${age_c}${age}${off}" "${cmt_c}${commits}${off}")
+  [ "$wide" -ge 1 ] && CELL[4]="${cpu_col}${cpu}${off}"
+  [ "$wide" = 2 ] && CELL[5]="${mem_c}${mem}${off}"
+  CELL[${#TW[@]}-1]="${act_col}${activity}${off}"
+  OW=("${TW[@]}"); AL=("${TAL[@]}")
+  cells_line; rendered="$REPLY"
   out[n_out]="$prio	$key	$n	$grp	$rendered"; n_out=$((n_out+1))
   if [ "$1" = 1 ]; then c_out=$((c_out+1)); return 0; fi
   case "$grp" in
@@ -476,32 +550,14 @@ emit() {
   esac
 }
 
-# The header counts, wrapped to the pane: cut at its edge, the last ones were
-# lost. While a run is live the main ones show even at zero - "0 merged" is
-# news then - and they add up to the run; otherwise only what is not zero.
-counts_lines() {
-  local all="$1" cols="$2"
-  local -a items=("${ylw}${c_work} working${off}")
-  add() { if [ "$1" -gt 0 ] || { [ "$all" = 1 ] && [ "$4" = 1 ]; }; then items[${#items[@]}]="${2}${1} ${3}${off}"; fi; }
-  add "$c_ready" "$cyn" "ready to land" 1
-  add "$c_attn" "$hot" "$([ "$c_attn" = 1 ] && printf 'needs' || printf 'need') you" 1
-  add "$c_queue" "$blu" "queued" 1
-  add "$c_block" "$blu" "blocked" 0
-  add "$c_merged" "$grn" "merged" 1
-  add "$c_idle" "$gry" "idle" 0
-  add "$c_left" "$gry" "left over" 0
-  add "$c_out" "$gry" "not in this run" 0
-  wrap "$cols" " · " "${items[@]}"
-}
-
 render() {
   local now now_s issues n phase log age commits state glyph colour activity activity_note rendered
-  local merged_list pad cols rows w_act line prio cpu mem cpu_col budget shown hidden key
+  local merged_list cols rows prio cpu mem cpu_col budget hidden key wide WIN BUF BUF_N
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
-  local grp oc oc_run oc_text hidden_list group summary act since title counts overhead legend
-  local tstate started order note typ pos qmsg upstream ahead unpushed=
-  local -a out=()
+  local grp oc oc_run oc_text hidden_list group summary act since
+  local tstate started order note typ pos upstream ahead unpushed=
+  local -a out=() TW=() TAL=() OW=() CELL=() AL=() RUNC=() WRAPPED=()
   local n_out=0
 
   # render runs inside $(...) piped to awk, so stdout is not the terminal and
@@ -516,28 +572,36 @@ render() {
   load_run
   merged_list=$(git branch --merged "$BASE" --list 'agent/issue-*' 2>/dev/null)
 
-  # Not `tr ' ' '─'`: GNU tr maps bytes, so on Linux it emits a bare e2 per
-  # column, invalid UTF-8. Bash substitution is byte-safe in any locale.
-  pad=$(printf "%${cols}s" '')
-  line="${rule}${pad// /─}${off}"
-
   # Keyed by the branch slug, not the bare number: a follow-up step can run
   # on agent/issue-12-closeout while agent/issue-12 is long merged, and
   # keying both on 12 hid the live sandbox under the merged row.
   issues=$(ls logs/agent-issue-*.log 2>/dev/null \
     | log_ids | sort -u)
 
-  # The ISSUE column fits the longest ticket shown ("helpers-01" is longer than
-  # "#1234"), up to 16; the row for a longer one is cut to it.
-  local id d longest=6
+  # The table's columns. The fixed ones grow with the pane (a share of it,
+  # with a minimum each) and ACTIVITY takes the rest. The ISSUE column fits
+  # the longest ticket shown ("helpers-01" is longer than "#1234"), up to 16;
+  # a longer one is cut to it.
+  local id d longest=5 i sum=0 avail
   for id in $issues $QUEUE $TICKET_IDS; do d=$(disp "$id"); [ "${#d}" -gt "$longest" ] && longest=${#d}; done
-  W_ISSUE=$(( longest > 16 ? 16 : longest ))
+  [ "$longest" -gt 16 ] && longest=16
+  WIN="$cols"
   # In a narrow pane MEM gives its width to ACTIVITY, where the notes are:
-  # at 80 columns every note was cut to 30 characters.
-  W_MEM=7; [ "$cols" -lt 100 ] && W_MEM=0
-  W_FIXED=$(( W_ISSUE + W_STATE + W_AGE + W_COMMITS + W_CPU + W_MEM + 9 ))
-  w_act=$(( cols - W_FIXED ))
-  [ "$w_act" -lt 8 ] && w_act=8
+  # at 80 columns every note was cut to 30 characters. Below 80, CPU does too.
+  # wide: 2 with MEM, 1 with CPU only, 0 with neither.
+  wide=2; [ "$cols" -lt 100 ] && wide=1; [ "$cols" -lt 80 ] && wide=0
+  # STATE's minimum fits "! not landed", the longest state - but for the
+  # narrowest panes, which cut it.
+  local -a MIN=($(( longest + 2 )) 14 6 9 7 7) PCT=(6 9 5 6 6 6)
+  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 14 6 9 7); PCT=(6 9 5 6 6); }
+  [ "$wide" = 0 ] && { MIN=($(( longest + 2 )) 12 6 9); PCT=(6 9 5 6); }
+  avail=$(( cols - ${#MIN[@]} - 2 ))
+  for (( i=0; i<${#MIN[@]}; i++ )); do
+    TW[i]=$(( avail * PCT[i] / 100 )); [ "${TW[i]}" -lt "${MIN[i]}" ] && TW[i]=${MIN[i]}; sum=$(( sum + TW[i] ))
+  done
+  TW[${#MIN[@]}]=$(( avail - sum )); [ "${TW[${#MIN[@]}]}" -lt 10 ] && TW[${#MIN[@]}]=10
+  # Every column but STATE and ACTIVITY is centred.
+  TAL=(c l c c c c); TAL[${#MIN[@]}]=l
 
   # 1. The live run's tickets, as its record has them.
   for n in $TICKET_IDS; do
@@ -734,62 +798,108 @@ render() {
   # shipped nothing until they go out. No fetch here - no network.
   if upstream=$(git rev-parse --abbrev-ref "${BASE}@{upstream}" 2>/dev/null) && [ -n "$upstream" ]; then
     ahead=$(git rev-list --count "${upstream}..${BASE}" 2>/dev/null || echo 0)
-    [ "$ahead" -gt 0 ] 2>/dev/null && unpushed=" ${hot}${ahead} unpushed${off}"
+    [ "$ahead" -gt 0 ] 2>/dev/null && unpushed=" ${hot}↑${ahead} unpushed${off}"
   fi
-  title=" ${bold}Sandcastle${off} ${head}${SANDCASTLE_NAME:-}${off}  ${rule}│${off}  base ${accent}${BASE}${off}${unpushed}  ${rule}│${off}  ${accent}${now}${off}"
-  counts=$(counts_lines "$RUN_LIVE" "$cols")
-  legend=$(wrap "$cols" "  " "${ylw}● working${off}" "${hot}! needs you${off}" "${cyn}◆ ready to land${off}" "${blu}○ queued${off}" \
-    "${blu}◌ blocked${off}" "${grn}✓ merged${off}" "${gry}◇ left over${off}" "${gry}· idle${off}")
-  legend="${legend}
-$(wrap "$cols" "${mute} · ${off}" "${mute}ready = gates green, lands when the run ends${off}" \
-    "${mute}age = time in state (red: twice the usual)${off}" "${mute}CPU in cores of ${NCPU}${off}")"
-
-  printf '%s\n' "$line"
-  overhead=$(( 8 + $(printf '%s\n' "$legend" | wc -l) + $(printf '%s\n' "$counts" | wc -l) + $([ -n "$QUEUE_ERR" ] && echo 1 || echo 0) ))
-  printf '%s\n' "$title" "$counts"
-  # Label, then a dim pipe, then the value: the label column reads as the
-  # row's title at a glance.
-  printf '%s\n' " $(label run)$(run_line)"
-  # An unreadable queue is not an empty one: say so, under the run line.
-  if [ -n "$QUEUE_ERR" ]; then
-    qmsg="queue: could not read - ${QUEUE_ERR}"
-    [ "${#qmsg}" -gt $(( cols - 2 )) ] && qmsg="${qmsg:0:$(( cols - 3 ))}…"
-    printf '%s\n' "  ${mute}${qmsg}${off}"
-  fi
-  models=$(models_line)
-  [ -n "$models" ] && printf '%s\n' " $(label models)${mute}${models}${off}"
   # Tickets queued for a gates slot: gates are what the machine is busy with
   # while the table stands still.
+  local gate_wait models mprefix part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
+  local -a LG=() MAC=() MOD=() LEG=() NOTE=()
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
-  printf '%s\n' " $(label machine)${mute}$(pool_line)$([ "$gate_wait" -gt 0 ] && printf ' · %s waiting for a gates slot' "$gate_wait")${off}"
-  printf '%s\n' "$line"
-  printf ' %s%s %s %s %s %s %s%s%s\n' "$head" \
-    "$(pad ISSUE $W_ISSUE)" "  $(pad STATE $W_STATE)" "$(pad AGE $W_AGE)" \
-    "$(pad COMMITS $W_COMMITS)" "$(pad CPU $W_CPU)" "$([ "$W_MEM" -gt 0 ] && printf '%s ' "$(pad MEM $W_MEM)")" ACTIVITY "$off"
+  run_cell
+  load_pool
+  gauge "$USED_sandboxes" "$LIM_sandboxes"; kvl sandboxes "$REPLY"; MAC[0]="$REPLY"
+  gauge "$USED_gates" "$LIM_gates"; kvl gates "$REPLY"; MAC[1]="$REPLY"
+  if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
+  MAC[2]="$REPLY"
+  # "implement X · review Y", one row each in the models cell.
+  models=$(models_line); mprefix=""
+  case "$models" in "next run: "*|"last run: "*) mprefix="${models%%: *}"; models="${models#*: }";; esac
+  part="$models"; i=0
+  while [ -n "$part" ] && [ "$i" -lt 3 ]; do
+    item="${part%% · *}"
+    case "$item" in *" "*) kvl "${item%% *}" "${head}${item#* }${off}";; *) kvl "$item" "";; esac
+    MOD[i]="$REPLY"; i=$((i+1))
+    case "$part" in *" · "*) part="${part#* · }";; *) part="";; esac
+  done
+  [ -n "$mprefix" ] && [ -n "${MOD[0]:-}" ] && MOD[0]="${MOD[0]} ${gry}(${mprefix})${off}"
 
+  # The header, with the logo in 3 rows or, in a short pane, 1.
+  build_header 3
+  # The legend with each group's count (the counts band is gone), then the note.
+  LEG=("${ylw}● working ${bold}${c_work}${off}" "${hot}! needs you ${bold}${c_attn}${off}" "${cyn}> ready to land ${bold}${c_ready}${off}" \
+    "${blu}○ queued ${bold}${c_queue}${off}" "${blu}~ blocked ${bold}${c_block}${off}" "${grn}+ merged ${bold}${c_merged}${off}" \
+    "${gry}- left over ${bold}${c_left}${off}" "${gry}· idle ${bold}${c_idle}${off}")
+  NOTE=()
+  [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
+  NOTE[${#NOTE[@]}]="${gry}ready = gates green, lands when the run ends${off}"
+  NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
+  NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
+  BUF=""; BUF_N=0
+  # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
+  # columns: eight on one row from 130 columns, else rows of four, or of two
+  # where four do not fit. A column is as wide as its widest item.
+  local per=8 r c sumw
+  [ "$cols" -lt 130 ] && per=4
+  while :; do
+    local -a LWT=(); sumw=0
+    for (( c=0; c<per; c++ )); do
+      LWT[c]=0
+      for (( r=c; r<8; r+=per )); do vlen "${LEG[r]}"; [ "$VN" -gt "${LWT[c]}" ] && LWT[c]=$VN; done
+      LWT[c]=$(( LWT[c] + 4 )); sumw=$(( sumw + LWT[c] ))
+    done
+    { [ "$per" -le 2 ] || [ $(( sumw + per + 1 )) -le "$WIN" ]; } && break
+    per=$(( per / 2 ))
+  done
+  split_cols "${LWT[@]}"; bars_of; lbars="$BARS"
+  AL=(c c c c c c c c)
+  for (( r=0; r<8; r+=per )); do CELL=("${LEG[@]:r:per}"); cells_line; put "$REPLY"; done
+  junction '├' '┤' '─' "$lbars" ""; put "$REPLY"
+  split_cols 1; AL=(c)
+  wrap_items $(( WIN - 4 )) "${NOTE[@]}"
+  for l in "${WRAPPED[@]}"; do CELL=("$l"); cells_line; put "$REPLY"; done
+  junction '└' '┘' '─' "" ""; put "$REPLY"
+  FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the double rule that opens it
+
+  # A short pane: the logo folds to one row, so the table keeps some rows.
+  if [ "$SHOW_ALL" != all ] && [ $(( rows - HDR_N - ftr_n - 1 )) -lt 5 ]; then build_header 1; fi
+  hdr_n="$HDR_N"
+
+  # The table body.
+  BUF=""; BUF_N=0
+  OW=("${TW[@]}"); bars_of; tbars="$BARS"
+  junction '├' '┤' '─' "$tbars" "$tbars"; sep_line="$REPLY"
+  up="$tbars"
   if [ "$n_out" -eq 0 ]; then
-    printf '%s\n' " ${mute}(no runs yet)${off}"
+    CELL=(); CELL[${#TW[@]}-1]="${mute}(no runs yet)${off}"; AL=("${TAL[@]}"); cells_line; put "$REPLY"
   else
     # Working, needing you, ready, queued, blocked, then merged and idle -
     # everything unfinished first - and within a group the most recent change
     # first (the queue: next to start first). The merged and idle tail is what
     # makes the list outgrow the screen, so it gets cut, oldest first.
-    # Frame overhead is 8 rows - rule, title, run, models, machine, rule,
-    # headings, rule - plus the legend's and the counts' lines. Every other
-    # row is a table row, and the
-    # "+N hidden" line only takes one when something is actually hidden.
-    budget=$(( rows - overhead )); shown=0; hidden=0; hidden_list=""
-    [ "$SHOW_ALL" = "all" ] && budget="$n_out"
+    # The rows left are the pane less the header, the footer and the bottom
+    # row, which stays free (see the loop). A light rule between groups takes
+    # a row too, and the "+N not shown" cell two, only when something is hidden.
+    budget=$(( rows - hdr_n - ftr_n - 1 )); hidden=0; hidden_list=""
+    [ "$SHOW_ALL" = "all" ] && budget=1000000
     [ "$budget" -lt 3 ] && budget=3
-    [ "$n_out" -gt "$budget" ] && budget=$(( budget - 1 ))
+    sorted=$(printf '%s\n' "${out[@]}" | sort -t$'\t' -k1,1n -k2,2nr -k3,3n)
+    need=0; pp=""
     while IFS=$'\t' read -r prio key n group rendered; do
-      if [ "$shown" -lt "$budget" ]; then
-        printf '%s\n' "$rendered"; shown=$((shown+1))
+      need=$((need+1)); [ -n "$pp" ] && [ "$prio" != "$pp" ] && need=$((need+1)); pp="$prio"
+    done <<<"$sorted"
+    [ "$need" -gt "$budget" ] && budget=$(( budget - 2 ))
+    used=0; pp=""
+    while IFS=$'\t' read -r prio key n group rendered; do
+      sep=0; [ -n "$pp" ] && [ "$prio" != "$pp" ] && sep=1
+      cost=$(( 1 + sep ))
+      if [ "$hidden" = 0 ] && [ $(( used + cost )) -le "$budget" ]; then
+        [ "$sep" = 1 ] && put "$sep_line"
+        put "$rendered"; used=$(( used + cost )); pp="$prio"
       else
         hidden=$((hidden+1)); hidden_list="${hidden_list}${group}|$(disp "$n")
 "
       fi
-    done < <(printf '%s\n' "${out[@]}" | sort -t$'\t' -k1,1n -k2,2nr -k3,3n)
+    done <<<"$sorted"
     # What did not fit, by state, so a long queue is one line rather than a
     # screen of rows: "+33 queued (#101-#140) · 2 merged". A range only when
     # every id in the group is a number: ticket-file ids ("checkout-03") have
@@ -806,12 +916,69 @@ $(wrap "$cols" "${mute} · ${off}" "${mute}ready = gates green, lands when the r
         END { for (i=1; i<=k; i++) { g=order[i]
           ids = num[g] ? "#" lo[g] (hi[g] != lo[g] ? "-#" hi[g] : "") : names[g] (c[g] > 3 ? ", …" : "")
           printf "%s%d %s (%s)", (i>1 ? " · " : ""), c[g], g, ids } }')
-      printf '%s\n' "$(fit " ${gry}+${summary} not shown${off}" "$cols")"
+      junction '├' '┤' '─' "$tbars" ""; put "$REPLY"
+      split_cols 1; AL=(l); CELL=("${gry}+${summary} not shown${off}"); cells_line; put "$REPLY"
+      up=""
     fi
   fi
+  junction '╞' '╡' '═' "$up" "$lbars"
+  printf '%s%s%s\n%s' "$HDR" "$BUF" "$REPLY" "$FTR"
+}
 
-  printf '%s\n' "$line"
-  printf '%s\n' "$legend"
+# The header bands into HDR (HDR_N lines): the logo cell, the run band, the
+# models and the queue error when there are any, and the table's headings.
+# $1: the logo's rows, 3 or 1. Reads render's locals.
+build_header() {
+  local l m=0 prev
+  if [ "$1" = 3 ]; then
+    LG=(" ${moon}▄ ▄ ▄${off} ${star}+${off}   ${bold}${moon}s a n d c a s t l e${off} ${night}- k i t${off}  ${star}·   +   ·${off}"
+      " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
+      " ${deep}██▀██${off} ${star}·${off}   ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+  else
+    LG=("${moon}▄▄▄${off} ${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+  fi
+  # Every logo line padded to the widest, so centring keeps the castle's shape.
+  for l in "${LG[@]}"; do vlen "$l"; [ "$VN" -gt "$m" ] && m=$VN; done
+  for (( i=0; i<${#LG[@]}; i++ )); do align "${LG[i]}" "$m"; LG[i]="$REPLY"; done
+  BUF=""; BUF_N=0
+  if [ "$cols" -ge 170 ]; then
+    # Wide: the logo, the run, the machine and the models side by side.
+    split_cols 40 20 20 20; bars_of
+    junction '┌' '┐' '─' "" "$BARS"; put "$REPLY"
+    AL=(c l l l)
+    for i in 0 1 2; do CELL=("${LG[i]:-}" "${RUNC[i]}" "${MAC[i]}" "${MOD[i]:-}"); cells_line; put "$REPLY"; done
+  else
+    split_cols 1; AL=(c)
+    junction '┌' '┐' '─' "" ""; put "$REPLY"
+    for l in "${LG[@]}"; do CELL=("$l"); cells_line; put "$REPLY"; done
+    split_cols 1 1; AL=(l l); bars_of
+    junction '├' '┤' '─' "" "$BARS"; put "$REPLY"
+    for i in 0 1 2; do CELL=("${RUNC[i]}" "${MAC[i]}"); cells_line; put "$REPLY"; done
+    if [ -n "$models" ]; then
+      prev="$BARS"; split_cols 1; AL=(l)
+      junction '├' '┤' '─' "$prev" ""; put "$REPLY"
+      kvl models "${mute}${mprefix:+${mprefix}: }${models}${off}"; CELL=("$REPLY"); cells_line; put "$REPLY"
+      BARS=""
+    fi
+  fi
+  prev="$BARS"
+  # An unreadable queue is not an empty one: say so, under the run band.
+  if [ -n "$QUEUE_ERR" ]; then
+    split_cols 1; AL=(l)
+    junction '├' '┤' '─' "$prev" ""; put "$REPLY"
+    CELL=("${mute}queue: could not read - ${QUEUE_ERR}${off}"); cells_line; put "$REPLY"
+    prev=""
+  fi
+  # The table's headings, under a double rule.
+  OW=("${TW[@]}"); bars_of
+  junction '╞' '╡' '═' "$prev" "$BARS"; put "$REPLY"
+  CELL=("${bold}${head}ISSUE${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
+  [ "$wide" -ge 1 ] && CELL[4]="${bold}${head}CPU${off}"
+  [ "$wide" = 2 ] && CELL[5]="${bold}${head}MEM${off}"
+  CELL[${#TW[@]}-1]="${bold}${head}ACTIVITY${off}"
+  AL=("${TAL[@]}"); cells_line; put "$REPLY"
+  junction '├' '┤' '─' "$BARS" "$BARS"; put "$REPLY"
+  HDR="$BUF"; HDR_N=$BUF_N
 }
 
 if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
@@ -835,24 +1002,32 @@ SLEEP_PID=""; RESIZED=0; frame=""
 trap 'RESIZED=1; [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
 
 while true; do
-  size=$(stty size </dev/tty 2>/dev/null)
-  TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"
+  # The pane's size from its terminal; without one (a test), the size given.
+  if size=$( { stty size </dev/tty; } 2>/dev/null) && [ -n "$size" ]; then TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"; fi
   export TERM_ROWS TERM_COLS
   if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "$TERM_ROWS" =~ ^[0-9]+$ ]]; then
-    printf '\e[H%s\e[J' "$(printf '%s\n' "$frame" | head -n "$TERM_ROWS")"
+    printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi
   RESIZED=0
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be
   # blanked first - no flash, and no visible row-by-row repaint.
+  # With line wrap off, a line that fills the pane leaves the cursor ON its
+  # last cell, and a \e[K there erased that cell: every full-width rule lost
+  # its last character. So \e[K only after a shorter line, and the frame ends
+  # in a newline on a row of its own (render keeps the bottom row free).
   # stderr is swallowed: a stray warning printed mid-frame lands wherever the
   # cursor happens to be and corrupts the screen.
   frame=$(render 2>>"${STATUS_ERRLOG:-/dev/null}" | while IFS= read -r l; do
-    if [[ "$TERM_COLS" =~ ^[0-9]+$ ]]; then fit "$l" "$TERM_COLS"; else printf '%s' "$l"; fi
-    printf '\033[K\n'
+    if [[ "$TERM_COLS" =~ ^[0-9]+$ ]]; then
+      l=$(fit "$l" "$TERM_COLS"); printf '%s' "$l"; vlen "$l"; [ "$VN" -lt "$TERM_COLS" ] && printf '\033[K'
+    else printf '%s\033[K' "$l"; fi
+    printf '\n'
   done)
-  printf '\e[H%s\e[J' "$frame"
+  printf '\e[H%s\n\e[J' "$frame"
+  # One frame and out, for the tests: what the loop writes is what they check.
+  [ -n "${STATUS_FRAMES:-}" ] && { STATUS_FRAMES=$(( STATUS_FRAMES - 1 )); [ "$STATUS_FRAMES" -le 0 ] && exit 0; }
   [ "$RESIZED" = 1 ] && continue
   sleep "$INTERVAL" & SLEEP_PID=$!
   wait "$SLEEP_PID" 2>/dev/null

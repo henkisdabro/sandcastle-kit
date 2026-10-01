@@ -62,9 +62,10 @@ for (const locale of [utf8, "C"]) {
     const out = render(locale);
     // Strict decoding throws on a bare e2.
     const text = new TextDecoder("utf-8", { fatal: true }).decode(out).replace(/\u001b\[[0-9;]*m/g, "");
-    const frames = text.split("\n").filter((l) => /^─+$/.test(l));
+    // The window's rules: an end, ─ or ═ with the joints, the other end - each the pane's width.
+    const frames = text.split("\n").filter((l) => /^[┌├╞└][─═┬┴┼╤╧╪]+[┐┤╡┘]$/.test(l));
     assert.ok(frames.length > 0, "no frame line in the view");
-    for (const l of frames) assert.equal(l, "─".repeat(COLS));
+    for (const l of frames) assert.equal([...l].length, COLS, l);
     assert.ok(out.includes(Buffer.from([0xe2, 0x94, 0x80])), "no ─ as e2 94 80");
   });
 }

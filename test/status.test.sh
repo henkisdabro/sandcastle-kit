@@ -46,7 +46,7 @@ esac
 EOF
 chmod +x "$FAKE/sandcastle" "$FAKE/docker"
 
-git_() { git -C "$REPO" -c core.hooksPath=/dev/null "$@"; }
+git_() { git -C "$REPO" -c core.hooksPath=/dev/null -c commit.gpgsign=false "$@"; }
 git_ init -q -b main
 git_ config user.email test@example.com
 git_ config user.name test
@@ -72,11 +72,11 @@ render() {
     [ "${#l}" -le "$COLS" ] || { echo "FAIL [$SCENARIO] wider than $COLS columns: $l"; fails=$((fails+1)); }
   done <"$TMP/frame"
 }
-# A row's state: the ticket, its glyph and state word, in that order.
+# A row's state: the ticket's cell, then its glyph and state word, in that order.
 row() { # ticket state [activity pattern]
   local line
-  line=$(grep -E "^ $1 " "$TMP/frame")
-  if ! grep -qE "^ $1 +. $2( |$)" <<<"$line"; then
+  line=$(grep -E "^│ +$1 +│" "$TMP/frame")
+  if ! grep -qE "^│ +$1 +│ . $2 +│" <<<"$line"; then
     echo "FAIL [$SCENARIO] $1: want state '$2', row is: ${line:-(missing)}"; fails=$((fails+1)); return
   fi
   if [ -n "${3:-}" ] && ! grep -qE "$3" <<<"$line"; then
@@ -124,7 +124,7 @@ cat >"$L/run.json" <<EOF
 EOF
 render "101 102 103 104 105 106 107 108 109 110 120"
 row '#101' impl 'Bash|\$ pnpm test'
-row '#102' gates 'usually 1m - 2/3 pytest - tests/test_'
+row '#102' gates 'usually 1m - 2/3 pytest'
 row '#103' ready 'gates green'
 row '#104' 'gate red' 'pytest red'
 row '#105' queued 'next to start'
@@ -134,17 +134,20 @@ row '#108' held '.github/'
 row '#109' conflict 'with #103'
 row '#110' merged
 row '#120' queued 'not in this run'
-# The counts add up to the run (ten tickets), with the rest apart. They wrap in a narrow pane.
-for c in '2 working' '1 ready to land' '3 need you' '2 queued' '1 blocked' '1 merged' '1 not in this run'; do has "(^| )$c( ·|$)"; done
+# The legend's counts add up to the run (ten tickets), with the rest apart in the note.
+for c in 'working 2' 'ready to land 1' 'needs you 3' 'queued 2' 'blocked 1' 'merged 1'; do has "$c +│"; done
+has '│ +1 not in this run · '
 has 'landing 2/4'
-has 'models +│ implement live-model/high'
+has 'implement +live-model/high'
 hasnt 'on its earlier branch'
 
 SCENARIO="live run, agents working"
 # Before landing: an estimate of when it starts, once a typical issue is known.
 sed -i.bak 's/"stage": "landing 2\/4"/"stage": "running"/' "$L/run.json"
 render "101 102 103 104 105 106 107 108 109 110 120"
-has 'run +│ running since [0-9:]+ \([0-9]+m\) · lands ~[0-9]{2}:[0-9]{2} · 1.2M in / 30k out'
+has 'state +running · [0-9]+m +│'
+has 'lands +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+has 'tokens +1.2M in / 30k out +│'
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, older orchestrator"
@@ -190,7 +193,7 @@ row '#111' withdrawn
 row '#112' held 'handed back'
 git_ branch -q -D agent/issue-112 # only this scenario's
 row '#103' 'left over' 'earlier run'
-has 'models +│ next run: implement next-model/high'
+has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
 hasnt 'old-model'
 
 # ---------------------------------------------------------------------------
@@ -202,7 +205,7 @@ cat >"$L/run.json" <<EOF
 EOF
 FAKE_DOCKER="$REPO" render "101"
 row '#101' impl
-has '^ #101 .* 1\.5c '
+has '^│ +#101 .*│ +1\.5c +│'
 
 # ---------------------------------------------------------------------------
 SCENARIO="a state written after the frame's clock"
@@ -213,15 +216,38 @@ cat >"$L/run.json" <<EOF
 EOF
 render "103"
 row '#103' ready
-has '^ #103 .* 0s '
+has '^│ +#103 .*│ +0s +│'
 
 # ---------------------------------------------------------------------------
 SCENARIO="overflow, ticket-file ids"
 # What does not fit is summed up by state. Ticket-file ids have no numeric
 # order: they are named, never made into a range like "#0-#0".
-SHOW=collapse ROWS=16 render "$(printf 'checkout-%02d ' $(seq 1 12))"
+SHOW=collapse ROWS=26 render "$(printf 'checkout-%02d ' $(seq 1 12))"
 has '\+.*[0-9]+ queued \(checkout-[0-9]{2}, checkout-[0-9]{2}, checkout-[0-9]{2}, …\)'
 hasnt '#checkout|#0'
+
+# ---------------------------------------------------------------------------
+SCENARIO="live loop, one frame"
+# What the refreshing view writes. Line wrap is off, so a line that fills the
+# pane leaves the cursor on its last cell, and an erase-to-end there wiped
+# that cell: every full-width rule lost its last character. And the frame must
+# fit the pane with its window closed - the bottom border on screen, the last
+# row left free so the erase below the frame cannot reach it.
+PATH="$FAKE:$PATH" FAKE_QUEUE="$(printf 'checkout-%02d ' $(seq 1 12))" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+  SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=30 XDG_CACHE_HOME="$TMP/cache" STATUS_FRAMES=1 \
+  "${STATUS_BASH:-bash}" "$KIT/status.sh" 1 >"$TMP/live" 2>&1 </dev/null
+ESC=$'\e'; erased=0; n=0; last=""
+while IFS= read -r l; do
+  # Only the frame: the screen set-up and restore codes are not rows.
+  case "$l" in *"${ESC}[?1049l"*) break;; esac
+  n=$((n+1))
+  p=$(printf '%s' "$l" | sed $'s/\e\\[[0-9;?]*[a-zA-Z]//g')
+  [ "${#p}" -ge "$COLS" ] && [[ "$l" == *"${ESC}[K"* ]] && erased=$((erased+1))
+  [ -n "$p" ] && last="$p"
+done <"$TMP/live"
+[ "$erased" = 0 ] || { echo "FAIL [$SCENARIO] $erased full-width line(s) followed by an erase to the end"; fails=$((fails+1)); }
+[ "$n" -le 29 ] || { echo "FAIL [$SCENARIO] $n rows in a 30-row pane: the bottom row must stay free"; fails=$((fails+1)); }
+[[ "$last" == └*┘ ]] || { echo "FAIL [$SCENARIO] the frame does not end in its bottom border: $last"; fails=$((fails+1)); }
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"

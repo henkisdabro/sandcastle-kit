@@ -71,19 +71,19 @@ const render = (queue: string, env: Record<string, string> = {}, shadow?: string
 
 test("a read that works lists the queue and says nothing of a failure", () => {
   const { frame } = render("101");
-  assert.match(frame, /^ #101 .* queued/m);
+  assert.match(frame, /^│ +#101 +│ . queued/m);
   assert.doesNotMatch(frame, /queue: could not read/);
 });
 
 test("a failed read shows why, and is not shown as an empty queue", () => {
   const { frame } = render("101", { FAKE_QUEUE_FAIL: "gh: not logged in" });
   assert.match(frame, /queue: could not read - gh: not logged in/);
-  assert.doesNotMatch(frame, /^ #101 .* queued/m);
+  assert.doesNotMatch(frame, /^│ +#101 +│ . queued/m);
 });
 
 test("a long failure message is cut to the pane", () => {
   const { frame } = render("", { FAKE_QUEUE_FAIL: "x".repeat(120) });
-  assert.match(frame, /queue: could not read - x+…$/m);
+  assert.match(frame, /queue: could not read - x+… +│$/m);
 });
 
 test("escape codes in the failure message cannot reach the terminal", () => {
@@ -100,5 +100,5 @@ test("a jq that does not run stops the view with what to install", () => {
   const { frame, status } = render("101", {}, shadow);
   assert.equal(status, 1);
   assert.match(frame, /status needs jq \(apt install jq \/ brew install jq\)/);
-  assert.doesNotMatch(frame, /^ *run /m);
+  assert.doesNotMatch(frame, /^│ state /m);
 });

@@ -70,7 +70,7 @@ const titleOf = (repo: string): string => {
       XDG_CACHE_HOME: join(TMP, "cache"),
     },
   });
-  const line = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n").find((l) => l.includes("Sandcastle") && l.includes("base main"));
+  const line = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n").find((l) => l.includes("base main"));
   assert.ok(line, `no title line in:\n${r.stdout}\n${r.stderr}`);
   return line;
 };
@@ -80,7 +80,7 @@ test("the status title shows how many commits the base branch is ahead of its up
   assert.ok(!titleOf(repo).includes("unpushed"), "pushed base should show nothing");
   git(repo, "commit", "-q", "--allow-empty", "-m", "one");
   git(repo, "commit", "-q", "--allow-empty", "-m", "two");
-  assert.match(titleOf(repo), /base main 2 unpushed/);
+  assert.match(titleOf(repo), /base main ↑2 unpushed/);
 });
 
 test("a base branch with no upstream shows no unpushed count", () => {
