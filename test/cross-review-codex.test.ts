@@ -5,14 +5,19 @@
 //   pnpm exec tsx --test test/cross-review-codex.test.ts
 
 import assert from "node:assert/strict";
-import { dirname } from "node:path";
+import { mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 
-// Read at import: the flags, and a PATH with node but no codex.
+// Read at import: the flags, and a PATH with node but no codex. Node alone, linked into a directory
+// of its own: in the sandbox image node's directory, /usr/local/bin, holds codex too.
 process.env.CROSS_REVIEW = "1";
 process.env.SKIP_PREFLIGHT = "1";
-process.env.PATH = [dirname(process.execPath), "/usr/bin", "/bin"].join(":");
+const bin = mkdtempSync(join(tmpdir(), "sandcastle-nocodex-"));
+symlinkSync(process.execPath, join(bin, "node"));
+process.env.PATH = [bin, "/usr/bin", "/bin"].join(":");
 const { preflight } = await import("../src/run.ts");
 const { OperatorError } = await import("../src/errors.ts");
 
