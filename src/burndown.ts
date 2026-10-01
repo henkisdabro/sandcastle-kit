@@ -31,7 +31,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, writePlan } from "./lean
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, withSlot } from "./pool.ts";
 import {
-  addTokens, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
+  addTokens, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, NO_TOKENS, openStatusPane, preflight, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
@@ -899,8 +899,21 @@ export const burndown = async (project: Project) => {
         land(o.issue, "conflict", conflictLine(conflicted.at(-1)!));
         run.ticket(o.issue, { files });
       } else {
-        failedToLand.push({ issue: o.issue, reason: errorLine(error) });
-        land(o.issue, "not landed", errorLine(error));
+        // git's own last line ("Merge with strategy ort failed.") names no file, and
+        // its wording varies by version, so the reason comes from the working tree.
+        const dirty = (() => {
+          try {
+            return dirtyFiles(project.root);
+          } catch {
+            return [];
+          }
+        })();
+        const reason =
+          dirty.length > 0
+            ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
+            : errorLine(error);
+        failedToLand.push({ issue: o.issue, reason });
+        land(o.issue, "not landed", reason);
       }
       continue;
     }
