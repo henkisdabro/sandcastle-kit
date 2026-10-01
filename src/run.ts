@@ -166,6 +166,11 @@ export const preflightFailure = (
 
 // `extra` is a model only some tickets ask for (a label), with where it came from.
 export const preflight = async (project: Project, image: string, extra: { model: string; from: string }[] = []) => {
+  // Before any probe, and with preflight skipped too: without Codex on the host every ticket's
+  // cross-review failed one by one, and preflight said only "spawn codex ENOENT" after the Claude probes.
+  if (CROSS_REVIEW && spawnSync("codex", ["--version"], { stdio: "ignore" }).error) {
+    throw new OperatorError("CROSS_REVIEW=1 needs the Codex CLI on this machine: `npm install -g @openai/codex && codex login` - or run without CROSS_REVIEW.");
+  }
   if (process.env.SKIP_PREFLIGHT === "1") return;
   const env = credentials(project);
   type Failure = { model: string; reply: string } | undefined;

@@ -241,6 +241,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   git keeps the old one (it does only once committed).
 - A syntax or runtime error in `.sandcastle/config.ts` is one line naming the place, not a Node
   loader stack trace.
+- `CROSS_REVIEW=1` on a machine without the Codex CLI is refused before anything is spent, with
+  the install command, instead of preflight reporting `spawn codex ENOENT` (or, with preflight
+  skipped, every ticket's cross-review failing one by one).
 
 ### Added
 
