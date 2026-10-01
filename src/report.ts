@@ -385,7 +385,14 @@ export const render = (f: Facts, plain = false): string => {
   }
   if (f.verify && !f.verify.green) next.push(`Fix ${f.base}: merged together, the gates are red. Do not push until they are green.`);
   if (sameTest.length) next.push(`Fix ${sameTest.map(([test]) => test).join(", ")} once - it fails on ${new Set(sameTest.flatMap(([, w]) => w)).size} of the unmerged branches.`);
-  if (sameFile.length) next.push(`Start with ${sameFile.map(([file]) => file).join(", ")}: ${new Set(sameFile.flatMap(([, w]) => w)).size} of the unmerged branches fail or conflict there.`);
+  // Grouped, these tickets got no step of their own (see `lone`): say here what the next run does with them.
+  if (sameFile.length) {
+    const ids = [...new Set(sameFile.flatMap(([, w]) => w))];
+    next.push(
+      `Start with ${sameFile.map(([file]) => file).join(", ")}: ${list(ids)} fail or conflict there. They are still queued: ` +
+        `the next \`sandcastle run\` resumes each branch, merging ${f.base} into it first; or fix one yourself and land it: \`sandcastle land <n>\`.`,
+    );
+  }
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
   if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);

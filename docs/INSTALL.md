@@ -118,8 +118,8 @@ Then read the Upgrading notes in `CHANGELOG.md`. Existing `.sandcastle/config.ts
 working - a new field is always optional, with a default - but a new default can change what a
 run does or spends, and a key the kit does not know (a typo an older version ignored) is now
 refused with the nearest real one: fix the key it names. The skill updates with the pull, since it
-is a link into the kit; an agent session that was already open sees the new skill once it is
-restarted.
+is a link into the kit: Claude Code picks up the change in an open session (`/reload-skills`
+forces it); in another harness, start a new session.
 
 The sandbox image picks up new Claude Code and Codex releases by itself (README,
 [The image's agent versions](../README.md#-the-images-agent-versions)), but not Debian and Node

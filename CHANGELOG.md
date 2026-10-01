@@ -309,6 +309,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   as `.githooks/` or `.gitattributes`, or a file over 50 MB) as `clean`; it now shows `held` and
   why. Its note about conflicting branches appears only when one conflicts. `sandcastle land`'s
   refusal of a protected branch gives the review and merge commands.
+- When several unmerged tickets fail or conflict in the same files, the closing summary's first
+  step now also says they are still queued and the next `sandcastle run` resumes each branch
+  (merging the base in first), or `sandcastle land <n>` - grouped, they had no step of their own.
 
 ### Added
 

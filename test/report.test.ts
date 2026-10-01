@@ -81,7 +81,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
   assert.match(body(out, "## 📤 Local state"), /main is 51 commit\(s\) ahead of origin\/main/);
   assert.match(body(out, "## 📤 Local state"), /Nothing is pushed by Sandcastle/);
   const next = body(out, "## 👉 Next step");
-  assert.match(next, /^1\. Start with tests\/test_totals.py: 2 of the unmerged branches/m);
+  assert.match(next, /^1\. Start with tests\/test_totals.py: #\d+ #\d+ fail or conflict there\. They are still queued: the next `sandcastle run` resumes each branch, merging main into it first/m);
   assert.match(next, /Review and merge the 1 held branch/);
   assert.match(next, /Run again for the 1 issue\(s\) this run unblocked/);
   assert.match(next, /Push main \(51 commit\(s\)\)/);
