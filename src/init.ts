@@ -14,6 +14,9 @@ import { CONFIG_PATH } from "./config.ts";
 import { KIT } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
+/** What init writes to .sandcastle/.gitignore; doctor names the missing ones in its fix. */
+export const SANDCASTLE_IGNORES = [".env", "logs/", "worktrees/", ".run/", "triage/"];
+
 type Stack = { label: string; block: string; dockerfile?: string };
 
 const gatesBlock = (gates: [string, string][]) =>
@@ -177,7 +180,7 @@ export const init = (root: string) => {
 
   // Sandcastle's working files never belong in the repo.
   const ignore = join(root, ".sandcastle/.gitignore");
-  const want = [".env", "logs/", "worktrees/", ".run/", "triage/"];
+  const want = SANDCASTLE_IGNORES;
   const have = existsSync(ignore) ? readFileSync(ignore, "utf8").split("\n") : [];
   const add = want.filter((w) => !have.includes(w));
   if (add.length) appendFileSync(ignore, add.join("\n") + "\n");
@@ -191,6 +194,7 @@ export const init = (root: string) => {
           "you fill in gates and setup - copy the commands CI runs from .github/workflows/*.yml, or use `node --test` for a Node project " +
           "with no package.json.") +
       "\nNext, in order: `sandcastle build`, `sandcastle lean`, `sandcastle gates`." +
+      "\nBefore the first run, answer the three questions in .sandcastle/rules.md: generated files (also `generated` in config.ts), paths agents must never touch, and the gate that catches drift in generated files." +
       "\nAgents only work on queued tickets, so file issues (or ticket files) for the work, then triage them into the queue with " +
       "`/sandcastle queue` (the queue label is `label` in .sandcastle/config.ts, default ready-for-agent).\n",
   );

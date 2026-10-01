@@ -12,9 +12,13 @@ import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { assertGitUnchanged, gitFingerprint } from "../src/guard.ts";
 
+// Inside a sandbox the kit sets GIT_COMMITTER_* (AGENT_COMMITTER), which beats `-c user.name`;
+// drop every identity variable so the commits here are T's wherever the suite runs.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)));
+
 const repo = () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-guard-"));
-  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8" });
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=T", "-c", "user.email=t@example.com", ...args], { encoding: "utf8", env });
   git("init", "-q", "-b", "main");
   git("commit", "-q", "--allow-empty", "-m", "start");
   return { project: { root, baseBranch: "main" } as Project, git };

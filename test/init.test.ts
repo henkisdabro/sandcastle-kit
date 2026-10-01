@@ -59,7 +59,8 @@ test("npm: a lockfile gives npm ci and the scripts as gates in order, with no Do
 test("npm: the placeholder test script is no gate, and no lockfile means no lockfile is written", (t) => {
   const { config } = run(t, { "package.json": pkg({ test: NO_TEST }) });
   assert.ok(config.includes('{ name: "test", command: "npm test" }'));
-  assert.ok(!config.includes("npm run"));
+  // The commented `generated` example names `pnpm run`, so look at gate commands only.
+  assert.ok(!config.includes('command: "npm run'));
   assert.ok(config.includes("npm install --no-package-lock"));
 });
 

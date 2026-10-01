@@ -22,6 +22,9 @@
 //                    does not (a run reads only the body); no model calls
 //   gates            every gate on the base branch in a sandbox, as a run's
 //                    first phase does; no model calls
+//   land <ticket>    merge one agent branch with the kit's message, gate the merge in the
+//                    project image, then close the ticket; nothing is merged on a red gate
+//                    or a conflict; no model calls
 //   lean [--measure] what the repo's skills, agents, MCP servers and plugins
 //                    would cost each sandbox, which hooks are kept and whether
 //                    they can run in the image; --measure runs one real turn
@@ -40,13 +43,14 @@ import { MODELS_LINE } from "./agents.ts";
 import { blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
+import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { closingReport } from "./report.ts";
 import { makeTracker } from "./tracker.ts";
-import { archiveFinishedLogs, exitOnSignal, parseRunArgs, preflight } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -191,6 +195,20 @@ try {
         assertGitUnchanged(project, fingerprint, "after the gates");
       }
       console.log("All gates green on the base branch.");
+      break;
+    }
+    case "land": {
+      // The merge lands in this checkout, so it must be clean and no run may be merging into it.
+      disableHostGitHooks();
+      const project = await loadProject(root);
+      assertCleanBase(project);
+      lockRun(project);
+      console.log(
+        await landTicket(project, makeTracker(project), args[0], () => {
+          const image = ensureImage(project);
+          return { open: sandboxOpener(project, image, writePlan(project).file) };
+        }),
+      );
       break;
     }
     case "lean": {

@@ -1,0 +1,202 @@
+// Landing a branch whose merge conflicts only in generated files (`generated` in
+// .sandcastle/config.ts). The host never runs project code, so `regen` cannot run there:
+// the merge is redone in a throwaway sandbox from the base tip, resolved by regenerating,
+// committed with the landing message, and the host's base branch is fast-forwarded to it.
+
+import { createSandbox } from "@ai-hero/sandcastle";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { Project } from "./config.ts";
+import { OperatorError } from "./errors.ts";
+import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
+import { type Exec, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
+import { assertGitUnchanged, gitFingerprint, protectedChanges } from "./guard.ts";
+import { withSlot } from "./pool.ts";
+import { gatesLog } from "./run.ts";
+import { errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
+import type { Tracker } from "./tracker.ts";
+import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
+
+export type Box = { worktreePath: string; exec: Exec["exec"]; close(): Promise<unknown> };
+export type Opener = (branch: string) => Promise<Box>;
+export type LandResult =
+  | { kind: "merged"; commit: string; files: string[]; regen: string[] }
+  | { kind: "conflict"; files: string[] }
+  | { kind: "regen-failed"; files: string[]; reason: string }
+  | { kind: "red"; run: GateRun };
+
+/**
+ * Merge `t.head` into the base branch in a sandbox and, when the conflict is confined to
+ * generated paths, resolve it there. `merged` means the host base is already fast-forwarded
+ * to `commit`; the others leave the host untouched. With `gate`, the merge is gated in the
+ * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
+ * throws `OperatorError`, as after any sandbox.
+ */
+export const landInSandbox = async (
+  project: Project,
+  t: { branch: string; head: string; message: string },
+  open: Opener,
+  gate?: (box: Box) => Promise<GateRun>,
+): Promise<LandResult> => {
+  // Before any container starts: it runs with the shared .git mounted.
+  const before = gitFingerprint(project);
+  // The `sandcastle/` prefix is what `sandcastle clean` already treats as scratch.
+  const scratch = `sandcastle/land-${t.branch.replace(/\W+/g, "-")}-${Date.now()}`;
+  try {
+    let result: LandResult;
+    const box = await open(scratch);
+    try {
+      const identity = hostIdentity(project.root);
+      const merge = await box.exec(`git ${identity} merge --no-ff --no-verify -m ${shq(t.message)} ${shq(t.head)}`);
+      if (merge.exitCode === 0) {
+        result = { kind: "merged", commit: "", files: [], regen: [] };
+      } else {
+        const files = (await box.exec("git diff --name-only --diff-filter=U")).stdout.split("\n").filter(Boolean);
+        if (!files.length || !regensFor(files, project.generated)) {
+          // No unmerged file: the merge was refused outright. Otherwise a conflict that is not ours to resolve.
+          await box.exec("git merge --abort");
+          result = { kind: "conflict", files };
+        } else {
+          const r = await resolveGenerated(box, { files, generated: project.generated, setup: project.setup, message: t.message, identity });
+          result = r.ok ? { kind: "merged", commit: "", files, regen: r.regen } : { kind: "regen-failed", files, reason: r.reason };
+        }
+      }
+      if (gate && result.kind === "merged") {
+        let red: GateRun | undefined;
+        // Setup ran on the base tip before the merge: a branch that adds a dependency would be
+        // gated without it. A resolved conflict already re-ran setup.
+        if (!result.files.length) {
+          for (const command of project.setup) {
+            const r = await execGate(box, command);
+            if (r.exitCode === 0) continue;
+            const failure = { name: "setup", command, exitCode: r.exitCode, output: clip([r.stdout, r.stderr].filter(Boolean).join("\n").trim()) };
+            red = { gates: [{ name: "setup", pass: false }], failure, failures: [failure] };
+            break;
+          }
+        }
+        red ??= await gate(box);
+        if (red.failures.length || red.gates.some((g) => !g.pass)) result = { kind: "red", run: red };
+      }
+    } finally {
+      // Sandcastle's close keeps a worktree that holds untracked files, and a build leaves them.
+      try {
+        await box.exec("git reset -q --hard && git clean -fdq");
+      } catch {
+        /* closing still has to happen */
+      }
+      await box.close();
+    }
+    // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.
+    // A gated merge ran the branch's own code there, so a red one is checked too, as `sandcastle gates` is.
+    if (result.kind === "merged" || gate) assertGitUnchanged(project, before, `after landing ${t.branch} in a sandbox`);
+    if (result.kind !== "merged") return result;
+    const commit = sh("git", ["rev-parse", scratch], project.root);
+    sh("git", ["merge", "--ff-only", commit], project.root);
+    return { ...result, commit };
+  } finally {
+    try {
+      sh("git", ["branch", "-D", scratch], project.root);
+    } catch {
+      /* never created, or held by a kept worktree - `sandcastle clean` removes those */
+    }
+  }
+};
+
+// Set up as gateBase's sandbox is: the same image, lean plan and worktree lock.
+export const sandboxOpener =
+  (project: Project, image: string, planFile: string): Opener =>
+  async (branch) => {
+    const s = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
+    lockWorktree(s.worktreePath);
+    return {
+      worktreePath: s.worktreePath,
+      exec: (c, o) => s.exec(c, o),
+      close: async () => {
+        unlockWorktree(s.worktreePath);
+        return s.close();
+      },
+    };
+  };
+
+/**
+ * `sandcastle land <ticket>`: merge one agent branch the way a run does, gate the merge in a
+ * sandbox, and close the ticket on green. Every refusal comes before `prepare()`, so it builds
+ * no image and starts no container. Nothing is commented on a refusal or a red gate.
+ */
+export const landTicket = async (
+  project: Project,
+  tracker: Tracker,
+  arg: string | undefined,
+  prepare: () => { open: Opener },
+): Promise<string> => {
+  if (!arg) throw new OperatorError("Usage: sandcastle land <ticket>");
+  const id = arg.replace(/^#/, "");
+  const ref = tracker.ref(id);
+  const base = project.baseBranch;
+  const branch = `agent/issue-${id}`;
+  if (!tracker.get(id).open) throw new OperatorError(`${ref} is closed. Nothing to land.`);
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], project.root);
+  } catch {
+    throw new OperatorError(`No branch ${branch}. A run that worked on ${ref} leaves one; \`git branch --list 'agent/*'\` shows what there is.`);
+  }
+  if (sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root) === "0") {
+    throw new OperatorError(`Every commit of ${branch} is already on ${base}. Nothing to land.`);
+  }
+  const paths = protectedChanges(project, branch);
+  if (paths.length) {
+    throw new OperatorError(
+      `${branch} changes how the repo executes (${paths.join(", ")}), which its own gates cannot vouch for. Review it and merge it by hand.`,
+    );
+  }
+
+  // Counted now: once merged, none of the branch's commits are ahead of the base.
+  const commits = ownCommits(base, branch, project.root);
+  const { open } = prepare();
+  const head = sh("git", ["rev-parse", branch], project.root);
+  const log = gatesLog(project, id);
+  mkdirSync(dirname(log), { recursive: true });
+  const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
+    landInSandbox(project, { branch, head, message: `Merge ${branch} (closes ${ref})` }, open, (box) =>
+      runGates(project, box, `${ref} land gates`, false, { log }),
+    ),
+  );
+
+  switch (result.kind) {
+    case "merged": {
+      const { files, regen } = result;
+      const comment =
+        `Merged locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +
+        `${project.gates.map((g) => g.name).join(", ")} all green on the merge.` +
+        (files.length ? ` Conflicts in generated files (${files.join(", ")}) were resolved by running ${regen.map((c) => `\`${c}\``).join(", ")}.` : "");
+      try {
+        tracker.close(id, comment);
+      } catch (error) {
+        return `Landed ${ref}: merged ${branch} into ${base}, but closing it failed (${errorLine(error)}) - close it by hand.`;
+      }
+      return `Landed ${ref}: merged ${branch} into ${base} and closed it. Not pushed - push under this repo's rules.`;
+    }
+    case "conflict":
+      throw new OperatorError(
+        result.files.length
+          ? `${branch} conflicts with ${base} in ${result.files.join(", ")}. Nothing was merged. If these files are written by a command (a build, a minifier), ` +
+            `declare them under \`generated\` in .sandcastle/config.ts with that command and land again: the conflict is then resolved by regenerating them. ` +
+            `Otherwise the ticket's next run merges ${base} into its branch first.`
+          : `Could not merge ${branch} into ${base}; nothing was merged.`,
+      );
+    case "regen-failed":
+      throw new OperatorError(
+        `${branch} conflicts with ${base} only in generated files (${result.files.join(", ")}), but regenerating them failed: ${result.reason}. Nothing was merged.`,
+      );
+    case "red": {
+      const { run } = result;
+      const setup = run.failure?.name === "setup" && project.setup.includes(run.failure.command);
+      for (const line of setup ? [`  FAIL  setup  $ ${run.failure!.command}`] : gateResultLines(project.gates, run.gates)) console.log(line);
+      if (run.failure) console.log(`\n--- ${run.failure.name} (exit ${run.failure.exitCode}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
+      throw new OperatorError(
+        `Gates red on the merge of ${branch} into ${base}: ${run.failures.map((f) => f.name).join(", ")}. ` +
+          `Nothing was merged; the gate output is in .sandcastle/logs/agent-issue-${id}-gates-${id}.log.`,
+      );
+    }
+  }
+};

@@ -40,6 +40,19 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   (`generated: [{ paths, regen }]`). A carried branch whose base merge conflicts only in those
   files is regenerated in its sandbox instead of handed to the implementer. Nothing changes until
   a project sets it; `/sandcastle update` asks about lockfiles, codegen output and similar.
+- **`sandcastle doctor` in a GitHub project now fails when the queue label is missing**, and its
+  FIX line names the `gh label create` command that adds it. Every other FIX line now names the
+  command that applies it too; there is still no `--fix` flag.
+- With `generated` set, a green branch whose landing conflicts only in those paths now lands by
+  regenerating them in a throwaway sandbox - one more container at landing for that branch - and
+  the merged base is gated again at the end of the run.
+- **A re-run of a branch that was reviewed and green, and has not moved since, skips implement and
+  review.** A clean base merge goes straight to the gates; a conflicted one gets a short resolver
+  prompt first. Such a re-run now costs a sandbox and the gates rather than a full
+  re-implementation. Its record lives in `.sandcastle/logs/heads.json`.
+- **Sandbox commits and the kit's landing merges now have a distinct git committer**, `Sandcastle
+  agent <agent@sandcastle.invalid>`; you stay the author. Anything that filters history by
+  committer will see the change.
 
 ### Changed
 
@@ -47,6 +60,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `update` action moved into `skill/run.md` and `skill/update.md`, which `SKILL.md` names when
   they are needed.
 - Tickets whose existing branches change the same file are kept out of the same run.
+- `sandcastle doctor`: every FIX line names the command that applies it, with macOS and Linux
+  variants where they differ.
+- `sandcastle init` and the skill's init step ask about generated paths, no-touch paths and a
+  drift gate when writing `rules.md`; the config template carries a commented `generated` example.
 
 ### Fixed
 
@@ -114,6 +131,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   merge; and what green gates prove - the gate commands, and nothing more.
 - Blocker phrases inside fenced or inline code are no longer read as dependencies; write a blocker
   as plain text.
+- Tests: the signal test sends SIGINT a second time after 5 s, as an operator would, instead of
+  failing a loaded macOS suite on a rare unacted first signal.
 
 ### Added
 
@@ -138,6 +157,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `.sandcastle/logs/heads.json`, for re-runs to build on.
 - `sandcastle doctor` warns (without failing) when the host's Claude Code is newer than the
   version the image pins.
+- A skill-only `audit` action (`/sandcastle audit`): review lenses run as read-only subagents on
+  the host, and their findings are filed as issues by the queue's criteria. The steps live in
+  `skill/audit.md`.
+- Before its slow steps, a run prints a rough token and time estimate from the medians of the
+  project's earlier tickets (`timings.jsonl`), once there are any.
+- Landing resolves a conflict confined to `generated` paths by regenerating them in a throwaway
+  sandbox, then fast-forwards the base; the ticket's closing comment says so.
+- `sandcastle land <n>`: merge one ticket's branch with the kit's message, gate it in the project
+  image (regenerating `generated` paths if they conflict), then comment and close on green. A
+  conflict outside `generated` stops with the files named.
 
 ## [0.2.0] - 2026-09-30
 

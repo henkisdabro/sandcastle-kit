@@ -34,8 +34,18 @@ export const machineSettings = (): Record<string, unknown> => {
   return settings as Record<string, unknown>;
 };
 
-export const sh = (cmd: string, args: string[], cwd?: string) =>
-  execFileSync(cmd, args, { encoding: "utf8", cwd }).trim();
+export const sh = (cmd: string, args: string[], cwd?: string, env?: Record<string, string>) =>
+  execFileSync(cmd, args, { encoding: "utf8", cwd, ...(env && { env: { ...process.env, ...env } }) }).trim();
+
+// Who git records as the committer of a sandbox's commits and the kit's merges. Only the
+// committer: the operator stays the author (git leaves that to config), so ownership stays
+// clear while `git log --format='%an / %cn'` tells the agents' commits from the operator's
+// own. `.invalid` is a reserved top-level domain (RFC 2606), so the address can never belong
+// to a person or map to a GitHub account, as a users.noreply.github.com address would.
+export const AGENT_COMMITTER = {
+  GIT_COMMITTER_NAME: "Sandcastle agent",
+  GIT_COMMITTER_EMAIL: "agent@sandcastle.invalid",
+} as const;
 
 // A branch's own commits since the base: merges are left out, because the kit
 // merges the base into a carried branch on each re-run and those merge-ins are
@@ -221,12 +231,15 @@ export const ensureImage = (project: Project, force = false): string => {
 // keeps the copies from needing a refresh of their own.
 const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 
+// Not part of credentials(): doctor and the token checks read that as what the user configured.
+export const sandboxEnv = (project: Project): Record<string, string> => ({ ...credentials(project), ...AGENT_COMMITTER });
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
   sandbox: docker({
     imageName: image,
-    env: credentials(project),
+    env: sandboxEnv(project),
     mounts: [
       ...project.mounts,
       ...(CROSS_REVIEW

@@ -1,7 +1,7 @@
 ---
 name: sandcastle
-description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, queueing issues for agents, or updating or upgrading sandcastle-kit."
-argument-hint: "[init|queue|run|status|update]"
+description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as issues ready to queue), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing issues for agents, or updating or upgrading sandcastle-kit."
+argument-hint: "[init|audit|queue|run|status|update]"
 arguments: [action]
 ---
 
@@ -12,6 +12,7 @@ Requested action: `$action`
 | Action | Does | Done when |
 |---|---|---|
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
+| `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as issues that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
 | `queue` | Triages every open issue into the agent queue, with the user | Every open issue is labelled, parked, or left with a stated reason |
 | `run` | Starts a burndown in a tab of its own, and closes it with a summary | The run is live in its own tab and its status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
@@ -56,7 +57,17 @@ going keeps its models; the change applies from the next one. It never needs a c
 2. Run `sandcastle init`. It detects the stack (Node with its package manager and scripts, Python
    with uv, Go, Rust), writes gates and setup from it, and writes `.sandcastle/Dockerfile` when
    the base image lacks the toolchain. Treat all of it as a draft: correct the gates to what CI
-   really runs, then write `.sandcastle/rules.md` from those facts. The kit's `examples/` has two
+   really runs, then write `.sandcastle/rules.md` from those facts.
+   Before writing it, ask the user three questions with the harness's question tool
+   (`AskUserQuestion` in Claude Code), proposing an answer for each from what you read: **generated
+   files** - committed files a command writes (minified CSS, a data file built from JSON, a
+   sitemap), with that command: write each as a `generated: [{ paths, regen }]` entry in the config
+   and a rules line telling agents to edit the source and run the command; **no-touch paths** -
+   what an agent must never change: a rules line, and `protectedPaths` for any that change how the
+   repo executes; **drift gate** - if there are generated files, propose a gate from the README's
+   "A gate for generated files" recipe and add it to `gates` once the user agrees, or record in the
+   rules why there is none. "None" is a fine answer to each; write it down so the next reader knows
+   it was asked. The kit's `examples/` has two
    worked configs. Extend the Dockerfile (from the kit's `templates/Dockerfile` if init wrote
    none) only when the base image lacks something the gates or hooks need (browsers, a pinned
    package manager).
@@ -112,6 +123,11 @@ going keeps its models; the change applies from the next one. It never needs a c
 
 Re-run `sandcastle lean` whenever the project adds skills, MCP servers or hooks. Every run repeats
 the hook check and refuses to start while a kept hook cannot run.
+
+## audit - find work and file it
+
+Read audit.md in this skill's directory (next to this file) and follow it. It files issues by
+the queue action's categories and its closed-spec test, so read the queue section below as well.
 
 ## queue - triage every open issue into the queue
 
@@ -196,7 +212,7 @@ comments, and the gates can prove it.
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
    same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry run, and `sandcastle status 0`'s
-   machine line (other projects' runs share the limits). Say that a red gate gets a repair pass
+   machine line (other projects' runs share the limits) and, if the project has run before, the run prints a rough estimate at the start - quote it rather than guessing how long the run takes. Say that a red gate gets a repair pass
    (`repair.attempts`, default 1), and a repair that turns it green a second review - more
    allowance, fewer red branches - and offer `USAGE_CHECK=1`
    if the plan is close to its limit. Say that the run first gates the base commit and stops if a

@@ -27,8 +27,9 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, runs `src/cli.ts` with the kit's own `tsx` |
-| `src/cli.ts` | Commands: setup, doctor, init, build, gates, lean, lean-apply (internal hook), preflight, queue, blockers, run, report, status, clean |
+| `src/cli.ts` | Commands: setup, doctor, init, build, gates, land, lean, lean-apply (internal hook), preflight, queue, blockers, run, report, status, clean |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
+| `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land, verify, report; dependencies, timings |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
@@ -58,8 +59,9 @@ bug no gate would fail"), never as an incident from a named project.
 | `test/gates.test.ts` | Hook tests and gate runs against a made-up sandbox; `pnpm test` |
 | `test/generated.test.ts` | Path matching, the resolve-by-regenerating helper against a real conflict in a temp repo, and the `generated` config validation; `pnpm test` |
 | `test/guard.test.ts` | The shared-`.git` check in a throwaway repo: a moved base and tampering told apart; `pnpm test` |
+| `test/land-command.test.ts` | `sandcastle land`: merge, gate, close and every refusal, in a temp repo with a host worktree as the sandbox; `pnpm test` |
 | `test/lock.test.ts` | Lock takeover and release, and eight processes racing one stale lock; `pnpm test` |
-| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run) and update.md (the update action) |
+| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action) |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
