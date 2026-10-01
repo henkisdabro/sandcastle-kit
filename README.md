@@ -437,8 +437,11 @@ changes there). Linear as a full tracker is not built; Linear issues work as blo
 ```bash
 sandcastle run                        # every queued issue
 ISSUES=12,15 sandcastle run           # just these
+sandcastle run 12 15                  # the same, as arguments
 DRY_RUN=1 sandcastle run              # implement, review, gate - never merge or close
+sandcastle run --dry                  # the same, as an argument
 CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
+sandcastle run --concurrency 2        # the same, as an argument
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
 ```
 

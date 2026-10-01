@@ -15,7 +15,8 @@
 //   Phase 4  Verify  - the gates once more on the merged base branch, because
 //                      two branches green on their own can be red together.
 //
-// Environment: ISSUES=1,2 (instead of the queue label), CONCURRENCY, DRY_RUN=1,
+// Environment: ISSUES=1,2 (instead of the queue label), CONCURRENCY, DRY_RUN=1 (`sandcastle run 1 2
+// --dry --concurrency N` set the same three),
 // SANDCASTLE_TEST_RED_GATE=1, SKIP_BASE_GATES=1, plus the model variables in agents.ts and the
 // machine-wide limits in pool.ts.
 
