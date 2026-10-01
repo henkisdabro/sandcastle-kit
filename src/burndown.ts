@@ -123,8 +123,50 @@ export const closeComment = (
 // the agent's, the author the operator's (see AGENT_COMMITTER).
 // --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
 // green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
-export const mergeBranch = (root: string, branch: string, head: string, ticket: string) =>
-  sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
+export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge") => {
+  if (mode === "merge") {
+    return sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
+  }
+  // The branch's own commits not on the base, without the kit's merges of the base into a carried branch.
+  const subjects = sh("git", ["log", "--reverse", "--no-merges", "--format=%s", `HEAD..${head}`], root);
+  // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
+  sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
+  // --allow-empty: a green branch whose change is already on the base still gets its commit, so
+  // `mergedEarlier` and status.sh find the ticket as landed.
+  return sh(
+    "git",
+    [
+      "commit",
+      "--no-verify",
+      "--allow-empty",
+      "-m",
+      `Merge ${branch} (closes ${ticket})`,
+      ...(subjects ? ["-m", subjects.split("\n").map((s) => `- ${s}`).join("\n")] : []),
+    ],
+    root,
+    AGENT_COMMITTER,
+  );
+};
+
+// Every place that decides "landed", and why each works with a squash (whose commits are not
+// ancestors of the base, and whose branch is deleted once the loop has landed everything):
+// - `mergedEarlier`, burndown.ts: a subject `--grep` on the base - works unchanged.
+// - carried / nochange, burndown.ts (`rev-list --count base..branch`): only for a branch that
+//   exists; a squashed branch is deleted, so a reopened ticket starts fresh from the base, which
+//   holds its work - correct.
+// - `sandcastle clean`, cli.ts (`git cherry`): the deleted branch is not listed - correct.
+// - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
+// - the log archive, `archiveFinishedLogs` in run.ts: a deleted branch counts as finished, so its
+//   log is archived - correct.
+// - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
+// - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
+//   base reads `merged`, not `no branch`.
+// - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
+//   the branch exists - unaffected.
+// A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
+// staged squash and keeps unrelated local changes.
+export const abortLanding = (root: string, mode: "merge" | "squash") =>
+  sh("git", mode === "squash" ? ["reset", "--merge"] : ["merge", "--abort"], root);
 
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
 export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
@@ -973,6 +1015,7 @@ export const burndown = async (project: Project) => {
   // Where the branches forked, to tell which merged branch a conflict is with.
   const startBase = sh("git", ["rev-parse", base]);
   const merged: string[] = [];
+  const squashed: string[] = [];
   // Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen.
   const regenerated = new Map<string, { files: string[]; regen: string[] }>();
   const conflicted: { issue: string; branch: string; files: string[]; with: string[] }[] = [];
@@ -1060,8 +1103,9 @@ export const burndown = async (project: Project) => {
     }
     try {
       // The commit the gates passed on, not whatever the branch names now.
-      mergeBranch(project.root, o.branch, o.head!, ref(o.issue));
+      mergeBranch(project.root, o.branch, o.head!, ref(o.issue), project.land);
       merged.push(o.issue);
+      if (project.land === "squash") squashed.push(o.branch);
     } catch (error) {
       // A real conflict and a merge that failed for another reason (a dirty
       // index, a full disk) are reported apart - calling both "conflict" sent us
@@ -1074,7 +1118,7 @@ export const burndown = async (project: Project) => {
         }
       })();
       try {
-        sh("git", ["merge", "--abort"]);
+        abortLanding(project.root, project.land);
       } catch {
         /* nothing to abort */
       }
@@ -1144,6 +1188,19 @@ export const burndown = async (project: Project) => {
     } catch (error) {
       closeFailed.push(o.issue);
       run.ticket(o.issue, { state: "merged", note: "merged; closing the ticket failed", closeFailed: errorLine(error) });
+    }
+  }
+
+  // Deleted only now: the conflict attribution above diffs `${startBase}...agent/issue-N` for every
+  // ticket merged so far, so each branch must exist until the loop ends. A squashed branch's commits
+  // are not ancestors of the base and `git cherry` cannot match one squashed patch to several
+  // commits, so a kept branch would read as unmerged work in `sandcastle clean`, the closing
+  // summary and the status view.
+  for (const b of squashed) {
+    try {
+      sh("git", ["branch", "-D", b]);
+    } catch {
+      console.log(`${b}: squashed into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
     }
   }
 
