@@ -9,6 +9,47 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **`jq` is now a checked requirement.** The status view always needed it; without it the view
+  went blank and wrong with no error. `sandcastle doctor` now fails without `jq`, and the status
+  view says it is missing. macOS 15 and later ship it; on most Linux, `apt install jq` (or `dnf`).
+- A watcher that parsed the closing summary's headline: `N need you` now counts only the
+  **Needs you** section, and a new `N need fixing` counts the **Needs fixing** one.
+
+### Fixed
+
+- Every command prints a refusal - an unknown command, a missing config, credentials, the run
+  lock, a red base gate, preflight, `init` on an existing config - as a message with no stack
+  trace. Only a real kit bug keeps one.
+- The status view no longer shows an empty queue when reading the queue fails (a signed-out
+  `gh`, a rejected token): it says it could not read it, and why.
+- An agent handing a ticket back no longer fails on a repo without an `agent-blocked` label,
+  which left the ticket with no labels at all. The kit's label was never read; the hand-back now
+  creates `needs-human` if missing and adds only that.
+- The closing summary's headline no longer contradicts its sections: `- X need you - Y need
+  fixing -`.
+- A ticket's commit count in the close comment and run summary leaves out the kit's own merges
+  of the base into a carried branch.
+- `sandcastle setup` checks a saved GitHub token live instead of trusting its prefix, and offers
+  to replace one GitHub rejects.
+- The summary's "Same failing test" grouping recognises node:test (TAP and spec), Go and cargo
+  failures, not only pytest, vitest and jest.
+- A warning when `gh` returns its limit of 500 issues, so issues beyond it are not silently
+  missed.
+- A run adopting its Herdr tab keeps a label the operator gave it, renaming only a default one.
+- The lean check warns when `.claude/settings.json` defines hooks but git does not track it, so
+  sandboxes would never get them.
+- The skill copies the closing summary's headings exactly as `sandcastle report` prints them,
+  emoji included, instead of rewriting them.
+- Docs: `rules.md` reaches the implement, review and repair prompts but not the kit's own landing
+  merge; and what green gates prove - the gate commands, and nothing more.
+
+### Added
+
+- Tests for the protected-path check, blocker references and ticket files, and `init`'s stack
+  detection.
+
 ## [0.2.0] - 2026-09-30
 
 ### Upgrading
