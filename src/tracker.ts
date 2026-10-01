@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
+import { OperatorError } from "./errors.ts";
 import { sh } from "./sandbox.ts";
 
 export type Ticket = { id: string; title: string; body: string; comments: string[]; updated?: number; status?: string };
@@ -45,6 +46,8 @@ export interface Tracker {
   close(id: string, text: string): void;
   /** Out of the queue and marked for a human, with the reason. */
   hold(id: string, text: string): void;
+  /** Back in the queue: the queue label (GitHub) or status (files) on, needs-human off, the note (if any) as a comment first. */
+  requeue(id: string, note?: string): void;
   /** State, labels, comment count and a title/body hash (GitHub also keys LATEST_ISSUE), to prove a dry run wrote nothing. */
   snapshot(ids: string[]): Map<string, string>;
   /** Whether the ticket was reopened / requeued by someone after `at` (ms). */
@@ -167,6 +170,14 @@ const github = (project: Project): Tracker => {
       }
       gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", "needs-human"]);
       gh(["issue", "comment", id, "--body", text]);
+    },
+    requeue: (id, note) => {
+      // The note first: a run that picks the ticket up straight away already sees it.
+      if (note) gh(["issue", "comment", id, "--body", note]);
+      // --remove-label only when the label is on the issue: a repo that has
+      // never had a needs-human label makes gh fail on it.
+      const held = (JSON.parse(gh(["issue", "view", id, "--json", "labels"])).labels as { name: string }[]).some((l) => l.name === "needs-human");
+      gh(["issue", "edit", id, "--add-label", project.label, ...(held ? ["--remove-label", "needs-human"] : [])]);
     },
     snapshot: (ids) => {
       const seen = new Map(
@@ -348,9 +359,10 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
     status: t.status,
   });
   const isDone = (t: FileTicket) => !!t.status && done.includes(t.status);
-  const write = (t: FileTicket, status: string | undefined, comment: string) => {
+  const write = (t: FileTicket, status: string | undefined, comment?: string) => {
     let text = readFileSync(join(root, t.path), "utf8");
     if (status) text = withStatus(text, status);
+    if (comment === undefined) return writeFileSync(join(root, t.path), text);
     const heading = /^## Comments\b/m.test(text) ? "" : "\n## Comments\n";
     writeFileSync(join(root, t.path), `${text.trimEnd()}\n${heading}\n### ${new Date().toISOString().slice(0, 10)} - sandcastle\n\n${comment.trim()}\n`);
   };
@@ -387,6 +399,13 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
       const t = find(id);
       write(t, HELD, text);
       commit(t.path, `sandcastle: hold ${id} for a human`);
+    },
+    requeue: (id, note) => {
+      const t = find(id);
+      write(t, project.label, note);
+      // Not "sandcastle: ...": reopenedSince ignores those as the kit's own
+      // commits, and a requeue is a person asking for more work.
+      commit(t.path, `requeue ${id} (sandcastle requeue)`);
     },
     snapshot: (ids) =>
       new Map(
@@ -445,6 +464,42 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
       "instructions ask for a report or a hand-back, put it in your final message as usual - the orchestrator posts nothing in a dry run. " +
       "Everything else - the work, the commits, the gates - is exactly as in a real run.\n\n",
   };
+};
+
+// ---------------------------------------------------------------------------
+// `sandcastle requeue`
+// ---------------------------------------------------------------------------
+
+const REQUEUE_USAGE = 'Usage: sandcastle requeue <ticket> [--note "text for the next run"]';
+
+/** The ticket id (one leading "#" dropped) and the note. The CLI reads the id from here too: the note may come first. */
+export const parseRequeueArgs = (args: string[]): { id: string; note?: string } => {
+  let ticket: string | undefined;
+  let note: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--note") {
+      note = args[++i];
+      if (!note) throw new OperatorError(REQUEUE_USAGE);
+    } else if (!args[i].startsWith("--") && ticket === undefined) ticket = args[i].replace(/^#/, "");
+  }
+  if (!ticket) throw new OperatorError(REQUEUE_USAGE);
+  return { id: ticket, note };
+};
+
+/** Puts a ticket back in the queue, or only adds the note to one still queued. Returns what to tell the operator. */
+export const requeueTicket = (tracker: Tracker, label: string, args: string[]): string => {
+  const { id, note } = parseRequeueArgs(args);
+  const t = tracker.get(id);
+  const ref = tracker.ref(id);
+  if (!t.open) throw new OperatorError(`${ref} is closed. Reopen it first if it needs more work.`);
+  const text = note && `Note for the next run, from \`sandcastle requeue\`:\n\n${note}`;
+  if (t.status === label && !t.held) {
+    if (!text) return `${ref} is still in the queue; nothing to change. Add --note "..." to leave the next run a note.`;
+    tracker.comment(id, text);
+    return `${ref} is still in the queue; added your note.`;
+  }
+  tracker.requeue(id, text);
+  return `${ref} is back in the queue (${label})${t.held ? ", needs-human removed" : ""}${note ? ", with your note" : ""}.`;
 };
 
 // ---------------------------------------------------------------------------

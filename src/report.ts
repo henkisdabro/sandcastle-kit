@@ -363,7 +363,7 @@ export const render = (f: Facts, plain = false): string => {
   if (sameTest.length) next.push(`Fix ${sameTest.map(([test]) => test).join(", ")} once - it fails on ${new Set(sameTest.flatMap(([, w]) => w)).size} of the unmerged branches.`);
   if (sameFile.length) next.push(`Start with ${sameFile.map(([file]) => file).join(", ")}: ${new Set(sameFile.flatMap(([, w]) => w)).size} of the unmerged branches fail or conflict there.`);
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
-  if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue.`);
+  if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
