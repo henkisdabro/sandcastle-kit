@@ -164,6 +164,13 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : "FAIL"}`).join(" ");
 
+// One line per gate result with the command that ran, in full: a gate that
+// reached the network went green unnoticed because only its name and verdict
+// were printed. runGates stops early, so `results` is a prefix of `configured`
+// and the command is found by position.
+export const gateResultLines = (configured: { name: string; command: string }[], results: Gate[]): string[] =>
+  results.map((g, i) => `  ${g.pass ? "pass" : "FAIL"}  ${g.name}  $ ${configured[i]?.command ?? ""}`);
+
 // Where gate time goes, per gate. A slow gate runs on every branch, its
 // repair passes and the base check, so it is the first place to look when
 // sandboxes take long - and the one test runner is usually most of it.
@@ -263,6 +270,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
   const run = await gateBase(project, image, planFile, "base-gates", true);
   console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
+  for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
   console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   const redHooks = run.hookTests.filter((t) => !t.pass);
