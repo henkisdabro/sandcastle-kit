@@ -28,6 +28,9 @@
 //   land <ticket>    merge one agent branch with the kit's message, gate the merge in the
 //                    project image, then close the ticket; nothing is merged on a red gate
 //                    or a conflict; no model calls
+//   preview          dry-merge every unlanded agent branch onto the base, oldest first,
+//                    in the project image; lists clean and conflicting branches with their
+//                    files; merges nothing; no model calls
 //   lean [--measure] what the repo's skills, agents, MCP servers and plugins
 //                    would cost each sandbox, which hooks are kept and whether
 //                    they can run in the image; --measure runs one real turn
@@ -51,6 +54,7 @@ import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
+import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
@@ -224,6 +228,16 @@ try {
           return { open: sandboxOpener(project, image, writePlan(project).file) };
         }),
       );
+      break;
+    }
+    case "preview": {
+      // Writes nothing to the repo (the image gets .git read-only), so no run lock or clean-tree check.
+      const project = await loadProject(root);
+      if (!unlanded(project).length) {
+        console.log(previewLines(project, project.baseBranch, []).join("\n"));
+        break;
+      }
+      console.log(previewLines(project, project.baseBranch, preview(project, dockerRunner(ensureImage(project)))).join("\n"));
       break;
     }
     case "lean": {
