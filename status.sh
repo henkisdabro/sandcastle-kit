@@ -44,22 +44,29 @@ mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 
 utc_to_epoch() { date -j -u -f '%Y-%m-%dT%H:%M:%S' "$1" '+%s' 2>/dev/null || date -u -d "$1" '+%s' 2>/dev/null || echo 0; }
 epoch_fmt() { date -r "$1" "$2" 2>/dev/null || date -d "@$1" "$2" 2>/dev/null; }
 
-# "Sand": the frame and its text in dark browns and sand tones, so the state
-# colours, which carry meaning, stand out against it.
+# "Sand": the frame in dark, muted browns and its text in lighter sand, so the
+# state colours, which carry meaning, stand out against it. 24-bit where the terminal says it
+# has it (COLORTERM); the 256-colour palette has almost no dark browns, so
+# elsewhere the nearest of its colours.
+if [ "${COLORTERM:-}" = truecolor ] || [ "${COLORTERM:-}" = 24bit ]; then
+  sand() { printf '\e[38;2;%sm' "$1"; }
+else
+  sand() { printf '\e[38;5;%sm' "$2"; }
+fi
 bold=$'\e[1m'; off=$'\e[0m'
-rule=$'\e[38;5;94m'       # frame lines: wet sand
-mute=$'\e[38;5;137m'      # activity text, labels: tan
-head=$'\e[38;5;223m'      # column headings, numbers: dry sand
-accent=$'\e[38;5;180m'    # base branch, clock, stage: dune
-wht=$'\e[38;5;230m'       # ticket ids: bleached sand
+rule=$(sand '74;58;42' 58)       # frame lines: wet sand
+mute=$(sand '146;124;94' 137)    # activity text, labels
+head=$(sand '205;184;148' 180)   # column headings, numbers: dry sand
+accent=$(sand '192;164;120' 180)  # base branch, clock, stage
+wht=$(sand '232;214;180' 223)    # ticket ids
 grn=$'\e[38;5;77m'        # merged
 ylw=$'\e[38;5;221m'       # working
 cyn=$'\e[38;5;80m'        # ready to land
 blu=$'\e[38;5;111m'       # queued, not started
-gry=$'\e[38;5;95m'        # nothing there: damp sand
-hot=$'\e[38;5;203m'       # needs you; a container working hard (red, clear of the sand tones)
-# The logo: bleached sand at the top, wet sand at the base, specks of shell.
-moon=$'\e[38;5;230m'; dusk=$'\e[38;5;223m'; night=$'\e[38;5;180m'; deep=$'\e[38;5;137m'; star=$'\e[38;5;94m'
+gry=$(sand '94;78;60' 95)        # nothing there: damp sand
+hot=$'\e[38;5;203m'       # needs you; a container working hard (red, clear of the sand)
+# The logo: dry sand at the top, wet sand at the base, specks of shell.
+moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '160;134;98' 137); deep=$(sand '112;92;66' 95); star=$(sand '74;58;42' 58)
 # No colour when NO_COLOR is set (non-empty, no-color.org) or stdout is not a
 # terminal. Top level on purpose: the live loop calls render inside $(...),
 # where stdout is always a pipe, so the check there would always strip colour.
