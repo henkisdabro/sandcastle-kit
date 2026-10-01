@@ -318,8 +318,10 @@ gates: [
   excluding it.
 - `OUT` is split on spaces, so paths with spaces need listing differently.
 
-This gate does not handle conflicts in generated files during landing: the kit does not yet
-resolve merge conflicts in generated files.
+Declare the same files under `generated` in `.sandcastle/config.ts`, with the command that writes
+them: `generated: [{ paths: ["dist/"], regen: "pnpm build" }]`. A branch from an earlier run whose
+base merge conflicts only in them is then merged by regenerating, with no agent; the drift gate
+still proves the result matches the sources.
 
 ## 📋 Queue: what agents work on
 
@@ -622,6 +624,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
+| `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A base merge into a branch from an earlier run that conflicts only in these paths takes either side, reruns `setup`, runs `regen` in the sandbox and commits; any other conflict is left for the implementer. See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run |
 

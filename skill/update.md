@@ -36,5 +36,9 @@ was set up with.
    7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).
+   8. **Generated files.** If a gate regenerates committed files (the README's "A gate for
+      generated files" recipe, or any gate that runs a build and diffs its output) and `generated`
+      is not set in `.sandcastle/config.ts`, propose declaring those paths with the command that
+      writes them. Apply after the user agrees.
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
