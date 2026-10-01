@@ -16,4 +16,7 @@ if probe=$(mktemp -d "${tmp%/}/sandcastle-probe.XXXXXX" 2>/dev/null); then rmdir
   echo "sandcastle: cannot write to the temp directory ($tmp) - its disk is full, or it is read-only. Free some space there, or point TMPDIR at a directory with room, then try again." >&2
   exit 1
 fi
-exec "$KIT/node_modules/.bin/tsx" "$KIT/src/cli.ts" "$@"
+# One node process with tsx's loader, not the tsx binary: that runs the CLI in a child and, on
+# SIGTERM, SIGKILLs it unless it answers within ~60 ms - a run busy in a git or docker call did
+# not, and died without its exit handler (no recorded end, no notify, sandboxes left working).
+exec node --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/cli.ts" "$@"

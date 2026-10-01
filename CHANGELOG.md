@@ -272,6 +272,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - A gate that hits its 45-minute bound reads as one: `test=TIMEOUT` in the gate line and the
   report, `RED (timed out after 45 min)` in the gate log, and the failure output starts by saying
   so, instead of a bare exit 124.
+- A `sandcastle run` stopped with SIGTERM (`timeout`, `kill`, a closing terminal) while busy in a
+  git or Docker call now ends through its exit handler - recording its end, notifying, and
+  stopping its sandboxes - instead of being SIGKILLed by the tsx wrapper it ran under. The
+  launcher now runs one node process with tsx's loader.
 
 ### Added
 
