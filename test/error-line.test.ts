@@ -21,3 +21,9 @@ test("agentFailure: the library's two-line agent error reads as one line with it
   assert.equal(agentFailure(e), "claude-code exited with code 1 - unrecognized model");
   assert.equal(agentFailure(new Error("Error: boom")), "boom");
 });
+
+test("a commit git could not sign says so, and what to do", () => {
+  const e = Object.assign(new Error("Command failed: git merge"), { stderr: "error: 1Password: agent refused operation\nfatal: failed to write commit object\n" });
+  assert.equal(errorLine(e), "fatal: failed to write commit object - git could not sign the commit (commit.gpgsign is on): unlock your signing agent (1Password, gpg-agent), then try again");
+  assert.equal(errorLine(new Error("fatal: not a git repository")), "fatal: not a git repository");
+});
