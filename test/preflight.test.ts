@@ -87,7 +87,7 @@ test("the credential comes from the project's file when it defines the key, else
   assert.deepEqual(credentialSource(project), { key: "CLAUDE_CODE_OAUTH_TOKEN", file: projectFile });
 });
 
-test("a Codex-only rejection does not blame the Claude credential", () => {
+test("a Codex-only rejection does not blame the Claude credential", async () => {
   // A fake docker answers OK for every Claude model; a fake codex fails as a stale ChatGPT login does.
   const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
   const fake = (name: string, body: string) => {
@@ -104,8 +104,8 @@ test("a Codex-only rejection does not blame the Claude credential", () => {
   const path = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${path}`;
   try {
-    assert.throws(
-      () => preflight(project, "sandcastle-test"),
+    await assert.rejects(
+      preflight(project, "sandcastle-test"),
       (error: Error) => {
         assert.ok(error.message.includes("401 Unauthorized"), error.message);
         assert.ok(!error.message.includes("CLAUDE_CODE_OAUTH_TOKEN"), error.message);

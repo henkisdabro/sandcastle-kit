@@ -1,7 +1,7 @@
 // Everything around a run that is not the pipeline itself: preconditions,
 // preflight, prompts, the run record, the log archive and the status pane.
 
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,17 +113,18 @@ export const assertCleanBase = (project: Project) => {
 // the implementation has already been paid for. SKIP_PREFLIGHT=1 skips it.
 // ---------------------------------------------------------------------------
 
-const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) => {
-  try {
-    return {
-      ok: true,
-      out: execFileSync(cmd, args, { ...opts, encoding: "utf8", timeout: 180_000, stdio: ["ignore", "pipe", "pipe"] }),
-    };
-  } catch (error) {
-    const e = error as { stdout?: string; stderr?: string; message: string };
-    return { ok: false, out: `${e.stdout ?? ""}${e.stderr ?? ""}`.trim() || e.message };
-  }
-};
+const ask = (cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) =>
+  new Promise<{ ok: boolean; out: string }>((resolve) => {
+    const child = execFile(
+      cmd, args, { ...opts, encoding: "utf8", timeout: 180_000 },
+      (error, stdout, stderr) => {
+        if (!error) return resolve({ ok: true, out: stdout });
+        resolve({ ok: false, out: `${stdout ?? ""}${stderr ?? ""}`.trim() || error.message });
+      },
+    );
+    // execFile has no stdio option: close the piped stdin so nothing waits on input (codex exec reads it).
+    child.stdin?.end();
+  });
 
 // What a failed preflight says. Every model rejecting a bad token returns the same reply, so one line
 // names them all; a reply that looks like an auth rejection also names the credential's key and file
@@ -147,12 +148,14 @@ export const preflightFailure = (
   return `NOT STARTED: Preflight failed - no sandbox started:\n  ${lines.join("\n  ")}`;
 };
 
-export const preflight = (project: Project, image: string) => {
+export const preflight = async (project: Project, image: string) => {
   if (process.env.SKIP_PREFLIGHT === "1") return;
   const env = credentials(project);
-  const failures: { model: string; reply: string }[] = [];
-  for (const model of new Set([IMPL_MODEL, REVIEW_MODEL])) {
-    const r = ask(
+  type Failure = { model: string; reply: string } | undefined;
+  // Every model is asked at once; failures are read back in this array's order, not completion order,
+  // so the message is the same on every run.
+  const probes: Promise<Failure>[] = [...new Set([IMPL_MODEL, REVIEW_MODEL])].map(async (model): Promise<Failure> => {
+    const r = await ask(
       "docker",
       [
         "run", "--rm", ...Object.keys(env).flatMap((k) => ["-e", k]),
@@ -167,18 +170,20 @@ export const preflight = (project: Project, image: string) => {
     } catch {
       /* not JSON - the raw output is the reason */
     }
-    if (!r.ok || reply.is_error !== false) failures.push({ model, reply: (reply.result ?? r.out).slice(0, 300) });
-  }
+    return !r.ok || reply.is_error !== false ? { model, reply: (reply.result ?? r.out).slice(0, 300) } : undefined;
+  });
   if (CROSS_REVIEW) {
     // On the HOST, not in the image: this also refreshes the host's ChatGPT
     // login, which every sandbox then copies (see sandboxConfig).
-    const r = ask(
-      "codex",
-      ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-m", CROSS_REVIEW_MODEL, "Reply OK"],
-      { cwd: tmpdir() },
+    probes.push(
+      ask(
+        "codex",
+        ["exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "-m", CROSS_REVIEW_MODEL, "Reply OK"],
+        { cwd: tmpdir() },
+      ).then((r) => (r.ok ? undefined : { model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) })),
     );
-    if (!r.ok) failures.push({ model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) });
   }
+  const failures = (await Promise.all(probes)).filter((f): f is { model: string; reply: string } => f !== undefined);
   if (failures.length) {
     // The hint names the Claude credential; a Codex reply comes from the host's ChatGPT login, not that file.
     const claudeOnly = failures.every((f) => f.model !== CROSS_REVIEW_MODEL);
