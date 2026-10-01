@@ -1,0 +1,53 @@
+// Sandcastle project config - read by sandcastle-kit (https://github.com/henkisdabro/sandcastle-kit).
+// Only what differs from the kit's defaults belongs here.
+
+export default {
+  name: "sandcastle-kit",
+  // baseBranch: "main",
+  // label: "ready-for-agent",
+  // concurrency: 4,
+
+  // Where tickets live. Unset, the kit reads docs/agents/issue-tracker.md (written by
+  // Matt Pocock's /setup-matt-pocock-skills, if you ran it) and otherwise uses GitHub.
+  // tracker: "github",
+  // tracker: "files",                      // .scratch/<feature>/issues/NN-<slug>.md, `Status:` line
+  // tracker: { type: "files", dir: "tickets", done: ["done", "shipped"] },
+  // Extra things a ticket may wait for: Linear issues, ticket files. README -> Blockers.
+  // blockers: { linear: ["ENG"] },
+
+  // The same checks as .github/workflows/check.yml - AGENTS.md -> "Verifying a change".
+  mounts: [{ hostPath: "~/Library/pnpm/store/v11", sandboxPath: "/home/agent/.pnpm-store" }],
+  setup: ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"],
+  gates: [
+    { name: "typecheck", command: "pnpm run typecheck" },
+    { name: "shell-syntax", command: "bash -n status.sh bin/sandcastle .githooks/pre-commit" },
+    { name: "test", command: "pnpm run test" },
+  ],
+
+  rules: ".sandcastle/rules.md",
+
+  // Models and effort differ from the kit's defaults only when set here, per agent.
+  // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
+  // review: { model: "claude-opus-5-5", effort: "medium" },
+
+  // A red gate gets this many repair passes, fed its output. 0 turns it off.
+  // repair: { attempts: 1 },
+
+  // Proof that each kept PreToolUse guard blocks what it should: a made-up tool
+  // call handed to the matching hooks in the base-gate sandbox (no model call).
+  // hookTests: [
+  //   { name: "guard refuses X", tool: "Write", input: { file_path: "a", content: "b" }, expect: "block" },
+  // ],
+
+  // Sandboxes load NONE of the repo's skills, agents, commands, MCP servers or
+  // plugins unless kept here. Keep only what a run literally needs (e.g. a
+  // skill rules.md tells agents to use). Every hook is KEPT - they enforce the
+  // repo's rules; dropHooks removes host-only conveniences by a substring of
+  // their command, each with a comment saying why. `sandcastle lean` checks both.
+  lean: {
+    keep: [],
+    dropHooks: [
+      // "rtk hook claude", // host-only token compressor; not in the image
+    ],
+  },
+};

@@ -6,5 +6,3 @@ node_modules/
 !.env.example
 *.local.*
 .DS_Store
-# If someone runs the kit on the kit itself.
-.sandcastle/
