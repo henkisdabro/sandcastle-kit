@@ -279,9 +279,10 @@ export const render = (f: Facts, plain = false): string => {
   // Done
   const done: string[] = [];
   if (closed.length) done.push(`${closed.length} merged and ${closedWhere}: ${list(closed)}`);
-  if (merged.length) {
-    if (f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
-  }
+  // Merged with the close refused: done in git, still open in the tracker - not "closed on GitHub".
+  if (notClosed.length) done.push(`${notClosed.length} merged, but still open in the tracker: ${list(notClosed)} (see Needs you)`);
+  if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
+  else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
   if (wouldMerge.length) {
     // Each branch was gated alone; whether they merge together is a separate question.
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";

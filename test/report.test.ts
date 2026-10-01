@@ -133,6 +133,14 @@ test("a merge whose close failed counts as merged, not closed, and needs you", (
   assert.match(body(out, "## 👉 Next step"), /Close #12 \(merged, still open\)/);
 });
 
+test("a merge whose close failed alone is not reported as closed", () => {
+  const out = render(facts({ tickets: { "12": { state: "merged", title: "b", closeFailed: "HTTP 502" } } }));
+  const done = body(out, "## ✅ Done");
+  assert.doesNotMatch(done, /Closed on GitHub|merged and closed/);
+  assert.match(done, /1 merged, but still open in the tracker: #12 \(see Needs you\)/);
+  assert.match(done, /The code is only on your local main until you push it\./);
+});
+
 test("a ticket withdrawn during the run is reported as done by someone's decision, not as a fix", () => {
   const out = render(facts({
     tickets: {

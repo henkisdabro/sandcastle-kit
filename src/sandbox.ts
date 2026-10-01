@@ -90,7 +90,8 @@ export const reapOrphans = (project: Project) => {
 export const errorLine = (error: unknown) => {
   const stderr = (error as { stderr?: unknown })?.stderr;
   const said = typeof stderr === "string" ? stderr.trim().split("\n").filter(Boolean).at(-1) : undefined;
-  return (said ?? String(error).split("\n")[0]).slice(0, 160);
+  // The message, not String(error): its "Error: " prefix reached the summary's lines.
+  return (said ?? (error instanceof Error ? error.message : String(error)).split("\n")[0]).slice(0, 160);
 };
 
 // ---------------------------------------------------------------------------

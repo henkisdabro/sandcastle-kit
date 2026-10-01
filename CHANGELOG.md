@@ -208,6 +208,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   (agent branches are never pushed, so there is nothing to fetch); it says the branch is resumed
   in its kept worktree. A worktree kept after an interrupted sandbox points at `sandcastle clean`,
   not a hand-run `git worktree remove --force`.
+- A merged ticket whose close failed is no longer reported under Done as "Closed on GitHub" when
+  nothing was closed: Done says it is merged but still open, and failure reasons in the summary
+  drop the `Error: ` prefix.
 
 ### Added
 
