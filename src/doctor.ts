@@ -8,16 +8,53 @@ import { join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 import { probeOAuth } from "./usage.ts";
 
-export const run = (cmd: string, args: string[]) => {
+export const run = (cmd: string, args: string[], cwd?: string) => {
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd }).trim();
   } catch {
     return undefined;
   }
+};
+
+/** A path or label put into a command a person pastes: quoted only when it has to be, so a path with a space still runs. */
+export const shellQuote = (s: string) => /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`;
+
+/**
+ * The fix for a missing or incomplete .sandcastle/.gitignore: a command that appends what init
+ * would write. `sandcastle init` cannot be rerun for it - it refuses once a config exists.
+ */
+export const gitignoreFix = (root: string): string => {
+  const file = join(root, ".sandcastle/.gitignore");
+  const have = existsSync(file) ? readFileSync(file, "utf8").split("\n") : [];
+  const missing = SANDCASTLE_IGNORES.filter((w) => !have.includes(w));
+  if (!missing.length) return ".sandcastle/.gitignore lists them all, but another ignore rule un-ignores logs/: `git check-ignore -v .sandcastle/logs/x` names it.";
+  return `\`printf '%s\\n' ${missing.join(" ")} >> ${shellQuote(file)}\``;
+};
+
+/**
+ * Whether the queue label exists on GitHub, asked of `gh` from inside the project (so it picks the
+ * project's remote). Anything but a clear answer is "not checked": gh missing, signed out, no
+ * remote and no network all look alike, and none of them says the label is absent.
+ */
+export const queueLabel = (root: string, label: string): { state: "ok" | "missing" | "not checked"; fix: string } => {
+  const out = run("gh", ["label", "list", "--search", label, "--limit", "100", "--json", "name"], root);
+  const fix = `\`gh label create ${shellQuote(label)} --description 'Queued for a Sandcastle agent run'\``;
+  if (out === undefined) return { state: "not checked", fix };
+  let names: unknown;
+  try {
+    names = JSON.parse(out);
+  } catch {
+    return { state: "not checked", fix };
+  }
+  if (!Array.isArray(names)) return { state: "not checked", fix };
+  // GitHub label names are case-insensitive.
+  const found = names.some((n) => typeof n?.name === "string" && n.name.toLowerCase() === label.toLowerCase());
+  return { state: found ? "ok" : "missing", fix };
 };
 
 // Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
@@ -85,13 +122,21 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       ? await loadProject(repoRoot).catch(() => undefined)
       : undefined;
   const needsGh = project?.tracker.kind !== "files";
+  // The commands that install things differ: Homebrew and `open -a` on macOS, the distribution's tools elsewhere.
+  const mac = process.platform === "darwin";
   const node = Number(process.versions.node.split(".")[0]);
-  check(node >= 22, `Node ${process.versions.node}`, "Install Node 22 or newer (24 LTS recommended).");
-  check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `cd ${KIT} && pnpm install`);
-  check(!!run("docker", ["info", "--format", "{{.ServerVersion}}"]), "Docker running", "Start your container runtime (OrbStack, Podman machine, Docker Desktop or the Docker daemon) - `docker info` must work in this shell.");
-  check(!!run("gh", ["auth", "status"]), "GitHub CLI signed in on this machine" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "gh auth login", !needsGh);
-  check(!!run("git", ["--version"]), "git", "Install git 2.31 or newer.");
-  check(!!run("jq", ["--version"]), "jq (status view)", "Install jq: apt install jq, dnf install jq, or brew install jq.");
+  check(node >= 22, `Node ${process.versions.node}`, `Install Node 22 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
+  check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
+  check(
+    !!run("docker", ["info", "--format", "{{.ServerVersion}}"]),
+    "Docker running",
+    mac
+      ? "Start your container runtime: `open -a OrbStack`, `open -a Docker` or `podman machine start` - then `docker info` must work in this shell."
+      : "Start the Docker daemon: `sudo systemctl start docker` (or `podman machine start`) - then `docker info` must work in this shell.",
+  );
+  check(!!run("gh", ["auth", "status"]), "GitHub CLI signed in on this machine" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "`gh auth login`", !needsGh);
+  check(!!run("git", ["--version"]), "git", mac ? "Install git 2.31 or newer: `xcode-select --install` or `brew install git`." : "Install git 2.31 or newer: `sudo apt install git` or `sudo dnf install git`.");
+  check(!!run("jq", ["--version"]), "jq (status view)", mac ? "`brew install jq`" : "Install jq: `sudo apt install jq` or `sudo dnf install jq`.");
 
   const onPath = run("sh", ["-c", "command -v sandcastle"]);
   const linked = (() => {
@@ -101,7 +146,10 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       return false;
     }
   })();
-  check(linked, "`sandcastle` on PATH points at this kit", `sandcastle setup   (or: ln -sf ${join(KIT, "bin/sandcastle")} ~/.local/bin/sandcastle, and put ~/.local/bin on PATH)`);
+  // With no `sandcastle` on PATH, "run `sandcastle setup`" cannot work: name the kit's own script.
+  const bin = shellQuote(join(KIT, "bin/sandcastle"));
+  const setup = linked ? "sandcastle setup" : `${bin} setup`;
+  check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
 
   const skill = join(homedir(), ".claude/skills/sandcastle");
   const skillOk = (() => {
@@ -111,7 +159,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       return false;
     }
   })();
-  check(skillOk, "Claude Code skill /sandcastle installed", `ln -sfn ${join(KIT, "skill")} ~/.claude/skills/sandcastle`, true);
+  check(skillOk, "Claude Code skill /sandcastle installed", `\`mkdir -p ~/.claude/skills && ln -sfn ${shellQuote(join(KIT, "skill"))} ~/.claude/skills/sandcastle\``, true);
 
   // pool.ts reads the machine settings on first use, so a malformed file or a
   // bad limit lands here as a FIX line instead of crashing every command.
@@ -124,16 +172,25 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       return (error as Error).message;
     }
   })();
-  check(!settingsProblem, `machine-wide settings (${join(USER_CONFIG, "config.json")}, SANDCASTLE_MAX_*)`, `${settingsProblem} Fix or delete it.`);
+  const settingsFile = join(USER_CONFIG, "config.json");
+  const settingsName = settingsProblem?.match(/^SANDCASTLE_MAX_\w+/)?.[0];
+  check(
+    !settingsProblem,
+    `machine-wide settings (${settingsFile}, SANDCASTLE_MAX_*)`,
+    `${settingsProblem} ` +
+      (settingsName
+        ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
+        : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
+  );
 
   const envFile = join(USER_CONFIG, ".env");
   const env = existsSync(envFile) ? parseEnv(readFileSync(envFile, "utf8")) : {};
-  check(existsSync(envFile), `credentials file ${envFile}`, "sandcastle setup   (or see docs/INSTALL.md to write it by hand)");
+  check(existsSync(envFile), `credentials file ${envFile}`, `\`${setup}\` (or see docs/INSTALL.md to write it by hand)`);
   // A run refuses empty values, so catch them here rather than hours later.
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
-  if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")}, or run sandcastle setup.`);
-  check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", "sandcastle setup   (or run `claude setup-token` and put the token in the credentials file)");
-  check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), "sandcastle setup   (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read)", !needsGh);
+  if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")} from ${envFile}, or run \`${setup}\`, which drops them whenever it writes the file.`);
+  check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", `\`${setup}\` (or run \`claude setup-token\` and put the token in ${envFile} as CLAUDE_CODE_OAUTH_TOKEN=...)`);
+  check(!!env.GH_TOKEN?.startsWith("github_pat_"), "GH_TOKEN is a fine-grained token (github_pat_)" + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), `\`${setup}\` (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read - and put it in ${envFile} as GH_TOKEN=...)`, !needsGh);
   if (verify) {
     // The project's file overrides the shared one key by key, as credentials() in sandbox.ts does.
     const inProject = !!repoRoot && realpathSync(repoRoot) !== realpathSync(KIT);
@@ -155,12 +212,12 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       const status = key === "GH_TOKEN" ? gh?.status : key === "ANTHROPIC_API_KEY" ? await probeApiKey(found.value) : await probeOAuth(found.value);
       const seen = verdict(status);
       if (seen === "ok") console.log(`ok   ${print} - accepted${gh?.login ? ` (${gh.login})` : ""}`);
-      else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`sandcastle setup\``);
+      else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
     }
     console.log();
   }
-  check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "npm install -g @openai/codex && codex login", true);
+  check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "`npm install -g @openai/codex && codex login`", true);
   // A warning, never a FIX: host and sandbox need not match, so it does not touch `bad`.
   const pinWarning = (() => {
     try {
@@ -176,22 +233,28 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   if (repoRoot && realpathSync(repoRoot) !== realpathSync(KIT)) {
     console.log(`\nproject ${repoRoot}`);
     const hasConfig = existsSync(join(repoRoot, CONFIG_PATH));
-    check(hasConfig, CONFIG_PATH, "sandcastle init   (then fill in gates, setup and lean - see the kit README)");
+    check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
     if (project) {
       const t = project.tracker;
       check(!t.note, `issue tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);
+      if (t.kind === "github") {
+        const q = queueLabel(repoRoot, project.label);
+        const what = `queue label "${project.label}" exists on GitHub`;
+        if (q.state === "not checked") console.log(`opt  queue label "${project.label}" on GitHub - not checked (gh could not list labels)`);
+        else check(q.state === "ok", what, q.fix);
+      }
     }
     if (project?.blockers?.linear?.length) {
-      check(!!linearKey(), `LINEAR_API_KEY set (blockers.linear: ${project.blockers.linear.join(", ")})`, "Put a Linear personal API key (read-only) as LINEAR_API_KEY in the credentials file. It stays on the host; without it a Linear blocker counts as open.");
+      check(!!linearKey(), `LINEAR_API_KEY set (blockers.linear: ${project.blockers.linear.join(", ")})`, `Add LINEAR_API_KEY=<a Linear personal API key, read-only> to ${envFile}. It stays on the host; without it a Linear blocker counts as open.`);
     }
     const projectEnv = join(repoRoot, ".sandcastle/.env");
     if (existsSync(projectEnv)) {
       const p = parseEnv(readFileSync(projectEnv, "utf8"));
-      if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", "Sandcastle would forward it into every sandbox. Move it to the credentials file in ~/.config/sandcastle-kit/.env.");
-      if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", "Replace it with a fine-grained token, or delete the line to use the shared one.");
+      if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
+      if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
-    if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", "Run `sandcastle init` again or add logs/, worktrees/, .run/, .env to .sandcastle/.gitignore");
+    if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
   } else {
     console.log("\n(not inside a project - run doctor again from one to check it too)");
   }

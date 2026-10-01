@@ -590,7 +590,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | Command | What it does | Calls the model? |
 |---|---|---|
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup; prints the fix for each problem as the command that applies it (doctor itself changes nothing). `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call, no allowance spent); warns (never fails) when this machine's Claude Code is newer than the image's pinned one | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>`; prunes superseded tags | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
