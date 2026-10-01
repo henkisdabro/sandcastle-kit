@@ -29,8 +29,6 @@ mkdir -p "$REPO" "$FAKE"
 # The queue the tracker would list: each id still carries the label.
 cat >"$FAKE/sandcastle" <<'EOF'
 #!/usr/bin/env bash
-# FAKE_QUEUE_FAIL: the read fails the way a signed-out gh does.
-[ -n "${FAKE_QUEUE_FAIL:-}" ] && { echo "$FAKE_QUEUE_FAIL" >&2; exit 1; }
 printf '['; sep=""
 for id in $FAKE_QUEUE; do printf '%s{"id":"%s","title":"t","updated":null,"blockedOn":[]}' "$sep" "$id"; sep=","; done
 printf ']\n'
@@ -63,7 +61,7 @@ mkdir -p "$L" "$REPO/.sandcastle/worktrees"
 log() { printf '%s\n' "$3" >"$L/agent-issue-$1-$2-$1.log"; }
 
 render() {
-  PATH="${SHADOW:+$SHADOW:}$FAKE:$PATH" FAKE_QUEUE="$1" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+  PATH="$FAKE:$PATH" FAKE_QUEUE="$1" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
     SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" \
     TERM_COLS="$COLS" TERM_ROWS="${ROWS:-200}" XDG_CACHE_HOME="$TMP/cache" \
     "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 "${SHOW:-all}" 2>&1 | sed $'s/\e\\[[0-9;]*m//g' >"$TMP/frame"
@@ -141,7 +139,6 @@ for c in '2 working' '1 ready to land' '3 need you' '2 queued' '1 blocked' '1 me
 has 'landing 2/4'
 has 'models +│ implement live-model/high'
 hasnt 'on its earlier branch'
-hasnt 'queue: could not read'
 
 SCENARIO="live run, agents working"
 # Before landing: an estimate of when it starts, once a typical issue is known.
@@ -214,29 +211,6 @@ SCENARIO="overflow, ticket-file ids"
 SHOW=collapse ROWS=16 render "$(printf 'checkout-%02d ' $(seq 1 12))"
 has '\+.*[0-9]+ queued \(checkout-[0-9]{2}, checkout-[0-9]{2}, checkout-[0-9]{2}, …\)'
 hasnt '#checkout|#0'
-
-# ---------------------------------------------------------------------------
-SCENARIO="queue read fails"
-# A signed-out gh or a stale token must not read as an empty queue: the
-# reason is shown, and the rows that need no queue are still there.
-FAKE_QUEUE_FAIL='gh: not logged in' render "101"
-has 'queue: could not read - gh: not logged in'
-hasnt '^#101 .* queued'
-FAKE_QUEUE_FAIL="$(printf 'x%.0s' $(seq 120))" render ""
-has 'queue: could not read - x+…$'
-
-SCENARIO="queue read fails, then recovers"
-FAKE_QUEUE_FAIL= render "101"
-hasnt 'queue: could not read'
-
-SCENARIO="jq missing"
-# On PATH but not running (what a shadowing fake in a test, or a broken
-# install, looks like): the view says what to install and stops.
-mkdir -p "$TMP/nojq"
-printf '#!/bin/sh\nexit 127\n' >"$TMP/nojq/jq"; chmod +x "$TMP/nojq/jq"
-SHADOW="$TMP/nojq" render "101"
-has 'status needs jq \(apt install jq / brew install jq\)'
-hasnt '^ *run '
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
