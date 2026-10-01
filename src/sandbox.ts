@@ -171,17 +171,18 @@ const imageExists = (tag: string) => {
   }
 };
 
-const build = (tag: string, dockerfile: string, args: Record<string, string>) => {
+/** The `docker build` argv. `--pull` makes the daemon fetch the FROM image afresh instead of reusing its local copy. */
+export const buildArgs = (tag: string, args: Record<string, string>, pull: boolean): string[] => [
+  "build",
+  ...(pull ? ["--pull"] : []),
+  "-t", tag,
+  ...Object.entries(args).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]),
+  "-",
+];
+
+const build = (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean) => {
   console.log(`Building ${tag} ...`);
-  execFileSync(
-    "docker",
-    [
-      "build", "-t", tag,
-      ...Object.entries(args).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]),
-      "-",
-    ],
-    { input: dockerfile, stdio: ["pipe", "inherit", "inherit"] },
-  );
+  execFileSync("docker", buildArgs(tag, args, pull), { input: dockerfile, stdio: ["pipe", "inherit", "inherit"] });
 };
 
 // A superseded tag of the same repository is removed once its successor is
@@ -198,13 +199,20 @@ const prune = (repo: string, keep: string) => {
   }
 };
 
-export const ensureImage = (project: Project, force = false): string => {
-  const baseFile = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
+/** The base image's tag and what it builds from, in one place so doctor finds the image `ensureImage` made. */
+export const baseImage = () => {
+  const file = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
   // The user ids are baked into the image, so they are part of its identity.
   const ids = { AGENT_UID: sh("id", ["-u"]), AGENT_GID: sh("id", ["-g"]) };
-  const baseTag = `sandcastle-base:${hash(baseFile, ids.AGENT_UID, ids.AGENT_GID)}`;
+  return { file, ids, tag: `sandcastle-base:${hash(file, ids.AGENT_UID, ids.AGENT_GID)}` };
+};
+
+export const ensureImage = (project: Project, force = false): string => {
+  const { file: baseFile, ids, tag: baseTag } = baseImage();
   if (force || !imageExists(baseTag)) {
-    build(baseTag, baseFile, ids);
+    // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
+    // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
+    build(baseTag, baseFile, ids, force);
     prune("sandcastle-base", baseTag);
   }
   // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
@@ -215,7 +223,7 @@ export const ensureImage = (project: Project, force = false): string => {
   const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
   const tag = `${repo}:${hash(baseTag, layerFile)}`;
   if (force || !imageExists(tag)) {
-    build(tag, layerFile, { BASE: baseTag });
+    build(tag, layerFile, { BASE: baseTag }, false);
     prune(repo, tag);
   }
   return tag;

@@ -10,7 +10,7 @@ import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
-import { KIT, USER_CONFIG } from "./sandbox.ts";
+import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
 import { probeOAuth } from "./usage.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string) => {
@@ -110,6 +110,20 @@ export const claudePinWarning = (dockerfile: string, hostVersion: string | undef
     if (diff !== 0) return diff > 0 ? `Claude Code here is ${host}, newer than the sandbox image's pin ${pin} (docker/base.Dockerfile)` : undefined;
   }
   return undefined;
+};
+
+const STALE_IMAGE_DAYS = 30;
+
+/**
+ * A warning when the base image (`docker image inspect` `.Created`, RFC 3339) is more than 30 days old,
+ * else undefined - also for a date that does not parse, so a changed format stays silent.
+ */
+export const staleImageWarning = (created: string, now: Date, tag = "sandcastle-base"): string | undefined => {
+  const at = Date.parse(created.trim());
+  if (Number.isNaN(at)) return undefined;
+  const days = Math.floor((now.getTime() - at) / 86_400_000);
+  if (days <= STALE_IMAGE_DAYS) return undefined;
+  return `base image ${tag} was built ${days} days ago - \`sandcastle build --force\` pulls Debian and Node security updates`;
 };
 
 export const doctor = async (repoRoot?: string, verify = false) => {
@@ -257,6 +271,17 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
       if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
+    // A warning, never a FIX. Silent when Docker is down or the image is not built yet.
+    const staleImage = (() => {
+      try {
+        const tag = baseImage().tag;
+        const created = run("docker", ["image", "inspect", tag, "--format", "{{.Created}}"]);
+        return created ? staleImageWarning(created, new Date(), tag) : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    if (staleImage) console.log(`warn ${staleImage}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
   } else {
