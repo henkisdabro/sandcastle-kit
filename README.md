@@ -387,6 +387,8 @@ comments whose blockers are all closed (stale).
 
 Several may share a line: `Blocked by #12, ENG-42 and .scratch/checkout/issues/03-pay.md`.
 
+Write the line as plain text. One inside a code block or inline code (backticks) is an example, not a blocker, so a ticket can quote blocker lines without waiting on them.
+
 ```ts
 // .sandcastle/config.ts
 blockers: {
