@@ -363,6 +363,8 @@ export type TicketRecord = {
   files?: string[];
   /** Merged, but the tracker refused the close: the error, short. */
   closeFailed?: string;
+  /** What the reviewer said no gate exercises (its <ungated> line); a merged ticket with one is listed under Needs you. */
+  ungated?: string;
 };
 
 export const recordRun = (project: Project, extra: Record<string, unknown> = {}) => {

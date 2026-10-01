@@ -205,6 +205,9 @@ export const render = (f: Facts, plain = false): string => {
   // Merged, but the tracker refused the close: the work is on base, the ticket still open.
   const notClosed = merged.filter((id) => f.tickets[id].closeFailed);
   const closed = merged.filter((id) => !notClosed.includes(id));
+  // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
+  // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
+  const ungated = merged.filter((id) => f.tickets[id].ungated);
   const held = ids(["held"]);
   // Held with nothing on its branch: an agent handed it back, or a person took
   // it before any commit. There is nothing to review or merge - only a question.
@@ -240,7 +243,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + notClosed.length} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -292,6 +295,7 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
+      ...ungated.map((id) => `- ${name(id)} - merged - check by hand: ${f.tickets[id].ungated}`),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - filed by an agent during this run (needs-triage): triage it, then queue or close it`),
     ],
   );
@@ -365,6 +369,7 @@ export const render = (f: Facts, plain = false): string => {
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
   if (handedBack.length) next.push(`Answer ${list(handedBack)} in the tracker, then requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
+  if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.

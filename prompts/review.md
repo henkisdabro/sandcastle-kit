@@ -59,6 +59,17 @@ you need - but a full gate run of your own adds nothing when you commit nothing.
 
 # Finishing
 
+**If no gate exercises this change** - its effect shows only in a browser, in a generated file
+the gates do not rebuild, in a rendered document or image, or anywhere else the gates above
+never run - say what a person should check, in one sentence, on a line of its own, whether or
+not you committed:
+
+<ungated>...</ungated>
+
+with your sentence in place of the dots. The branch still merges if its gates are green; the
+line puts it in front of a person afterwards. Leave it out when a gate runs the changed code,
+even indirectly.
+
 If you committed a fix, make sure the gates it touches pass and everything is committed, then output
 `<promise>COMPLETE</promise>`.
 
