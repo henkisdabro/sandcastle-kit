@@ -18,6 +18,7 @@ the same by hand.
 | 🟩 | **Node.js 22+** | 24 LTS recommended. |
 | 📦 | **pnpm** | Installs the kit's dependencies. |
 | 🌿 | **git 2.31+** | Worktrees are the backbone of every run. |
+| 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |
 | 🐙 | **GitHub CLI**, signed in | `gh auth login`. Only needed when tickets are GitHub Issues; a project that keeps them as files in the repo can skip it. |
 | 🧠 | **A Claude subscription or Anthropic API key** | For the implement and review agents. A subscription token comes from `claude setup-token`, so Claude Code must be installed somewhere. |
 | 🔑 | **A fine-grained GitHub token** | Issues read/write and metadata read, on chosen repos only. `setup` walks you through it. |
