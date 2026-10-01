@@ -63,6 +63,8 @@ type Outcome = {
   carried?: boolean;
   /** Repaired green, but the review of the repair failed: held, never merged unreviewed. */
   unreviewed?: boolean;
+  /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
+  ungated?: string;
 };
 
 // A branch's outcome as the status view's row shows it, before landing.
@@ -117,6 +119,15 @@ export const closeComment = (
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
   (report ? `\n\n${report}` : "");
+
+// The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
+// exercises the change. Same rules as `tags()` in the pipeline - the last tag wins, an empty
+// one or the echoed placeholder "..." does not count - and the text is one line, cut to 200.
+export const ungatedOf = (text: string): string | undefined => {
+  const last = [...text.matchAll(/<ungated>([\s\S]*?)<\/ungated>/g)].at(-1);
+  const said = last?.[1].replace(/\s+/g, " ").trim().slice(0, 200).trim();
+  return said && said !== "..." ? said : undefined;
+};
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
 // `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
@@ -670,6 +681,8 @@ export const burndown = async (project: Project) => {
         );
       };
       let reviewCommits = 0;
+      // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
+      const ungated: string[] = [];
       if (landOnly && mergeConflicted && greenHead !== undefined) {
         // The resolver finished the merge on a branch reviewed and green at greenHead:
         // nobody has seen its resolution. A clean land-only merge needs no review.
@@ -757,6 +770,10 @@ export const burndown = async (project: Project) => {
             : undefined;
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+          for (const r of [review, cross]) {
+            const u = r && ungatedOf(r.stdout);
+            if (u) ungated.push(u);
+          }
           if (!tracker.agentsWrite) {
             for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
               const said = r && tags(r.stdout).report;
@@ -881,6 +898,8 @@ export const burndown = async (project: Project) => {
         if (after) {
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits += after.commits.length;
+          const u = ungatedOf(after.stdout);
+          if (u) ungated.push(u);
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
           if (after.commits.length) gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
@@ -903,6 +922,7 @@ export const burndown = async (project: Project) => {
         head,
         carried,
         unreviewed,
+        ungated: ungated.length ? [...new Set(ungated)].join("; ").slice(0, 300) : undefined,
       };
     } catch (error) {
       failed = error;
@@ -1004,6 +1024,7 @@ export const burndown = async (project: Project) => {
                   minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
                   ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
                   ...(value.failing?.length ? { failing: value.failing } : {}),
+                  ...(value.ungated ? { ungated: value.ungated } : {}),
                 });
                 run.update({ typical: typicalTimes(project, [...took.values()]) });
                 // With nothing left to start, the pane closes: five panes each

@@ -18,7 +18,9 @@ This continues the run steps 1-3 in SKILL.md.
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
-      held, its size, the review and merge commands, and anything that needs a decision.
+      held, its size, the review and merge commands, and anything that needs a decision - and each
+      ticket listed `merged - check by hand`: what the reviewer said to check, and offer to check it
+      if you can (open the page, rebuild the file) - the gates did not.
    4. `## ❌ Needs fixing` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
