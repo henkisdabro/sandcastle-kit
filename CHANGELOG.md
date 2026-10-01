@@ -32,8 +32,20 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   sandboxes 25% in a column of equal rows), and Herdr switches to the run's tab once it opens.
   `SANDCASTLE_HERDR_FOCUS=0` keeps your focus where it is.
 
+### Changed
+
+- The skill loads less for most actions: the run action's closing hand-off and the whole
+  `update` action moved into `skill/run.md` and `skill/update.md`, which `SKILL.md` names when
+  they are needed.
+
 ### Fixed
 
+- A ticket's gate log is kept across attempts instead of being wiped at each one, and every
+  agent and gate log marks the start of each run's phase with its run id and local time.
+- `init`'s placeholder gate points at `.github/workflows` and `node --test`, and says Python
+  detection needs uv.
+- The signal-handling test fails after 15 seconds instead of hanging when its fixture survives
+  a signal, which once stalled the macOS suite.
 - A branch that conflicts at landing says so on its issue - the files and the other ticket - in
   the one comment the run already posts, instead of only in the console.
 - Gate times under 10 seconds show one decimal (`green in 0.4s`, not `green in 0s`).

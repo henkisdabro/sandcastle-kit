@@ -48,8 +48,17 @@ const run = (sig: NodeJS.Signals, env: Record<string, string> = {}) =>
       out += d;
       if (out.includes("ready")) child.kill(sig);
     });
+    // A fixture that survives its signal once hung the whole macOS suite for minutes; fail
+    // instead, naming the signal, and never leave the process behind.
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`fixture still running 15 s after ${sig}${out.includes("ready") ? "" : " (it never printed ready)"}`));
+    }, 15_000);
     child.on("error", reject);
-    child.on("exit", (code) => resolve(code));
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
   });
 
 for (const [sig, code] of [["SIGTERM", 143], ["SIGHUP", 129], ["SIGINT", 130]] as const) {
