@@ -134,7 +134,7 @@ comments, and the gates can prove it.
    |---|---|
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the issue is stale or half-fixed |
    | Needs a decision | ask (step 3) |
-   | Human-only - console, device, secret, production, legal | the repo's human label (e.g. `needs-human`), with a comment saying why |
+   | Human-only - console, device, secret, production, legal | `needs-human` (the kit's human label: a run never takes a ticket carrying it), with a comment saying why |
    | Blocked by another issue | label it, with a `Blocked by #N` line in the issue *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child issues; ask before creating them |

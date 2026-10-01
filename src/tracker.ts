@@ -135,7 +135,14 @@ const github = (project: Project): Tracker => {
       }
     },
     hold: (id, text) => {
-      gh(["label", "create", "needs-human", "--color", "D93F0B", "--force"]);
+      // No --force: it resets the colour and description of a label the repo
+      // already has. Only "already exists" is expected; any other failure
+      // (permissions, network) still stops the hold.
+      try {
+        gh(["label", "create", "needs-human", "--color", "D93F0B"]);
+      } catch (e) {
+        if (!/already exists/i.test(e instanceof Error ? e.message : String(e))) throw e;
+      }
       gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", "needs-human"]);
       gh(["issue", "comment", id, "--body", text]);
     },
