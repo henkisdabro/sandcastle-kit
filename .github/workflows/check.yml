@@ -4,6 +4,11 @@ name: Check
 # model: types, shell syntax, and the status view against a fixture run. The
 # view once showed a live run's green branches as queued for over an hour, and
 # nothing here would have noticed.
+#
+# On Linux and macOS: agents test only in the Linux sandbox, and two tests that
+# passed there failed on macOS (BSD `script`, a mise `node` shim) until a
+# maintainer ran them by hand. macOS also runs the status view under its own
+# bash 3.2, the bash the kit's users have there.
 
 on:
   push:
@@ -14,7 +19,11 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -26,3 +35,5 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: bash -n status.sh bin/sandcastle .githooks/pre-commit
       - run: pnpm test
+      - if: runner.os == 'macOS'
+        run: STATUS_BASH=/bin/bash bash test/status.test.sh
