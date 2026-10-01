@@ -4,16 +4,19 @@
 //   pnpm exec tsx --test test/preflight.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 // Importing the kit must not touch the real slots or the real credentials file.
 const home = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = join(home, "cache");
 process.env.XDG_CONFIG_HOME = join(home, "config");
-const { preflightFailure } = await import("../src/run.ts");
+// Read once at import: the Codex check runs only with cross-review on.
+process.env.CROSS_REVIEW = "1";
+delete process.env.SKIP_PREFLIGHT;
+const { preflight, preflightFailure } = await import("../src/run.ts");
 const { credentialSource, USER_CONFIG } = await import("../src/sandbox.ts");
 
 const credential = { key: "CLAUDE_CODE_OAUTH_TOKEN", file: join("project", ".sandcastle", ".env") };
@@ -82,4 +85,34 @@ test("the credential comes from the project's file when it defines the key, else
 
   writeFileSync(projectFile, "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
   assert.deepEqual(credentialSource(project), { key: "CLAUDE_CODE_OAUTH_TOKEN", file: projectFile });
+});
+
+test("a Codex-only rejection does not blame the Claude credential", () => {
+  // A fake docker answers OK for every Claude model; a fake codex fails as a stale ChatGPT login does.
+  const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
+  const fake = (name: string, body: string) => {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+  };
+  fake("docker", `echo '{"is_error":false,"result":"OK"}'`);
+  fake("codex", `echo 'ERROR: 401 Unauthorized' >&2; exit 1`);
+  const root = mkdtempSync(join(tmpdir(), "sandcastle-test-project-"));
+  mkdirSync(join(root, ".sandcastle"));
+  writeFileSync(join(root, ".sandcastle/.env"), "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
+  const project = { root, tracker: { kind: "files" } } as Parameters<typeof preflight>[0];
+
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path}`;
+  try {
+    assert.throws(
+      () => preflight(project, "sandcastle-test"),
+      (error: Error) => {
+        assert.ok(error.message.includes("401 Unauthorized"), error.message);
+        assert.ok(!error.message.includes("CLAUDE_CODE_OAUTH_TOKEN"), error.message);
+        return true;
+      },
+    );
+  } finally {
+    process.env.PATH = path;
+  }
 });

@@ -132,7 +132,9 @@ export const preflight = (project: Project, image: string) => {
     if (!r.ok) failures.push({ model: CROSS_REVIEW_MODEL, reply: r.out.split("\n").slice(-3).join(" ").slice(0, 300) });
   }
   if (failures.length) {
-    throw new OperatorError(preflightFailure(failures, credentialSource(project)));
+    // The hint names the Claude credential; a Codex reply comes from the host's ChatGPT login, not that file.
+    const claudeOnly = failures.every((f) => f.model !== CROSS_REVIEW_MODEL);
+    throw new OperatorError(preflightFailure(failures, claudeOnly ? credentialSource(project) : undefined));
   }
   console.log(`Preflight ok: ${MODELS_LINE}`);
 };
