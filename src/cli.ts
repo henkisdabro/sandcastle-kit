@@ -56,7 +56,7 @@ import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { closingReport, gather } from "./report.ts";
+import { closingReport, gather, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
@@ -109,7 +109,12 @@ try {
       // An agent that started the run in another pane (Herdr's `pane run`) is
       // told nothing when it ends; its watcher waits for this line, printed on
       // every exit - a drained queue and a crash included.
-      process.on("exit", (code) => console.log(`sandcastle run ended (exit ${code})`));
+      process.on("exit", (code) => {
+        if (summary.due && !summary.printed) {
+          console.log("The run ended before its summary: `sandcastle report` shows what it did, and `sandcastle run` again picks up its tickets.");
+        }
+        console.log(`sandcastle run ended (exit ${code})`);
+      });
       exitOnSignal();
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);

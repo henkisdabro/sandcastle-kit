@@ -63,6 +63,13 @@ export type Facts = {
 
 export const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
 const LEFT = ["blocked", "skipped"];
+// Where a ticket's part in a run ends. Any other state at the end - a phase, or
+// "ready" outside a dry run - is a ticket the run stopped mid-work.
+const SETTLED = ["merged", "nochange", "withdrawn", "stopped", "held", "shipped", "queued", ...NEEDS_FIXING, ...LEFT];
+
+// A run that started agents owes a summary (due); an exit before it is printed
+// (Ctrl-C, a crash) says where to find one instead of ending silently.
+export const summary = { due: false, printed: false };
 
 // Git is asked, never assumed: a repo with no upstream, a deleted branch.
 const git = (args: string[], cwd: string) => {
@@ -220,14 +227,20 @@ export const render = (f: Facts, plain = false): string => {
   // and the queue is untouched. Said first, as nothing below it is news.
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
     !Object.values(f.tickets).some((t) => t.started);
-  const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT);
+  // Ended before its summary (Ctrl-C, a crash, kill -9): its tickets mid-work were
+  // counted as attempted and listed nowhere, under a headline that said "finished".
+  const early = !baseRed && !f.stopped && !f.live &&
+    (!!f.killed || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
+  const cut = early ? Object.keys(f.tickets).filter((id) => !SETTLED.includes(f.tickets[id].state ?? "") && !(f.dryRun && f.tickets[id].state === "ready")) : [];
+  const unstarted = early ? ids(["queued"]) : [];
+  const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
   // A dry run's green branches end as "ready": they would have merged.
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
-  const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length;
+  const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
@@ -240,7 +253,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? "STOPPED before landing - nothing was merged" : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
@@ -250,7 +263,7 @@ export const render = (f: Facts, plain = false): string => {
       : f.verify === undefined || f.verify === null
       // null: the run ended and chose not to (fewer than two merges this run - a
       // ticket closed as merged earlier merges nothing); undefined: it never got there.
-      ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : "no result recorded"}).`
+      ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green.`
         : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed.`,
@@ -336,11 +349,13 @@ export const render = (f: Facts, plain = false): string => {
     return s && s !== "merged" ? ` (${s === "red" ? "gate red" : s})` : "";
   };
   const skipped = ids(["skipped"]);
-  const anyLeft = f.runnable.length + f.blocked.length + skipped.length > 0 || !!f.blockCheck;
+  const anyLeft = f.runnable.length + f.blocked.length + skipped.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
+    ...(cut.length ? [`Cut short when the run ended: ${cut.map((id) => `${refOf(id)} (${f.tickets[id].state})`).join(", ")} - still queued`] : []),
+    ...(unstarted.length ? [`Not started (the run ended early): ${list(unstarted)}`] : []),
     ...(f.blockCheck ? [`Could not re-read blockers: ${f.blockCheck}`] : []),
   ] : []);
 
@@ -383,6 +398,13 @@ export const render = (f: Facts, plain = false): string => {
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
+  // They keep their queue label, and the next run resumes a kept branch rather than starting over.
+  if (cut.length + unstarted.length) {
+    next.push(
+      `\`sandcastle run\` again: it picks up ${list([...cut, ...unstarted])} where this run ended` +
+        (f.killed ? ", and first stops any sandbox the killed run left working." : "."),
+    );
+  }
   // A red base is red for whoever pulls it too.
   if (f.ahead) next.push(baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
@@ -394,6 +416,7 @@ export const render = (f: Facts, plain = false): string => {
 export const closingReport = async (project: Project) => {
   if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
   const facts = await gather(project);
+  summary.printed = true;
   if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
   // NO_COLOR counts as set only when non-empty (no-color.org).
   return render(facts, !!process.env.NO_COLOR);

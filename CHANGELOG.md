@@ -199,6 +199,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   gates and close comment.
 - A dry run with several green branches no longer reads as if they would all merge together: the
   summary says each was gated on its own and points at `sandcastle preview`.
+- A run cut short (Ctrl-C, a crash, a killed process) no longer reports "Run finished" with its
+  unfinished tickets counted as attempted and listed nowhere: the summary says the run ended
+  early, names each ticket it cut short (with its phase) or never started, and says the next
+  `sandcastle run` picks them up. The run pane says where the summary is when the run ends before
+  printing one.
 
 ### Added
 

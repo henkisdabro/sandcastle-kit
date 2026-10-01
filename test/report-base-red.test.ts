@@ -79,8 +79,8 @@ test("a normal finished run's headline is unchanged", () => {
   assert.match(ok, /^## 🏁 Run finished$/m);
   assert.match(ok, /- 1 attempted - 1 merged/);
   assert.doesNotMatch(ok, /Base gates|before any agent ran/);
-  // A later stage with a failing exit, or tickets that started, is not this case.
-  assert.match(render(facts({ stage: "landing", exitCode: 1, tickets: queued })), /^## 🏁 Run finished$/m);
-  assert.match(render(facts({ stage: "base gates", exitCode: 1, tickets: { "1": { state: "red", started: 1 } } })), /^## 🏁 Run finished$/m);
+  // A later stage with a failing exit, or tickets that started, is not this case: the run ended early.
+  assert.match(render(facts({ stage: "landing", exitCode: 1, tickets: queued })), /^## 🏁 Run ended early \(exit 1\)/m);
+  assert.match(render(facts({ stage: "base gates", exitCode: 1, tickets: { "1": { state: "red", started: 1 } } })), /^## 🏁 Run ended early \(exit 1\)/m);
   assert.match(render(facts({ stage: "base gates", exitCode: 0, tickets: queued })), /^## 🏁 Run finished$/m);
 });

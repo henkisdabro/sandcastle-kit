@@ -17,6 +17,9 @@ This continues the run steps 1-3 in SKILL.md.
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
+      If it reads `ended early` or `ended without a clean exit` (Ctrl-C, a crash, a killed
+      process), say that first: the summary is partial, and the tickets it cut short are listed
+      under Runnable now for the next `sandcastle run` to pick up.
    2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the issues are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread.
@@ -35,7 +38,9 @@ This continues the run steps 1-3 in SKILL.md.
       `git merge`, so the merge message and the close comment are the kit's. With several branches
       unlanded, `sandcastle preview` shows which of them conflict before anything is merged.
    5. `## ▶️ Runnable now / ⏳ Still blocked` - the unblocked list is computed after landing; for
-      each still blocked, what it waits for and whether that blocker is itself held or red.
+      each still blocked, what it waits for and whether that blocker is itself held or red; and
+      after a run that ended early, the tickets it cut short (with the phase each was in) and the
+      ones it never started - all still queued.
    6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
       and the push that fits the repo's own shipping rules (read its AGENTS.md or CONTRIBUTING).
       Say plainly that Sandcastle pushed nothing.

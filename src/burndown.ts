@@ -38,7 +38,7 @@ import {
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
-import { closingReport } from "./report.ts";
+import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
@@ -449,6 +449,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // Agents label the follow-up issues they file; the sandbox token cannot create the label.
   if (tracker.kind === "github" && !DRY_RUN) ensureTriageLabel();
   run.update({ stage: "running" });
+  Object.assign(summary, { due: true, printed: false });
   const fingerprint = gitFingerprint(project);
   // Set when the shared .git changed under us; no further issue starts.
   let tampered: string | undefined;

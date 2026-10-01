@@ -95,7 +95,7 @@ test("a run with nothing in it prints every section, each saying none", () => {
   assert.match(body(out, "## 📤 Local state"), /Nothing is pushed by Sandcastle/);
   assert.match(out, /not re-gated \(fewer than two branches merged in this run\)/);
   // A run that never reached verify says so, whatever its tickets say.
-  assert.match(render(facts({ verify: undefined, finished: undefined, killed: true })), /not re-gated \(no result recorded\)/);
+  assert.match(render(facts({ verify: undefined, finished: undefined, killed: true })), /not re-gated \(the run ended before it got there\)/);
 });
 
 test("a red merged base comes first in the next steps", () => {
