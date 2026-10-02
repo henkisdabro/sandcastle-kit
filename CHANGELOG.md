@@ -51,6 +51,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A test file a ticket adds no longer reads as a change beyond its Touches line**, in the report
+  or the close comment. Its name cannot be known when the ticket is written. A modified test file,
+  or a file added outside the conventional test paths, still counts.
 - **The skill states two rules agents kept getting wrong.** A `Blocked by` ref must sit on the
   same line (a list under a `Blocked by:` heading is not read); a drain's later turns run only what
   the turn before left conflicted or released. The README's `SANDCASTLE_HERDR_VIEW` row now says it turns off the
