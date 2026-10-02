@@ -365,7 +365,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
  * from this record, not from branches and logs: before it, a branch waiting to
  * land had no outcome, and the view's rules for old runs read it as queued.
  * `state` is one of: queued, blocked, setup, implement, review, cross-review,
- * gates, repair, ready, landing, merged, held, conflict, red, nochange,
+ * gates, repair, ready, landing, merged, held, conflict, red, nochange, uncommitted (finished, commit refused),
  * crashed, not landed, withdrawn (closed or unqueued during the run), stopped (finished, but
  * the run stopped before landing), skipped.
  */

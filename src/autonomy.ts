@@ -25,7 +25,8 @@ export type Rerun = { conflicted: string[]; unblocked: string[] };
 /**
  * What a further turn would take, or undefined when none should follow: a dry run changed
  * nothing, a stopped run or one that hit a usage limit should not be restarted by itself, and
- * a red base is not built on.
+ * a red base is not built on. An "uncommitted" ticket is not counted: its commit was refused,
+ * and another turn would only repeat the refusal until a person fixes the cause.
  */
 export const rerunnable = (facts: Facts): Rerun | undefined => {
   const tickets = Object.entries(facts.tickets);
