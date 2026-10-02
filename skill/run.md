@@ -52,6 +52,19 @@ This continues the run steps 1-3 in SKILL.md.
    requeue a failed issue with a note (`sandcastle requeue <n> --note "..."`), start a run for the unblocked issues, `sandcastle clean`
    once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
 
+   How landing reads: tickets land **while others still run**, one at a time on the landing worker,
+   as each goes green - not in a batch after the last one. So the summary's merged count
+   includes tickets that landed mid-run, `Merged <base> re-gated` is still the one check at the
+   end (it runs when two or more tickets merged), and a ticket's gates passing on its own branch
+   says nothing about the base it lands on. Two cases follow from that. **`red together with
+   #N`** (under Needs fixing) is a branch green alone but red once merged with ticket(s) that had
+   already landed: nothing was merged for it, and the fix is in how the two meet (usually a
+   shared test or file), not in the red ticket's own tests - read both diffs and the gate log
+   before blaming either. **`requeued`** (under Runnable now) is a ticket the run put back in the
+   queue itself: it needs no action from the user and runs again on the next `sandcastle run`.
+   In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
+   `ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
+
    Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
    person marked the ticket `needs-human` during the run; `held` with "no commits" is a ticket an
    agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
