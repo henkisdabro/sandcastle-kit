@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { RunRecord } from "../mod/hooks/run-record.ts";
 import { type Facts, render } from "../src/report.ts";
 
 const SECTIONS = ["## 🏁 Run", "## ✅ Done", "## 🙋 Needs you", "## ❌ Needs fixing", "## ▶️ Runnable now", "## 📤 Local state", "## 👉 Next step"];
@@ -49,7 +50,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
         "205": { state: "nochange", title: "e" },
         "209": { state: "blocked", title: "f" },
         "210": { state: "blocked", title: "g" },
-      },
+      } satisfies RunRecord["tickets"],
       runnable: ["209"],
       blocked: [{ id: "210", on: ["#206"] }],
       ahead: 51,

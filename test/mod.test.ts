@@ -13,23 +13,30 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { band, BUCKETS, CASTLE, GROUPS, line, needing, parse, rows, RUN_COMMAND, SAND, summarise } from "../mod/hooks/run-state.ts";
+import { DERIVED_STATES, GROUPS, isTicketState, TICKET_STATES, WORDS } from "../mod/hooks/run-record.ts";
+import { band, CASTLE, LEGEND, line, needing, parse, rows, RUN_COMMAND, SAND, summarise } from "../mod/hooks/run-state.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
 const status = read("status.sh");
 
-test("every state the run record can hold has a group", () => {
-  const doc = read("src", "run.ts").match(/`state` is one of:([\s\S]*?)\*\//)?.[1] ?? "";
-  const states = doc
-    .replace(/\n\s*\*/g, " ")
-    .replace(/\([^)]*\)/g, "")
-    .split(",")
-    .map((s) => s.trim().replace(/\.$/, ""))
-    .filter(Boolean);
-  assert.ok(states.length >= 20, `read ${states.length} states from src/run.ts`);
-  for (const s of states) assert.ok(s in BUCKETS, `src/run.ts writes "${s}", which mod/hooks/run-state.ts gives no group`);
-  for (const s of Object.keys(BUCKETS)) assert.ok(states.includes(s), `mod/hooks/run-state.ts groups "${s}", which src/run.ts does not write`);
+test("every ticket state has a group, and the group table holds no other", () => {
+  assert.deepEqual(Object.keys(GROUPS).sort(), [...TICKET_STATES].sort());
+  assert.equal(new Set(TICKET_STATES).size, TICKET_STATES.length, "no state is listed twice");
+  for (const s of TICKET_STATES) assert.ok(isTicketState(s), s);
+  for (const s of [...DERIVED_STATES, "constructor", "toString", "", undefined, 3]) assert.ok(!isTicketState(s), String(s));
+});
+
+test("the words and the derived states are the status view's", () => {
+  for (const [state, word] of Object.entries(WORDS)) {
+    assert.ok(isTicketState(state), state);
+    assert.ok(status.includes(`${word})`) || status.includes(`"${word}"`) || status.includes(`|${word}|`), `status.sh says "${word}"`);
+  }
+  // A derived state is one the view works out, never one the record holds.
+  for (const s of DERIVED_STATES) {
+    assert.ok(!isTicketState(s), `${s} is a ticket state`);
+    assert.ok(status.includes(s === "left over" ? `"left over"` : s), `status.sh knows "${s}"`);
+  }
 });
 
 // The 256-colour cube, as the terminal draws it.
@@ -42,13 +49,13 @@ const hex = (rgb: string) => "#" + rgb.split(";").map((v) => Number(v).toString(
 
 test("the groups carry the status view's glyphs and colours", () => {
   const styles = [...status.matchAll(/glyph='(.)'; colour="\$(\w+)"; prio=\d; grp="?([a-z ]+?)"?;;/g)];
-  for (const g of GROUPS) {
-    const style = styles.find((m) => m[3] === g.bucket);
-    assert.ok(style, `status.sh has no group "${g.bucket}"`);
-    assert.equal(g.glyph, style[1], `${g.bucket} glyph`);
+  for (const g of LEGEND) {
+    const style = styles.find((m) => m[3] === g.group);
+    assert.ok(style, `status.sh has no group "${g.group}"`);
+    assert.equal(g.glyph, style[1], `${g.group} glyph`);
     const code = status.match(new RegExp(`^${style[2]}=\\$'\\\\e\\[38;5;(\\d+)m'`, "m"))?.[1];
     assert.ok(code, `status.sh sets ${style[2]} as a 256-colour code`);
-    assert.equal(g.colour, cube(Number(code)), `${g.bucket} colour`);
+    assert.equal(g.colour, cube(Number(code)), `${g.group} colour`);
     assert.ok(status.includes(`${g.glyph} ${g.label} `), `the legend says "${g.glyph} ${g.label}"`);
   }
   const sand = (name: string) => hex(status.match(new RegExp(`\\b${name}=\\$\\(sand '([\\d;]+)'`))?.[1] ?? "");

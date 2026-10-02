@@ -1,8 +1,8 @@
 // Lean sandboxes. Every skill, agent and command a repo ships is listed in
 // every sandbox agent's context, and every MCP server adds its tool schemas -
 // paid on every turn of every run, whether the task needs them or not. The
-// container has no user-level ~/.claude, so the repo's own config is all an
-// agent loads. This module inventories it, hides everything the project has
+// container has no user-level ~/.claude (only the kit's managed git guard, which costs no
+// context), so the repo's own config is all an agent loads. This module inventories it, hides everything the project has
 // not explicitly kept, and can measure what that saves.
 //
 // Kept items are named in `.sandcastle/config.ts` -> `lean.keep`:

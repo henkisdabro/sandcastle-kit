@@ -12,6 +12,7 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
@@ -381,49 +382,15 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
 // run is still alive; `finishedAt` is written on a clean exit.
 // ---------------------------------------------------------------------------
 
-/**
- * Where one ticket of the live run is. The status view shows the run's tickets
- * from this record, not from branches and logs: before it, a branch waiting to
- * land had no outcome, and the view's rules for old runs read it as queued.
- * `state` is one of: queued, blocked, setup, implement, review, cross-review,
- * gates, repair, ready, landing, merged, held, conflict, red, nochange, uncommitted (finished, commit refused),
- * crashed, not landed, withdrawn (closed or unqueued during the run), stopped (finished, but
- * the run stopped before landing), skipped.
- */
-export type TicketRecord = {
-  state?: string;
-  since?: number;
-  started?: number;
-  order?: number;
-  note?: string | null;
-  title?: string;
-  // For the closing summary (report.ts), set when the pipeline ends.
-  commits?: number;
-  tokens?: string;
-  minutes?: number;
-  /** Test ids a red gate named. */
-  failing?: string[];
-  /** Files a merge conflicted on, or protected paths a held branch changes. */
-  files?: string[];
-  /** Sent back to the pipelines once after a conflict or red at landing ("requeued after conflict with #3"), for the status view; null once that second attempt is not going to run. */
-  requeued?: string | null;
-  /** Merged, but the tracker refused the close: the error, short. */
-  closeFailed?: string;
-  /** What the reviewer said no gate exercises (its <ungated> line); a merged ticket with one is listed under Needs you. */
-  ungated?: string;
-  /** Paths the branch changed beyond its ticket's `Touches:` line; a warning, never a hold. */
-  overrun?: string[];
-};
-
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
 
-export const recordRun = (project: Project, extra: Record<string, unknown> = {}, onEnd?: (run: Record<string, unknown>) => void) => {
+export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run: RunRecord) => void) => {
   // Before this record's first write: finishing the old one rewrites run.json.
   current?.(0);
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
-  let run: Record<string, unknown> = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
+  let run: RunRecord = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
   // Written whole and renamed into place: the view reads it every few seconds,
   // and a half-written file read as no record at all, so every row fell back
   // to the guesswork the record is there to replace.
@@ -460,16 +427,16 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {},
     process.on("exit", (code) => current?.(code));
   }
   return {
-    startedAt: run.startedAt as string,
+    startedAt: run.startedAt!,
     /** `stage` is what the status view's run line shows while the run is live. */
-    update(fields: Record<string, unknown>) {
+    update(fields: RunRecord) {
       run = { ...run, ...fields };
       write();
     },
-    tickets: () => (run.tickets ?? {}) as Record<string, TicketRecord>,
+    tickets: (): Record<string, TicketRecord> => run.tickets ?? {},
     /** A new `state` also restarts its clock; a note alone does not. */
     ticket(id: string, fields: TicketRecord) {
-      const tickets = (run.tickets ?? {}) as Record<string, TicketRecord>;
+      const tickets = run.tickets ?? {};
       const now = fields.state ? { since: Math.floor(Date.now() / 1000), note: null } : {};
       run = { ...run, tickets: { ...tickets, [id]: { ...tickets[id], ...now, ...fields } } };
       write();

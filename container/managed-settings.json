@@ -1,0 +1,1 @@
+{"hooks":{"PreToolUse":[{"matcher":"Bash|Write|Edit","hooks":[{"type":"command","command":"/etc/claude-code/git-guard.sh"}]}]}}

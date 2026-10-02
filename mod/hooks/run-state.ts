@@ -1,47 +1,15 @@
 // What the mod says about a run record (.sandcastle/logs/run.json). Pure: nothing here
-// touches Claude Code, so the kit's own tests import this file and hold it to the states
-// src/run.ts writes and to the status view's vocabulary (status.sh, `style_of`).
+// touches Claude Code, so the kit's own tests import this file and hold it to the status
+// view's vocabulary (status.sh, `style_of`). The record's types, the ticket states and the
+// tables from state to group and word live in run-record.ts.
 
+import { GROUPS, type Group, isTicketState, type RunRecord, WORDS } from "./run-record";
+
+/** A ticket as read from a file that may be a stranger's: its state is any short text until `isTicketState` says otherwise. */
 export type Ticket = { state?: string; note?: string; title?: string; order?: number };
 
-export type Run = {
-  /** The project's name. */
-  orchestrator?: string;
-  pid?: number;
-  startedAt?: string;
-  finishedAt?: string;
-  exitCode?: number;
-  stage?: string;
-  tokens?: string;
-  tickets?: Record<string, Ticket>;
-};
-
-export type Bucket = "working" | "needs you" | "ready" | "queued" | "blocked" | "merged" | "other";
-
-/** The status view's groups, by the state the record holds. */
-export const BUCKETS: Record<string, Bucket> = {
-  setup: "working",
-  implement: "working",
-  review: "working",
-  "cross-review": "working",
-  gates: "working",
-  repair: "working",
-  landing: "working",
-  red: "needs you",
-  conflict: "needs you",
-  held: "needs you",
-  uncommitted: "needs you",
-  crashed: "needs you",
-  "not landed": "needs you",
-  stopped: "needs you",
-  ready: "ready",
-  queued: "queued",
-  blocked: "blocked",
-  merged: "merged",
-  nochange: "other",
-  withdrawn: "other",
-  skipped: "other",
-};
+/** The run record as the mod reads it: the fields it shows, and tickets whose state is not yet trusted. */
+export type Run = Pick<RunRecord, "orchestrator" | "pid" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & { tickets?: Record<string, Ticket> };
 
 // The status view's sand palette, as hex: a mod's Text takes no 256-colour index. Dry sand at
 // the castle's top, wet sand at its base.
@@ -52,23 +20,19 @@ export const SAND = { top: "#e8d6b4", base: "#705c42", name: "#cdb894", stage: "
 export const CASTLE = { top: "▄ ▄ ▄", base: "██▀██" };
 
 /** The status view's legend: its order, glyphs, words and colours. */
-export const GROUPS: { bucket: Bucket; glyph: string; label: string; colour: string }[] = [
-  { bucket: "working", glyph: "●", label: "working", colour: "#ffd75f" },
-  { bucket: "needs you", glyph: "!", label: "needs you", colour: "#ff5f5f" },
-  { bucket: "ready", glyph: ">", label: "ready to land", colour: "#5fd7d7" },
-  { bucket: "queued", glyph: "○", label: "queued", colour: "#87afff" },
-  { bucket: "blocked", glyph: "~", label: "blocked", colour: "#87afff" },
-  { bucket: "merged", glyph: "+", label: "merged", colour: "#5fd75f" },
+export const LEGEND: { group: Group; glyph: string; label: string; colour: string }[] = [
+  { group: "working", glyph: "●", label: "working", colour: "#ffd75f" },
+  { group: "needs you", glyph: "!", label: "needs you", colour: "#ff5f5f" },
+  { group: "ready", glyph: ">", label: "ready to land", colour: "#5fd7d7" },
+  { group: "queued", glyph: "○", label: "queued", colour: "#87afff" },
+  { group: "blocked", glyph: "~", label: "blocked", colour: "#87afff" },
+  { group: "merged", glyph: "+", label: "merged", colour: "#5fd75f" },
 ];
 
-// Own keys only: a state named `constructor` is no group.
-const own = <T>(table: Record<string, T>, key: string | undefined): T | undefined => (key !== undefined && Object.hasOwn(table, key) ? table[key] : undefined);
+// A state that is no ticket state (`constructor` included) is in no group and has no word of its own.
+const group = (t: Ticket): Group => (isTicketState(t.state) ? GROUPS[t.state] : "other");
 
-const bucket = (t: Ticket): Bucket => own(BUCKETS, t.state) ?? "other";
-
-// The status view's words for the states the record spells differently.
-const WORDS: Record<string, string> = { implement: "impl", "cross-review": "codex", red: "gate red", nochange: "no change" };
-const word = (state: string | undefined) => own(WORDS, state) ?? state ?? "unknown";
+const word = (state: string | undefined) => (isTicketState(state) ? WORDS[state] : undefined) ?? state ?? "unknown";
 
 // The record is a file in a repository, which may be a stranger's: nothing in it is trusted to
 // be what src/run.ts writes. Text is cut to one short line with nothing in it that draws no
@@ -123,18 +87,18 @@ const tickets = (run: Run) => Object.entries(run.tickets ?? {});
 /** The tickets a person has to act on: `#105 conflict`. */
 export const needing = (run: Run): string[] =>
   tickets(run)
-    .filter(([, t]) => bucket(t) === "needs you")
+    .filter(([, t]) => group(t) === "needs you")
     .map(([id, t]) => `${ref(id)} ${word(t.state)}`);
 
 /** What the band above the prompt draws from: plain data, so it can live in `$.state`. */
 export type Summary = { name: string; stage: string; counts: number[]; tokens: string };
 
-/** `counts` runs parallel to GROUPS. */
+/** `counts` runs parallel to LEGEND. */
 export const summarise = (run: Run): Summary => ({
   name: run.orchestrator ?? "",
   // One process can hold several turns: a finished record with a live process is between two.
   stage: run.finishedAt ? "turn finished" : run.stage && run.stage !== "running" ? run.stage : "",
-  counts: GROUPS.map((g) => tickets(run).filter(([, t]) => bucket(t) === g.bucket).length),
+  counts: LEGEND.map((g) => tickets(run).filter(([, t]) => group(t) === g.group).length),
   tokens: run.tokens ?? "",
 });
 
@@ -159,7 +123,7 @@ export const band = (s: Summary, columns: number): Segment[][] => {
     ].filter((seg) => seg.text);
   const legend = (words: boolean): Segment[] => [
     { text: CASTLE.base, colour: SAND.base },
-    ...GROUPS.map((g, i) => ({ text: words ? `${g.glyph} ${g.label}` : g.glyph, count: s.counts[i] ?? 0, colour: g.colour })).filter((seg) => seg.count),
+    ...LEGEND.map((g, i) => ({ text: words ? `${g.glyph} ${g.label}` : g.glyph, count: s.counts[i] ?? 0, colour: g.colour })).filter((seg) => seg.count),
   ];
   return [fit([run(true, true), run(true, false), run(false, false)]), fit([legend(true), legend(false)])];
 };
@@ -167,14 +131,14 @@ export const band = (s: Summary, columns: number): Segment[][] => {
 /** The same summary as one line of text, for `/sandcastle-status`. A run that is over has no stage. */
 export const line = (run: Run, live: boolean): string => {
   const s = summarise(run);
-  return [live && s.stage, ...GROUPS.flatMap((g, i) => (s.counts[i] ? [`${g.glyph} ${g.label} ${s.counts[i]}`] : [])), s.tokens].filter(Boolean).join(" · ");
+  return [live && s.stage, ...LEGEND.flatMap((g, i) => (s.counts[i] ? [`${g.glyph} ${g.label} ${s.counts[i]}`] : [])), s.tokens].filter(Boolean).join(" · ");
 };
 
 /** One line per ticket, in the status view's order: working first, then what needs a person. */
 export const rows = (run: Run): string[] => {
-  const group = (t: Ticket) => GROUPS.findIndex((g) => g.bucket === bucket(t));
-  const rank = (t: Ticket) => (group(t) < 0 ? GROUPS.length : group(t));
+  const place = (t: Ticket) => LEGEND.findIndex((g) => g.group === group(t));
+  const rank = (t: Ticket) => (place(t) < 0 ? LEGEND.length : place(t));
   return tickets(run)
     .sort(([, a], [, b]) => rank(a) - rank(b) || (a.order ?? 0) - (b.order ?? 0))
-    .map(([id, t]) => `${GROUPS[group(t)]?.glyph ?? "·"} ${ref(id)} ${word(t.state)}${t.note ? ` (${t.note})` : ""}${t.title ? ` - ${t.title}` : ""}`);
+    .map(([id, t]) => `${LEGEND[place(t)]?.glyph ?? "·"} ${ref(id)} ${word(t.state)}${t.note ? ` (${t.note})` : ""}${t.title ? ` - ${t.title}` : ""}`);
 };

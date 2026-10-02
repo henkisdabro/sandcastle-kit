@@ -19,7 +19,8 @@ import { type GateRun, failingTests } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, largeFilesNote, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import { dirtyFiles, type TicketRecord } from "./run.ts";
+import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
+import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
 import { createQueue, type Queue } from "./schedule.ts";
@@ -257,7 +258,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
 export type Landable = { issue: string; branch: string; status: string; commits: number; repairs: number; head?: string; unreviewed?: boolean };
 
 /** What the run record takes from landing: a ticket's state, note and the odd extra field. */
-export type LandingRecord = { ticket(id: string, fields: Record<string, unknown>): void };
+export type LandingRecord = { ticket(id: string, fields: TicketRecord): void };
 
 export type LandContext = {
   project: Project;
@@ -331,7 +332,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   const tip = () => sh("git", ["rev-parse", `refs/heads/${base}`], root);
   // Each ticket's state as landing decides it, so the view counts landing
   // down rather than showing one opaque stage for minutes.
-  const land = (id: string, state: string, note: string) => run.ticket(id, { state, note });
+  const land = (id: string, state: TicketState, note: string) => run.ticket(id, { state, note });
   run.ticket(o.issue, { state: "landing" });
   // The issue can change during a long run: closed by hand, or sent to a
   // human. Merging then would land work nobody still wants. A gh error here

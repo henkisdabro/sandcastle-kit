@@ -34,7 +34,7 @@ const mixed = () =>
     "12": { state: "merged", title: "b", started: 1 },
     "13": { state: "red", title: "c", started: 1, note: "red with #11, #12", failing: ["tests/test_a.py::test_x"] },
     "14": { state: "red", title: "d", started: 1, note: "pytest red, 1 repair(s)" },
-    "15": { state: "requeued", title: "e", started: 1, note: "red together with #12 - runs again" },
+    "15": { state: "queued", title: "e", started: 1, note: "requeued after red with #12", requeued: "requeued after red with #12" },
   });
 
 test("a ticket red at landing is listed as red together with its pair, not as a failed gate", () => {
@@ -53,7 +53,7 @@ test("red on the merged tree with no pair named still reads red together", () =>
 
 test("a requeued ticket says so, is not cut short, and gets a next step", () => {
   const out = render(mixed(), true);
-  assert.match(section(out, "## Runnable now"), /Requeued: #15 e - red together with #12 - runs again - still queued for the next run/);
+  assert.match(section(out, "## Runnable now"), /Requeued: #15 e - requeued after red with #12 - still queued for the next run/);
   assert.match(section(out, "## Next step"), /`sandcastle run` again for #15: requeued during this run\./);
   // Not a ticket the run left half-done, and not one a person must fix.
   assert.doesNotMatch(section(out, "## Needs fixing"), /#15/);
