@@ -11,6 +11,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **The kit now ships an optional mod for Claude Code** (2.1.287 or newer) that shows a run in
+  the session that started it and tells that session when the run ends. Nothing changes until
+  it is linked: `sandcastle doctor` lists it as `opt` with the command, and `/sandcastle update`
+  offers it. It is code that runs inside Claude Code with your permissions; the README's "The
+  Claude Code mod" says what it reads.
 - **A run now lands each ticket as soon as it goes green**, on one landing worker beside the
   pipelines, instead of landing everything at the end. A branch that does not already hold the
   current base is merged and gated in a sandbox before the base moves. If that merged tree is red,
@@ -127,6 +132,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- **A Claude Code mod** (`mod/`, optional): the session that started a run shows it in a band
+  above the prompt, in the status view's castle, glyphs and colours; pins a line and shows a
+  notice when a ticket comes to need a person; and gets a prompt when the run's process is gone,
+  so it closes the run without a background watcher or Herdr. `/sandcastle-status` prints the
+  run as text with no model turn. `sandcastle setup` offers it and `sandcastle doctor` reports
+  it, with the reason when Claude Code has mods turned off. The README's "The Claude Code mod"
+  lists everything it reads and calls.
 - `sandcastle queue --lint` shows a queue's shape before the first run: chain depth, overlapping
   `Touches:` lines, and blockers that are not queued or missing. It is read-only and always exits 0.
 - A ticket body's `Touches:` line (format in the audit action) is parsed, with a check for files

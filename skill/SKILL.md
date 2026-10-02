@@ -251,7 +251,13 @@ comments, and the gates can prove it.
 
    Otherwise give the user the command to run in a second terminal, plus `sandcastle status` for
    a third.
-3. **Arrange to hear when it ends.** A command handed to another pane is not your own process, so
+3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - this text then
+   ends with a note saying so - skip this step: the mod submits a prompt when the run's process
+   is gone, and that prompt is your cue for step 4. The mod follows the run's record, which a
+   run writes just before it opens its status view; a run refused earlier (a dirty tree, say)
+   gets no prompt, so step 2's check for the `Status view:` line still matters. With no such
+   note, arrange it yourself:
+   a command handed to another pane is not your own process, so
    your harness never tells you it finished. Every run's last line is `sandcastle run ended (exit
    N)` - after the report, after a drained queue, after a crash or Ctrl-C. Right after starting
    it, start a background command your harness reports back on when it exits (`run_in_background`
