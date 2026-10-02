@@ -254,8 +254,13 @@ comments, and the gates can prove it.
    For a user who wants the run in their own terminal, give them the attached command to run
    there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
    person's terminal alone in a Herdr tab it adopts that tab.
-3. **Arrange to hear when it ends.** The detached run is not your own process, so your harness
-   never tells you it finished. Right after starting it, run `sandcastle wait` as a background
+3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - this text then
+   ends with a note saying so - skip this step: the mod submits a prompt when the run's process
+   is gone, and that prompt is your cue for step 4. The mod follows the run's record, which a
+   run writes just before it opens its status view; a run that `--detach` refused gets no
+   prompt, so step 2's check of the printed line still matters. With no such note, arrange it
+   yourself: the detached run is not your own process, so your harness never tells you it
+   finished. Right after starting it, run `sandcastle wait` as a background
    command your harness reports back on when it exits (`run_in_background` in Claude Code): it
    blocks while the run is live, then prints the closing summary and exits with the run's exit
    code. A harness caps a background command (Claude Code: 2 hours), so give it a timeout under

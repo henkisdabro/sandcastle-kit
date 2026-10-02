@@ -12,6 +12,11 @@ was set up with.
    the user that block, and only after they agree run it again with `--yes`. It edits Herdr's own
    config, not the project, so it is theirs to decline. Outside Herdr doctor does not list it:
    say nothing about it.
+   If doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
+   shows a live run above the prompt, says when a ticket needs the user, and tells the session
+   when the run ends. It is code that runs inside Claude Code with the user's permissions (the
+   README's "The Claude Code mod" says what it reads), so show them doctor's command and run it
+   only after they agree. Without Claude Code doctor does not list it: say nothing about it.
 2. **What changed.** Read the kit's `CHANGELOG.md` - `[Unreleased]` and the releases since the
    last update, if the user knows when that was. Its **Upgrading** notes name what an existing
    project may act on.

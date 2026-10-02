@@ -203,6 +203,7 @@ flowchart LR
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
 | 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view, and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🔭 | **A Claude Code mod** | Optional: the session that started the run shows it above the prompt, says when a ticket needs you, and is told when the run ends - see [The Claude Code mod](#-the-claude-code-mod). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 
 ## 🔄 How it works
@@ -787,6 +788,81 @@ holds the status view alone):
 └────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘
                                               sidebar: #12 review ● · #15 implement ●
 ```
+
+## 🔭 The Claude Code mod
+
+Most runs start from a Claude Code session, with `/sandcastle run`. With the kit's
+[mod](https://code.claude.com/docs/en/plugins/mods/overview) linked, that session shows the run
+itself, in the status view's castle, glyphs and colours:
+
+```
+▄ ▄ ▄  sandcastle  my-app  landing 2/4  1.7M in / 30k out
+██▀██  ● working 1  ! needs you 2  > ready to land 1  ~ blocked 1  + merged 1
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⚠ sandcastle: #105 conflict, #111 held - /sandcastle-status
+```
+
+- 🏰 **A band above the prompt** while a run is alive: the run's stage and tokens beside the
+  castle's top, the legend's counts beside its base. In a narrow terminal the legend keeps its
+  glyphs and drops its words. It is gone when the run ends.
+- 🙋 **A pinned line and a notice** when a ticket comes to need a person - a conflict, a red
+  gate, a held branch, a crash - naming the tickets. The line stays until they are dealt with or
+  the run ends.
+- 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the
+  run's process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that
+  died seconds after it started - and closes the run with the seven-section summary. It needs no
+  Herdr and no `sandcastle wait`. A session you quit and resumed in the meantime hears it when
+  it comes back; after `/clear` the terminal you started from still hears it.
+- 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
+  answers while Claude is working.
+
+It is optional. `sandcastle setup` offers it, and `sandcastle doctor` prints the one command that
+links it (`ln -sfn <kit>/mod ~/.claude/skills/sandcastle-mod`); `rm
+~/.claude/skills/sandcastle-mod` takes it out, and `/plugin` in Claude Code turns it off without
+unlinking it. It needs Claude Code 2.1.287 or newer.
+
+Three things to know:
+
+- **Mods are early access in Claude Code.** Their API can change between releases, and Claude
+  Code can turn mods off from its side; `sandcastle doctor` then says so in Claude Code's own
+  words. Nothing depends on the mod: without it the skill waits for the run's end its own way,
+  and the status view, the Herdr tab and `notify` work as before.
+- **It draws in the terminal and, by Claude Code's account, in the Desktop app's Code tab.**
+  Elsewhere - the VS Code panel, `claude -p` - Claude Code draws nothing for a mod, though its
+  hooks still run, so `/sandcastle-status` answers there. Codex and OpenCode have no mods; the
+  skill behaves there as it always has.
+- **It stays out of the way.** In a project with no `.sandcastle/` it does nothing at all. It
+  never opens a pane and never moves focus. Only a session where you used `/sandcastle` gets
+  the closing prompt, and of two such sessions in one project, the later one.
+
+### What the mod touches
+
+A mod is code that runs inside Claude Code with your permissions, not in a sandbox, so here is
+all of it. The mod:
+
+- reads `.sandcastle/logs/run.json` under the session's project root, after checking that
+  `.sandcastle/` exists and that the record is a plain file, not a link;
+- runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
+  run. It sends that process nothing;
+- keeps one small entry per project in its own store: which session closes the run, and the
+  last run it has accounted for;
+- submits one prompt when a run ends.
+
+It makes no network request, writes no file, calls no model and changes neither git nor the
+tracker. The record is a file in the repository, so the mod trusts none of it: text from it is
+cut to one short line with control and invisible characters removed, and the prompt it submits
+carries nothing from the record but a numeric exit code. Ticket titles are shown as written, as
+`sandcastle status` shows them. `claude plugin validate <kit>/mod` lists every event it hooks
+and every call it makes, without running it:
+
+```
+❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, ui.render{component=AbovePrompt}
+❯ ./register.tsx calls: $.clock.after, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
+```
+
+A test in the kit fails when either list changes, so a new call cannot arrive unnoticed.
 
 ## 📥 Updating
 

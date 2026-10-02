@@ -47,7 +47,9 @@ install ends with it; to run it again later: `sandcastle setup`.
 1. **Links the command** into `~/.local/bin` and tells you the line to add if that folder is not
    on your `PATH`. It never edits your shell files.
 2. **Links the skill** for Claude Code (`~/.claude/skills`, which OpenCode also reads), and for
-   Codex (`~/.agents/skills`) if Codex is installed and you say yes.
+   Codex (`~/.agents/skills`) if Codex is installed and you say yes. With Claude Code 2.1.287 or
+   newer it also offers [the Claude Code mod](../README.md#-the-claude-code-mod), which shows a
+   run in the session that started it; it is code that runs inside Claude Code, so it asks first.
 3. **Claude credential** - offers to run `claude setup-token` for your subscription, or takes an
    Anthropic API key.
 4. **GitHub token** - opens GitHub's token page pre-filled with the right permissions, then checks
@@ -74,6 +76,9 @@ ln -sf "$PWD/bin/sandcastle" ~/.local/bin/sandcastle
 # The sandcastle skill (optional, recommended) - one file for every agent
 mkdir -p ~/.claude/skills && ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle   # Claude Code, OpenCode
 mkdir -p ~/.agents/skills && ln -sfn "$PWD/skill" ~/.agents/skills/sandcastle   # Codex only
+
+# The Claude Code mod (optional; runs inside Claude Code - see the README's "The Claude Code mod")
+ln -sfn "$PWD/mod" ~/.claude/skills/sandcastle-mod
 
 # Credentials, outside the repo
 mkdir -p ~/.config/sandcastle-kit

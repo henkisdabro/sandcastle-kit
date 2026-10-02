@@ -67,6 +67,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and this table's `skill/` row |
 | `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action) |
+| `mod/` | The optional Claude Code mod, a plugin linked as `~/.claude/skills/sandcastle-mod`: `hooks/register.tsx` (the hooks: watch `run.json`, the band above the prompt, the needs-you line and notice, the prompt when the run's process is gone, `/sandcastle-status`) and `hooks/run-state.ts` (pure: states to the status view's groups, glyphs and colours, and the band cut to its width - `test/mod.test.ts` holds it to `src/run.ts` and `status.sh`). It runs inside Claude Code, not under `tsx`, and imports nothing from `src/`. Its own tests are `mod/tests/`, run by `claude plugin test mod` |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
@@ -107,6 +108,13 @@ sandcastle doctor
 sandcastle status 0
 sandcastle lean
 ```
+
+A change to `mod/` also needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs
+`claude plugin validate` and the mod's own tests (`test/mod.test.ts`), and skips them without it,
+as CI and the sandboxes do. That checks the hooks and the tree they return, never the paint: look
+at a changed drawing in a real session, `claude --plugin-dir mod` from a project with a run
+record. The mod's API is early access - the `.d.ts` that session writes under
+`mod/.claude-plugin/types/` is the authority, not memory.
 
 `sandcastle run`, `preflight` and `lean --measure` spend the user's model allowance; ask first.
 Test a guard (git hooks, protected paths, fingerprint) in a throwaway clone under a temp

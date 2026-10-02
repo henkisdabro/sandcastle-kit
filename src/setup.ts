@@ -10,7 +10,7 @@ import { basename, dirname, join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
-import { doctor, probeGithubToken, run } from "./doctor.ts";
+import { claudeCode, doctor, probeGithubToken, run } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
 import { configure, pluginState } from "./herdr-plugin.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
@@ -131,6 +131,13 @@ export const setup = async (repoRoot?: string) => {
     console.log(`     ~/.local/bin is not on your PATH. Add it, then open a new terminal:\n       ${line}`);
   }
   await link(join(KIT, "skill"), join(homedir(), ".claude/skills/sandcastle"), "skill for Claude Code (and OpenCode)");
+  // Unlike the skill, the mod is code that runs inside Claude Code with the user's permissions,
+  // so it is asked for. Recommended, so Enter says yes; an older Claude Code is doctor's to explain.
+  const mod = join(homedir(), ".claude/skills/sandcastle-mod");
+  if (real(mod) === real(join(KIT, "mod"))) console.log("ok   mod for Claude Code");
+  else if (claudeCode()?.mods && (await yes("Link the kit's Claude Code mod too? It shows a live run above the prompt, says when a ticket needs you and tells the session when the run ends. It runs inside Claude Code with your permissions.", true))) {
+    await link(join(KIT, "mod"), mod, "mod for Claude Code");
+  }
   // OpenCode reads both skill folders, so the Codex link is made only for
   // Codex users - otherwise OpenCode would see the skill twice.
   const codexSkill = join(homedir(), ".agents/skills/sandcastle");

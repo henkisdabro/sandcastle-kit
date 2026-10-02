@@ -6,3 +6,6 @@ node_modules/
 !.env.example
 *.local.*
 .DS_Store
+# Written by Claude Code when the mod is loaded with `--plugin-dir` while working on it.
+mod/.claude-plugin/types/
+mod/tsconfig.json

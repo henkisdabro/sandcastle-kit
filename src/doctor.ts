@@ -1,9 +1,9 @@
 // `sandcastle doctor` - one line per requirement, ok or the exact fix. Written
 // to be read by a person or by a coding agent helping them set up.
 
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
@@ -21,6 +21,26 @@ export const run = (cmd: string, args: string[], cwd?: string) => {
   } catch {
     return undefined;
   }
+};
+
+/** The first Claude Code that loads mods (plugins whose hooks run inside it). */
+const MOD_MIN = [2, 1, 287];
+
+/** The Claude Code on PATH and whether it is new enough to load the kit's mod; undefined with none. */
+export const claudeCode = (): { version: string; mods: boolean } | undefined => {
+  const v = run("claude", ["--version"])?.match(/(\d+)\.(\d+)\.(\d+)/);
+  return v ? { version: v[0], mods: MOD_MIN.reduce((d, min, i) => d || Number(v[i + 1]) - min, 0) >= 0 } : undefined;
+};
+
+/**
+ * Claude Code's own words when it would load no mod here ("turned off in this process: ..."),
+ * or undefined when it would: a setting, an organisation's policy, or a switch on Claude
+ * Code's side that nothing on the machine turns back on. `claude plugin test` in a folder
+ * with no mod is how it says which.
+ */
+const modsOff = (): string | undefined => {
+  const r = spawnSync("claude", ["plugin", "test"], { cwd: mkdtempSync(join(tmpdir(), "sandcastle-mods-")), encoding: "utf8" });
+  return `${r.stdout}${r.stderr}`.match(/hooks modules are (turned off[^\n]*)/)?.[1].replace(/, and a plugin's tests run only while it is on$/, "");
 };
 
 /** A path or label put into a command a person pastes: quoted only when it has to be, so a path with a space still runs. */
@@ -214,6 +234,31 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     }
   })();
   check(skillOk, "Claude Code skill /sandcastle installed", `\`mkdir -p ~/.claude/skills && ln -sfn ${shellQuote(join(KIT, "skill"))} ~/.claude/skills/sandcastle\``, true);
+
+  // The mod is Claude Code's alone, so with no `claude` here nothing is said about it. It is
+  // offered, never linked silently: it runs inside Claude Code with the user's permissions.
+  const claude = claudeCode();
+  if (claude) {
+    const mod = join(homedir(), ".claude/skills/sandcastle-mod");
+    const linked = (() => {
+      try {
+        return realpathSync(mod) === realpathSync(join(KIT, "mod"));
+      } catch {
+        return false;
+      }
+    })();
+    const off = linked && claude.mods ? modsOff() : undefined;
+    check(
+      linked && claude.mods && !off,
+      "Claude Code mod (optional: a live run above the prompt, a notice when a ticket needs you, a prompt when the run ends)",
+      !claude.mods
+        ? `Needs Claude Code ${MOD_MIN.join(".")} or newer (this is ${claude.version}): \`claude update\`, then \`sandcastle doctor\` again.`
+        : off
+        ? `Linked, but Claude Code says mods are ${off}. Until they are on again nothing is drawn, and the skill waits for the run's end its own way.`
+        : `\`ln -sfn ${shellQuote(join(KIT, "mod"))} ~/.claude/skills/sandcastle-mod\` - it runs inside Claude Code with your permissions; the README's "The Claude Code mod" says what it reads. \`rm ~/.claude/skills/sandcastle-mod\` takes it out.`,
+      true,
+    );
+  }
 
   // pool.ts reads the machine settings on first use, so a malformed file or a
   // bad limit lands here as a FIX line instead of crashing every command.

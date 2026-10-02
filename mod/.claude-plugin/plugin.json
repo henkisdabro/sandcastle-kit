@@ -1,0 +1,7 @@
+{
+  "name": "sandcastle",
+  "version": "0.1.0",
+  "description": "Shows a live sandcastle run in the Claude Code session: a row above the prompt, a notice when a ticket needs a person, and a prompt when the run ends",
+  "author": { "name": "sandcastle-kit" },
+  "types": "./types/index.d.ts"
+}
