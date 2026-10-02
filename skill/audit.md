@@ -75,28 +75,28 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
    called real or order-only - and get the user's yes before filing anything: filing writes to the
    tracker. The user can split a cluster back into its findings.
 10. **File in dependency order**, so a blocker exists (and has its number) before what waits on
-   it.
-   - GitHub: `gh issue create --title ... --body-file <temp file>`. The body has `## Problem`,
-     `## Evidence`, `## Fix` and `## Done when`, a `Touches:` line, and a blocker line in plain
-     text, written as the queue action's "Blocked by another issue" row shows - never inside
-     code, which a run does not read as a blocker.
-   - The `Touches:` line is one line in plain text, outside code (the kit ignores fences and
-     backticks): `Touches: <path or glob>, <path or glob>, ...`, with repo-relative paths and
-     `*` (within a directory) or `**` (across directories) globs. A directory path covers
-     everything under it. Name a file the fix will create too, and list a lockfile or generated
-     file if the fix will rewrite it. A second `Touches:` line is merged into the first. Example:
-     `Touches: src/pages/pricing.tsx, src/components/**/*.tsx, public/pricing.css` written as a
-     bare line (no backticks) in the body. The kit reads it as a scheduling hint and a warning
-     of tickets that will meet at landing, never as a limit on what the agent may change.
-   - Apply only labels that already exist in the repo's vocabulary (area, severity). Create none
-     except the queue label (`gh label create`, as the queue action does).
-   - A ready or decided finding gets the queue label. Human-only, parked and declined findings
-     are not filed unless the user asks.
-   - Files tracker: write `.scratch/audit-<YYYYMMDD>/issues/<NN>-<slug>.md` (take the date from
-     your own context, not from a shell command) with a `# ` title, a `Status: <label>` line for
-     queued ones, and a `Blocked by: NN` header line for a blocker in the same feature. Then
-     commit them in one commit by the repo's rules.
-   - Record each filed number or path in its finding's file (`filed`).
+    it.
+    - GitHub: `gh issue create --title ... --body-file <temp file>`. The body has `## Problem`,
+      `## Evidence`, `## Fix` and `## Done when`, a `Touches:` line, and a blocker line in plain
+      text, written as the queue action's "Blocked by another issue" row shows - never inside
+      code, which a run does not read as a blocker.
+    - The `Touches:` line is one line in plain text, outside code (the kit ignores fences and
+      backticks): `Touches: <path or glob>, <path or glob>, ...`, with repo-relative paths and
+      `*` (within a directory) or `**` (across directories) globs. A directory path covers
+      everything under it. Name a file the fix will create too, and list a lockfile or generated
+      file if the fix will rewrite it. A second `Touches:` line is merged into the first. Example:
+      `Touches: src/pages/pricing.tsx, src/components/**/*.tsx, public/pricing.css` written as a
+      bare line (no backticks) in the body. The kit reads it as a scheduling hint and a warning
+      of tickets that will meet at landing, never as a limit on what the agent may change.
+    - Apply only labels that already exist in the repo's vocabulary (area, severity). Create none
+      except the queue label (`gh label create`, as the queue action does).
+    - A ready or decided finding gets the queue label. Human-only, parked and declined findings
+      are not filed unless the user asks.
+    - Files tracker: write `.scratch/audit-<YYYYMMDD>/issues/<NN>-<slug>.md` (take the date from
+      your own context, not from a shell command) with a `# ` title, a `Status: <label>` line for
+      queued ones, and a `Blocked by: NN` header line for a blocker in the same feature. Then
+      commit them in one commit by the repo's rules.
+    - Record each filed number or path in its finding's file (`filed`).
 11. **Report**: a table of what was filed (number, title, queued or not), merged, and dropped with
     the reason. The next step is `/sandcastle run`, or `/sandcastle queue` for anything filed
     unqueued.
