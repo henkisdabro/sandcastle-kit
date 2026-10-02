@@ -60,7 +60,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { closingReport, gather, summary } from "./report.ts";
+import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
@@ -166,6 +166,8 @@ try {
           drain.unblocked = left.unblocked;
           if (why) {
             drain.cause = why;
+            // The turn's summary said the loop runs again; it does not, so the steps are the operator's after all.
+            console.log(await operatorSteps(project));
             break;
           }
         }

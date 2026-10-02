@@ -474,6 +474,16 @@ export const render = (f: Facts, plain = false): string => {
   return out.join("\n");
 };
 
+/**
+ * The Next step section alone, as the operator's. A drain turn's summary hands its Next step to
+ * the loop ("runs turn N next"), but the loop can still stop after it (drainStop): then these
+ * are the steps the operator never saw. Next step is the summary's last section.
+ */
+export const operatorSteps = async (project: Project) => {
+  const text = render(await gather(project), !!process.env.NO_COLOR);
+  return text.slice(text.lastIndexOf("## "));
+};
+
 /** The summary for the project's last recorded run. */
 export const closingReport = async (project: Project, turn?: { level: Level; turn: number }) => {
   if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";

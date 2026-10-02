@@ -16,7 +16,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { afterTurn } = await import("../src/autonomy.ts");
 const { settledUnlanded } = await import("../src/burndown.ts");
-const { closingReport, render } = await import("../src/report.ts");
+const { closingReport, operatorSteps, render } = await import("../src/report.ts");
 const { recordRun } = await import("../src/run.ts");
 const { strayChanges, strayNote } = await import("../src/resolution.ts");
 type Facts = Parameters<typeof render>[0];
@@ -222,4 +222,10 @@ test("closingReport marks a turn the loop continues from, and only that one", as
     assert.doesNotMatch(body(last, "## 👉 Next step"), /Autonomy level/);
     assert.match(body(last, "## 👉 Next step"), /Run again for the 1 issue\(s\) this run unblocked/);
   }
+  // A drain turn that said the loop runs again, and then the loop stopped (drainStop): the operator's steps, alone.
+  assert.match(body(await closingReport(project, { level: "drain", turn: 1 }), "## 👉 Next step"), /runs turn 2 of at most 20 next/);
+  const steps = await operatorSteps(project);
+  assert.match(steps, /^## (👉 )?Next step\n/);
+  assert.doesNotMatch(steps, /Autonomy level|Runnable now/);
+  assert.match(steps, /Run again for the 1 issue\(s\) this run unblocked/);
 });
