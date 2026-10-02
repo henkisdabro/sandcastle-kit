@@ -124,7 +124,7 @@ Then read the Upgrading notes in `CHANGELOG.md`, act on them, and run `sandcastl
 project to record that it is up to date. You do not have to remember which notes are new: after a
 pull, `sandcastle doctor` in a project lists the Upgrading notes that project has not had since its
 last update, and `sandcastle run` warns about them in one line, until `/sandcastle update` (or
-`sandcastle updated`) records the kit's commit. The record is per project and per machine
+`sandcastle updated`) records the notes as acted on. The record is per project and per machine
 (`.sandcastle/.run/kit-updated`, gitignored); a project with none is told to update once. Existing `.sandcastle/config.ts` files keep
 working - a new field is always optional, with a default - but a new default can change what a
 run does or spends, and a key the kit does not know (a typo an older version ignored) is now

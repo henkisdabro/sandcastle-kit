@@ -27,7 +27,7 @@ bug no gate would fail"), never as an incident from a named project.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one node process with the kit's own tsx loader (not the tsx binary, whose child is SIGKILLed on a slow answer to SIGTERM); `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone, as Herdr's tab bar calls it every 10 seconds |
-| `src/cli.ts` | Commands: help, setup, doctor, init, updated, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, report, status, clean, herdr; also the autonomy loop around `burndown()` |
+| `src/cli.ts` | Commands: help, `--version`, setup, doctor, init, updated, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, report, status, clean, herdr; also the autonomy loop around `burndown()` |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
@@ -39,7 +39,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
-| `src/upgrading.ts` | Whether a pulled kit has **Upgrading** notes a project has not had: the kit commit the project was last updated to (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`), the changelog's notes there against the kit's own, and the lines doctor and a run print |
+| `src/upgrading.ts` | Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release and the notes acted on; an older record's kit commit is read through git) against the kit's own notes, and the lines doctor and a run print. Also `kitVersion`, the version doctor and `--version` print: `package.json`'s release, and in a clone past its tag, the distance and commit |
 | `src/herdr.ts` | Herdr helpers and the run's view: the tab (adopted only from a terminal), per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status pane), agent-state reports, sidebar tokens, the workspace's run summary, the live-runs directory the tab bar reads |
 | `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, Ctrl-click logs, the Agents view |
 | `herdr/` | The Herdr plugin: `herdr-plugin.toml` (its `version` follows each release; a test checks) and `entry.sh`, through which every action, pane and hook runs |
@@ -137,6 +137,10 @@ directory, never in a real project.
   that step as a check that is safe to repeat, never as "since version X".
 
 ## GitHub releases
+
+A release bumps `version` in `package.json` and in `herdr/herdr-plugin.toml` with its changelog
+heading (tests check all three agree), then tags `vX.Y.Z`: the kit version counts a clone's
+distance from that tag.
 
 The release notes are a short, emoji-led summary, never the changelog pasted in. Copy the shape of
 the latest release (`gh release view`) and keep it:

@@ -50,6 +50,7 @@
 //                    update action's last step); doctor and run then stop listing them
 //   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
 //                    and list unmerged ones; --all deletes those too, without asking
+//   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
 //                    and keys to Herdr's config (shows them and asks first); --remove
@@ -78,7 +79,7 @@ import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
-import { markUpdated, upgradeLines } from "./upgrading.ts";
+import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
@@ -98,7 +99,7 @@ const COMMANDS = [...HELP.flatMap((l) => /^  ([a-z][a-z-]*)/.exec(l)?.[1] ?? [])
 // A refusal the operator acts on is a message, not a crash: no stack trace. Anything else is a
 // kit bug and keeps its stack.
 try {
-  if (!["help", "--help", "-h", ...COMMANDS].includes(command)) {
+  if (!["help", "--help", "-h", "--version", ...COMMANDS].includes(command)) {
     const near = nearest(command, COMMANDS.filter((c) => c !== "lean-apply"));
     throw new OperatorError(`Unknown command "${command}".${near ? ` Did you mean \`sandcastle ${near}\`?` : ""} Run \`sandcastle help\` for the list.`);
   }
@@ -118,6 +119,10 @@ try {
   if (command === "herdr") {
     await herdrCommand(args);
     process.exit(process.exitCode ?? 0);
+  }
+  if (command === "--version") {
+    console.log(`sandcastle-kit ${kitVersion()}`);
+    process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP.join("\n"));
@@ -454,8 +459,7 @@ try {
       break;
     }
     case "updated": {
-      const head = markUpdated(root);
-      console.log(head ? `Recorded: this project is up to date with the kit at ${head.slice(0, 12)}.` : `The kit at ${KIT} is not a git checkout, so there is nothing to record.`);
+      console.log(`Recorded: this project is up to date with sandcastle-kit ${markUpdated(root)}.`);
       break;
     }
     case "clean": {

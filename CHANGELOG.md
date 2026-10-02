@@ -9,6 +9,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **`sandcastle --version`.** Prints the kit version: the release, and in a clone that is past it
+  or has local changes, how far and at which commit (`0.4.2 +1 (1c4f46f)`). Doctor's first line
+  now names it too, so a report of a problem says which kit it came from.
+
+### Changed
+
+- **The update record keeps the Upgrading notes, not a kit commit.** `sandcastle updated` now
+  records the release and every note acted on, so doctor and a run can tell what is new in a
+  shallow clone, a kit outside git or another clone of the kit - where a commit could not be read
+  and the project was told it had no record, or heard nothing. An older record keeps working while
+  git can read its commit, and the next `sandcastle updated` rewrites it.
+- **`package.json` names Node 22 or newer** (`engines`), so `pnpm install` warns on an older Node
+  before doctor does.
+
 ## [0.4.2] - 2026-10-02
 
 ### Added
