@@ -56,6 +56,13 @@ export const isTestPath = (path: string): boolean => {
   );
 };
 
+/**
+ * Whether a path is a project's agent-instructions file: `AGENTS.md` or `CLAUDE.md`, at the root or
+ * in any directory. A ticket that adds a module must add its row to the layout table there, so
+ * landing does not count a change to one as an overrun when the branch also adds a file.
+ */
+export const isAgentDoc = (path: string): boolean => /^(?:AGENTS|CLAUDE)\.md$/.test(normalise(path).split("/").pop() ?? "");
+
 const isGlob = (p: string) => /[*?]/.test(p);
 
 // `**` crosses directories, `*` and `?` stay inside one path segment.
