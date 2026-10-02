@@ -18,9 +18,17 @@ import { OperatorError } from "./errors.ts";
 // finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
 // only while a sandbox is live: while it listens, leave the teardown to it (a SIGHUP
 // is handed over as a SIGTERM); otherwise exit, so the exit handlers fire.
+// A detached run (`--detach`) has no terminal to hang up, and a SIGHUP it still gets (the
+// shell that started it closing, on a system that sends one to the session) must not end it:
+// it stops on `sandcastle stop`, which is a SIGINT.
 export const exitOnSignal = () => {
   const mapped = { SIGHUP: "SIGTERM", SIGINT: "SIGINT", SIGTERM: "SIGTERM" } as const;
+  const detached = process.env.SANDCASTLE_DETACHED === "1";
   for (const sig of Object.keys(mapped) as (keyof typeof mapped)[]) {
+    if (detached && sig === "SIGHUP") {
+      process.on(sig, () => {});
+      continue;
+    }
     process.on(sig, () => {
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
@@ -64,13 +72,15 @@ export const namedTicketsFromEnv = (env: NodeJS.ProcessEnv = process.env): { lis
   return list ? { list } : {};
 };
 
-const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N]";
+const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N] [--detach]";
 
-export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean; concurrency?: number } => {
-  const out: { issues?: string[]; dry: boolean; concurrency?: number } = { dry: false };
+// `detach` is only present when asked for, so the common result keeps its shape.
+export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean; concurrency?: number; detach?: true } => {
+  const out: { issues?: string[]; dry: boolean; concurrency?: number; detach?: true } = { dry: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--dry") out.dry = true;
+    else if (arg === "--detach") out.detach = true;
     else if (arg === "--concurrency") {
       const n = args[++i];
       if (n === undefined || !/^[1-9]\d*$/.test(n)) throw new OperatorError(`--concurrency needs a whole number of 1 or more. ${RUN_USAGE}`);

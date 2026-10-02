@@ -14,7 +14,7 @@ Requested action: `$action`
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
 | `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as tickets that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
 | `queue` | Triages every open ticket into the agent queue, with the user | Every open ticket is labelled, parked, or left with a stated reason |
-| `run` | Starts a burndown in a tab of its own, and closes it with a summary | The run is live in its own tab and its status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
+| `run` | Starts a burndown detached, waits for it with `sandcastle wait`, and closes it with a summary | The run is live and its printed status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
 | `update` | Pulls the latest kit and brings the current project up to date with it | The kit is current, the project's image and hook check are clean, and every change that affects it is reported or applied |
 
@@ -231,38 +231,37 @@ comments, and the gates can prove it.
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run
    (`DRY_RUN=1`) merges and closes nothing, and its agents are told to write nothing to the tracker.
-2. **Start it in a tab of its own, never beside yourself** - it takes hours. In a terminal
-   multiplexer you can drive (for example Herdr: `test "${HERDR_ENV:-}" = 1`):
-   1. Create a tab without taking focus, at the repo root, in your own workspace: `herdr tab
-      create --workspace "$HERDR_WORKSPACE_ID" --label "sandcastle <project>" --cwd <root>
-      --no-focus`. Without `--workspace` Herdr uses the focused one, and the user may have moved
-      to another workspace by then. Its root pane is the run pane: name it `herdr pane rename
-      <pane> "sandcastle run <project>"`.
-   2. Run `<env vars> sandcastle run` in that pane (`herdr pane run <pane> "..."`). Alone in its
-      tab, the run adopts it: the status view opens beside it at once - before the image check,
-      preflight and base gates - and one pane per sandbox follows, each reported to the agent
-      sidebar (blocked means a human has to act). Never open a status view of your own: the kit
-      opens exactly one.
-   3. **Confirm the view exists** within a minute: the run pane prints `Status view: pane <id>`
-      (`herdr pane wait-output <pane> --match "Status view:" --timeout 60000`), and `herdr tab get
-      <tab>` shows more than one pane. If the line is missing, or the run printed "Could not open
-      the status view", say so plainly to the user - do not carry on as if they can watch it.
-   4. Tell the user the tab, the run pane and the status pane ids.
+2. **Start it detached, never in a pane or tab of your own** - it takes hours, and a command
+   run as your own background task has a time cap, dies with your session and has no terminal.
+   From the project root run `<env vars> sandcastle run --detach` (the same arguments as
+   `sandcastle run`). It checks what a run checks (clean tree, no other run, autonomy level),
+   starts the run as a process of its own that outlives this session, and returns once the run is
+   going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
+   `drain`, or run it attached (below). Inside Herdr the run opens a tab of its own holding only
+   the status view - never open a status view of your own, and expect no pane per sandbox (the
+   sidebar carries the run). It prints:
 
-   Otherwise give the user the command to run in a second terminal, plus `sandcastle status` for
-   a third.
-3. **Arrange to hear when it ends.** A command handed to another pane is not your own process, so
-   your harness never tells you it finished. Every run's last line is `sandcastle run ended (exit
-   N)` - after the report, after a drained queue, after a crash or Ctrl-C. Right after starting
-   it, start a background command your harness reports back on when it exits (`run_in_background`
-   in Claude Code) that waits for that line in the run pane, for example `herdr pane wait-output
-   <pane> --match "sandcastle run ended" --timeout <ms>`. Use a fresh pane per run - the wait also
-   matches output already in the pane. Runs take hours; a timeout exits 1 with
-   `{"error":{"code":"timeout"...}}`, which your harness reports as a failed task although the run
-   is fine. That is not a result: check `.sandcastle/logs/run.json` (a `finishedAt` means it
-   ended; no `finishedAt` and a live `pid` means it is still going) and, if it is still going,
-   start the wait again. When the line arrives, read the report (`herdr pane read <pane> --source
-   recent-unwrapped`) and tell the user.
+   ```
+   Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
+   ```
+
+   **Confirm that line.** Outside Herdr it says `Status view: run `sandcastle status``. If the
+   command refuses, or prints `The run ended at once`, or no status view where Herdr is in use,
+   say so plainly to the user - do not carry on as if they can watch it. Tell the user the pid,
+   and the tab and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output;
+   the status view's bottom shows its last lines while the run is live.
+
+   For a user who wants the run in their own terminal, give them the attached command to run
+   there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
+   person's terminal alone in a Herdr tab it adopts that tab.
+3. **Arrange to hear when it ends.** The detached run is not your own process, so your harness
+   never tells you it finished. Right after starting it, run `sandcastle wait` as a background
+   command your harness reports back on when it exits (`run_in_background` in Claude Code): it
+   blocks while the run is live, then prints the closing summary and exits with the run's exit
+   code. A harness caps a background command (Claude Code: 2 hours), so give it a timeout under
+   the cap, `sandcastle wait 6600`: at the timeout it exits 124 with the run untouched, which
+   is no result - start the same `sandcastle wait` again. `sandcastle stop` stops the run as
+   Ctrl-C does; use it only when the user asks, and `sandcastle wait` then shows how it ended.
 4. **Close the run - required, even mid-way through another request.** When the run ends, read
    run.md in this skill's directory (next to this file) and follow it before writing your closing
    message.

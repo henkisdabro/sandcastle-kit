@@ -367,5 +367,39 @@ rm -f "$L/run.json"; render ""
 has '\(no runs yet\)'
 rm -rf "$L"; mv "$TMP/logs-kept" "$L"
 
+# ---------------------------------------------------------------------------
+SCENARIO="log strip, detached run"
+# A run started detached writes its output to logs/run-output.log. While the run is live the
+# frame closes with the last three non-empty lines of it, under a light rule, each cut to the
+# pane's width; with no log, or once the run has ended, the frame is the one it always was.
+cp "$L/run.json" "$TMP/run.json.kept" 2>/dev/null || true
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "issues": [],
+  "tickets": { "301": { "state": "implement", "since": $now, "title": "t" } } }
+EOF
+rm -f "$L/run-output.log"
+render ""; cp "$TMP/frame" "$TMP/frame-plain"
+hasnt 'run output'
+long=$(printf 'x%.0s' $(seq 1 $((COLS + 40))))
+printf 'first line\nsecond line\n\n   \nthird line\r\n\033[32mfourth line\033[0m\n%s\n' "$long" >"$L/run-output.log"
+render ""
+has '^── run output ─+$'
+hasnt 'first line'
+hasnt 'second line'
+has '^third line$'
+has '^fourth line$'
+has '^x+…$'
+# The strip is the frame's last four rows, after the table's bottom border.
+[ "$(wc -l <"$TMP/frame")" = "$(( $(wc -l <"$TMP/frame-plain") + 4 ))" ] || { echo "FAIL [$SCENARIO] the strip is not four rows"; fails=$((fails+1)); }
+[ "$(grep -n '^── run output' "$TMP/frame" | cut -d: -f1)" = "$(( $(wc -l <"$TMP/frame-plain") + 1 ))" ] || { echo "FAIL [$SCENARIO] the strip does not follow the plain frame"; fails=$((fails+1)); }
+head -n "$(wc -l <"$TMP/frame-plain")" "$TMP/frame" | diff -q - "$TMP/frame-plain" >/dev/null || { echo "FAIL [$SCENARIO] the frame above the strip changed"; fails=$((fails+1)); }
+# A finished run's output is in its report, not on the view.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": 1, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0, "models": "m", "issues": [] }
+EOF
+render ""
+hasnt 'run output'
+rm -f "$L/run-output.log" "$L/run.json"; if [ -f "$TMP/run.json.kept" ]; then mv "$TMP/run.json.kept" "$L/run.json"; fi
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"

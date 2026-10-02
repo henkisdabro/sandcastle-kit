@@ -57,7 +57,7 @@ export const limit = (pool: PoolName): number => {
   return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
 };
 
-const alive = (pid: number) => {
+export const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
