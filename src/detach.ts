@@ -30,6 +30,16 @@ export const livePid = (root: string): number | undefined => {
   return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : undefined;
 };
 
+/** The pid run.json names while the run has written no `exitCode`: a run that has not finished, whether or not it still holds the lock. */
+const unfinishedPid = (root: string): number | undefined => {
+  try {
+    const { pid, exitCode } = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
+    return Number.isInteger(pid) && pid > 0 && !Number.isInteger(exitCode) && alive(pid) ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /** The exit code the run wrote to run.json at its end; 0 when there is none (no run, or one killed outright). */
 export const recordedExitCode = (root: string): number => {
   try {
@@ -119,16 +129,18 @@ export const startDetached = async (
 };
 
 /**
- * Blocks while the process holding the run lock is alive. The lock goes before the process does
- * (its exit handlers run in turn, and the record's exit code is written after the lock is
- * released), so the pid last seen is waited for too: reading the record any sooner gave the
- * previous exit code. `seconds` undefined waits as long as it takes.
+ * Blocks while the run is alive: the process holding the run lock, or the one run.json names while
+ * it has no exit code. The lock goes before the process does (its exit handlers run in turn, and
+ * the record's exit code is written after the lock is released), so a `wait` that starts inside
+ * that gap finds no lock but still sees a live pid with an unfinished record; and the pid last
+ * seen is waited for too: reading the record any sooner gave the previous exit code. `seconds`
+ * undefined waits as long as it takes.
  */
 export const waitForRun = async (root: string, seconds?: number, pollMs = 500): Promise<{ ended: boolean; pid?: number }> => {
   const deadline = seconds === undefined ? Infinity : Date.now() + seconds * 1000;
   let seen: number | undefined;
   for (;;) {
-    const now = livePid(root) ?? (seen !== undefined && alive(seen) ? seen : undefined);
+    const now = livePid(root) ?? unfinishedPid(root) ?? (seen !== undefined && alive(seen) ? seen : undefined);
     if (now === undefined) return { ended: true };
     seen = now;
     if (Date.now() >= deadline) return { ended: false, pid: now };
