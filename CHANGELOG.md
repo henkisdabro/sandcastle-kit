@@ -9,6 +9,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **The status view draws light rules at every seam.** The rules above the headings and above the
+  legend are no longer double lines, and a column bar that lands within 4 columns of a bar in the
+  band above snaps onto it, so the two meet in one joint. The website's demo matches.
+
+### Fixed
+
+- **The Claude Code mod follows a run its session started in another directory**, such as a
+  second clone or a monorepo package: the band, the needs-you notice and the end prompt work by
+  the session id each run records. Every run now registers in the machine-wide live-runs
+  directory, with or without Herdr.
+- **A ticket that conflicts or goes red at landing after a usage or plan limit stopped the run is
+  not requeued.** It ends conflicted or red, and the next run picks it up, where it used to be
+  told it would "run again in this run".
+- **A refused host git write stops new attempts at once**, not only through the landing worker.
+- **A sandbox's Herdr pane closes once the run has stopped**, instead of staying open as if busy.
+- **A `.git` change found while a landing waited for its own check no longer lets that ticket
+  land.** The landing worker checks for a safety stop again once its check returns.
+
 ## [0.4.2] - 2026-10-02
 
 ### Added
