@@ -49,7 +49,7 @@ import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
-import { conflictLine, createHostGit, createLanding, type LandContext, pipelineWorkers, slotTurn, trackerMade } from "./landing.ts";
+import { againLine, conflictLine, createFlow, createHostGit, createLanding, type Landed, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
 import { createQueue } from "./schedule.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -521,6 +521,9 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
   };
 
+  // The second attempt's line for a ticket landing sent back (see createFlow); the setup of its pipeline carries it.
+  const requeuedAs = new Map<string, string>();
+
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
@@ -537,6 +540,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     releaseBranchWorktree(branch);
     const sandbox = await timed(issue.id, "setup", () =>
       createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
+      requeuedAs.get(issue.id),
     );
 
     let failed: unknown;
@@ -952,7 +956,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
       failed = error;
       throw error;
     } finally {
-      took.set(issue.id, Date.now() - started);
+      // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
+      took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
       unlockWorktree(sandbox.worktreePath);
       // Sandcastle keeps a worktree with uncommitted files rather than lose
       // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
@@ -1021,48 +1026,82 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // How many of the greens have been dealt with, for the run line's "landing 6/25" once the pipelines are done.
   let pushed = 0;
   let dealt = 0;
-  let pipelinesDone = false;
+  // A requeued ticket can come back to the pipelines from landing, so they are done once none runs and none waits.
   const landingStage = () => {
-    if (pipelinesDone && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
+    if (flow.working === 0 && queue.size === 0 && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
+  };
+  // What the closing report is built from: where a landing's last word puts the ticket.
+  const account = (o: Waiting, landed: Landed) => {
+    switch (landed.kind) {
+      case "merged":
+      case "close-failed":
+        merged.push(o.issue);
+        if (landed.regenerated) regenerated.set(o.issue, landed.regenerated);
+        if (landed.kind === "close-failed") closeFailed.push(o.issue);
+        break;
+      case "conflict":
+        conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
+        break;
+      case "red":
+        redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
+        break;
+      case "held":
+        heldBack.push({ issue: o.issue, paths: landed.paths });
+        break;
+      case "withdrawn":
+        withdrawn.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "taken-back":
+        takenBack.push(o.issue);
+        break;
+      case "closed-earlier":
+        closedEarlier.push(o.issue);
+        break;
+      case "skipped":
+        skipped.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "not-landed":
+        failedToLand.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "dry-run":
+        break;
+    }
+  };
+  // A ticket landing sent back, until its second pipeline has started: if that never starts (the run
+  // stops), the landing it had stands as its outcome.
+  const sentBack = new Map<string, { o: Waiting; landed: Landed; was: TicketRecord | undefined }>();
+  const keepFirst = (id: string) => {
+    const back = sentBack.get(id);
+    if (!back) return;
+    sentBack.delete(id);
+    account(back.o, back.landed);
+    bookkeep(id, () => run.ticket(id, { ...(back.was?.state ? { state: back.was.state } : {}), note: back.was?.note ?? null }));
   };
   const landing = createLanding(ctx, {
     settled: (o, landed) => {
       dealt++;
       landingStage();
-      switch (landed.kind) {
-        case "merged":
-        case "close-failed":
-          merged.push(o.issue);
-          if (landed.regenerated) regenerated.set(o.issue, landed.regenerated);
-          if (landed.kind === "close-failed") closeFailed.push(o.issue);
-          break;
-        case "conflict":
-          conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
-          break;
-        case "red":
-          redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
-          break;
-        case "held":
-          heldBack.push({ issue: o.issue, paths: landed.paths });
-          break;
-        case "withdrawn":
-          withdrawn.push({ issue: o.issue, reason: landed.reason });
-          break;
-        case "taken-back":
-          takenBack.push(o.issue);
-          break;
-        case "closed-earlier":
-          closedEarlier.push(o.issue);
-          break;
-        case "skipped":
-          skipped.push({ issue: o.issue, reason: landed.reason });
-          break;
-        case "not-landed":
-          failedToLand.push({ issue: o.issue, reason: landed.reason });
-          break;
-        case "dry-run":
-          break;
+      // A conflict or a red merge sends the ticket back to the pipelines once, in this run.
+      const again = flow.retry(byId.get(o.issue)!, landed, landing.stop !== undefined || host.failed !== undefined);
+      if (again !== undefined) {
+        requeuedAs.set(o.issue, again);
+        sentBack.set(o.issue, { o, landed, was: run.tickets()[o.issue] });
+        bookkeep(o.issue, () => {
+          console.log(`${ref(o.issue)}: ${again}; its pipeline runs again in this run.`);
+          run.ticket(o.issue, { state: "queued", note: again, requeued: again });
+        });
+        return;
       }
+      const earlier = flow.earlier(o.issue);
+      if (earlier && (landed.kind === "conflict" || landed.kind === "red")) {
+        // Held for the next run, with the tickets of both attempts named.
+        const named = [...new Set([...earlier.with, ...landed.with])];
+        const line = againLine(landed.kind, named);
+        againNote.set(o.issue, line);
+        bookkeep(o.issue, () => run.ticket(o.issue, { note: landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line }));
+      }
+      account(o, landed);
+      flow.finish();
     },
     // Green before the base moved: finished, and landing on a later run like
     // the ones whose own check failed - not "ready", which says this run lands it.
@@ -1070,6 +1109,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       tampered ??= String(why);
       dealt++;
       landingStage();
+      flow.finish();
       bookkeep(o.issue, () => {
         run.ticket(o.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
         recordOutcomes(project, runId, { [o.issue]: "stopped: the run stopped before landing" });
@@ -1082,9 +1122,13 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const results: PromiseSettledResult<Outcome>[] = [];
   const crashed = new Map<string, string>();
   // Every ticket up front, closed at once: the same fixed set of tickets a sliding pool drained before.
+  // Not closed up front: a ticket that conflicts at landing comes back to it (createFlow closes it).
   const queue = createQueue<Issue>();
   for (const i of issues) queue.push(i);
-  queue.close();
+  const byId = new Map(issues.map((i) => [i.id, i]));
+  const flow = createFlow(issues.length, queue, landing);
+  // What a second conflict or red was held as, for the outcome the status view reads.
+  const againNote = new Map<string, string>();
   const begun = new Set<string>();
   const calledOff = new Set<string>();
   // The ticket's state once its pipeline ends. A green branch that changes
@@ -1111,13 +1155,15 @@ export const burndown = async (project: Project): Promise<boolean> => {
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
-  const pipelines = queue.run(workers, async (issue) => {
+  const pipelines = queue.run(workers, flow.work(async (issue) => {
+    // Whether the ticket went on to landing, which says its last word; otherwise this pipeline did.
+    let handed = false;
     // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered || landing.stop) return;
+    if (limitHit !== undefined || usageHit || tampered || landing.stop) return keepFirst(issue.id);
     const stop = await usageStop(env);
     if (stop) {
       usageHit ??= stop;
-      return;
+      return keepFirst(issue.id);
     }
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
     const called = (() => {
@@ -1133,7 +1179,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
       return;
     }
     begun.add(issue.id);
-    results.push(
+    sentBack.delete(issue.id);
+    const result =
       await slotTurn(slotWanted).then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue))).then(
         (value) => {
           bookkeep(issue.id, () => {
@@ -1158,6 +1205,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
           // To the landing worker as it ends, not when the slowest pipeline does.
           if (value.status === "green" || value.status === "merged-earlier") {
             pushed++;
+            handed = true;
             landing.push(value);
           }
           return { status: "fulfilled", value } as const;
@@ -1182,17 +1230,22 @@ export const burndown = async (project: Project): Promise<boolean> => {
           });
           return { status: "rejected", reason } as const;
         },
-      ),
-    );
-  });
-  // Landing ends when the pipelines are done and its queue is empty.
+      );
+    // A requeued ticket's second pipeline replaces its first in the per-issue lines.
+    const earlier = results.findIndex((r) => r.status === "fulfilled" && r.value.issue === issue.id);
+    if (earlier >= 0) results.splice(earlier, 1);
+    results.push(result);
+    return handed;
+  }));
+  // Landing ends when every ticket has had its last word (createFlow); a pipeline that throws ends both queues.
   const pipelinesEnded = pipelines.finally(() => {
-    pipelinesDone = true;
-    landingStage();
+    queue.close();
     landing.close();
+    landingStage();
   });
-  // Settled, not all: a landing that throws must not end the run while pipelines still work.
-  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run()]);
+  // Settled, not all: a landing that throws must not end the run while pipelines still work. A landing
+  // that ends early closes the pipelines too: nothing is left to send a ticket back to them.
+  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run().finally(() => queue.close())]);
   clearInterval(heartbeat);
   const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
   for (const i of issues) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
@@ -1286,8 +1339,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
   }
   for (const n of merged) outcome.set(n, "merged");
   for (const n of closeFailed) outcome.set(n, "merged (ticket not closed)");
-  for (const c of conflicted) outcome.set(c.issue, `merge conflict: ${conflictLine(c)}`);
-  for (const r of redMerged) outcome.set(r.issue, `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
+  for (const c of conflicted) outcome.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
+  for (const r of redMerged) outcome.set(r.issue, `red when merged${againNote.has(r.issue) ? `: ${againNote.get(r.issue)}` : r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
   for (const f of failedToLand) outcome.set(f.issue, "failed to land");
   for (const k of skipped) outcome.set(k.issue, `not merged: ${k.reason}`);
   for (const w of withdrawn) outcome.set(w.issue, `withdrawn: ${w.reason}`);
