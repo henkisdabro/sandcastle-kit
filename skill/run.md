@@ -21,13 +21,13 @@ This continues the run steps 1-3 in SKILL.md.
       If it reads `ended early` or `ended without a clean exit` (Ctrl-C, a crash, a killed
       process), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
-   2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the issues are
+   2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the tickets are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, and anything that needs a decision - and each
       ticket listed `merged - check by hand`: what the reviewer said to check, and offer to check it
-      if you can (open the page, rebuild the file) - the gates did not - and each follow-up issue an
+      if you can (open the page, rebuild the file) - the gates did not - and each follow-up ticket an
       agent filed (`needs-triage`): one line on what it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
@@ -50,7 +50,7 @@ This continues the run steps 1-3 in SKILL.md.
       branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
 
    End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
-   requeue a failed issue with a note (`sandcastle requeue <n> --note "..."`), start a run for the unblocked issues, `sandcastle clean`
+   requeue a failed ticket with a note (`sandcastle requeue <n> --note "..."`), start a run for the unblocked tickets, `sandcastle clean`
    once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
 
    How landing reads: tickets land **while others still run**, one at a time on the landing worker,
@@ -75,7 +75,7 @@ This continues the run steps 1-3 in SKILL.md.
    commits it lists and ask whether they are theirs before offering a re-run; for a changed
    `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
    no commit usually means the repair agent judged the failure outside the branch - read the repair
-   log and its issue comment, then check that gate with `sandcastle gates` before blaming the
+   log and its ticket comment, then check that gate with `sandcastle gates` before blaming the
    branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the cause
    is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`). A dry
    run ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote to the

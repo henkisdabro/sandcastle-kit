@@ -10,7 +10,7 @@ Two kinds of task happen in this repository. Decide which one you are doing firs
 ## This repository is public
 
 It is published on GitHub and used daily on the maintainer's machine, so everything committed
-here is **generic**: no names, emails, tokens, private repo or client names, private issue
+here is **generic**: no names, emails, tokens, private repo or client names, private ticket
 numbers or home-directory paths. Write a lesson as a pattern ("a review caught a money-handling
 bug no gate would fail"), never as an incident from a named project.
 

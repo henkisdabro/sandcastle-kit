@@ -87,7 +87,7 @@ Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
   <https://github.com/settings/personal-access-tokens/new>: repository access limited to the
   repos you will run, permissions **Issues: Read and write** and **Metadata: Read**.
 
-- `LINEAR_API_KEY` - only if issues wait on Linear issues (README, Blockers); read-only is enough.
+- `LINEAR_API_KEY` - only if tickets wait on Linear issues (README, Blockers); read-only is enough.
   It stays on the host.
 
 Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake and an

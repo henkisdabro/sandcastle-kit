@@ -48,10 +48,21 @@ export const rewordLibraryLines = () => {
 };
 
 // ---------------------------------------------------------------------------
-// `sandcastle run` arguments - aliases for the ISSUES, DRY_RUN and CONCURRENCY
+// `sandcastle run` arguments - aliases for the TICKETS, DRY_RUN and CONCURRENCY
 // variables, which stay the one mechanism. Anything else is refused: a
 // silently ignored `run 12 14` burned down the whole queue.
 // ---------------------------------------------------------------------------
+
+/**
+ * The tickets the environment names: `TICKETS`, or `ISSUES` as the older name it replaced. When
+ * both are set `TICKETS` wins, and `note` says so - the run prints it once, so a stale `ISSUES`
+ * in a shell profile is not mistaken for the list in use.
+ */
+export const namedTicketsFromEnv = (env: NodeJS.ProcessEnv = process.env): { list?: string; note?: string } => {
+  if (env.TICKETS && env.ISSUES) return { list: env.TICKETS, note: "TICKETS and ISSUES are both set; using TICKETS (ISSUES is the older name)." };
+  const list = env.TICKETS || env.ISSUES;
+  return list ? { list } : {};
+};
 
 const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N]";
 

@@ -1,6 +1,6 @@
 # sandcastle audit - find work and file it
 
-This continues SKILL.md: run its "Before every action" first. The audit files issues by the queue
+This continues SKILL.md: run its "Before every action" first. The audit files tickets by the queue
 action's categories and its closed-spec test, so keep that section of SKILL.md to hand.
 
 1. **Costs.** The lenses run as subagents in the user's own session on the host - no sandbox, no
@@ -12,9 +12,9 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
      gates do not cover), performance, docs and developer experience, and accessibility and SEO
      only for a web front end.
    - Which areas (directories) are in or out.
-   - A cap per lens (default 10 findings) and on issues filed in total (default 25).
+   - A cap per lens (default 10 findings) and on tickets filed in total (default 25).
    - Which tracker: `sandcastle queue` names it.
-3. **Read what is there** before any subagent starts: open issues and those closed recently
+3. **Read what is there** before any subagent starts: open tickets and those closed recently
    (GitHub: `gh issue list --state all --limit 500 --json number,title,state,labels`; files: every
    ticket file), the repo's label vocabulary (`gh label list`, `docs/agents/triage-labels.md` or
    similar), decision records, `CLAUDE.md` / `AGENTS.md`, and the gates in
@@ -22,7 +22,7 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
 4. **Fan out**: one read-only subagent per lens, in parallel (split a lens by area for a large
    repo; without subagents, run the lenses one after another). Write the lens and areas into the
    brief before sending; never send a brief with a placeholder left in it. Give each subagent the
-   issue list from step 3 as well.
+   ticket list from step 3 as well.
 
    ```text
    Brief for each subagent
@@ -35,7 +35,7 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
    Areas: <the directories to cover>
    Report at most <the cap> findings, most important first. Each must be small enough for one
    agent run and provable by the project's gates. Evidence is file:line. No style nits, no
-   speculative rewrites, nothing already in the issue list you were given.
+   speculative rewrites, nothing already in the ticket list you were given.
    Per finding: `title` (imperative), `lens`, `area`, `severity`, `evidence` (file:line),
    `problem`, `fix`, `doneWhen` (a check the gates can run), `touches` (paths), `dependsOn`
    (another finding's title, optional), `confidence` (`high` or `medium`).
@@ -46,17 +46,17 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
    The files sit under the gitignored `triage/` directory that `sandcastle init` already ignores,
    so no project change is needed, and the results survive the chat being compacted.
 5. **Merge and de-duplicate** from those files. Findings with the same root cause or the same
-   file:line become one. A finding that matches an existing issue is dropped, noting the issue.
+   file:line become one. A finding that matches an existing ticket is dropped, noting the ticket.
    Two findings that contradict each other, or one that contradicts a decision record, become a
    decision question: filing both is how contradictory tickets reach a run.
 6. **Classify each** with the queue action's seven categories: ready, needs a decision,
-   human-only, blocked by another issue, already fixed or false, epic or too big, parked. Before
+   human-only, blocked by another ticket, already fixed or false, epic or too big, parked. Before
    calling one ready, read its cited lines yourself: a subagent's claim is not evidence until
    checked. Split one that is too big into children that are each ready.
 7. **Ask in batched rounds** as the queue action does: up to four questions a round, each
    standalone, the recommended option first. Ask the decisions, and keep-or-drop for
    `medium`-confidence findings.
-8. **Cluster findings that touch the same files**, before the filing list. One issue per finding
+8. **Cluster findings that touch the same files**, before the filing list. One ticket per finding
    born overlapping makes a queue whose tickets all want the same few files.
    - Group the findings by shared `touches` paths (a directory covers everything under it, a glob
      its matches).
@@ -78,7 +78,7 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
     it.
     - GitHub: `gh issue create --title ... --body-file <temp file>`. The body has `## Problem`,
       `## Evidence`, `## Fix` and `## Done when`, a `Touches:` line, and a blocker line in plain
-      text, written as the queue action's "Blocked by another issue" row shows - never inside
+      text, written as the queue action's "Blocked by another ticket" row shows - never inside
       code, which a run does not read as a blocker.
     - The `Touches:` line is one line in plain text, outside code (the kit ignores fences and
       backticks): `Touches: <path or glob>, <path or glob>, ...`, with repo-relative paths and

@@ -1,5 +1,5 @@
 // The skill's portable frontmatter limits, and the queue step's triage brief: it must be complete
-// as written, read-only, and carry an `Issues:` line the assistant fills in before sending (a
+// as written, read-only, and carry a `Tickets:` line the assistant fills in before sending (a
 // literal placeholder prompt once sent a whole fan-out to be killed and rerun).
 //
 //   pnpm exec tsx --test test/skill.test.ts
@@ -34,8 +34,8 @@ test("the queue section holds a triage brief in a fenced block", () => {
   assert.ok(lines >= 12 && lines <= 18, `brief is ${lines} lines`);
 });
 
-test("the brief has an Issues: line", () => {
-  assert.match(brief, /^\s*Issues: /m);
+test("the brief has a Tickets: line", () => {
+  assert.match(brief, /^\s*Tickets: /m);
 });
 
 test("the brief names each of the seven categories", () => {
@@ -45,7 +45,7 @@ test("the brief names each of the seven categories", () => {
     "ready",
     "needs a decision",
     "human-only",
-    "blocked by another issue",
+    "blocked by another ticket",
     "already fixed or false",
     "epic or too big",
     "parked",
@@ -60,8 +60,8 @@ test("the brief is read-only and forbids tracker writes", () => {
   assert.match(brief, /sandcastle run/);
 });
 
-test("the assistant is told to write the issue numbers in before sending", () => {
+test("the assistant is told to write the ticket numbers in before sending", () => {
   const flat = queue.replace(/\s+/g, " ");
-  assert.match(flat, /Write the batch's issue numbers into the `Issues:` line before sending/);
+  assert.match(flat, /Write the batch's ticket numbers into the `Tickets:` line before sending/);
   assert.match(flat, /never send a brief with a placeholder left in it/);
 });

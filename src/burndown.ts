@@ -18,7 +18,7 @@
 //   Phase 4  Verify  - the gates once more on the merged base branch, because
 //                      two branches green on their own can be red together.
 //
-// Environment: ISSUES=1,2 (instead of the queue label), CONCURRENCY, DRY_RUN=1 (`sandcastle run 1 2
+// Environment: TICKETS=1,2 (ISSUES is the older name; instead of the queue label), CONCURRENCY, DRY_RUN=1 (`sandcastle run 1 2
 // --dry --concurrency N` set the same three),
 // SANDCASTLE_TEST_RED_GATE=1, SKIP_BASE_GATES=1, plus the model variables in agents.ts and the
 // machine-wide limits in pool.ts.
@@ -37,7 +37,7 @@ import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
-  recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -166,7 +166,7 @@ export const ungatedOf = (text: string): string | undefined => {
   return said && said !== "..." ? said : undefined;
 };
 
-/** The tickets `ISSUES` (or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
+/** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
   list.split(",").map((n) => {
     const t = tracker.get(n.trim());
@@ -179,7 +179,7 @@ export const wholeQueue = (tracker: Tracker, named: Issue[]): Issue[] => [...nam
 
 /**
  * Every queued ticket with an open blocker, whether or not this turn runs it. A later autonomy
- * turn names its tickets in `ISSUES`, and a `waiting` built from those alone loses every
+ * turn names its tickets in `TICKETS`, and a `waiting` built from those alone loses every
  * dependant outside the list - so the closing summary never says they were freed.
  */
 export const waitingTickets = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<{ issue: string; on: string[] }[]> =>
@@ -220,7 +220,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
-  // counts each issue's first gate run as red, with an output that says so.
+  // counts each ticket's first gate run as red, with an output that says so.
   // Off without repair passes: a forced red nobody repairs would only hold
   // good work back.
   const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && (project.repair.attempts ?? 1) > 0;
@@ -245,7 +245,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // installed its dependencies.
   const tracker = makeTracker(project);
   const ref = tracker.ref;
-  const queued: Issue[] = process.env.ISSUES ? namedTickets(tracker, process.env.ISSUES) : tracker.queued();
+  const named = namedTicketsFromEnv();
+  if (named.note) console.log(named.note);
+  const queued: Issue[] = named.list ? namedTickets(tracker, named.list) : tracker.queued();
   if (queued.length === 0) {
     console.log(`No ${project.label} tickets. Queue drained.`);
     return false;
@@ -258,7 +260,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // and, if the project configures them, Linear issues and task files
   // (blockers.ts); one that cannot be read counts as open.
   // `waiting` covers the whole queue, not only the named tickets, so a later turn still records the dependants.
-  const whole = process.env.ISSUES ? wholeQueue(tracker, queued) : queued;
+  const whole = named.list ? wholeQueue(tracker, queued) : queued;
   const wholeOpen = await openOnQueue(project, tracker, whole);
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
@@ -292,7 +294,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     }
   }
   if (issues.length === 0) {
-    console.log("Every queued issue is waiting on another. Nothing to start.");
+    console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
   }
 
@@ -324,7 +326,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
   console.log(
-    `${candidates.length} issue(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, ${capped ? workers : CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
+    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, ${capped ? workers : CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
       (capped ? ` (CONCURRENCY=${CONCURRENCY}, but one of the ${limit("sandboxes")} machine-wide sandbox slots is kept for landing)` : ""),
   );
   for (const i of candidates) {
@@ -342,8 +344,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   console.log(`Keep awake: ${keepAwake()}`);
   if (TEST_RED_GATE) {
     console.log(
-      "SANDCASTLE_TEST_RED_GATE=1: each issue's first gate run counts as red, to test the repair pass. " +
-        "Each issue pays for a repair agent and another full gate run - a test switch, not for real runs.",
+      "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
+        "Each ticket pays for a repair agent and another full gate run - a test switch, not for real runs.",
     );
   } else if (process.env.SANDCASTLE_TEST_RED_GATE === "1") console.log("SANDCASTLE_TEST_RED_GATE=1 ignored: repair.attempts is 0.");
 
@@ -539,7 +541,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // The ticket can change during a long run: closed by hand, taken out of the
   // queue (its label, or its status in a ticket file), or sent to a human.
   // Asked before a pipeline starts, so nobody's allowance goes on work already
-  // called off, and again before landing, so none of it merges. An `ISSUES=`
+  // called off, and again before landing, so none of it merges. A `TICKETS=`
   // ticket that never carried the label started with no status, so its status
   // is not checked.
   const withdrawal = (id: string): { held: boolean; reason: string } | undefined => {
@@ -1398,7 +1400,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // The detail, one line per issue, for an engineer. The closing summary
   // after it says what to do next (report.ts). The word is each ticket's final
   // state: "shipped" once sat on every branch, held ones included.
-  console.log("\n--- per issue ---");
+  console.log("\n--- per ticket ---");
   const final = run.tickets();
   for (const r of results) {
     if (r.status === "rejected") {
@@ -1416,7 +1418,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
   if (limitHit !== undefined || usageHit) {
-    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${entered.length - begun.size} queued issue(s) were not started.`);
+    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${entered.length - begun.size} queued ticket(s) were not started.`);
   }
   let dryRunCheck: string | undefined;
   if (before) {

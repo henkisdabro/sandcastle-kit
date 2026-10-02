@@ -83,7 +83,7 @@ test("the last turn's Next step is unchanged", () => {
   const next = body(out, "## 👉 Next step");
   assert.doesNotMatch(next, /Autonomy level/);
   assert.match(next, /Look at #108: still queued/);
-  assert.match(next, /Run again for the 2 issue\(s\) this run unblocked/);
+  assert.match(next, /Run again for the 2 ticket\(s\) this run unblocked/);
   assert.match(next, /Push main \(3 commit\(s\)\)/);
 });
 
@@ -220,12 +220,12 @@ test("closingReport marks a turn the loop continues from, and only that one", as
   // The cap turn, a plain run and `sandcastle report` keep the operator's own steps.
   for (const last of [await closingReport(project, { level: 3, turn: 3 }), await closingReport(project, { level: 1, turn: 1 }), await closingReport(project)]) {
     assert.doesNotMatch(body(last, "## 👉 Next step"), /Autonomy level/);
-    assert.match(body(last, "## 👉 Next step"), /Run again for the 1 issue\(s\) this run unblocked/);
+    assert.match(body(last, "## 👉 Next step"), /Run again for the 1 ticket\(s\) this run unblocked/);
   }
   // A drain turn that said the loop runs again, and then the loop stopped (drainStop): the operator's steps, alone.
   assert.match(body(await closingReport(project, { level: "drain", turn: 1 }), "## 👉 Next step"), /runs turn 2 of at most 20 next/);
   const steps = await operatorSteps(project);
   assert.match(steps, /^## (👉 )?Next step\n/);
   assert.doesNotMatch(steps, /Autonomy level|Runnable now/);
-  assert.match(steps, /Run again for the 1 issue\(s\) this run unblocked/);
+  assert.match(steps, /Run again for the 1 ticket\(s\) this run unblocked/);
 });

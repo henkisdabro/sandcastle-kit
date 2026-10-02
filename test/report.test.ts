@@ -83,7 +83,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
   const next = body(out, "## 👉 Next step");
   assert.match(next, /^1\. Start with tests\/test_totals.py: #\d+ #\d+ fail or conflict there\. They are still queued: the next `sandcastle run` resumes each branch, merging main into it first/m);
   assert.match(next, /Review and merge the 1 held branch/);
-  assert.match(next, /Run again for the 1 issue\(s\) this run unblocked/);
+  assert.match(next, /Run again for the 1 ticket\(s\) this run unblocked/);
   assert.match(next, /Push main \(51 commit\(s\)\)/);
   assert.doesNotMatch(out, /shipped/);
 });

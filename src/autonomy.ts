@@ -122,7 +122,7 @@ export const stillOpen = (tracker: Tracker) => (id: string): boolean => {
 
 /**
  * What the loop does after a turn, from that turn's facts: the tickets a further turn would take
- * (`open` drops one closed by hand, which would make the ISSUES path throw) and the verdict. The
+ * (`open` drops one closed by hand, which would make the TICKETS path throw) and the verdict. The
  * loop in cli.ts and the turn's own closing summary both ask, so the summary never says the
  * operator's next step is something the loop is about to do.
  */

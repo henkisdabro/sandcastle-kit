@@ -66,7 +66,7 @@ test("audit.md names each of the seven queue categories", () => {
     "ready",
     "needs a decision",
     "human-only",
-    "blocked by another issue",
+    "blocked by another ticket",
     "already fixed or false",
     "epic or too big",
     "parked",

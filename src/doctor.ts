@@ -302,7 +302,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
     if (project) {
       const t = project.tracker;
-      check(!t.note, `issue tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);
+      check(!t.note, `tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);
       // A github tracker in a repository with no GitHub remote has nothing to read: say it here,
       // not as gh's "no git remotes found" from the first run.
       // Any remote passes: gh also knows GitHub Enterprise hosts.

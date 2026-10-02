@@ -30,6 +30,6 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   not appended to an existing one, for the same reason. `pnpm test` picks up `test/*.test.ts`.
 - `skill/SKILL.md`'s `description` stays under 1,024 characters and the skill stays portable across
   Claude Code, Codex and OpenCode (AGENTS.md -> "The skill serves three harnesses").
-- Nothing personal in any file, commit or issue comment: no names, emails, tokens, home paths or
+- Nothing personal in any file, commit or ticket comment: no names, emails, tokens, home paths or
   private repo names. Write a lesson as a pattern, not as an incident.
 - Leave `docker/base.Dockerfile` version pins alone unless the ticket is about them.

@@ -85,7 +85,7 @@ export const usageLine = async (env: Record<string, string>) => {
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) return "Plan usage: not checked - it needs CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
   const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
   return Array.isArray(windows)
-    ? `Plan usage: ${describe(windows)} (no new issue starts at ${stop}%).`
+    ? `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`
     : `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.`;
 };
 

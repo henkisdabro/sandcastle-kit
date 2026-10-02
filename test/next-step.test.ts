@@ -73,7 +73,7 @@ esac
 
   const human = run();
   assert.equal(human.status, 0, human.stderr);
-  assert.ok(human.stdout.includes("2 open issue(s) not in the queue"), human.stdout);
+  assert.ok(human.stdout.includes("2 open ticket(s) not in the queue"), human.stdout);
   assert.ok(human.stdout.includes("/sandcastle queue"), human.stdout);
 
   const json = run("--json");

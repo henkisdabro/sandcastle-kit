@@ -1,3 +1,3 @@
 - Read `docs/architecture.md` before changing anything under `src/server/`.
 - Never run `pnpm run deploy` or any command against the production database.
-- A UI change is proven by the `ui-check` skill's screenshots, attached to the issue as a comment.
+- A UI change is proven by the `ui-check` skill's screenshots, attached to the ticket as a comment.
