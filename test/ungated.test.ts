@@ -18,6 +18,7 @@ const { ungatedOf } = await import("../src/burndown.ts");
 const { renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
 const { render } = await import("../src/report.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Facts = import("../src/report.ts").Facts;
 
 const facts = (over: Partial<Facts> = {}): Facts => ({
@@ -120,7 +121,7 @@ test("the review prompt asks for the <ungated> line and gains no placeholder", (
     implement: {},
     review: {},
     repair: {},
-    tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
+    tracker: fakeTracker(),
   };
   const paths = renderPrompts(project, makeTracker(project));
   for (const file of [paths.review, paths.rereview]) {

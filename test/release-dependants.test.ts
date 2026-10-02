@@ -37,6 +37,7 @@ const { createHostGit, landingWork } = await import("../src/landing.ts");
 const { createHoldRecord, refusedRecord } = await import("../src/burndown.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { createSchedule } = await import("../src/schedule.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Blocker = import("../src/blockers.ts").Blocker;
 type Project = import("../src/config.ts").Project;
 type Ctx = import("../src/landing.ts").LandContext;
@@ -124,7 +125,7 @@ const runWith = async (
   rmSync(STATE, { recursive: true, force: true });
   mkdirSync(STATE);
   const root = makeRepo();
-  const project = { root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [], tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+  const project = { root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [], tracker: fakeTracker() } as unknown as Project;
   const run: Run = { root, events: [], states: {}, history: {}, started: [], landed: [], said: [] };
   const record = {
     ticket: (id: string, fields: { state?: string; note?: string | null }) => {
@@ -368,7 +369,7 @@ test("a bad label on a released ticket holds that ticket, never the run", async 
 
 test("a fresh resolver reads a landed blocker as closed, where the first one read it as open", async () => {
   const root = makeRepo();
-  const project = { root, name: "fixture", baseBranch: "main", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+  const project = { root, name: "fixture", baseBranch: "main", tracker: fakeTracker() } as unknown as Project;
   const tracker = { kind: "github", ref: (id: string) => `#${id}`, declaredBlockers: () => [] } as unknown as Ctx["tracker"];
   const t = ticket("2", ["1"]);
   const first = blockerResolver(project, tracker, new Set(["1", "2"]));

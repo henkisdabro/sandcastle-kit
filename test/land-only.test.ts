@@ -17,6 +17,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { landOnlyHead, recordHead, renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
@@ -102,7 +103,7 @@ test("the resolver prompt is rendered with the others, with every kit placeholde
     implement: {},
     review: {},
     repair: {},
-    tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
+    tracker: fakeTracker(),
   };
   const { resolve } = renderPrompts(project, makeTracker(project));
   assert.equal(resolve, join(root, ".sandcastle/.run", "resolve.md"));

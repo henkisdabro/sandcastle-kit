@@ -16,6 +16,7 @@ import { test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { ensureTriageLabel } = await import("../src/tracker.ts");
 const { gather, render } = await import("../src/report.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Facts = Parameters<typeof render>[0];
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
@@ -130,7 +131,7 @@ test("gather: only needs-triage issues created since the run started are filed",
     { number: 40, title: "older", createdAt: "2026-09-29T12:00:00Z" },
     { number: 41, title: "newer", createdAt: "2026-09-30T06:30:00Z" },
   ]);
-  const project = { root, baseBranch: "main", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" }, gates: [] } as any;
+  const project = { root, baseBranch: "main", tracker: fakeTracker(), gates: [] } as any;
   const f = await gather(project);
   assert.deepEqual(f.filed, [{ id: "41", title: "newer" }]);
   assert.ok(calls().some((c) => c.includes("issue list") && c.includes("--label needs-triage")));

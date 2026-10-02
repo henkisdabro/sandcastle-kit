@@ -19,6 +19,7 @@ const { capLine, nextTurn, rerunList, rerunnable } = await import("../src/autono
 const { gather } = await import("../src/report.ts");
 const { recordRun } = await import("../src/run.ts");
 const { makeTracker, refOf } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 const root = mkdtempSync(join(tmpdir(), "sandcastle-autonomy-waiting-"));
@@ -39,7 +40,7 @@ const project = {
   baseBranch: "main",
   label: "ready-for-agent",
   gates: [],
-  tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+  tracker: fakeTracker({ kind: "files" }),
 } as unknown as Project;
 const tracker = makeTracker(project);
 

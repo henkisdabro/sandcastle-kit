@@ -14,9 +14,10 @@ import { test } from "node:test";
 // nothing here may read the user's real config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { parseRefs } = await import("../src/blockers.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
-const base = { tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+const base = { tracker: fakeTracker() } as unknown as Project;
 const withProject = (extra: object) => ({ ...base, ...extra }) as unknown as Project;
 
 test("a list of issue numbers counts each, in order", () => {
@@ -46,6 +47,6 @@ test("a Linear key counts only when the project configures it", () => {
 });
 
 test("a ticket file path counts on a files tracker", () => {
-  const files = withProject({ tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch" } });
+  const files = withProject({ tracker: fakeTracker({ kind: "files" }) });
   assert.deepEqual(parseRefs(files, "Blocked by .scratch/cart/01-add-cart.md"), [{ kind: "file", id: ".scratch/cart/01-add-cart.md" }]);
 });

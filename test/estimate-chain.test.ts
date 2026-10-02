@@ -15,6 +15,7 @@ import { test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { estimate } = await import("../src/run.ts");
 const { blockerChain } = await import("../src/lint.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = Parameters<typeof estimate>[0];
 
 const project = () => {
@@ -22,7 +23,7 @@ const project = () => {
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const tokens = { input: 0, cacheWrite: 0, cacheRead: 1_000_000, output: 10_000 };
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), JSON.stringify({ project: "fixture", run: "r1", issue: "1", phase: "implement", ms: 600_000, tokens }) + "\n");
-  return { root, name: "fixture", tracker: { kind: "github" } } as unknown as Project;
+  return { root, name: "fixture", tracker: fakeTracker() } as unknown as Project;
 };
 const tracker = { declaredBlockers: () => [] as string[] } as unknown as Parameters<typeof blockerChain>[1];
 

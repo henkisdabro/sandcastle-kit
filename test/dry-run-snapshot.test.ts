@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker, LATEST_ISSUE } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
 // Plain sh, no GNU or BSD flags: the same on macOS and Linux. The JSON is built
@@ -32,7 +33,7 @@ esac
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
+const project = { root: dir, label: "ready-for-agent", tracker: fakeTracker() } as any;
 const tracker = makeTracker(project);
 
 const set = (env: Record<string, string | undefined>) => {

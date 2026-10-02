@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
 import { makeTracker } from "../src/tracker.ts";
+import { fakeTracker } from "./fixtures.ts";
 
 // Building the tracker calls no `gh`.
 const project: Project = {
@@ -27,7 +28,7 @@ const project: Project = {
   implement: {},
   review: {},
   repair: {},
-  tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
+  tracker: fakeTracker(),
 };
 
 const blocked = makeTracker(project).words.BLOCKED;

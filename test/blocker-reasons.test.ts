@@ -15,6 +15,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 delete process.env.LINEAR_API_KEY;
 const { blockerProblems, blockerResolver, openBlockers } = await import("../src/blockers.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 // 10: closed as not planned, 11: open and held, 12: open and not queued, 13: closed as completed.
@@ -44,7 +45,7 @@ esac
 chmodSync(join(bin, "gh"), 0o755);
 process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 
-const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker() } as unknown as Project;
 const tracker = makeTracker(project);
 const queue = (...bodies: string[]) => bodies.map((body, i) => ({ id: String(i + 1), body }));
 

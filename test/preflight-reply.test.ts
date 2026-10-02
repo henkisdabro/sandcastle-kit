@@ -16,6 +16,7 @@ delete process.env.SKIP_PREFLIGHT;
 delete process.env.CROSS_REVIEW;
 const { preflight } = await import("../src/run.ts");
 const { OperatorError } = await import("../src/errors.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const reason = "There's an issue with the selected model (bogus-model). It may not exist or you may not have access to it.";
 
@@ -32,7 +33,7 @@ test("an unknown model's refusal prints the CLI's reason, not its JSON", async (
   const root = mkdtempSync(join(tmpdir(), "sandcastle-test-project-"));
   mkdirSync(join(root, ".sandcastle"));
   writeFileSync(join(root, ".sandcastle/.env"), "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
-  const project = { root, tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage" } } as Parameters<typeof preflight>[0];
+  const project = { root, tracker: fakeTracker({ kind: "files" }) } as Parameters<typeof preflight>[0];
 
   const path = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${path}`;

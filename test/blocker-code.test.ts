@@ -13,9 +13,10 @@ import { test } from "node:test";
 // nothing here may read the user's real config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { parseRefs, stripCode } = await import("../src/blockers.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
-const base = { tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+const base = { tracker: fakeTracker() } as unknown as Project;
 const withProject = (extra: object) => ({ ...base, ...extra }) as unknown as Project;
 
 const gh = (id: string) => ({ kind: "github", id });
@@ -60,7 +61,7 @@ test("a Linear key and a ticket file path inside inline code are not blockers", 
   const linear = withProject({ blockers: { linear: ["ENG"] } });
   assert.deepEqual(parseRefs(linear, "`Blocked by ENG-42`"), []);
   assert.deepEqual(parseRefs(linear, "Blocked by ENG-42"), [{ kind: "linear", id: "ENG-42" }]);
-  const files = withProject({ tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch" } });
+  const files = withProject({ tracker: fakeTracker({ kind: "files" }) });
   assert.deepEqual(parseRefs(files, "`Blocked by .scratch/cart/01-add-cart.md`"), []);
   assert.deepEqual(parseRefs(files, "Blocked by .scratch/cart/01-add-cart.md"), [{ kind: "file", id: ".scratch/cart/01-add-cart.md" }]);
 });

@@ -15,6 +15,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { namedTickets } = await import("../src/burndown.ts");
 const { makeTracker } = await import("../src/tracker.ts");
 const { OperatorError } = await import("../src/errors.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 const root = mkdtempSync(join(tmpdir(), "sandcastle-named-tickets-"));
@@ -27,7 +28,7 @@ const project = {
   name: "demo",
   root,
   baseBranch: "main",
-  tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+  tracker: fakeTracker({ kind: "files" }),
   label: "ready-for-agent",
 } as unknown as Project;
 const tracker = makeTracker(project);

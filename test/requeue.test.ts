@@ -16,6 +16,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker, parseRequeueArgs, requeueTicket } = await import("../src/tracker.ts");
 const { forgetHead, readHeads } = await import("../src/run.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
 const log = join(dir, "calls.log");
@@ -40,7 +41,7 @@ exit 0
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const ghProject = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
+const ghProject = { root: dir, label: "ready-for-agent", tracker: fakeTracker() } as any;
 const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
 const writes = () => calls().filter((c) => /^issue (comment|edit)/.test(c));
 const as = (issue: string) => {
@@ -102,7 +103,7 @@ test("ticket files: status, comment, commit subject, clean tree, queued, reopene
   writeFileSync(join(repo, ".scratch/demo/issues/04-pick.md"), "# Pick the colour\n\nStatus: needs-human\n\nChoose one.\n");
   git("add", "-A");
   git("commit", "-q", "-m", "ticket");
-  const project = { root: repo, label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"] } } as any;
+  const project = { root: repo, label: "ready-for-agent", tracker: fakeTracker({ kind: "files" }) } as any;
   const tracker = makeTracker(project);
   const before = Date.now() - 2000;
   assert.match(requeueTicket(tracker, "ready-for-agent", ["demo-04", "--note", "Use the blue."]), /demo-04 is back in the queue \(ready-for-agent\), no longer held, with your note\./);

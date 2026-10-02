@@ -18,6 +18,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 Object.assign(process.env, { GIT_AUTHOR_NAME: "T", GIT_AUTHOR_EMAIL: "t@localhost", GIT_COMMITTER_NAME: "T", GIT_COMMITTER_EMAIL: "t@localhost" });
 const { landTicket } = await import("../src/land.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 type Opener = import("../src/land.ts").Opener;
 
@@ -75,7 +76,7 @@ const fixture = (o: { gate?: string; generated?: boolean; mainChange?: "same-lin
     name: "demo",
     root,
     baseBranch: "main",
-    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: fakeTracker({ kind: "files" }),
     label: "ready-for-agent",
     gates: [{ name: "check", command: o.gate ?? "test -f feature.txt" }],
     setup: [`cat feature.txt >> ${marker} 2>/dev/null || true`],
