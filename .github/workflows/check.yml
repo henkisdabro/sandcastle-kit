@@ -1,9 +1,9 @@
 name: Check
 
 # The checks AGENTS.md asks of every change that need neither Docker nor a
-# model: types, shell syntax, and the status view against a fixture run. The
-# view once showed a live run's green branches as queued for over an hour, and
-# nothing here would have noticed.
+# model: types, the tests (shell syntax among them), and the status view
+# against a fixture run. The view once showed a live run's green branches as
+# queued for over an hour, and nothing here would have noticed.
 #
 # On Linux and macOS: agents test only in the Linux sandbox, and two tests that
 # passed there failed on macOS (BSD `script`, a mise `node` shim) until a
@@ -33,7 +33,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc --noEmit
-      - run: bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh
       - run: pnpm test
       - if: runner.os == 'macOS'
         run: STATUS_BASH=/bin/bash bash test/status.test.sh

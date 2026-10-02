@@ -952,7 +952,7 @@ Examples: [`examples/`](examples/).
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
 | `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
-| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
+| `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_LINKS=0` or `1` | on inside Herdr | The status view's links from each ticket to its latest log (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); off outside Herdr and into a pipe |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why (a rate limit, or HTTP 403 for a token that may not read usage - the guard is then off for that token) |
