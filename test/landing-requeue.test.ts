@@ -26,13 +26,14 @@ const { againLine, createFlow, createHostGit, createLanding, createSettling, req
 const { notLandedComment } = await import("../src/burndown.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { landOnlyHead, recordHead, recordRun } = await import("../src/run.ts");
-const { createQueue } = await import("../src/schedule.ts");
+const { createQueue, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 type Landings = import("../src/landing.ts").Landings;
+type StopState = import("../src/schedule.ts").StopState;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-landing-requeue-"));
 // recordRun finishes its record in an exit handler, so the temp directory goes after it: registered once the
@@ -98,7 +99,8 @@ const failure = { name: "test", command: "test", exitCode: 1, output: "FAIL: a.t
 const RED: GateRun = { gates: [{ name: "test", pass: false }], failure, failures: [failure] };
 
 type Issue = { id: string };
-type Pipeline = (issue: Issue, attempt: number) => Promise<Waiting | undefined>;
+// `stop` is the run's stop state: a pipeline adds a cause where burndown.ts finds one.
+type Pipeline = (issue: Issue, attempt: number, stop: StopState) => Promise<Waiting | undefined>;
 
 // The lists burndown() keeps, and a run record in a directory of its own (never the repo under test).
 const newLists = (): Landings => ({
@@ -123,7 +125,7 @@ const newRecord = () => {
 };
 
 // The settling burndown.ts makes, over a queue of pipelines and a flow that closes both queues.
-const settlingOver = (ids: string[], record: ReturnType<typeof recordRun>, opts: { stopping?: () => boolean } = {}) => {
+const settlingOver = (ids: string[], record: ReturnType<typeof recordRun>, opts: { stop?: StopState } = {}) => {
   const issues = ids.map((id) => ({ id }));
   // Only what landing sends back: the tickets themselves are with the pipelines already.
   const queue = createQueue<Issue>();
@@ -137,10 +139,9 @@ const settlingOver = (ids: string[], record: ReturnType<typeof recordRun>, opts:
     run: record,
     flow,
     byId: new Map(issues.map((i) => [i.id, i])),
-    stopping: opts.stopping ?? (() => false),
+    stop: opts.stop ?? createStopState(),
     dealt: () => {},
     afterLanding: () => flow.finish(),
-    onStop: () => {},
     outcomes: (lines) => void Object.assign(outcomes, lines),
     ref: (id) => `#${id}`,
     say: (line) => void said.push(line),
@@ -182,37 +183,46 @@ const run = async (root: string, ids: string[], pipeline: Pipeline, gate: Ctx["g
   const attempts = new Map<string, number>();
   const lists = newLists();
   const sentBack: string[] = [];
+  const stopped: string[] = [];
+  const stop = createStopState(host);
   const flow = createFlow(issues.length, queue, { close: () => landing.close() });
   const settling = createSettling<Issue>({
     lists,
     run: record,
     flow,
     byId: new Map(issues.map((i) => [i.id, i])),
-    stopping: () => landing.stop !== undefined || host.failed !== undefined,
+    stop,
     dealt: () => {},
     afterLanding: () => flow.finish(),
-    onStop: () => {},
     outcomes: () => {},
     ref: (id) => `#${id}`,
     say: (line) => void (/; its pipeline runs again in this run\.$/.test(line) && sentBack.push(line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: "))),
   });
-  const landing = createLanding(ctx, {
+  const landing = createLanding(ctx, stop, {
     settled: async (o, landed) => {
       const before = sentBack.length;
       await settling.settled(o, landed);
       if (sentBack.length === before) final.push({ issue: o.issue, landed, line: settling.againNote.get(o.issue) });
     },
-    stopped: settling.stopped,
+    stopped: async (o) => {
+      stopped.push(o.issue);
+      await settling.stopped(o);
+    },
   });
   const pipelines = queue.run(
     workers,
     flow.work(async (issue) => {
+      // As burndown.ts begins an attempt: a stopped run starts nothing.
+      if (stop.startsNothing) {
+        settling.keepFirst(issue.id);
+        return false;
+      }
       const attempt = (attempts.get(issue.id) ?? 0) + 1;
       attempts.set(issue.id, attempt);
       settling.began(issue.id);
       // As burndown.ts brackets a pipeline: its agent may commit to the branch, and the `.git` check then takes the tip.
       host.begin(`agent/issue-${issue.id}`);
-      const o = await pipeline(issue, attempt);
+      const o = await pipeline(issue, attempt, stop);
       await host.settle(`agent/issue-${issue.id}`, `after #${issue.id}`);
       if (!o) return false;
       landing.push(o);
@@ -220,7 +230,7 @@ const run = async (root: string, ids: string[], pipeline: Pipeline, gate: Ctx["g
     }),
   );
   await Promise.all([pipelines, landing.run()]);
-  return { final, sentBack, states: written(), calls, host, attempts, lists, settling };
+  return { final, sentBack, stopped, states: written(), calls, host, stop, attempts, lists, settling };
 };
 
 const mergeOrder = (root: string) =>
@@ -270,9 +280,9 @@ test("a conflict is requeued and lands on the second try in one run", async () =
   stages.length = 0;
   const pipeline = fakePipeline(root, (id) => mergeBaseIn(root, id, { "shared.txt": "one\ntwo\n" }));
   // 1 lands first; 2 conflicts with it, is requeued, and its second pipeline resolves the merge.
-  const slow: Pipeline = async (issue, attempt) => {
+  const slow: Pipeline = async (issue, attempt, stop) => {
     if (issue.id === "2" && attempt === 1) await new Promise((r) => setTimeout(r, 60));
-    return pipeline(issue, attempt);
+    return pipeline(issue, attempt, stop);
   };
   const r = await run(root, ["1", "2"], slow);
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "merged"]]);
@@ -331,13 +341,63 @@ test("a merged tree that is red is requeued once too, and a second red holds it"
   assert.deepEqual(mergeOrder(root), ["1"]);
 });
 
+// 1 lands; then a cause stops the run while 2 and 3 are green already: 2 meets 1 on shared.txt at
+// landing, and 3, which changes a file of its own, reaches landing after 2. Ordered by events:
+// 2's pipeline ends once 1 has merged, and 3's once 2's has handed it on (the host's writer settles
+// 2 first, so 2 is on the landing queue before 3).
+const stopMidRun = async (cause: Parameters<StopState["add"]>[0]) => {
+  const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" }, 3: { "c.txt": "three\n" } });
+  let twoDone!: () => void;
+  const two = new Promise<void>((resolve) => (twoDone = resolve));
+  const pipeline: Pipeline = async (issue, _attempt, stop) => {
+    if (issue.id === "2") {
+      while (!mergeOrder(root).includes("1")) await new Promise((r) => setTimeout(r, 5));
+      stop.add(cause);
+      twoDone();
+    }
+    if (issue.id === "3") {
+      await two;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return outcome(root, issue.id);
+  };
+  return { root, r: await run(root, ["1", "2", "3"], pipeline, async () => GREEN, 3) };
+};
+
+test("after a usage stop a conflict at landing is not requeued, and a green ticket still lands", async () => {
+  const { root, r } = await stopMidRun({ kind: "usage limit", line: "usage 97% of the 5-hour window" });
+  assert.deepEqual(r.sentBack, [], "no 'runs again in this run' line");
+  assert.equal(r.attempts.get("2"), 1);
+  assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "conflict"], ["3", "merged"]]);
+  assert.equal(r.states["2"].state, "conflict");
+  assert.equal(r.states["2"].requeued ?? null, null, "no requeue recorded");
+  assert.deepEqual(r.lists.conflicted.map((c) => [c.issue, c.with]), [["2", ["1"]]]);
+  assert.equal(r.settling.lines().get("2"), "merge conflict: with #1: shared.txt");
+  assert.deepEqual(r.stopped, []);
+  // A limit still lands what is green.
+  assert.deepEqual(mergeOrder(root), ["1", "3"]);
+  assert.deepEqual(r.stop.causes.map((c) => c.kind), ["usage limit"]);
+});
+
+test("after a .git change nothing more lands: the conflicting and the green ticket both end stopped", async () => {
+  const { root, r } = await stopMidRun({ kind: "tampered", error: new Error("STOPPED after #2: main moved while sandboxes ran") });
+  assert.deepEqual(r.sentBack, []);
+  assert.equal(r.attempts.get("2"), 1);
+  assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"]]);
+  assert.deepEqual(r.stopped, ["2", "3"]);
+  assert.equal(r.states["2"].state, "stopped");
+  assert.equal(r.states["3"].state, "stopped");
+  assert.equal(r.states["2"].requeued ?? null, null);
+  assert.deepEqual(mergeOrder(root), ["1"]);
+});
+
 test("a requeued ticket runs no implement or full review when its heads record matches", async () => {
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" } });
   stages.length = 0;
   const pipeline = fakePipeline(root, (id) => mergeBaseIn(root, id, { "shared.txt": "one\ntwo\n" }));
-  const slow: Pipeline = async (issue, attempt) => {
+  const slow: Pipeline = async (issue, attempt, stop) => {
     if (issue.id === "2" && attempt === 1) await new Promise((r) => setTimeout(r, 60));
-    return pipeline(issue, attempt);
+    return pipeline(issue, attempt, stop);
   };
   await run(root, ["1", "2"], slow);
   assert.deepEqual(stages.filter((s) => s.startsWith("2#")), ["2#1: implement, review", "2#2: land only"]);
@@ -450,7 +510,9 @@ test("red, requeued, red again: no doubled 'red', and the comment names both att
 
 test("a first red or conflict that is not requeued keeps the plain outcome lines", async () => {
   const { record } = newRecord();
-  const { settling } = settlingOver(["2", "3"], record, { stopping: () => true });
+  const stop = createStopState();
+  stop.add({ kind: "usage limit", line: "usage 97% of the 5-hour window" });
+  const { settling } = settlingOver(["2", "3"], record, { stop });
   await settling.settled(waiting("2"), { kind: "red", with: ["1"], gates: ["test"] });
   await settling.settled(waiting("3"), { kind: "conflict", files: ["a.txt", "b.txt", "c.txt", "d.txt"], with: ["1"] });
   assert.equal(settling.lines().get("2"), "red when merged with #1");

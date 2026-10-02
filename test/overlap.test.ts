@@ -22,7 +22,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { branchFiles, refreshFiles, ticketFiles } = await import("../src/burndown.ts");
 const { createDependants, createRelease } = await import("../src/blockers.ts");
 const { createFlow } = await import("../src/landing.ts");
-const { createFileHold, createQueue, fileShareLine, fileWaitNote, startHold } = await import("../src/schedule.ts");
+const { createFileHold, createQueue, createStopState, fileShareLine, fileWaitNote, startHold } = await import("../src/schedule.ts");
 type Project = import("../src/config.ts").Project;
 type Ticket = import("../src/tracker.ts").Ticket;
 
@@ -89,7 +89,7 @@ type FlowOptions = {
   work?: (t: Ticket, attempt: number) => void | Promise<void>;
   /** Tickets whose first landing conflicts: the flow requeues them once. */
   requeue?: string[];
-  /** The run has stopped from the nth landing on (1 = the first). */
+  /** A usage limit stops the run at the nth landing (1 = the first), before its ticket is done with. */
   stopAfter?: number;
   /** A ticket's label refusal. */
   badLabels?: Record<string, string>;
@@ -132,6 +132,7 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
   const queue = createQueue<Ticket>();
   const flow = createFlow(start.issues.length, queue, { close() {} });
   let landings = 0;
+  const stop = createStopState();
   // A fake `createDependants`: a ticket is released when the one it waits for lands.
   const dependants = {
     landed: () => {},
@@ -147,7 +148,7 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
     hold,
     start: (t) => flow.start(t),
     finish: () => flow.finish(),
-    stopped: () => opts.stopAfter !== undefined && landings >= opts.stopAfter,
+    stop,
     dryRun: false,
     badLabel: (id) => start.badLabels.get(id),
     record,
@@ -179,7 +180,7 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
           return true;
         }
         out.events.push(`land ${t.id}`);
-        landings++;
+        if (++landings === opts.stopAfter) stop.add({ kind: "usage limit", line: "usage 97% of the 5-hour window" });
         await afterLanding(t.id, true);
         return true;
       },

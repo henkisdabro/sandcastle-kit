@@ -15,7 +15,7 @@ import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
 import { errorLine, sh, USER_CONFIG } from "./sandbox.ts";
-import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, stoppedWaitNote } from "./schedule.ts";
+import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, type StopState, stoppedWaitNote } from "./schedule.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
@@ -414,8 +414,8 @@ export type Dependants<T extends Blocked> = ReturnType<typeof createDependants<T
  * its close has been written, so every held ticket that has no open blocker now starts (`start`),
  * and a bad label on one holds that ticket, never the run. `afterLanding(id, false)`: it will not
  * land; nothing is released. Either way `finish` comes last, after `start`, so a flow that closes
- * its queue at zero never reads empty between a landing and the tickets it frees. A run that has
- * stopped (`stopped()`), and a dry run, release nothing.
+ * its queue at zero never reads empty between a landing and the tickets it frees. A run whose stop
+ * state `startsNothing`, and a dry run, release nothing.
  */
 export const createRelease = <T extends Blocked>(o: {
   dependants: Dependants<T>;
@@ -423,7 +423,8 @@ export const createRelease = <T extends Blocked>(o: {
   hold?: FileHold<T>;
   start(ticket: T): void;
   finish(): void;
-  stopped(): unknown;
+  /** The run's stop state (schedule.ts): any cause stops releasing. */
+  stop: Pick<StopState, "startsNothing">;
   dryRun: boolean;
   /** The refusal for a ticket's label, found when it is released rather than at the start. */
   badLabel(id: string): string | undefined;
@@ -520,7 +521,7 @@ export const createRelease = <T extends Blocked>(o: {
       try {
         if (landed) o.dependants.landed(id);
         else o.dependants.ended(id);
-        const going = !o.dryRun && !o.stopped();
+        const going = !o.dryRun && !o.stop.startsNothing;
         // Before the blockers: a dependant that shares a file with this ticket must not find it still in flight.
         if (going) unpark(id);
         else if (!o.dryRun) settle(id);

@@ -23,7 +23,7 @@ import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
-import { createQueue, type Queue } from "./schedule.ts";
+import { createQueue, type Queue, type StopState } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -577,35 +577,34 @@ export type Waiting = Landable & { carried?: boolean };
  * wait (in finish order it came last - it had a merge to resolve - and lost a conflict to a new
  * branch on the same lines, run after run). `close()` says the pipelines are done: `run` resolves
  * once the queue is empty. `settled` is awaited before the next landing, so a ticket it releases
- * (burndown.ts) starts before that one lands. A `.git` check that fails stops landing - what is queued and what
- * arrives later is handed to `stopped`, not landed - and the cause is `stop`.
+ * (burndown.ts) starts before that one lands. Once the run's stop state `landsNothing` - a `.git`
+ * check that failed here or after a pipeline, a host git write refused - what is queued and what
+ * arrives later is handed to `stopped`, not landed. A usage or plan limit still lands what is green.
  */
 export const createLanding = (
   ctx: LandContext,
-  on: { settled(o: Waiting, landed: Landed): void | Promise<void>; stopped(o: Waiting, why: unknown): void | Promise<void> },
+  stop: StopState,
+  on: { settled(o: Waiting, landed: Landed): void | Promise<void>; stopped(o: Waiting): void | Promise<void> },
 ) => {
   const queue = createQueue<Waiting>((o) => (o.carried ? 1 : 0));
-  let stop: unknown;
   return {
     push: (o: Waiting) => queue.push(o),
     close: () => queue.close(),
     get size() {
       return queue.size;
     },
-    get stop() {
-      return stop;
-    },
     run: () =>
       queue.run(1, async (o) => {
-        if (stop) return on.stopped(o, stop);
+        if (stop.landsNothing) return on.stopped(o);
         let landed: Landed;
         try {
           await ctx.host.check(`before landing ${ctx.tracker.ref(o.issue)}`);
           landed = await landOne(ctx, o);
         } catch (error) {
           if (error instanceof OperatorError) {
-            stop = error;
-            return on.stopped(o, error);
+            // A refused write is the host's failure, which the stop state reads live; any other is a `.git` check.
+            if (error !== ctx.host.failed) stop.add({ kind: "tampered", error });
+            return on.stopped(o);
           }
           // Anything else (a tracker call that failed, a full disk, a branch gone) costs this
           // ticket only. Thrown on, it ended the process while pipelines still ran: no summary,
@@ -618,9 +617,9 @@ export const createLanding = (
           }
           landed = { kind: "not-landed", reason };
         }
+        // A write refused after its merge (the close, the branch delete): this one landed, and the
+        // stop state reads the host's failure live, so nothing after it does.
         await on.settled(o, landed);
-        // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.
-        stop ??= ctx.host.failed;
       }),
   };
 };
@@ -738,14 +737,12 @@ export type SettlingDeps<I extends { id: string }> = {
   flow: Pick<ReturnType<typeof createFlow<I>>, "retry" | "earlier">;
   /** The tickets by id, for putting one back on the pipeline queue. */
   byId: Map<string, I>;
-  /** A run that is stopping requeues nothing. */
-  stopping: () => boolean;
+  /** A run that has stopped (any cause: a limit, a `.git` change, a refused write) requeues nothing. */
+  stop: Pick<StopState, "startsNothing">;
   /** A landing was dealt with (the run line's count). */
   dealt: () => void;
   /** The ticket's landing is over; `closed` says it left the tracker's queue. Frees what waited for it. */
   afterLanding: (id: string, closed: boolean) => void | Promise<void>;
-  /** The `.git` check failed under the landing worker: the run stops. */
-  onStop: (why: unknown) => void;
   /** Where a ticket's outcome line goes for the status view. */
   outcomes: (lines: Record<string, string>) => void;
   ref: (id: string) => string;
@@ -853,7 +850,7 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
     settled: async (o: Waiting, landed: Landed) => {
       d.dealt();
       // A conflict or a red merge sends the ticket back to the pipelines once, in this run.
-      const again = d.flow.retry(d.byId.get(o.issue)!, landed, d.stopping(), (line) => {
+      const again = d.flow.retry(d.byId.get(o.issue)!, landed, d.stop.startsNothing, (line) => {
         const was = run.tickets()[o.issue];
         requeuedAs.set(o.issue, line);
         sentBack.set(o.issue, { o, landed, was });
@@ -883,8 +880,7 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
     },
     // Green before the base moved: finished, and landing on a later run like
     // the ones whose own check failed - not "ready", which says this run lands it.
-    stopped: async (o: Waiting, why: unknown) => {
-      d.onStop(why);
+    stopped: async (o: Waiting) => {
       d.dealt();
       bookkeep(o.issue, () => {
         run.ticket(o.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });

@@ -20,10 +20,11 @@ for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)
 const { createHostGit, createLanding, landOne, pipelineWorkers } = await import("../src/landing.ts");
 const { disableHostGitGc, gitFingerprint } = await import("../src/guard.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
-const { createQueue } = await import("../src/schedule.ts");
+const { createQueue, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
+type StopState = import("../src/schedule.ts").StopState;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 
@@ -119,11 +120,18 @@ const harness = (root: string, over: Over = {}) => {
   };
   const settled: { issue: string; landed: Landed }[] = [];
   const stopped: string[] = [];
-  const landing = createLanding(ctx, {
+  const stop = createStopState(host);
+  const landing = createLanding(ctx, stop, {
     settled: (o, landed) => void settled.push({ issue: o.issue, landed }),
     stopped: (o) => void stopped.push(o.issue),
   });
-  return { ctx, host, landing, calls, history, states, settled, stopped };
+  return { ctx, host, stop, landing, calls, history, states, settled, stopped };
+};
+
+// The run's headline stop as "<kind>: <error>": a `.git` check or a refused write.
+const why = (stop: StopState) => {
+  const c = stop.headline;
+  return c && "error" in c ? `${c.kind}: ${String(c.error)}` : c?.kind;
 };
 
 // Fake pipelines: each ends after `ms`, makes the check a real pipeline makes once its sandbox is
@@ -242,7 +250,7 @@ test("a hand commit on the base mid-run still stops the run", async () => {
   next.landing.push(outcome(root, "3"));
   next.landing.close();
   await next.landing.run();
-  assert.match(String(next.landing.stop), /STOPPED before landing #2: main moved/);
+  assert.match(String(why(next.stop)), /^tampered: .*STOPPED before landing #2: main moved/);
   assert.deepEqual(next.stopped, ["2", "3"]);
   assert.deepEqual(next.settled, []);
   assert.deepEqual(mergeOrder(root), ["1"]);
@@ -260,7 +268,7 @@ test("a hand commit while a merge is gated in a sandbox stops the run and the me
   h.landing.push(outcome(root, "2"));
   h.landing.close();
   await h.landing.run();
-  assert.match(String(h.landing.stop), /STOPPED after landing agent\/issue-2 in a sandbox: main moved/);
+  assert.match(String(why(h.stop)), /^tampered: .*STOPPED after landing agent\/issue-2 in a sandbox: main moved/);
   assert.deepEqual(mergeOrder(root), ["1"]);
   assert.equal(git(root, "log", "-1", "--format=%s", "main"), "by hand");
   assert.deepEqual(h.stopped, ["2"]);
@@ -409,7 +417,9 @@ test("a .git change found by the writer's own check stops landing, and no host g
   h.landing.close();
   await h.landing.run();
   assert.equal(existsSync(marker), false, "a host git call ran the planted command");
-  assert.match(String(h.landing.stop), /STOPPED before writing to the base branch: .*config changed while sandboxes ran/);
+  // The writer's refusal is the host's failure, which the stop state reads without being told.
+  assert.match(String(why(h.stop)), /^host failed: .*STOPPED before writing to the base branch: .*config changed while sandboxes ran/);
+  assert.deepEqual(h.stop.causes.map((c) => c.kind), ["host failed"]);
   assert.deepEqual(h.stopped, ["1", "2"]);
   assert.deepEqual(h.settled, []);
 });
@@ -426,7 +436,7 @@ test("a hand commit made after the worker's check is not merged over, even on th
   h.landing.push(outcome(root, "1"));
   h.landing.close();
   await h.landing.run();
-  assert.match(String(h.landing.stop), /STOPPED before landing agent\/issue-1 in a sandbox: main moved/);
+  assert.match(String(why(h.stop)), /^tampered: .*STOPPED before landing agent\/issue-1 in a sandbox: main moved/);
   assert.deepEqual(h.stopped, ["1"]);
   assert.deepEqual(mergeOrder(root), []);
   assert.equal(git(root, "log", "-1", "--format=%s", "main"), "by hand");
