@@ -33,7 +33,7 @@ import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, 
 import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
-import { IN_HERDR, openSandboxView } from "./herdr.ts";
+import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
@@ -383,11 +383,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // Once per process: each turn of an autonomy run would add another listener.
   if (!unlockOnExit) process.on("exit", unlockAll);
   unlockOnExit = true;
-  // Inside Herdr, the run's own tab: the status view and one pane per
+  // Inside Herdr, the run's own tab: the status view and, with `herdr.panes: "all"`, one pane per
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
-  const view = openSandboxView(project, workers, ref, run.tickets);
+  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project));
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");

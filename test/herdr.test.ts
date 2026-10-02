@@ -35,6 +35,8 @@ chmodSync(join(bin, "herdr"), 0o755);
 process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 process.env.HERDR_ENV = "1";
 process.env.HERDR_PANE_ID = "p1";
+// A run adopts a lone tab only from a terminal (src/herdr.ts), and the test runner's stdout is a pipe.
+(process.stdout as { isTTY?: boolean }).isTTY = true;
 // A run registers itself for the tab bar under the cache directory: never the real one.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-herdr-cache-"));
 // IN_HERDR is read when the module loads, so the environment comes first.

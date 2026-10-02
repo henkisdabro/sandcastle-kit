@@ -6,10 +6,17 @@
 //                    check this machine and (inside a repo) this project are
 //                    set up; prints what is missing and how to fix it;
 //                    --verify also asks GitHub and Anthropic whether the tokens are accepted
-//   run [TICKET ...] [--dry] [--concurrency N]
+//   run [TICKET ...] [--dry] [--concurrency N] [--detach]
 //                    burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge;
-//                    the arguments are the same as TICKETS, DRY_RUN and CONCURRENCY
+//                    the arguments are the same as TICKETS, DRY_RUN and CONCURRENCY;
+//                    --detach (or SANDCASTLE_DETACH=1) starts it as a process of its own,
+//                    output in .sandcastle/logs/run-output.log, and returns once it is going
+//                    (not with autonomy level 1, which asks a question a detached run cannot)
+//   wait [seconds]   block while the project's run is live, then print its closing summary
+//                    and exit with the run's exit code; with a timeout, exit 124 and leave
+//                    the run alone. With no run live: the last summary and its exit code
+//   stop             stop the live run, as Ctrl-C does in its terminal
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -57,6 +64,7 @@ import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, 
 import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
+import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
@@ -72,7 +80,7 @@ import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
-import { askingInPane } from "./herdr.ts";
+import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
@@ -130,6 +138,26 @@ try {
       }
       if (given.dry) process.env.DRY_RUN = "1";
       if (given.concurrency !== undefined) process.env.CONCURRENCY = String(given.concurrency);
+      // The same run again, as a process of its own. Everything a run refuses on is refused here,
+      // before a process starts; the child (SANDCASTLE_DETACHED) runs the checks again for itself.
+      if ((given.detach || process.env.SANDCASTLE_DETACH === "1") && process.env.SANDCASTLE_DETACHED !== "1") {
+        const project = await loadProject(root);
+        if (autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy) === 1) {
+          throw new OperatorError("Autonomy level 1 asks a question at the end of each turn, which a detached run cannot. Use level 2 or 3, or run attached.");
+        }
+        sandboxPanes(project);
+        assertCleanBase(project);
+        const owner = livePid(root);
+        if (owner) {
+          throw new OperatorError(
+            `Another sandcastle run of this project is live (pid ${owner}). One run per project at a time: \`sandcastle wait\` blocks until it ends, \`sandcastle stop\` stops it.`,
+          );
+        }
+        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR });
+        for (const line of started.lines) console.log(line);
+        process.exitCode = started.code;
+        break;
+      }
       // An agent that started the run in another pane (Herdr's `pane run`) is
       // told nothing when it ends; its watcher waits for this line, printed on
       // every exit - a drained queue and a crash included.
@@ -144,6 +172,7 @@ try {
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
+      sandboxPanes(project);
       checkUsageSettings();
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
@@ -238,6 +267,34 @@ try {
         },
       });
       process.exit(r.status ?? 0);
+    }
+    case "wait": {
+      const given = args[0];
+      if (args.length > 1 || (given !== undefined && !/^\d+(\.\d+)?$/.test(given))) {
+        throw new OperatorError("Usage: sandcastle wait [seconds] - seconds is a number, 0 or more.");
+      }
+      const project = await loadProject(root);
+      const waited = await waitForRun(root, given === undefined ? undefined : Number(given));
+      if (!waited.ended) {
+        // Not a failure of the run: the caller's own clock ran out.
+        console.log(`The run is still live (pid ${waited.pid}) after ${given} s. \`sandcastle wait\` again keeps waiting; \`sandcastle stop\` stops it.`);
+        process.exitCode = 124;
+        break;
+      }
+      console.log(await closingReport(project));
+      process.exitCode = recordedExitCode(root);
+      break;
+    }
+    case "stop": {
+      // SIGINT, what Ctrl-C sends the run in its terminal: it ends its sandboxes and records how it ended.
+      const pid = livePid(root);
+      if (pid === undefined) {
+        console.log("No run is live.");
+        break;
+      }
+      process.kill(pid, "SIGINT");
+      console.log(`Stopping the run (pid ${pid}); \`sandcastle wait\` shows how it ended.`);
+      break;
     }
     case "report": {
       console.log(await closingReport(await loadProject(root)));

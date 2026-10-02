@@ -35,6 +35,12 @@ export type ProjectConfig = {
   label?: string;
   /** Parallel sandboxes. Default 4. */
   concurrency?: number;
+  /**
+   * Inside Herdr, whether a run opens a pane per sandbox: `"none"` (default) leaves the run's tab
+   * with the status view alone and reports the run as one agent on it, `"all"` adds a pane per
+   * concurrent sandbox. `SANDBOX_PANES` overrides it for one run.
+   */
+  herdr?: { panes?: "none" | "all" };
   /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two, "drain" until the queue is drained or a stop condition holds; `AUTONOMY_LEVEL` overrides it for one run. */
   autonomy?: 0 | 1 | 2 | 3 | "drain";
   /**
@@ -108,14 +114,14 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -123,6 +129,7 @@ const NESTED: Record<string, string[]> = {
   review: ["model", "effort", "maxIterations", "idleTimeoutSeconds"],
   repair: ["attempts", "maxIterations", "idleTimeoutSeconds"],
   blockers: ["linear", "files"],
+  herdr: ["panes"],
 };
 
 const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -154,6 +161,9 @@ const checkShape = (config: ProjectConfig) => {
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
   if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
+  if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {
+    refuse(`\`herdr.panes\` must be "none" or "all", not ${JSON.stringify(config.herdr.panes)}.`);
+  }
   if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
   if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
     refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");

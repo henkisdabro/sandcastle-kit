@@ -202,7 +202,7 @@ flowchart LR
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
-| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab: the status view and a pane per sandbox, each shown in Herdr's agent sidebar as working, done or blocked - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view, and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 
 ## 🔄 How it works
@@ -505,6 +505,7 @@ DRY_RUN=1 sandcastle run              # implement, review, gate - never merge or
 sandcastle run --dry                  # the same, as an argument
 CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
 sandcastle run --concurrency 2        # the same, as an argument
+sandcastle run --detach               # start it as a process of its own and return (see Detached runs)
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
 AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked tickets (see autonomy)
 AUTONOMY_LEVEL=drain sandcastle run   # keep taking turns until the queue is drained or a stop condition holds
@@ -554,6 +555,44 @@ and ends by checking that its tickets and the tracker are unchanged.
 > [!TIP]
 > Start with `DRY_RUN=1` on a couple of tickets to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
+
+### 🛰️ Detached runs
+
+An agent that starts a run should not hold it: a harness's background command has a time cap
+(Claude Code: 2 hours) and ends with the session, and a run killed mid-landing leaves work half
+merged. `sandcastle run --detach` (or `SANDCASTLE_DETACH=1`) starts the same run as a process of its
+own, in its own session, and returns:
+
+```bash
+sandcastle run --detach               # checks what a run checks, starts it, returns
+sandcastle wait                       # blocks until it ends, then prints the closing summary
+sandcastle wait 6600                  # ... or gives up after 6600 s (exit 124), leaving the run alone
+sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
+```
+
+- **`--detach`** checks what a run checks before it starts - a clean tree on the base branch, no
+  other run live, the autonomy level - and refuses with the same message if one fails. The run's
+  output goes to `.sandcastle/logs/run-output.log` (emptied at each start), and the command waits
+  up to a minute for the run's status view, then prints `Run started detached (pid <pid>). Status
+  view: pane <id> (tab <id>). Output: ...`. Outside Herdr the status view is `sandcastle status`
+  in a terminal of yours. A run that ends before it is going is reported with the end of its
+  output. A detached run ignores SIGHUP.
+- **Not with autonomy level 1**, which asks whether to run again at the end of each turn and has
+  no terminal to ask in: `Autonomy level 1 asks a question ... Use level 2 or 3, or run attached.`
+  Levels 2, 3 and `drain` work as usual.
+- **`sandcastle wait [seconds]`** blocks while the run holds the project's run lock, then prints
+  what `sandcastle report` prints and exits with the run's own exit code (recorded in
+  `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
+  time cap is met by starting it again. With no run live it prints the last summary at once and
+  exits with the recorded code (0 when there is none).
+- **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
+  sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
+  live: `No run is live.`
+- While a detached run is live, the **status view** closes with the last three lines of
+  `run-output.log` under a light rule, so the run's own messages are on screen without a pane of
+  their own.
+
+A run in a terminal of your own (`sandcastle run`) works as before.
 
 ### 📊 After a run
 
@@ -649,31 +688,40 @@ sandcastle-kit runs anywhere, but it is built to be watched from [Herdr](https:/
 terminal multiplexer for coding agents. Start `sandcastle run` in a Herdr pane and the run lays
 out its own view:
 
-- 🗂️ **A tab of its own.** Started in a fresh tab where it is the only pane (what the skill
-  does), the run adopts that tab, names it `sandcastle <project>` and puts the status view beside
-  its own output. Started anywhere else, it opens that tab itself and the tab you launched from
-  gets nothing new. Either way one pane per concurrent sandbox stacks on the right, named after
-  its ticket and following that sandbox's log through implement, review, gates and repair. Once
-  nothing is left to start, each pane closes as its sandbox finishes (a crashed one stays open). The
-  run prints `Status view: pane <id> (tab <id>)`.
-- 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
-  reports each sandbox to Herdr itself, as an agent named after its ticket (`#12 Add CSV export`):
-  *working* while it implements, reviews or gates,
-  *done* when its pipeline finishes - ready to land or red, the outcome is in the message - and
-  *blocked* only when a human has to act: a crash, a merge conflict, a branch held for a human
-  merge. The tab and workspace badges roll the states up, so a glance at the sidebar says whether
-  a run needs you. With the [plugin's sidebar rows](#the-herdr-plugin) each sandbox also shows its
-  step and how long it has been at it, and the run's workspace shows its progress.
+- 🗂️ **A tab of its own.** A run you start by hand, in a terminal that is the only pane of its
+  tab, adopts that tab, names it `sandcastle <project>` and puts the status view beside its own
+  output. Started anywhere else - by an agent, with `--detach`, into a pipe - it opens a tab itself,
+  holding only the status view, and the tab you launched from gets nothing new: a run adopts a tab
+  only from a terminal. The run prints `Status view: pane <id> (tab <id>)`. An agent starts its
+  run with `sandcastle run --detach` and waits for it with `sandcastle wait` (see
+  [Detached runs](#-detached-runs)).
+- 🚦 **The run in the sidebar.** Herdr cannot see an agent inside a container, so the run
+  reports itself. The workspace shows `🏰 4/9 · 1 needs you` (red when something needs you) and the
+  tab bar a line per run. The status view's pane is one agent, `sandcastle` titled `<project> run`:
+  *working* while the run goes, then at its end *blocked* when a ticket is held, failed or
+  conflicted, else *idle*.
+- 🧱 **A pane per sandbox, if you want them.** `herdr: { panes: "all" }` in `.sandcastle/config.ts`
+  (or `SANDBOX_PANES=all` for one run; the variable wins) stacks one pane per concurrent sandbox
+  on the right of the status view, named after its ticket and following that sandbox's log
+  through implement, review, gates and repair. Each is reported as an agent named after its
+  ticket (`#12 Add CSV export`): *working* while it implements, reviews or gates, *done* when its
+  pipeline finishes - ready to land or red, the outcome is in the message - and *blocked* only
+  when a human has to act: a crash, a merge conflict, a branch held for a human merge. With the
+  [plugin's sidebar rows](#the-herdr-plugin) each sandbox also shows its step and how long it has
+  been at it. Once nothing is left to start, each pane closes as its sandbox finishes (a crashed
+  one stays open). The default is `"none"`: five sandbox panes crowded the tab, and the status
+  view says the same, better.
 - 🔔 **A notification** with the run's summary when it ends. Outside Herdr, set `notify` in
   your [personal settings](#personal-settings) to get one.
 
-When the run ends its sandbox panes close, so nothing in the sidebar outlives it; the status view
+When the run ends its sandbox panes (if any) close, so nothing in the sidebar outlives it; the status view
 stays, showing each branch's outcome, and the next run replaces it rather than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
 `sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
 view then opens in a pane beside yours.
 
-The status view gets about half the screen: run pane 25%, status view 50%, sandboxes 25% in one
-column of equal rows (status below the run pane on a narrow screen; 2/3 in a tab of its own).
+In an adopted tab the status view gets about half the screen: run pane 25%, status view 50%,
+sandboxes (with `panes: "all"`) 25% in one column of equal rows (status below the run pane on a
+narrow screen; 2/3 in a tab of its own, and all of it with no sandbox panes).
 The run never moves your focus: it works in the background until you switch to its tab.
 
 ### The Herdr plugin
@@ -725,6 +773,9 @@ pane. Sidebar rows belong to the Herdr you look through: if you watch a remote m
 your own, run `configure` on both - the plugin and the tab bar on the machine running the kit, the
 rows on yours.
 
+With `herdr: { panes: "all" }` and a run started by hand, the tab looks like this (by default it
+holds the status view alone):
+
 ```
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
 │ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
@@ -761,7 +812,9 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
-| `sandcastle run` | The burndown (above) | 💸 yes |
+| `sandcastle run [--detach]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)) | 💸 yes |
+| `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
+| `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -777,6 +830,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
+| `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have now landed; a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
@@ -808,6 +862,8 @@ Examples: [`examples/`](examples/).
 | `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
+| `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
+| `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_LINKS=0` or `1` | on inside Herdr | The status view's links from each ticket to its latest log (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); off outside Herdr and into a pipe |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
@@ -1019,7 +1075,7 @@ exact command under every `FIX`. Any failure later starts there too, then [Troub
 | "which issues can the agents do?", "triage for sandcastle" | `sandcastle queue` first: it names the tracker and queue label in use. Then `/sandcastle queue`, or [Queue](#-queue-what-agents-work-on) by hand. | Every open ticket is queued, decided with the user, or left with a reason |
 | "find work for the agents", "audit this repo", "we have no issues yet" | `/sandcastle audit`: read-only review agents per lens, findings de-duplicated and triaged by the queue criteria, filed with the user's yes. Costs interactive allowance, no sandbox. | Every finding is filed, merged or dropped with a reason |
 | "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
-| "start a run", "burn down the queue" | [Run](#-run), in a separate terminal or pane: a run takes hours. | `sandcastle run ended` is printed, and you have read the run report |
+| "start a run", "burn down the queue" | [Run](#-run), detached: `sandcastle run --detach`, then `sandcastle wait` as a background command ([Detached runs](#-detached-runs)); a run takes hours. | `sandcastle wait` has returned, and you have read the closing summary |
 | "is it working?", "how did the run go?" | `sandcastle status 0` while it runs; `sandcastle report` after. Logs are in `.sandcastle/logs/`. | You can name each ticket's phase, or have relayed the summary |
 | "land this branch", "try that ticket again" | [After a run](#-after-a-run): `sandcastle preview`, `sandcastle land <n>`, `sandcastle requeue <n> --note "..."`. Each changes the base branch or the tracker: ask first. | The ticket is closed with the kit's merge, or queued with the note |
 | "update sandcastle" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating). `CHANGELOG.md` says what changed. | The kit is pulled and `sandcastle doctor` is green in the project |

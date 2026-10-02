@@ -940,6 +940,19 @@ render() {
   wrap_items $(( WIN - 4 )) "${NOTE[@]}"
   for l in "${WRAPPED[@]}"; do CELL=("$l"); cells_line; put "$REPLY"; done
   junction '└' '┘' '─' "" ""; put "$REPLY"
+  # A run started detached writes its output to a log nobody has open: while it is live, the
+  # last three lines of it close the frame, under a light rule. The log's lines are cut to the
+  # frame's width here, as the one-shot view does not cut a line itself.
+  if [ "$RUN_LIVE" = 1 ] && [ -f logs/run-output.log ]; then
+    local tail_lines="" tl
+    tail_lines=$(grep -v '^[[:space:]]*$' logs/run-output.log 2>/dev/null | tail -n 3 | tr -d '\r' | tr '\t' ' ' | sed "s/${ESC}\[[0-9;?]*[A-Za-z]//g")
+    if [ -n "$tail_lines" ]; then
+      rep ─ $(( WIN > 16 ? WIN - 16 : 0 )); put "${rule}── run output ──${REPLY}${off}"
+      while IFS= read -r tl; do
+        tl=$(fit "$tl" "$WIN"); put "${mute}${tl}${off}"
+      done <<<"$tail_lines"
+    fi
+  fi
   FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the double rule that opens it
 
   # A short pane: the logo folds to one row, so the table keeps some rows.
