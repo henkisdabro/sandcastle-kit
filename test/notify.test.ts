@@ -73,7 +73,7 @@ test("process.exit(3) notifies with the exit and keeps the exit status", () => {
 
 test("a SIGTERM ends the run through the exit handler and notifies with 143", async () => {
   const { out, env } = setup("writer");
-  const code = await new Promise<number | null>((resolve, reject) => {
+  const ended = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
     const child = spawn(process.execPath, ["--import", TSX, fixture], { env: { ...env, END: "signal" }, stdio: ["ignore", "pipe", "inherit"] });
     let seen = "";
     let sent = false;
@@ -89,12 +89,13 @@ test("a SIGTERM ends the run through the exit handler and notifies with 143", as
       reject(new Error("fixture still running 15 s after SIGTERM"));
     }, 15_000);
     child.on("error", reject);
-    child.on("exit", (c) => {
+    child.on("exit", (code, signal) => {
       clearTimeout(timer);
-      resolve(c);
+      resolve({ code, signal });
     });
   });
-  assert.equal(code, 143);
+  // The process ends by the signal itself, after its exit handlers; the shell reads that as 143.
+  assert.equal(ended.signal, "SIGTERM");
   assert.equal(JSON.parse(readFileSync(out, "utf8")).e, "143");
 });
 

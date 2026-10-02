@@ -18,7 +18,12 @@ import { type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-r
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
 // finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
 // only while a sandbox is live: while it listens, leave the teardown to it (a SIGHUP
-// is handed over as a SIGTERM); otherwise exit, so the exit handlers fire.
+// is handed over as a SIGTERM); otherwise run the exit handlers once and die by the signal.
+// Not `process.exit`: on Node 24 it can deadlock joining V8's platform workers (a concurrent
+// Sparkplug or Maglev compile waits for a GC the main thread never runs), after which no signal
+// reaches JS again and only SIGKILL ends the process (nodejs/node#66171, open). A signal the
+// process re-raises on itself, with its default action back, is ended by the kernel with no join,
+// and the shell still sees 129, 130 or 143.
 // A detached run (`--detach`) has no terminal to hang up, and a SIGHUP it still gets (the
 // shell that started it closing, on a system that sends one to the session) must not end it:
 // it stops on `sandcastle stop`, which is a SIGINT.
@@ -30,13 +35,19 @@ export const exitOnSignal = () => {
       process.on(sig, () => {});
       continue;
     }
-    process.on(sig, () => {
+    const onSignal = () => {
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;
       }
-      process.exit(128 + osConstants.signals[sig]);
-    });
+      const code = 128 + osConstants.signals[sig];
+      process.exitCode = code;
+      process.emit("exit", code);
+      // With no listener left Node restores the signal's default action, which ends the process.
+      process.removeAllListeners(sig);
+      process.kill(process.pid, sig);
+    };
+    process.on(sig, onSignal);
   }
 };
 
