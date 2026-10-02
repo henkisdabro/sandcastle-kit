@@ -43,6 +43,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore |
 | `src/touches.ts` | The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeable` (lockfiles, `generated` paths, minified blobs). A scheduling hint and warning source, never a guard |
+| `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, `blockerProblems`, a rough turn count. Read-only advice |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
