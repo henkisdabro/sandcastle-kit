@@ -72,7 +72,7 @@ What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and 
 
 ## `src/touches.ts`
 
-The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun). A scheduling hint and warning source, never a guard
+The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). A scheduling hint and warning source, never a guard
 
 ## `src/lint.ts`
 
