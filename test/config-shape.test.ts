@@ -38,9 +38,14 @@ test("wrong types are refused with what the key takes", async () => {
   await refused("concurrency: 0", /`concurrency` must be a whole number of 1 or more, not 0/);
   await refused("repair: { attempts: -1 }", /`repair\.attempts` must be a whole number of 0 or more/);
   await refused('protectedPaths: ".github"', /`protectedPaths` must be a list of strings/);
-  await refused("autonomy: 5", /`autonomy` must be 0, 1, 2 or 3/);
+  await refused("autonomy: 5", /`autonomy` must be 0, 1, 2, 3 or "drain"/);
+  await refused('autonomy: "forever"', /`autonomy` must be 0, 1, 2, 3 or "drain", not "forever"/);
   await assert.rejects(load('export default { name: "t", gates: [{ name: "t" }] };\n'), /each gate needs a `name` and a `command`/);
   await assert.rejects(load('export default { name: "t", gates: [] };\n'), /at least one gate/);
+});
+
+test('autonomy: "drain" is accepted', async () => {
+  assert.equal((await load(`export default { ${ok}, autonomy: "drain" };\n`)).autonomy, "drain");
 });
 
 test("a valid config, repair off included, loads", async () => {

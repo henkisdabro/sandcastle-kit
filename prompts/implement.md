@@ -55,6 +55,10 @@ issue names. The project rules below say what else to read.
 - Dependencies are already installed. If you add one, use the project's package manager and commit
   the lockfile.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
+- **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
+  --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
+  hook, a full disk or a signing failure can refuse a commit. If one does, quote the last lines of
+  the refusal in your hand-back and never write "done" or "committed".
 
 {{KIT_PROJECT_RULES}}
 
