@@ -11,6 +11,8 @@ import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { parseEnv } from "node:util";
 import { doctor, probeGithubToken, run } from "./doctor.ts";
+import { OperatorError } from "./errors.ts";
+import { configure, pluginState } from "./herdr-plugin.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
 
 // Ctrl-C at a question rejects it with an AbortError, which reached the operator as a stack
@@ -226,7 +228,23 @@ export const setup = async (repoRoot?: string) => {
     if (Object.keys(set).length) console.log(`done credentials saved to ${envFile}`);
   }
 
-  // 3. Everything else - Docker, gh, git - is doctor's to check and explain.
+  // 3. Inside Herdr, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
+  // config, so `configure` shows what it adds before asking; a config that already sets the
+  // same things is reported, not touched, and setup goes on.
+  if (process.env.HERDR_ENV === "1") {
+    const plugin = pluginState();
+    if (!plugin.linkedHere || !plugin.block) {
+      console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its log, and run progress in the sidebar.");
+      try {
+        await configure(false, false, true);
+      } catch (error) {
+        if (!(error instanceof OperatorError)) throw error;
+        console.log(`     ${error.message}`);
+      }
+    }
+  }
+
+  // 4. Everything else - Docker, gh, git - is doctor's to check and explain.
   console.log("\nChecking the whole setup:\n");
   await doctor(repoRoot);
 };

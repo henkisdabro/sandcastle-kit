@@ -386,7 +386,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
-  const view = openSandboxView(project, workers, ref);
+  const view = openSandboxView(project, workers, ref, run.tickets);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
@@ -410,8 +410,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     const since = Date.now();
     active.set(issue, { phase, since });
     if (issue) {
-      view.phase(issue, phase);
+      // The record first: the view's workspace count reads it.
       run.ticket(issue, { state: phase, ...(phase === "setup" ? { started: Math.floor(since / 1000) } : {}), ...(note ? { note } : {}) });
+      view.phase(issue, phase);
     } else run.update({ stage: phase });
     let ok = false;
     let tokens: Tokens | undefined;

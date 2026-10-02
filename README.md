@@ -657,11 +657,13 @@ out its own view:
   nothing is left to start, each pane closes as its sandbox finishes (a crashed one stays open). The
   run prints `Status view: pane <id> (tab <id>)`.
 - 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
-  reports each sandbox's phase to Herdr itself: *working* while it implements, reviews or gates,
+  reports each sandbox to Herdr itself, as an agent named after its ticket (`#12 Add CSV export`):
+  *working* while it implements, reviews or gates,
   *done* when its pipeline finishes - ready to land or red, the outcome is in the message - and
   *blocked* only when a human has to act: a crash, a merge conflict, a branch held for a human
   merge. The tab and workspace badges roll the states up, so a glance at the sidebar says whether
-  a run needs you.
+  a run needs you. With the [plugin's sidebar rows](#the-herdr-plugin) each sandbox also shows its
+  step and how long it has been at it, and the run's workspace shows its progress.
 - 🔔 **A notification** with the run's summary when it ends. Outside Herdr, set `notify` in
   your [personal settings](#personal-settings) to get one.
 
@@ -673,6 +675,55 @@ view then opens in a pane beside yours.
 The status view gets about half the screen: run pane 25%, status view 50%, sandboxes 25% in one
 column of equal rows (status below the run pane on a narrow screen; 2/3 in a tab of its own).
 The run never moves your focus: it works in the background until you switch to its tab.
+
+### The Herdr plugin
+
+The kit ships a [Herdr plugin](https://herdr.dev/docs/plugins) in `herdr/`. It is optional, and
+nothing above needs it. One command sets it up:
+
+```bash
+sandcastle herdr configure            # shows what it adds, asks, then does it
+sandcastle herdr configure --remove   # takes all of it out again
+```
+
+It links the plugin from the kit's own checkout (no build step: a `git pull` of the kit updates
+it), appends one marked block to Herdr's `config.toml`, and reloads Herdr's config. Nothing
+restarts and no pane is touched. `sandcastle setup` and `/sandcastle update` offer it inside
+Herdr, with yes as the default answer, and `sandcastle doctor` says whether it is in place. Nothing
+installs it without asking: it edits your own Herdr config. Outside Herdr none of this exists, and
+nothing asks. What you get:
+
+| | |
+|---|---|
+| `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
+| `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
+| `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup. |
+| Sidebar rows | Each sandbox shows its step and time (`review · 12m`); the run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you. |
+| Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
+
+The prefix is Herdr's, `ctrl+b` unless you changed it. The keys work on the project of the focused
+pane; from a pane in no project, on the run going (with several, the one whose tab is in this
+workspace, else Herdr asks you to focus the one you mean). They open only when you press them: a
+run never opens one. The log a Ctrl-click opens must be a file in some project's
+`.sandcastle/logs`, and is paged with no shell escape, as an agent's log can print links too.
+
+With or without the plugin, a run at autonomy level 1 that asks whether to run tickets again
+marks its own pane as waiting for you, so Herdr's sidebar and notifications say so like for any
+agent with a question.
+
+If your `config.toml` already sets sidebar rows (`ui.sidebar.agents` or `ui.sidebar.spaces`), tab
+bar entries or one of the three keys, `configure` changes nothing and prints the block for you to
+merge by hand; comment lines do not count, so a config saved from `herdr --default-config` is fine.
+After writing, it asks Herdr to reload the config and puts the file and the plugin link back as
+they were if Herdr says anything new about it. The previous file is kept as
+`config.toml.sandcastle-kit.bak`.
+
+Herdr cannot dock a plugin in its sidebar (plugins get terminal panes and popups, not native
+panels), so the sidebar carries the run through the values it reports, and the full view stays a
+pane. Sidebar rows belong to the Herdr you look through: if you watch a remote machine's Herdr from
+your own, run `configure` on both - the plugin and the tab bar on the machine running the kit, the
+rows on yours.
 
 ```
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
@@ -758,6 +809,7 @@ Examples: [`examples/`](examples/).
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
+| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr | The status view's links from each ticket to its latest log (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); off outside Herdr and into a pipe |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why (a rate limit, or HTTP 403 for a token that may not read usage - the guard is then off for that token) |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |

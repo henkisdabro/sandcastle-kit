@@ -8,6 +8,7 @@ import { join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
@@ -294,6 +295,17 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     }
   }
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
+  if (process.env.HERDR_ENV === "1") {
+    const plugin = pluginState();
+    check(
+      plugin.linkedHere && plugin.block,
+      "Herdr plugin and sidebar rows (optional: the status view and report over any tab, Ctrl-click logs, run progress in the sidebar)",
+      plugin.linkedFrom && !plugin.linkedHere
+        ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure\` here links this one.`
+        : "`sandcastle herdr configure` (shows what it adds and asks first).",
+      true,
+    );
+  }
 
   // The kit's own clone is not a project; checking it would print a false FIX.
   if (repoRoot && realpathSync(repoRoot) !== realpathSync(KIT)) {

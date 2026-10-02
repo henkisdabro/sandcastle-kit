@@ -19,13 +19,23 @@
 // phases repoint: restarting the tail would drop the shell to idle between
 // phases and wipe the sandbox from the sidebar.
 //
+// The sidebar also carries the run itself: each sandbox's row is named after
+// its ticket and reports `$sc_phase` and `$sc_elapsed` tokens, and the run's
+// workspace reports `$sandcastle` ("4/9 · 1 needs you"). Herdr shows a token
+// only where a sidebar row names it (`sandcastle herdr configure` adds the
+// rows), and keeps none across a server restart, so everything is re-sent
+// once a minute: the sidebar heals itself after a restart or a live handoff.
+//
 // All of it is a convenience: outside Herdr, or with SANDCASTLE_HERDR_VIEW=0,
 // or on any herdr error, it does nothing and the run carries on.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
+import type { TicketRecord } from "./run.ts";
 import { KIT } from "./sandbox.ts";
 
 // stderr is captured, not inherited: herdr reports errors there as JSON
@@ -63,6 +73,77 @@ export const layoutRatios = (adopted: boolean, wide: boolean) =>
 // each time left five sandboxes at 1/2, 1/4, 1/8, 1/16, 1/16 of the column.
 export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1);
 
+// A run's tickets counted in the status view's own groups (status.sh `style_of`), so the
+// sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
+const WORKING = new Set(["setup", "implement", "review", "cross-review", "gates", "repair", "landing"]);
+const NEEDS_YOU = new Set(["stopped", "red", "conflict", "held", "crashed", "not landed"]);
+export type RunCounts = { working: number; needsYou: number; merged: number; total: number };
+export const runCounts = (tickets: Record<string, TicketRecord>): RunCounts => {
+  const states = Object.values(tickets).map((t) => t.state ?? "queued");
+  return {
+    working: states.filter((s) => WORKING.has(s)).length,
+    needsYou: states.filter((s) => NEEDS_YOU.has(s)).length,
+    merged: states.filter((s) => s === "merged").length,
+    total: states.length,
+  };
+};
+
+// The workspace row in the sidebar, about 22 columns wide: what needs you first, as that is
+// why anyone looks. A `contains = "needs you"` rule in the sidebar config turns it red.
+export const spaceText = (c: RunCounts) =>
+  `🏰 ${c.merged}/${c.total}` + (c.needsYou ? ` · ${c.needsYou} needs you` : c.working ? ` · ${c.working} working` : "");
+
+// One run in the tab bar, which has more room: `name 4/9 · 2 working · 1 needs you`.
+export const lineText = (name: string, c: RunCounts) =>
+  [`${name} ${c.merged}/${c.total}`, ...(c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : [])].join(" · ");
+
+export const elapsed = (ms: number) => {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+};
+
+/** A sandbox's row tokens. `sc_run` names the run, and is what the Agents view sorts on. */
+export const sandboxTokens = (run: string, phase: string, since: number | undefined, now: number): Record<string, string | null> => ({
+  sc_run: run,
+  sc_phase: phase,
+  // Only a step in progress has a clock; a finished pipeline's outcome stands alone.
+  sc_elapsed: since === undefined ? null : elapsed(now - since),
+});
+
+/** `--token k=v` to set, `--clear-token k` for null: Herdr's token patch, as CLI arguments. */
+export const tokenArgs = (tokens: Record<string, string | null>) =>
+  Object.entries(tokens).flatMap(([k, v]) => (v === null ? ["--clear-token", k] : ["--token", `${k}=${v}`]));
+
+/**
+ * While the run's own pane waits for an answer (autonomy level 1), Herdr is told: the pane
+ * reads as a blocked agent - sidebar, notification, `agent wait --until blocked` - like any
+ * agent with a question, instead of a run quietly waiting in a tab nobody is looking at.
+ * Released after, as a reported state outlives what it was about.
+ */
+export const askingInPane = async <T>(about: string, ask: () => Promise<T>): Promise<T> => {
+  const pane = process.env.HERDR_PANE_ID;
+  if (!IN_HERDR || !pane) return ask();
+  const tell = (args: string[]) => {
+    try {
+      herdr(args);
+    } catch {
+      /* the question works without Herdr knowing */
+    }
+  };
+  tell(["pane", "report-agent", pane, "--source", "sandcastle-kit", "--agent", "sandcastle", "--state", "blocked", "--message", about.slice(0, 80)]);
+  try {
+    return await ask();
+  } finally {
+    tell(["pane", "release-agent", pane, "--source", "sandcastle-kit", "--agent", "sandcastle"]);
+  }
+};
+
+// Live runs, one file per project holding its root, so the tab bar can show every run on
+// the machine whichever pane has focus. A run that dies without its exit handler leaves
+// its file; readers check the run's pid and drop it.
+export const RUNS_DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "runs");
+export const runFile = (root: string) => join(RUNS_DIR, createHash("sha1").update(root).digest("hex").slice(0, 12));
+
 type Slot = { pane: string; issue?: string; closed?: boolean };
 export type SandboxView = {
   /** The status view's pane; undefined when this view is off and the caller opens one. */
@@ -82,13 +163,20 @@ export type SandboxView = {
 
 const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, close() {} };
 const SOURCE = "sandcastle-kit";
+// Two and a half of the minute's re-sends: no flicker between them, gone soon after a kill.
+const TTL = "150000";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
 // Gates have one too: the orchestrator writes their output as it arrives
 // (burndown.ts), so a pane shows the test run instead of the review's last words.
 const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
 
-export const openSandboxView = (project: Project, panes: number, ref: (id: string) => string): SandboxView => {
+export const openSandboxView = (
+  project: Project,
+  panes: number,
+  ref: (id: string) => string,
+  tickets: () => Record<string, TicketRecord> = () => ({}),
+): SandboxView => {
   if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return NONE;
   const logs = join(project.root, ".sandcastle/logs");
   const record = join(logs, "herdr-view.json");
@@ -139,6 +227,7 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   const alone = myTabInfo?.pane_count === 1;
   let tab: string;
   let statusPane: string;
+  let workspace = me?.workspace_id ?? process.env.HERDR_WORKSPACE_ID;
   let wide = false;
   if (alone && mine && myTab) {
     wide = (safe(() => (herdrJson(["pane", "layout", "--pane", mine]).result.layout.panes as { pane_id: string; rect: { width: number } }[])
@@ -155,7 +244,6 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   } else {
     // The run's own workspace, never Herdr's default (the focused one): the
     // user has often moved elsewhere by the time the view opens.
-    const workspace = me?.workspace_id ?? process.env.HERDR_WORKSPACE_ID;
     const created = safe(() =>
       herdrJson([
         "tab", "create", ...(workspace ? ["--workspace", workspace] : []), "--label", `sandcastle ${project.name}`,
@@ -165,6 +253,7 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
     if (!created) return NONE;
     tab = created.result.tab.tab_id as string;
     statusPane = created.result.root_pane.pane_id as string;
+    workspace = created.result.tab.workspace_id as string;
   }
   // Pane-log links left by an earlier run point at logs since archived, and
   // one past this run's pane count would never be repointed.
@@ -209,19 +298,72 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
   // Herdr ignores a report older than the last one it took for the pane.
   let n = 0;
   const seq = () => String(Date.now() * 1000 + (n++ % 1000));
-  const report = (pane: string, state: "working" | "blocked" | "idle", message: string, title: string) => {
-    herdr(["pane", "report-agent", pane, "--source", SOURCE, "--agent", "sandcastle", "--state", state, "--message", message, "--seq", seq()]);
-    herdr(["pane", "report-metadata", pane, "--source", SOURCE, "--agent", "sandcastle", "--title", title, "--display-agent", "sandbox"]);
+  // What each pane shows: which issue, the step or outcome, and since when (a step in
+  // progress only). A landing result may only update a pane no later issue has taken over.
+  type Shown = { issue: string; title: string; state: "working" | "blocked" | "idle"; phase: string; since?: number };
+  const shown = new Map<string, Shown>();
+  // A pane the operator closed by hand is forgotten. Left to `safe`, its pane_not_found on
+  // the next minute's report switched every other pane's reporting off too.
+  const gone = (pane: string, error: unknown) => {
+    if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return false;
+    shown.delete(pane);
+    const slot = slots.find((s) => s.pane === pane);
+    if (slot) Object.assign(slot, { closed: true, issue: undefined });
+    save();
+    return true;
+  };
+  // `state` only when it changed: the minute's re-send is the metadata alone, as a repeated
+  // idle report could mark a finished sandbox unseen again. Metadata expires (TTL) unless
+  // re-sent, so a run killed without its exit handler leaves nothing behind for long.
+  const report = (pane: string, state = false) => {
+    const s = shown.get(pane);
+    if (!s) return;
+    const now = Date.now();
+    const label = s.since === undefined ? s.phase : `${s.phase} · ${elapsed(now - s.since)}`;
+    try {
+      if (state) herdr(["pane", "report-agent", pane, "--source", SOURCE, "--agent", "sandcastle", "--state", s.state, "--message", s.phase, "--seq", seq()]);
+      herdr([
+        "pane", "report-metadata", pane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${ref(s.issue)} ${s.phase}`,
+        // The ticket, not "sandbox": the agent row names it even with Herdr's default sidebar.
+        "--display-agent", `${ref(s.issue)} ${s.title}`.slice(0, 80),
+        // Wherever Herdr shows a state's text (Go To, `state_text` rows), the step instead.
+        ...["working", "blocked", "idle", "done"].flatMap((k) => ["--state-label", `${k}=${label}`]),
+        ...tokenArgs(sandboxTokens(project.name, s.phase, s.since, now)),
+        "--ttl-ms", TTL,
+      ]);
+    } catch (error) {
+      if (!gone(pane, error)) throw error;
+    }
+  };
+  const show = (pane: string, s: Shown) => {
+    shown.set(pane, s);
+    report(pane, true);
+    reportSpace();
+  };
+  const reportSpace = () => {
+    if (workspace) {
+      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets()))}`, "--ttl-ms", TTL]);
+    }
   };
   const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
-  // Which issue each pane showed last: a landing result may only update the
-  // pane if no later issue has taken it over since.
-  const shownBy = new Map<string, string>();
+  // Herdr keeps no tokens across a restart, even when it keeps the panes. Re-sent once a
+  // minute, which also moves each `$sc_elapsed`.
+  const tick = setInterval(() => safe(() => {
+    for (const pane of shown.keys()) report(pane);
+    reportSpace();
+  }), 60_000);
+  tick.unref();
+  // The tab bar's `sandcastle herdr line` finds the run here.
+  safe(() => {
+    mkdirSync(RUNS_DIR, { recursive: true });
+    writeFileSync(runFile(project.root), project.root);
+  });
 
   // Reported states outlive the process: a finished run's panes went on
   // saying "blocked" in the sidebar an hour later. The sandbox panes close
   // with the run - the outcomes are in the report and the status view.
   process.on("exit", () => {
+    clearInterval(tick);
     for (const s of slots.filter((s) => !s.closed)) {
       rmSync(link(s.pane), { force: true });
       try {
@@ -235,6 +377,12 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
       save();
     } catch {
       /* best effort */
+    }
+    rmSync(runFile(project.root), { force: true });
+    try {
+      if (workspace) herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--clear-token", "sandcastle"]);
+    } catch {
+      /* the workspace or the server is gone */
     }
   });
 
@@ -258,16 +406,16 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
         }
         if (!slot) return;
         slot.issue = issue;
-        shownBy.set(slot.pane, issue);
         herdr(["pane", "rename", slot.pane, `${ref(issue)} ${title}`.slice(0, 60)]);
-        report(slot.pane, "working", "setup", `${ref(issue)} setup`);
+        show(slot.pane, { issue, title, state: "working", phase: "setup", since: Date.now() });
       });
     },
     phase(issue, phase) {
       const slot = slotOf(issue);
-      if (!slot) return;
+      const s = slot && shown.get(slot.pane);
+      if (!slot || !s) return;
       safe(() => {
-        report(slot.pane, "working", phase, `${ref(issue)} ${phase}`);
+        show(slot.pane, { ...s, state: "working", phase, since: Date.now() });
         const name = LOG[phase as keyof typeof LOG];
         if (!name) return; // setup has no log of its own
         follow(slot.pane, `agent-issue-${issue}-${name}-${issue}.log`);
@@ -282,23 +430,34 @@ export const openSandboxView = (project: Project, panes: number, ref: (id: strin
         // words for the rest of the run, and five of them read as five stuck
         // sandboxes; the status view has the outcome.
         slot.closed = true;
-        shownBy.delete(slot.pane);
+        shown.delete(slot.pane);
         rmSync(link(slot.pane), { force: true });
-        safe(() => herdr(["pane", "close", slot.pane]));
+        safe(() => {
+          herdr(["pane", "close", slot.pane]);
+          reportSpace();
+        });
         save();
         return;
       }
       // Herdr's "blocked" means "needs your input". A red branch is a
       // finished result, read from the report; a crash is not.
-      safe(() => report(slot.pane, outcome === "crashed" ? "blocked" : "idle", outcome, `${ref(issue)} ${outcome}`));
+      const s = shown.get(slot.pane);
+      if (s) safe(() => show(slot.pane, { ...s, state: outcome === "crashed" ? "blocked" : "idle", phase: outcome, since: undefined }));
     },
     /** `ok` false: a human has to act - a conflict, a failed landing, a held branch. */
     landed(issue, ok, outcome) {
-      const pane = [...shownBy].find(([, shown]) => shown === issue)?.[0];
-      if (pane) safe(() => report(pane, ok ? "idle" : "blocked", outcome, `${ref(issue)} ${outcome}`));
+      const [pane, s] = [...shown].find(([, s]) => s.issue === issue) ?? [];
+      if (pane && s) safe(() => show(pane, { ...s, state: ok ? "idle" : "blocked", phase: outcome, since: undefined }));
+      else safe(reportSpace);
     },
     close(summary) {
-      safe(() => herdr(["notification", "show", `Sandcastle ${project.name}`, "--body", summary, "--sound", "done"]));
+      // An autonomy run's next turn opens a view of its own, closing these panes: this
+      // tick would report into them and turn its view off with a warning.
+      clearInterval(tick);
+      safe(() => {
+        reportSpace();
+        herdr(["notification", "show", `Sandcastle ${project.name}`, "--body", summary, "--sound", "done"]);
+      });
     },
   };
 };

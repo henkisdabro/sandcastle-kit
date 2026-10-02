@@ -138,11 +138,14 @@ export const confirm = async (
   question: string,
   input: NodeJS.ReadableStream & { isTTY?: boolean } = process.stdin,
   output: NodeJS.WritableStream = process.stdout,
+  /** The answer to a bare Enter. */
+  byDefault = false,
 ): Promise<boolean | undefined> => {
   if (input.isTTY !== true) return undefined;
   const rl = createInterface({ input, output });
   try {
-    return /^y/i.test((await rl.question(question)).trim());
+    const answer = (await rl.question(question)).trim();
+    return answer ? /^y/i.test(answer) : byDefault;
   } catch (error) {
     // Ctrl-C at the question is a no, not a stack trace.
     if ((error as Error).name !== "AbortError") throw error;

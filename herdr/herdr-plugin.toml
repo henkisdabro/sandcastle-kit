@@ -1,0 +1,73 @@
+# sandcastle-kit's Herdr plugin (https://herdr.dev/docs/plugins).
+#
+# `sandcastle herdr configure` links it from the kit's own checkout - no build step,
+# and a `git pull` of the kit updates it - and adds the keys and sidebar rows it pairs
+# with to Herdr's config; `--remove` takes all of it out. Every command runs through
+# entry.sh, which hands it to `sandcastle herdr`. Herdr ignores keybindings in a
+# manifest, so the keys live in that config block (src/herdr-plugin.ts).
+id = "sandcastle-kit"
+name = "Sandcastle"
+version = "0.3.0"
+min_herdr_version = "0.9.3"
+description = "Watch sandcastle-kit runs: the status view and report over any tab, Ctrl-click a ticket for its log, sandboxes first in Agents"
+platforms = ["linux", "macos"]
+
+# Herdr forgets the Agents view on a restart: put "sandboxes first" back if it was on.
+[[startup]]
+command = ["./entry.sh", "startup"]
+
+[[actions]]
+id = "status"
+title = "Sandcastle: status view"
+contexts = ["workspace"]
+command = ["./entry.sh", "open", "status"]
+
+[[actions]]
+id = "report"
+title = "Sandcastle: last run's report"
+contexts = ["workspace"]
+command = ["./entry.sh", "open", "report"]
+
+[[actions]]
+id = "sandboxes"
+title = "Sandcastle: sandboxes first in Agents (toggle)"
+contexts = ["global"]
+command = ["./entry.sh", "view", "toggle"]
+
+[[actions]]
+id = "log"
+title = "Sandcastle: open a ticket's log"
+contexts = ["pane"]
+command = ["./entry.sh", "open-log"]
+
+# None of these opens by itself; each closes with q. The status view is an overlay, a real
+# pane zoomed over the active one, not a popup: Herdr 0.9.3 does not route a Ctrl-click
+# inside a popup to a link handler, and a second popup cannot open over the first.
+[[panes]]
+id = "status"
+title = "Sandcastle status"
+placement = "overlay"
+command = ["./entry.sh", "status"]
+
+[[panes]]
+id = "report"
+title = "Sandcastle report"
+placement = "popup"
+width = "90%"
+height = "90%"
+command = ["./entry.sh", "report"]
+
+[[panes]]
+id = "log"
+title = "Sandcastle log"
+placement = "popup"
+width = "90%"
+height = "90%"
+command = ["./entry.sh", "log"]
+
+# The status view links each ticket to its latest log (OSC 8): Ctrl-click opens it here.
+[[link_handlers]]
+id = "log"
+title = "Open a sandcastle log"
+pattern = "^file://.*/\\.sandcastle/logs/[^/]+\\.log$"
+action = "log"

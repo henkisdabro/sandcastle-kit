@@ -334,6 +334,25 @@ done <"$TMP/live"
 [[ "$last" == └*┘ ]] || { echo "FAIL [$SCENARIO] the frame does not end in its bottom border: $last"; fails=$((fails+1)); }
 
 # ---------------------------------------------------------------------------
+SCENARIO="links, inside Herdr"
+# Each ticket links to its latest log (OSC 8) for the Herdr plugin's Ctrl-click. A
+# link has no width: with the links taken out, every line still fits the pane and
+# the frame has as many rows as without them.
+render ""; plain_rows=$(wc -l <"$TMP/frame")
+PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+  SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture SANDCASTLE_MODELS="implement next-model/high" \
+  TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" SANDCASTLE_LINKS=1 \
+  "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+grep -q $'\e]8;;file://.*/my%20repo/\.sandcastle/logs/agent-issue-[a-z0-9-]*\.log\e\\\\' "$TMP/linked" \
+  || { echo "FAIL [$SCENARIO] no ticket links to its log (the space in the path as %20)"; fails=$((fails+1)); }
+sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
+while IFS= read -r l; do
+  [ "${#l}" -le "$COLS" ] || { echo "FAIL [$SCENARIO] wider than $COLS columns: $l"; fails=$((fails+1)); }
+done <"$TMP/frame"
+[ "$(wc -l <"$TMP/frame")" = "$plain_rows" ] || { echo "FAIL [$SCENARIO] $(wc -l <"$TMP/frame") rows with links, $plain_rows without"; fails=$((fails+1)); }
+row '#103' ready
+
+# ---------------------------------------------------------------------------
 SCENARIO="every log archived"
 # Runs happened - the run cell says how the last ended - but merged tickets'
 # logs moved to logs/archive/, so no row is left: not "no runs yet".
