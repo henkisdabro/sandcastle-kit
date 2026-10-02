@@ -46,6 +46,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The skill states two rules agents kept getting wrong.** A `Blocked by` ref must sit on the
+  same line (a list under a `Blocked by:` heading is not read); a drain's later turns run only what
+  the turn before left conflicted or released. The README's `SANDCASTLE_HERDR_VIEW` row now says it turns off the
+  whole Herdr view, not a per-sandbox tab.
 - **The Claude Code mod follows a run its session started in another directory**, such as a
   second clone or a monorepo package: the band, the needs-you notice and the end prompt work by
   the session id each run records. Every run now registers in the machine-wide live-runs
