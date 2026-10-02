@@ -12,7 +12,7 @@ import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
-import { upgradeLines } from "./upgrading.ts";
+import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { probeOAuth } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
@@ -164,7 +164,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     if (mode & 0o077) check(false, `${file} is readable only by you (mode ${mode.toString(8)})`, `\`chmod 600 ${shellQuote(file)}\``);
   };
 
-  console.log(`sandcastle-kit at ${KIT}\n`);
+  console.log(`sandcastle-kit ${kitVersion()} at ${KIT}\n`);
   // Whether this project's tickets are GitHub Issues decides what GitHub access is required.
   const project =
     repoRoot && existsSync(join(repoRoot, CONFIG_PATH)) && realpathSync(repoRoot) !== realpathSync(KIT)

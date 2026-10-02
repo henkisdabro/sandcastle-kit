@@ -54,3 +54,17 @@ A state the status view works out for itself and no run record holds - a run tha
 (stalled, orphaned), a branch from an older run (left over), a branch of this run that waits for
 landing to decide it (finished), or an older run's branch whose ticket was labelled again
 (requeued).
+
+### Keeping a project up to date
+
+**Kit version**:
+The release a kit is at; a kit between releases also says how far past that release it is.
+_Avoid_: kit commit (one way of telling a kit between releases, not its version)
+
+**Upgrading note**:
+One item in a release's Upgrading section: something an existing project may have to act on.
+_Avoid_: migration, upgrade step
+
+**Update record**:
+What a project keeps, on one machine, of the Upgrading notes it has acted on.
+_Avoid_: marker, kit-updated (the file's name, not the concept)
