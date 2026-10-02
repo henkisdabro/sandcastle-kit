@@ -390,9 +390,11 @@ has '^third line$'
 has '^fourth line$'
 has '^x+…$'
 # The strip is the frame's last four rows, after the table's bottom border.
-[ "$(wc -l <"$TMP/frame")" = "$(( $(wc -l <"$TMP/frame-plain") + 4 ))" ] || { echo "FAIL [$SCENARIO] the strip is not four rows"; fails=$((fails+1)); }
+[ "$(wc -l <"$TMP/frame")" -eq "$(( $(wc -l <"$TMP/frame-plain") + 4 ))" ] || { echo "FAIL [$SCENARIO] the strip is not four rows"; fails=$((fails+1)); }
 [ "$(grep -n '^── run output' "$TMP/frame" | cut -d: -f1)" = "$(( $(wc -l <"$TMP/frame-plain") + 1 ))" ] || { echo "FAIL [$SCENARIO] the strip does not follow the plain frame"; fails=$((fails+1)); }
-head -n "$(wc -l <"$TMP/frame-plain")" "$TMP/frame" | diff -q - "$TMP/frame-plain" >/dev/null || { echo "FAIL [$SCENARIO] the frame above the strip changed"; fails=$((fails+1)); }
+# The two renders can fall in different seconds: the clock and the AGE cells are not what is compared.
+steady() { sed -E 's/[0-9]{2}:[0-9]{2}:[0-9]{2}/HH:MM:SS/g; s/│ +[0-9]+[smh] +│/│ age │/g'; }
+head -n "$(wc -l <"$TMP/frame-plain")" "$TMP/frame" | steady | diff -q - <(steady <"$TMP/frame-plain") >/dev/null || { echo "FAIL [$SCENARIO] the frame above the strip changed"; fails=$((fails+1)); }
 # A finished run's output is in its report, not on the view.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": 1, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0, "models": "m", "issues": [] }
