@@ -61,6 +61,29 @@ export const checkLandingMerge = (root: string, c: string, b: string, h: string,
   return `landing merge changed paths outside generated: ${[...new Set(stray)].slice(0, 5).join(", ")}`;
 };
 
+/**
+ * A merge that needed no regenerating must hold exactly the tree the host's own merge of `b` and
+ * `h` makes. `checkLandingMerge` vouches only for which paths changed, so a commit with the right
+ * parents and other content inside the branch's own files would pass it. Needs `git merge-tree
+ * --write-tree` (git 2.38); older git says so once and keeps the path check alone.
+ */
+let mergeTreeNoticed = false;
+export const plainMergeNote = (root: string, c: string, b: string, h: string): string | undefined => {
+  let tree: string;
+  try {
+    tree = sh("git", ["merge-tree", "--write-tree", b, h], root).split("\n")[0];
+  } catch (error) {
+    const message = String((error as Error).message ?? error);
+    if (/usage|unknown option|write-tree/i.test(message)) {
+      if (!mergeTreeNoticed) console.log("git on this machine has no `merge-tree --write-tree` (2.38+): a landing merge is checked by its changed paths only.");
+      mergeTreeNoticed = true;
+      return undefined;
+    }
+    return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
+  }
+  return sh("git", ["rev-parse", `${c}^{tree}`], root) === tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
+};
+
 /** A squash landing's commit body: the branch's own subjects, without the kit's merges of the base into it. */
 export const squashBody = (root: string, base: string, head: string) =>
   sh("git", ["log", "--reverse", "--no-merges", "--format=%s", `${base}..${head}`], root)
@@ -96,6 +119,7 @@ export const landInSandbox = async (
   const baseTip = sh("git", ["rev-parse", project.baseBranch], project.root);
   // The `sandcastle/` prefix is what `sandcastle clean` already treats as scratch.
   const scratch = `sandcastle/land-${t.branch.replace(/\W+/g, "-")}-${Date.now()}`;
+  let made = "";
   try {
     let result: LandResult;
     const box = await open(scratch);
@@ -115,6 +139,9 @@ export const landInSandbox = async (
           result = r.ok ? { kind: "merged", commit: "", files, regen: r.regen } : { kind: "regen-failed", files, reason: r.reason };
         }
       }
+      // The commit the merge made, read before the gates run the branch's code: other sandboxes
+      // share this .git and could repoint the scratch ref while they do.
+      if (result.kind === "merged") made = (await box.exec("git rev-parse HEAD")).stdout.trim();
       if (gate && result.kind === "merged") {
         let red: GateRun | undefined;
         // Setup ran on the base tip before the merge: a branch that adds a dependency would be
@@ -145,7 +172,8 @@ export const landInSandbox = async (
     if (result.kind === "merged" || gate) assertGitUnchanged(project, before, `after landing ${t.branch} in a sandbox`);
     if (result.kind !== "merged") return result;
     const commit = sh("git", ["rev-parse", scratch], project.root);
-    const note = checkLandingMerge(project.root, commit, baseTip, t.head, project.generated);
+    if (commit !== made) return { kind: "conflict", files: result.files, note: `the landing merge's ref moved after the merge (${made.slice(0, 12)} -> ${commit.slice(0, 12)})` };
+    const note = checkLandingMerge(project.root, commit, baseTip, t.head, project.generated) ?? (result.files.length ? undefined : plainMergeNote(project.root, commit, baseTip, t.head));
     if (note) return { kind: "conflict", files: result.files, note };
     // The merge is what the sandbox gated and the host checked; a squash keeps its tree exactly.
     const landed = t.squash
@@ -156,7 +184,12 @@ export const landInSandbox = async (
         })()
       : commit;
     sh("git", ["merge", "--ff-only", landed], project.root);
-    if (expected) expected.base = sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root);
+    if (expected) {
+      // Only what this fast-forward made: a base that names anything else is not ours to adopt.
+      const now = sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root);
+      if (now !== landed) throw new OperatorError(`${project.baseBranch} names ${now.slice(0, 12)} after landing ${t.branch} at ${landed.slice(0, 12)}: something else moved it. Nothing more lands.`);
+      expected.base = landed;
+    }
     return { ...result, commit: landed };
   } finally {
     try {

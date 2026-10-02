@@ -30,7 +30,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview,
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, protectedChanges } from "./guard.ts";
+import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
@@ -49,7 +49,7 @@ import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
-import { conflictLine, createHostGit, createLanding, type LandContext, pipelineWorkers } from "./landing.ts";
+import { conflictLine, createHostGit, createLanding, type LandContext, pipelineWorkers, slotTurn, trackerMade } from "./landing.ts";
 import { createQueue } from "./schedule.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -182,6 +182,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const notify = notifyCommand();
   disableHostGitHooks();
   disableHostGitGc();
+  pinHostGitConfig(project.root);
   assertCleanBase(project);
   lockRun(project);
   reapOrphans(project);
@@ -600,7 +601,19 @@ export const burndown = async (project: Project): Promise<boolean> => {
       }
       if (mergeConflicted) {
         const head = await sandbox.exec("git rev-parse -q --verify MERGE_HEAD");
-        if (head.exitCode === 0) baseTip = head.stdout.trim();
+        if (head.exitCode === 0) {
+          // Read inside the sandbox, after the branch's own setup ran there: trusted only when the
+          // host finds it on the base's history. Otherwise the resolution has nothing sound to be
+          // checked against, so the full implement and review take the branch.
+          const tip = head.stdout.trim();
+          try {
+            sh("git", ["merge-base", "--is-ancestor", tip, `refs/heads/${base}`]);
+            baseTip = tip;
+          } catch {
+            console.log(`${ref(issue.id)}: the merge in its sandbox names ${tip.slice(0, 12)}, which is not on ${base} - the full implement and review run.`);
+            landOnly = false;
+          }
+        }
       }
       // A conflicted merge on a branch that is already reviewed and green needs
       // only the merge resolved, not the issue implemented again: a short prompt
@@ -975,6 +988,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // The ticket's state as landing decides it, for the notes below.
   const land = (id: string, state: string, note: string) => run.ticket(id, { state, note });
 
+  const slotWanted = { n: 0 };
   const ctx: LandContext = {
     project,
     tracker,
@@ -988,6 +1002,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     host,
     gate: (box, id) => runGates(box, id),
     landed: new Map(),
+    slotWanted,
   };
   // How many of the greens have been dealt with, for the run line's "landing 6/25" once the pipelines are done.
   let pushed = 0;
@@ -1105,7 +1120,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
     begun.add(issue.id);
     results.push(
-      await withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)).then(
+      await slotTurn(slotWanted).then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue))).then(
         (value) => {
           bookkeep(issue.id, () => {
             const tokens = spent.get(issue.id);
@@ -1162,7 +1177,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
     landingStage();
     landing.close();
   });
-  await Promise.all([pipelinesEnded, landing.run()]);
+  // Settled, not all: a landing that throws must not end the run while pipelines still work.
+  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run()]);
   clearInterval(heartbeat);
   const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
   for (const i of issues) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
@@ -1176,6 +1192,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     throw error;
   };
   if (landing.stop) await stopLanding(landing.stop);
+  for (const r of [ended, landed]) if (r.status === "rejected") await stopLanding(r.reason);
   // A pipeline's own check failed and nothing was left to land: the run still stops, as it did before landing.
   if (tampered) {
     try {
@@ -1216,7 +1233,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     if (DRY_RUN) console.log(`[dry run] would ${n.kind === "hold" ? "hold for a human" : "comment on"} ${ref(n.issue)}: ${n.text.slice(0, 120)}`);
     else {
       try {
-        await host.write(() => (n.kind === "hold" ? tracker.hold(n.issue, n.text) : tracker.comment(n.issue, n.text)));
+        await host.write(() => (n.kind === "hold" ? tracker.hold(n.issue, n.text) : tracker.comment(n.issue, n.text)), trackerMade(project.root));
       } catch (error) {
         console.log(`Could not update ${ref(n.issue)}: ${errorLine(error)}`);
       }

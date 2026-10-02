@@ -20,10 +20,11 @@ import { OperatorError } from "./errors.ts";
 // ---------------------------------------------------------------------------
 
 // One more `GIT_CONFIG_*` pair for this process and every git it starts. Not added twice: each
-// turn of an autonomy run calls this again.
+// turn of an autonomy run calls this again, and the first value stays - a later turn reads a
+// config that sandboxes have had their hands on.
 const hostGitConfig = (key: string, value: string) => {
   const n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
-  for (let i = 0; i < n; i++) if (process.env[`GIT_CONFIG_KEY_${i}`] === key && process.env[`GIT_CONFIG_VALUE_${i}`] === value) return;
+  for (let i = 0; i < n; i++) if (process.env[`GIT_CONFIG_KEY_${i}`]?.toLowerCase() === key.toLowerCase()) return;
   process.env[`GIT_CONFIG_KEY_${n}`] = key;
   process.env[`GIT_CONFIG_VALUE_${n}`] = value;
   process.env.GIT_CONFIG_COUNT = String(n + 1);
@@ -34,6 +35,33 @@ export const disableHostGitHooks = () => hostGitConfig("core.hooksPath", "/dev/n
 // A landing merge on the host runs while sandboxes add and remove worktrees, and `git merge` starts
 // `git gc --auto` when the repo has enough loose objects: maintenance that prunes beside them.
 export const disableHostGitGc = () => hostGitConfig("gc.auto", "0");
+
+// Config keys that make the host's git run a program. A sandbox can write `.git/config` at any
+// moment, and the `.git` check before each host write leaves a gap of milliseconds before the git
+// call; command-scope config (`GIT_CONFIG_*`) wins over every config file, so a value pinned here
+// is the one git uses whatever lands in the file. Signing is off: a host merge or commit would run
+// `gpg.program`. Drivers and programs the config names at the start keep that value, so a planted
+// replacement never runs. A driver named in `.gitattributes` with no config at the start is not
+// pinned - an empty value breaks git's built-in drivers (`merge=union`) - and is left to the check.
+const COMMAND_KEYS =
+  "^(filter\\.[^.]+\\.(clean|smudge|process)|merge\\.[^.]+\\.driver|diff\\.[^.]+\\.(command|textconv)|diff\\.external" +
+  "|core\\.(pager|editor|askpass|sshcommand)|gpg\\.(.+\\.)?program|sequence\\.editor)$";
+
+export const pinHostGitConfig = (root: string) => {
+  hostGitConfig("core.fsmonitor", "false");
+  hostGitConfig("commit.gpgSign", "false");
+  hostGitConfig("tag.gpgSign", "false");
+  let entries = "";
+  try {
+    entries = sh("git", ["config", "-z", "--get-regexp", COMMAND_KEYS], root);
+  } catch {
+    // Exit 1: none of the keys is set.
+  }
+  for (const entry of entries.split("\0").filter(Boolean)) {
+    const at = entry.indexOf("\n");
+    if (at > 0) hostGitConfig(entry.slice(0, at), entry.slice(at + 1));
+  }
+};
 
 // ---------------------------------------------------------------------------
 // 2. The shared `.git`. A container can rewrite `.git/config` (a
@@ -53,7 +81,12 @@ export type Fingerprint = { files: Record<string, string>; base: string };
 export const gitFingerprint = (project: Project): Fingerprint => {
   const dir = sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], project.root);
   const inside = (sub: string) => (existsSync(join(dir, sub)) ? readdirSync(join(dir, sub)).map((f) => join(dir, sub, f)) : []);
-  const paths = [join(dir, "config"), ...inside("info"), ...inside("hooks")];
+  // HEAD too: a sandbox that repoints it makes the host's landing merge commit on another branch,
+  // while the base - and so the check - stays where it was.
+  // Not info/refs: `git repack` rewrites it (an auto gc in a sandbox's commit does), it is only an
+  // index for the dumb HTTP transport and runs nothing - fingerprinted, it read as tampering.
+  const info = inside("info").filter((f) => f !== join(dir, "info", "refs"));
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
   const files: Record<string, string> = {};
   for (const f of paths) files[f] = createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
   return { files, base: sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root) };

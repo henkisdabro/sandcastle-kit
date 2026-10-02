@@ -95,13 +95,19 @@ export const abortLanding = (root: string, mode: "merge" | "squash") =>
  * The one writer of host git. `exclusive` runs its steps one after another, so the `.git` check a
  * pipeline makes never runs between a landing's merge and the update of the expected base.
  * `write` is a step that changes the repo: it first refuses a base that moved under it (a person's
- * commit must not be merged over), then moves `expected.base` to what the write made the base -
- * synchronously, with the write itself.
+ * commit must not be merged over), then accepts what the write made the base - synchronously, with
+ * the write itself - only if `made` vouches for it. A sandbox can move the base while a write runs
+ * (a `gh` call takes seconds); taking whatever the base names afterwards would adopt that as the
+ * kit's own, and every later check would pass.
  */
 export type HostGit = {
   readonly expected: Fingerprint;
   exclusive<T>(fn: () => T | Promise<T>): Promise<T>;
-  write<T>(fn: () => T): Promise<T>;
+  /**
+   * Without `made`, the write must leave the base where it was. With it, a moved base is accepted
+   * when `made(previous, tip)` returns nothing; a returned reason stops the run.
+   */
+  write<T>(fn: () => T, made?: (prev: string, tip: string) => string | undefined): Promise<T>;
   /** The check a pipeline makes once its sandbox is closed, and the worker before each landing. */
   check(when: string): Promise<void>;
   /**
@@ -110,6 +116,38 @@ export type HostGit = {
    */
   readonly failed: LandingStop | undefined;
 };
+
+const parentsOf = (root: string, c: string) => sh("git", ["rev-list", "--parents", "-n", "1", c], root).split(" ").slice(1);
+const treeOf = (root: string, c: string) => sh("git", ["rev-parse", `${c}^{tree}`], root);
+
+/** A landing merge or squash of `head`: on the previous tip, with exactly the gated head's tree. */
+export const landingMade =
+  (root: string, head: string, mode: "merge" | "squash") =>
+  (prev: string, tip: string): string | undefined => {
+    const parents = parentsOf(root, tip);
+    const want = mode === "merge" ? [prev, head] : [prev];
+    if (parents.join(" ") !== want.join(" ")) return `${tip.slice(0, 12)} is not a ${mode} of ${head.slice(0, 12)} on ${prev.slice(0, 12)}`;
+    if (treeOf(root, tip) !== treeOf(root, head)) return `${tip.slice(0, 12)} does not hold the gated tree of ${head.slice(0, 12)}`;
+    return undefined;
+  };
+
+/**
+ * A tracker write: nothing (GitHub), or the files tracker's one commit of one ticket file, on the
+ * previous tip, whose content is what the host just wrote to that file.
+ */
+export const trackerMade =
+  (root: string) =>
+  (prev: string, tip: string): string | undefined => {
+    if (parentsOf(root, tip).join(" ") !== prev) return `${tip.slice(0, 12)} is not one commit on ${prev.slice(0, 12)}`;
+    const files = sh("git", ["diff", "--no-renames", "--name-only", "-z", prev, tip], root).split("\0").filter(Boolean);
+    if (files.length !== 1) return `${tip.slice(0, 12)} changes ${files.length} files, not one ticket file`;
+    try {
+      sh("git", ["diff", "--quiet", tip, "--", files[0]], root);
+    } catch {
+      return `${tip.slice(0, 12)} commits a ${files[0]} that is not the one the host wrote`;
+    }
+    return undefined;
+  };
 
 export const createHostGit = (project: Project, expected: Fingerprint): HostGit => {
   let tail: Promise<unknown> = Promise.resolve();
@@ -120,6 +158,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
   };
   const check = (when: string) => assertGitUnchanged(project, expected, when);
   let failed: LandingStop | undefined;
+  const base = project.baseBranch;
   return {
     expected,
     exclusive,
@@ -127,7 +166,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
     get failed() {
       return failed;
     },
-    write: (fn) =>
+    write: (fn, made) =>
       exclusive(() => {
         try {
           check("before writing to the base branch");
@@ -136,10 +175,24 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
           failed ??= new LandingStop(error.message, { cause: error });
           throw failed;
         }
+        const prev = expected.base;
         try {
           return fn();
         } finally {
-          expected.base = sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root);
+          const tip = sh("git", ["rev-parse", `refs/heads/${base}`], project.root);
+          if (tip !== prev) {
+            const why = made ? made(prev, tip) : "this write commits nothing";
+            if (why) {
+              // `expected` stays where it was, so every later check stops too.
+              failed ??= new LandingStop(
+                `${base} moved to ${tip.slice(0, 12)} while the kit wrote to it, and not by that write: ${why}. ` +
+                  `Nothing more lands. Check \`git log ${prev.slice(0, 12)}..${base}\` before running again.`,
+              );
+              // Thrown from `finally` on purpose: the stop wins over the write's own result or error.
+              throw failed;
+            }
+            expected.base = tip;
+          }
         }
       }),
   };
@@ -174,6 +227,17 @@ export type LandContext = {
    * rather than to branches, which a squash deletes.
    */
   landed: Map<string, { files: string[]; commit: string }>;
+  /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
+  slotWanted?: { n: number };
+};
+
+/**
+ * Before a pipeline takes a sandbox slot: wait while a landing wants one. Slots are polled every
+ * 5 s, so with a pool of one a finishing pipeline worker took the freed slot straight back, and
+ * landings that need a sandbox waited until every pipeline had ended.
+ */
+export const slotTurn = async (wanted: { n: number }, pause = 1000) => {
+  while (wanted.n > 0) await new Promise((r) => setTimeout(r, pause));
 };
 
 export type Landed =
@@ -236,7 +300,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
         land(o.issue, "ready", "dry run: would close");
         return { kind: "dry-run" };
       }
-      await host.write(() => tracker.close(o.issue, `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`));
+      await host.write(() => tracker.close(o.issue, `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`), trackerMade(root));
       land(o.issue, "merged", `closed, merged earlier (${o.head})`);
       return { kind: "closed-earlier" };
     }
@@ -264,6 +328,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
             `executes (${touched.join(", ")}), which its own gates cannot vouch for. Review and merge by hand.` +
             (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""),
         ),
+        trackerMade(root),
       );
     }
     return { kind: "held", paths: touched, reason };
@@ -276,6 +341,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     if (!dryRun) {
       await host.write(() =>
         tracker.hold(o.issue, `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it ${largeFilesNote(large)}.` + (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : "")),
+        trackerMade(root),
       );
     }
     return { kind: "held", paths: large, reason };
@@ -284,7 +350,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     const why = "repair commits not reviewed: the review after repair failed";
     const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${why}`;
     land(o.issue, "held", reason);
-    if (!dryRun) await host.write(() => tracker.hold(o.issue, `Gated green on \`${o.branch}\` after a repair, but not merged: ${why}. Review the repair commits and merge by hand.`));
+    if (!dryRun) await host.write(() => tracker.hold(o.issue, `Gated green on \`${o.branch}\` after a repair, but not merged: ${why}. Review the repair commits and merge by hand.`), trackerMade(root));
     return { kind: "held", paths: [], reason };
   }
   if (dryRun) {
@@ -311,25 +377,26 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   if (isAncestor(root, before, o.head!)) {
     try {
       // The commit the gates passed on, not whatever the branch names now.
-      await host.write(() => mergeBranch(root, o.branch, o.head!, ref(o.issue), project.land));
+      await host.write(() => mergeBranch(root, o.branch, o.head!, ref(o.issue), project.land), landingMade(root, o.head!, project.land));
     } catch (error) {
       // The write was refused before it ran: nothing to abort, and no git may run on the host now.
       if (error instanceof LandingStop) throw error;
-      try {
-        abortLanding(root, project.land);
-      } catch {
-        /* nothing to abort */
-      }
       // git's own last line ("Merge with strategy ort failed.") names no file, and
       // its wording varies by version, so the reason comes from the working tree. A branch
-      // that holds the base cannot conflict: this is a dirty index, a full disk.
-      const dirty = (() => {
+      // that holds the base cannot conflict: this is a dirty index, a full disk. Both are host
+      // git calls (`git status` can run an fsmonitor), so they are a write: checked first.
+      const dirty = await host.write(() => {
+        try {
+          abortLanding(root, project.land);
+        } catch {
+          /* nothing to abort */
+        }
         try {
           return dirtyFiles(root);
         } catch {
           return [];
         }
-      })();
+      });
       const reason =
         dirty.length > 0
           ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
@@ -341,15 +408,24 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   } else {
     let result: Awaited<ReturnType<typeof landInSandbox>>;
     try {
-      result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () =>
-        landInSandbox(
-          project,
-          { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})`, squash },
-          opener,
-          (box) => ctx.gate(box, o.issue),
-          host.expected,
-        ),
-      );
+      const wanted = ctx.slotWanted ?? { n: 0 };
+      let waiting = true;
+      wanted.n++;
+      try {
+        result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () => {
+          wanted.n--;
+          waiting = false;
+          return landInSandbox(
+            project,
+            { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})`, squash },
+            opener,
+            (box) => ctx.gate(box, o.issue),
+            host.expected,
+          );
+        });
+      } finally {
+        if (waiting) wanted.n--;
+      }
     } catch (error) {
       // The .git check stops the run, as before landing.
       if (error instanceof OperatorError) throw new LandingStop(error.message, { cause: error });
@@ -407,7 +483,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // landed" sent a human to merge work already on the base branch.
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }) };
   try {
-    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated }, gateNames, reports.get(o.issue))));
+    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated }, gateNames, reports.get(o.issue))), trackerMade(root));
     land(o.issue, "merged", regenerated ? "merged and closed (generated files regenerated)" : "merged and closed");
     return { kind: "merged", ...merged };
   } catch (error) {
@@ -458,9 +534,20 @@ export const createLanding = (
           await ctx.host.check(`before landing ${ctx.tracker.ref(o.issue)}`);
           landed = await landOne(ctx, o);
         } catch (error) {
-          if (!(error instanceof OperatorError)) throw error;
-          stop = error;
-          return on.stopped(o, error);
+          if (error instanceof OperatorError) {
+            stop = error;
+            return on.stopped(o, error);
+          }
+          // Anything else (a tracker call that failed, a full disk, a branch gone) costs this
+          // ticket only. Thrown on, it ended the process while pipelines still ran: no summary,
+          // and tickets already landed went unreported.
+          const reason = errorLine(error);
+          try {
+            ctx.run.ticket(o.issue, { state: "not landed", note: reason });
+          } catch {
+            /* the record is what failed; the outcome below still stands */
+          }
+          landed = { kind: "not-landed", reason };
         }
         on.settled(o, landed);
         // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.

@@ -55,7 +55,7 @@ import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit } from "./pool.ts";
@@ -282,6 +282,7 @@ try {
       // The sandbox shares the repo's .git, so the run's host guards apply.
       disableHostGitHooks();
       const project = await loadProject(root);
+      pinHostGitConfig(project.root);
       const fingerprint = gitFingerprint(project);
       try {
         await requireGreenBase(project, await ensureImage(project), writePlan(project).file, false);
@@ -295,6 +296,7 @@ try {
       // The merge lands in this checkout, so it must be clean and no run may be merging into it.
       disableHostGitHooks();
       const project = await loadProject(root);
+      pinHostGitConfig(project.root);
       assertCleanBase(project);
       lockRun(project);
       console.log(
@@ -347,6 +349,7 @@ try {
       // live run's own worktrees must survive, so this takes the run lock.
       disableHostGitHooks();
       const project = await loadProject(root);
+      pinHostGitConfig(project.root);
       lockRun(project);
       reapOrphans(project);
       unlockAll();

@@ -20,6 +20,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A blocker closed as not planned now holds its dependants.** Before, it counted as done and the
   dependant started without the work it waited for. Reopen the blocker, or remove its
   `Blocked by` line.
+- **The kit's own commits during a run are no longer signed**, even with `commit.gpgSign` on: a
+  signing program is one a sandbox could replace in `.git/config`. This covers landing merges and
+  ticket-file commits. Your own commits are unaffected. A repo that requires signed commits on its
+  base branch needs them signed before pushing (for example `git rebase --exec 'git commit
+  --amend --no-edit -S'`), or landing by hand.
 
 ### Changed
 
@@ -28,8 +33,31 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The host git of a run now has `gc.auto=0`, so a landing merge never starts maintenance while
   sandboxes add worktrees.
 
+### Security
+
+- **In-run landing is hardened against live sandboxes.**
+  - The landing writer accepts a moved base only when its own write made it: a merge holding
+    exactly the gated tree, or a ticket file's commit. A base moved by anything else during a
+    write - a `gh` call takes seconds - stops the run instead of being taken as the kit's own.
+  - A sandbox landing reads its merge commit before the gates run, refuses a scratch ref moved
+    since, and checks the tree against the host's own `git merge-tree` (git 2.38+).
+  - `.git/HEAD` is fingerprinted.
+  - The abort and `git status` after a failed merge are checked first, like a write.
+  - A re-run's conflict resolution is checked against a base tip only if the host finds it on the
+    base.
+- **Git config keys that run a program are pinned for the run's host git.** `core.fsmonitor`
+  and commit signing are off, and drivers, pagers, editors and signing programs keep the value
+  configured at the start. So the kit's own landing merges and ticket-file commits are no longer
+  signed, even where `commit.gpgSign` is on.
+
 ### Fixed
 
+- An unexpected error while landing one ticket (a tracker call that failed, a full disk) no longer
+  ends the run with pipelines still working. That ticket is `not landed`, and the others land.
+- With a machine-wide sandbox limit of 1, a landing that needs a sandbox no longer waits for every
+  pipeline to end: pipelines start no new sandbox while a landing waits for one.
+- `.git/info/refs`, which `git repack` (an auto gc in a sandbox) rewrites, no longer reads as
+  tampering and stops the run.
 - The blocker check now also names a blocker held for a human, one that is open but not queued,
   and a `Blocked by` line written inside code (which a run does not read). The closing summary
   says why each ticket is still blocked.

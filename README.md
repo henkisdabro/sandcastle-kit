@@ -857,9 +857,16 @@ and the kit narrows what can cross it:
 - 🪝 **Host git hooks off.** Sandcastle mounts the project's `.git` into every container. During a
   run the host's own git calls ignore hooks, so a branch that adds `.husky/post-merge` does not
   run it on your machine when it lands.
-- 🧬 **`.git` fingerprint.** `.git/config`, `.git/info/`, `.git/hooks/` and the base branch are
-  fingerprinted; if a sandbox changes them, the run stops before the host runs another git command
-  there, naming the file. A hook planted there would otherwise run on your next checkout or commit.
+- 📌 **Command-running config pinned.** For the run's own git calls, `core.fsmonitor` and commit
+  signing are off, and every filter, merge or diff driver, pager, editor and signing program
+  configured when the run starts keeps that value, through git's command-scope config. A value a
+  sandbox writes into `.git/config` mid-run is never the one the host's git runs.
+- 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/`, `.git/hooks/` and the base
+  branch are fingerprinted; if a sandbox changes them, the run stops before the host runs another
+  git command there, naming the file. A hook planted there would otherwise run on your next
+  checkout or commit. While tickets land during the run, the base may move only by the kit's own
+  writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
+  stops the run.
 - 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
   labelled `needs-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
