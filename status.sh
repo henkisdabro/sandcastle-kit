@@ -1025,17 +1025,21 @@ if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
 # not arrive as arrow keys. isig stays on: Ctrl-C must still stop the view.
 # A background view would be stopped by SIGTTIN/SIGTTOU on those tty calls, so
 # both are ignored (the calls then fail and the view carries on as before).
+# TTY_SAVED is set only while that mode is in force: Ctrl-C runs restore twice
+# (the INT trap, then the EXIT trap its `exit` fires), and a drain of a tty
+# back in canonical mode blocks until lines are typed, hanging the view.
 TTY_SAVED=$( { stty -g </dev/tty; } 2>/dev/null) || TTY_SAVED=""
 drain() { [ -n "$TTY_SAVED" ] && { dd if=/dev/tty of=/dev/null bs=1024 count=4; } 2>/dev/null; return 0; }
 restore() {
   drain
   [ -n "$TTY_SAVED" ] && { stty "$TTY_SAVED" </dev/tty; } 2>/dev/null
+  TTY_SAVED=""
   printf '\e[?1007h\e[?7h\e[?25h\e[?1049l'
 }
 trap restore EXIT
 trap 'restore; exit 130' INT TERM
 trap '' TTIN TTOU
-[ -n "$TTY_SAVED" ] && { stty -echo -icanon min 0 time 0 </dev/tty; } 2>/dev/null
+if [ -n "$TTY_SAVED" ]; then { stty -echo -icanon min 0 time 0 </dev/tty; } 2>/dev/null || TTY_SAVED=""; fi
 printf '\e[?1049h\e[?25l\e[?7l\e[?1007l\e[2J'
 
 # Redraw on a pane resize instead of waiting out the interval. A render takes

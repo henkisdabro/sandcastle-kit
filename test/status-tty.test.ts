@@ -83,3 +83,36 @@ test("without a terminal the view still runs and leaves no stty error", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!/stty|tty/i.test(r.stderr), r.stderr);
 });
+
+// Ctrl-C runs `restore` twice: from the INT trap, then from the EXIT trap its
+// `exit` fires. The second one found the tty back in canonical mode, and its
+// drain then blocked reading /dev/tty until lines were typed - the view hung
+// on Ctrl-C and ate what came next. The view's `sleep` here interrupts it the
+// way Ctrl-C does, and a reader on the pty's other side never types a line.
+test("Ctrl-C stops the live view at once and puts the tty back", { skip: hasScript ? false : "script(1) is not installed" }, () => {
+  const fake = join(TMP, "bin-int");
+  mkdirSync(fake);
+  for (const f of ["sandcastle", "docker"]) script(join(fake, f), readFileSync(join(FAKE, f), "utf8"));
+  script(join(fake, "sleep"), "#!/bin/sh\nkill -INT $PPID\nexec /bin/sleep 30\n");
+  const before = join(TMP, "int-before");
+  const afterF = join(TMP, "int-after");
+  const wrap = join(TMP, "wrapper-int.sh");
+  script(
+    wrap,
+    `#!/bin/sh
+stty -g </dev/tty >"${before}"
+bash "${join(KIT, "status.sh")}" 1
+echo "status=$?" >"${afterF}"
+stty -g </dev/tty >>"${afterF}"
+`,
+  );
+  const args = process.platform === "linux" ? ["-qec", `sh '${wrap}'`, "/dev/null"] : ["-q", "/dev/null", "sh", wrap];
+  const r = spawnSync("script", args, {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${fake}:${process.env.PATH}`, SANDCASTLE_PROJECT: REPO, SANDCASTLE_BASE: "main" },
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 20000,
+  });
+  assert.equal(r.error, undefined, `the view hung after Ctrl-C: ${r.error}`);
+  assert.equal(readFileSync(afterF, "utf8"), `status=130\n${readFileSync(before, "utf8")}`, "view did not exit 130 with the tty restored");
+});
