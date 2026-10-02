@@ -24,7 +24,7 @@ export const kitRelease = (kit = KIT): string => JSON.parse(readFileSync(join(ki
 
 /**
  * The kit version: the release, and in a clone that is not exactly at it, how far past it and at
- * which commit - `0.4.2`, `0.4.2 +1 (1c4f46f)`, `0.4.2 (1c4f46f, local changes)`. Counted from the
+ * which commit - `0.5.0`, `0.5.0 +1 (1c4f46f)`, `0.5.0 (1c4f46f, local changes)`. Counted from the
  * release's own tag, not the nearest one: between a version bump and its tag, `git describe`
  * counted from the release before and printed the wrong distance.
  */

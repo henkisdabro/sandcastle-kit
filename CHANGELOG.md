@@ -9,6 +9,24 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
+### Upgrading
+
+- **Run `/sandcastle update` once in each project, then start a new agent session.** It pulls the
+  kit, rebuilds the project's image, rewrites the update record in its new form (the release and
+  the notes acted on, readable without git) and checks that `.sandcastle/.gitignore` holds `.env`,
+  `logs/`, `worktrees/`, `.run/` and `triage/`. The skill is a link into the kit, but a session
+  keeps the skill it loaded at its start, so only a new session reads the corrected instructions.
+- **The Claude Code mod needs Claude Code 2.1.287 or newer** (`claude --version`). It is linked, not
+  copied, so the pull updates it and an open session reloads it; its band is now three rows tall.
+  Without the mod, nothing changes. `sandcastle doctor` lists it with its one-line link if it is
+  not set up.
+- **Node 22 or newer.** `package.json` now says so, and `pnpm install` warns on an older Node.
+- **`autonomy: "drain"` is for tickets that conflict across turns, not for `Blocked by` chains.** A
+  chain whose links are all queued drains in one run at any level. A project that set `drain` only
+  for its chains can drop it; nothing breaks if it stays.
+
 ### Added
 
 - **`sandcastle --version`.** Prints the kit version: the release, and in a clone that is past it
@@ -51,6 +69,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`queue --lint` no longer counts blocker depth as turns.** Its estimate says one run, with the
+  chain's tickets one after another in it, since dependants start as their blockers land.
+- **A change to `AGENTS.md` or `CLAUDE.md` beside an added file is not a Touches overrun.** A
+  ticket that adds a module adds its row to the layout table, so the report and the close comment
+  no longer name it; on a branch that adds nothing it still counts.
 - **`sandcastle <command> --help` (or `-h`) prints that command's help and runs nothing.**
   `clean --help` used to run the clean and delete the agent branches. A help flag counts anywhere
   in the arguments, `queue --help` shows the `queue --lint` entry too, `sandcastle herdr ... --help`
@@ -1082,7 +1105,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.3.0...v0.4.0
