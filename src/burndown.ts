@@ -26,7 +26,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";

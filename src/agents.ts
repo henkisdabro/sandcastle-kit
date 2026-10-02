@@ -114,8 +114,6 @@ const resultUsage = (line: string) => {
   }
 };
 
-export const implEffort = () => IMPL_EFFORT;
-
 /** A ticket's own choice of implementer, from its `model:` and `effort:` labels. */
 export type Override = { model?: string; effort?: Effort };
 
