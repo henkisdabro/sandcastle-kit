@@ -184,11 +184,12 @@ git_ branch -q -D agent/issue-113
 # ---------------------------------------------------------------------------
 SCENARIO="live run, in-run landing"
 # Tickets land while others still run: #103 is landing, #104 went red together with
-# #110 (landed a minute ago), #105 was put back in the queue. None of the three
-# holds a sandbox: of three slots, two are working, so both queued tickets start at once.
+# #110 (landed a minute ago), #105 was put back in the queue: queued, with the line
+# that says why. None of the three holds a sandbox: of four slots, two are working,
+# so all three queued tickets start at once.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m",
-  "stage": "running", "concurrency": 3,
+  "stage": "running", "concurrency": 4,
   "typical": { "implement": 600, "gates": 60, "issue": 900 },
   "issues": ["101","102","103","104","105","106","107","110"],
   "tickets": {
@@ -196,7 +197,7 @@ cat >"$L/run.json" <<EOF
     "102": { "state": "gates", "since": $((now - 600)), "started": $((now - 700)), "note": "2/3 pytest" },
     "103": { "state": "landing", "since": $((now - 20)), "note": "merging into main" },
     "104": { "state": "red", "since": $((now - 40)), "note": "red with #110" },
-    "105": { "state": "requeued", "since": $((now - 50)), "note": "red together with #110 - next run" },
+    "105": { "state": "queued", "order": 5, "since": $((now - 50)), "requeued": "requeued after red with #110" },
     "106": { "state": "queued", "order": 6, "since": $now },
     "107": { "state": "queued", "order": 7, "since": $now },
     "110": { "state": "merged", "since": $((now - 60)), "note": "merged and closed" }
@@ -207,7 +208,7 @@ row '#101' impl
 row '#102' gates
 row '#103' landing 'merging into main'
 row '#104' 'gate red' 'red with #110'
-row '#105' requeued 'red together with #110'
+row '#105' queued 'requeued after red'
 row '#106' queued 'next to start'
 row '#107' queued 'next to start'
 row '#110' merged
