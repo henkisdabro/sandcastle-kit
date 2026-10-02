@@ -35,7 +35,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { isTicketState, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
+import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
@@ -56,7 +56,7 @@ import {
   accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
-import { type Attempted, type Change, createFileHold, createSchedule, type Ending, fileWaitNote, type StopCause, startHold, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Release, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -231,6 +231,62 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
   return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
 };
 
+/**
+ * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
+ * is said and put on `waiting` (before the run record exists), and each pair that starts together
+ * sharing a mergeable file is named. `tell`: what the scheduler tells of the hold as the run goes -
+ * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
+ * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
+ */
+export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void }) => {
+  // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
+  const started = new Set<string>();
+  type Record = { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
+  const write = (run: Record, fields: RunRecord = {}) => run.update({ waiting: o.waiting.filter((w) => !started.has(w.issue)), ...fields });
+  // What the ticket waits for: the ticket that holds its file now (`holder`), not the one it was
+  // parked behind first. With no holder left (a stopped run) `was` is dropped from it, and a ticket
+  // that waits for nothing more leaves the list.
+  const waitsFor = (run: Record, id: string, was: string | undefined, holder?: string) => {
+    const at = o.waiting.findIndex((w) => w.issue === id);
+    const on = holder ? [o.ref(holder)] : at >= 0 ? o.waiting[at].on.filter((b) => b !== (was && o.ref(was))) : [];
+    if (at >= 0) {
+      if (on.length) o.waiting[at].on = on;
+      else o.waiting.splice(at, 1);
+    } else if (on.length) o.waiting.push({ issue: id, on });
+    write(run);
+  };
+  return {
+    start(candidates: readonly Start<{ id: string }>[]) {
+      for (const { ticket, file, shares } of candidates) {
+        if (file) {
+          o.waiting.push({ issue: ticket.id, on: [o.ref(file.with)] });
+          o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
+        }
+        for (const share of shares ?? []) o.say(`  ${fileShareLine(o.ref, ticket.id, share)}`);
+      }
+    },
+    tell(run: Record, c: HoldChange) {
+      switch (c.kind) {
+        case "started":
+          started.add(c.id);
+          o.say(`  ${o.ref(c.id)} starts: ${c.after.kind === "blockers" ? "its last blocker has landed" : `${o.ref(c.after.freed)} is done with the file they both change`}`);
+          for (const share of c.shares) o.say(`  ${fileShareLine(o.ref, c.id, share)}`);
+          run.ticket(c.id, { state: "queued", note: null });
+          write(run, { stage: "running" });
+          return;
+        case "waits":
+          if (c.parked) o.say(`  ${o.ref(c.id)} ${fileWaitNote(o.ref, c.wait)}`);
+          run.ticket(c.id, { state: "blocked", note: fileWaitNote(o.ref, c.wait) });
+          waitsFor(run, c.id, undefined, c.wait.with);
+          return;
+        case "next run":
+          run.ticket(c.id, { note: stoppedWaitNote(o.ref, c.wait) });
+          waitsFor(run, c.id, c.freed, c.wait?.with);
+      }
+    },
+  };
+};
+
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
@@ -297,12 +353,14 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // whatever the order, so one ticket at a time has it in flight; the others wait for that one to
   // land or leave the run. Files git can merge never hold a ticket: landing and the requeue resolve
   // them, and the start says which tickets will meet. A dry run lands nothing, so it holds nothing.
+  // The scheduler decides all of it, here, before the run is recorded.
   const laterOverrides = new Map<string, ReturnType<typeof ticketOverride>>();
-  const hold = DRY_RUN ? undefined : createFileHold<Issue>((t) => ticketFiles(project, t), (t, files) => refreshFiles(project, t, files));
-  const start = startHold(hold, ready, {
-    ref,
-    waiting,
-    // A parked ticket starts in this run, so a ticket that waits for it as a blocker does too.
+  // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
+  // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
+  // first conflict or red sent back once, the file hold, and the release of what waits, as each ticket ends.
+  const schedule = createSchedule<Issue, Outcome, Outcome>({
+    tickets: ready,
+    files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
     // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
     dependants: (starting) => {
       const startable = dependantsInRun(starting.map((i) => i.id), held);
@@ -320,9 +378,38 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return error.message;
       }
     },
-    say: (line) => console.log(line),
+    release: (s): Release => {
+      // A landing that has closed its ticket frees the tickets that waited for it, on the landing
+      // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
+      const { afterLanding, skipped } = createRelease({
+        dependants: waits,
+        start: s.start,
+        finish: s.finish,
+        stop: s.stop,
+        dryRun: DRY_RUN,
+        // Asked only of a ticket being freed: a bad label holds it, and is its ending.
+        badLabel: s.badLabel,
+        record: run,
+        ref,
+        say: (line) => console.log(line),
+      });
+      return {
+        afterLanding,
+        skipped,
+        get more() {
+          return waits.waitsForFlight;
+        },
+      };
+    },
   });
-  const { issues, parked, dependants, candidates, order, badLabels } = start;
+  const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
+  holds.start(schedule.start);
+  const candidates = schedule.start.map((c) => c.ticket);
+  const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
+  const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
+  const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
+  // `order` in run.json: a released ticket queues behind the ones already waiting for a sandbox.
+  const order = new Map(candidates.map((t, at) => [t.id, at] as const));
   if (issues.length === 0) {
     console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
@@ -1245,6 +1332,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return requeues.requeued(c.id, c.again);
       case "ended":
         return ended(c.id, c.ending);
+      default:
+        return holds.tell(run, c);
     }
   };
 
@@ -1257,41 +1346,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     throw error;
   };
 
-  // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
-  // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
-  // first conflict or red sent back once, and the release of what waits, as each ticket ends.
-  const schedule = createSchedule<Issue, Outcome, Outcome>({
-    tickets: issues,
-    later: [...dependants.map((ticket) => ({ ticket, on: "blockers" as const })), ...parked.map((p) => ({ ticket: p.ticket, on: "file" as const }))],
-    release: (s) => {
-      // A landing that has closed its ticket frees the tickets that waited for it, on the landing
-      // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
-      const { afterLanding } = createRelease({
-        dependants: waits,
-        hold,
-        start: s.start,
-        finish: s.finish,
-        stop: s.stop,
-        dryRun: DRY_RUN,
-        // Asked only of a ticket being freed: a bad label holds it, and is its ending.
-        badLabel: (id) => {
-          const bad = badLabels.get(id);
-          if (bad) s.refuse(id, bad);
-          return bad;
-        },
-        record: run,
-        waiting,
-        ref,
-        say: (line) => console.log(line),
-      });
-      return {
-        afterLanding,
-        get more() {
-          return waits.waitsForFlight || !!hold?.size;
-        },
-      };
-    },
-  });
   const { endings, stop } = await schedule
     .run({ workers, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {

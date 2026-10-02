@@ -33,6 +33,7 @@ process.env.PATH = `${SHIM}${delimiter}${process.env.PATH}`;
 
 const { blockedNote, createDependants, createRelease, dependantsInRun, openBlockers, blockerResolver } = await import("../src/blockers.ts");
 const { createHostGit, landingWork } = await import("../src/landing.ts");
+const { createHoldRecord } = await import("../src/burndown.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { createLanding, createQueue, createSchedule, createStopState } = await import("../src/schedule.ts");
 type StopWriter = import("../src/schedule.ts").StopWriter;
@@ -211,15 +212,19 @@ const runWith = async (
   let landing!: ReturnType<typeof createLanding<Waiting>>;
   const stop = createStopState(host);
   const flow = openCount(ready.length, queue, { close: () => landing.close() });
+  // The burndown's record of what the scheduler tells when a ticket its blockers freed starts.
+  const holds = createHoldRecord({ waiting, ref: tracker.ref, say: (line) => void run.said.push(line) });
   const { afterLanding } = createRelease({
     dependants: waits,
-    start: (t) => flow.start(t),
+    start: (t) => {
+      flow.start(t);
+      holds.tell(record, { kind: "started", id: t.id, after: { kind: "blockers" }, shares: [] });
+    },
     finish: () => flow.finish(),
     stop,
     dryRun: opts.dryRun ?? false,
     badLabel: (id) => opts.badLabel?.[id],
     record,
-    waiting,
     ref: tracker.ref,
     say: (line) => void run.said.push(line),
   });

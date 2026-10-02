@@ -29,12 +29,13 @@ const play = async (
     host?: Work<T, G, O>["host"];
     workers?: number;
     later?: Plan<T>["later"];
+    checkLabel?: Plan<T>["checkLabel"];
     release?: Plan<T>["release"];
   } = {},
 ) => {
   const told: Change<G, O>[] = [];
   const order: string[] = [];
-  const { endings, stop } = await createSchedule<T, G, O>({ tickets: ids.map((id) => ({ id })), later: o.later, release: o.release }).run({
+  const { endings, stop } = await createSchedule<T, G, O>({ tickets: ids.map((id) => ({ id })), later: o.later, checkLabel: o.checkLabel, release: o.release }).run({
     workers: o.workers ?? ids.length,
     attempt: async (t, at) => {
       order.push(`attempt ${t.id}#${at.n}`);
@@ -268,13 +269,16 @@ test("the release hears each ending after it is told, a landed ticket as landed,
       { ticket: { id: "2" }, on: "blockers" },
       { ticket: { id: "3" }, on: "blockers" },
     ],
+    // Read at the start; it holds 3 once 3 is freed.
+    checkLabel: (t) => (t.id === "3" ? "NOT STARTED: #3 has the label effort:turbo" : undefined),
     release: (s) => ({
       afterLanding: (id, landed) => {
         heard.push(`${id} ${landed}`);
         // 1 landed: 2 is freed, 3's label holds it. Started before the finish, so the run waits for 2.
         if (id === "1") {
           s.start({ id: "2" });
-          s.refuse("3", "NOT STARTED: #3 has the label effort:turbo");
+          assert.equal(s.badLabel("3"), "NOT STARTED: #3 has the label effort:turbo");
+          assert.equal(s.badLabel("2"), undefined);
         }
         s.finish();
       },
