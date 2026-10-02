@@ -1,0 +1,48 @@
+name: Pages
+
+# The project website, site/: static files with no build step. It deploys when
+# the site changes on main, when a release is published (the page names the
+# latest version, stamped here from the newest tag), or by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a running one is never cut off half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Stamp the latest version
+        run: |
+          version=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$version" ]; then
+            sed -E -i "s#(<span data-version>)[^<]*#\1${version}#g" site/index.html
+          fi
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5
