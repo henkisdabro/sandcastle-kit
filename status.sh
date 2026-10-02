@@ -438,6 +438,7 @@ outcome_state() {
     "gate red"*) printf 'gate red';;
     "merge conflict"*) printf 'conflict';;
     "needs a human"*) printf 'held';;
+    uncommitted*) printf 'uncommitted';;
     crashed*) printf 'crashed';;
     "failed to land"*|"not merged"*) printf 'not landed';;
     withdrawn*) printf 'withdrawn';;
@@ -454,7 +455,7 @@ outcome_state() {
 style_of() {
   case "$1" in
     setup|impl|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
-    stalled|orphaned|stopped|"gate red"|conflict|held|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
+    stalled|orphaned|stopped|"gate red"|conflict|held|uncommitted|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
     ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
     queued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
     blocked) glyph='~'; colour="$blu"; prio=4; grp=blocked;;
@@ -615,10 +616,10 @@ render() {
   # at 80 columns every note was cut to 30 characters. Below 80, CPU does too.
   # wide: 2 with MEM, 1 with CPU only, 0 with neither.
   wide=2; [ "$cols" -lt 100 ] && wide=1; [ "$cols" -lt 80 ] && wide=0
-  # STATE's minimum fits "! not landed", the longest state - but for the
+  # STATE's minimum fits "! uncommitted", the longest state - but for the
   # narrowest panes, which cut it.
-  local -a MIN=($(( longest + 2 )) 14 6 9 7 7) PCT=(6 9 5 6 6 6)
-  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 14 6 9 7); PCT=(6 9 5 6 6); }
+  local -a MIN=($(( longest + 2 )) 15 6 9 7 7) PCT=(6 9 5 6 6 6)
+  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 15 6 9 7); PCT=(6 9 5 6 6); }
   [ "$wide" = 0 ] && { MIN=($(( longest + 2 )) 12 6 9); PCT=(6 9 5 6); }
   avail=$(( cols - ${#MIN[@]} - 2 ))
   for (( i=0; i<${#MIN[@]}; i++ )); do

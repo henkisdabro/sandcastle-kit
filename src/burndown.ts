@@ -25,7 +25,7 @@
 
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
@@ -76,6 +76,26 @@ type Outcome = {
   unreviewed?: boolean;
   /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
   ungated?: string;
+};
+
+/**
+ * The kept worktree of a pipeline that ended with no commits: the agent finished and its commit
+ * was refused (a git hook, a full disk, a signing failure), so Sandcastle kept the worktree for
+ * its uncommitted files. That is not "nothing to change" - the work exists.
+ */
+export const keptFor = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[]) =>
+  o.status === "nochange" && o.commits === 0 ? kept.find((k) => k.issue === o.issue) : undefined;
+
+/** The record of a pipeline that added no commits: uncommitted work first, then a hand-back, then nothing to change. */
+export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[], root: string, handedBack: boolean): TicketRecord => {
+  const k = keptFor(o, kept);
+  if (k) {
+    // Shown relative to the project, as the worktrees live in .sandcastle/worktrees/<name>.
+    const inside = relative(root, k.path);
+    const where = inside && !inside.startsWith("..") && !isAbsolute(inside) ? inside.split(sep).join("/") : k.path;
+    return { state: "uncommitted", note: `work left uncommitted in ${where}` };
+  }
+  return { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
 };
 
 // A branch's outcome as the status view's row shows it, before landing.
@@ -1073,6 +1093,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   queue.close();
   const begun = new Set<string>();
   const calledOff = new Set<string>();
+  const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
   // The ticket's state once its pipeline ends. A green branch that changes
   // hooks, CI or install scripts says so now: before, a human merge was news
   // only at the end of the run.
@@ -1085,7 +1106,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
     if (o.status === "merged-earlier") return { state: "ready", note: `merged earlier (${o.head}) - to close` };
     if (o.status === "gate-failed") return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
-    return { state: "nochange", note: notes.some((n) => n.issue === o.issue && n.kind === "hold") ? "handed back - for a human" : "nothing to change" };
+    return noCommitRecord(o, keptWorktrees, project.root, notes.some((n) => n.issue === o.issue && n.kind === "hold"));
   };
   // What the view and the records say about a finished pipeline. A throw here
   // (a git call, a full disk) would escape the settle handlers and reject the
@@ -1135,11 +1156,11 @@ export const burndown = async (project: Project): Promise<boolean> => {
             run.update({ typical: typicalTimes(project, [...took.values()]) });
             // With nothing left to start, the pane closes: five panes each
             // frozen on a finished agent's summary read as five stuck sandboxes.
-            view.finish(issue.id, finishWord(value), queue.size === 0);
+            view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), queue.size === 0);
             // Recorded now, not only at the report: a branch waiting for
             // landing had no outcome for this run, and its row read as an
             // earlier run's leftover. Landing overwrites it.
-            recordOutcomes(project, runId, { [issue.id]: outcomeText(value) });
+            recordOutcomes(project, runId, { [issue.id]: uncommittedWork(value) ? "uncommitted" : outcomeText(value) });
           });
           // To the landing worker as it ends, not when the slowest pipeline does.
           if (value.status === "green" || value.status === "merged-earlier") {
@@ -1209,7 +1230,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const handedBack: string[] = [];
   if (tracker.agentsWrite && !DRY_RUN) {
     for (const r of results) {
-      if (r.status !== "fulfilled" || r.value.status !== "nochange") continue;
+      if (r.status !== "fulfilled" || r.value.status !== "nochange" || uncommittedWork(r.value)) continue;
       try {
         if (tracker.get(r.value.issue).held) handedBack.push(r.value.issue);
       } catch {
@@ -1238,7 +1259,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
         console.log(`Could not update ${ref(n.issue)}: ${errorLine(error)}`);
       }
     }
-    if (n.kind === "hold") {
+    // A hold on a ticket whose finished work sits uncommitted keeps its own state: the work exists.
+    if (n.kind === "hold" && !keptFor({ issue: n.issue, status: "nochange", commits: 0 }, keptWorktrees)) {
       view.landed(n.issue, false, "needs a human");
       land(n.issue, "held", "handed back - for a human");
     }
@@ -1268,7 +1290,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const outcome = new Map<string, string>();
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
-    outcome.set(r.value.issue, outcomeText(r.value));
+    outcome.set(r.value.issue, uncommittedWork(r.value) ? "uncommitted" : outcomeText(r.value));
   }
   for (const n of merged) outcome.set(n, "merged");
   for (const n of closeFailed) outcome.set(n, "merged (ticket not closed)");
