@@ -408,6 +408,9 @@ export const createLanding = <G extends Green>(
         let landed: Landed;
         try {
           await ports.host.check(g.issue);
+          // The check waits its turn on the host git, behind a pipeline's own check: a safety stop
+          // that arrived meanwhile lands this one no more than the ones queued behind it.
+          if (stop.landsNothing) return on.stopped(g);
           landed = await ports.land(g);
         } catch (error) {
           if (error instanceof OperatorError) {
