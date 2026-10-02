@@ -1001,8 +1001,9 @@ start lines and `sandcastle build` print `Claude Code <version> (<channel>) · C
 
 ## 🪶 Lean sandboxes and hooks
 
-A sandbox has no user-level `~/.claude`, so the project's own Claude Code config is everything an
-agent loads - and each skill description and MCP tool schema is paid on every turn. Before the
+A sandbox has no user-level `~/.claude` (the kit's managed git guard, see
+[Safety model](#-safety-model), adds a hook and no context), so the project's own Claude Code config
+is everything an agent loads - and each skill description and MCP tool schema is paid on every turn. Before the
 agent starts, each worktree loses `.claude/skills`, `.claude/agents`, `.claude/commands`,
 `.agents/skills` (read by Codex), `.mcp.json`, `.codex/config.toml`, and the plugin, marketplace,
 MCP-enable and status-line keys of `.claude/settings.json`. Permissions and `env` stay. The
@@ -1071,6 +1072,13 @@ and the kit narrows what can cross it:
   checkout or commit. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run.
+- 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
+  `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `push`,
+  `reflog expire`, `worktree prune` and `repair`, deleting an `agent/*` branch, `rm` or `mv` inside
+  the shared `.git`, and writes to it. Project hooks still run, and `reset --hard`, `clean`,
+  `checkout .` and `worktree remove --force` stay allowed. It reduces accidents and is not a
+  boundary - `sh -c` or a script gets past a command match; the host-side checks here are the real
+  protection.
 - 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or
   labelled `ready-for-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
