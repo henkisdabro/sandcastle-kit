@@ -62,6 +62,9 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
 };
 
+/** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
+export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${paths.join(", ")}`;
+
 export const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
 const LEFT = ["blocked", "skipped"];
 // Where a ticket's part in a run ends. Any other state at the end - a phase, or
@@ -292,6 +295,8 @@ export const render = (f: Facts, plain = false): string => {
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
     done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
   }
+  // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
+  for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} ${overrunLine(f.tickets[id].overrun!)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {

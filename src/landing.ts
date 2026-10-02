@@ -18,18 +18,35 @@ import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
+import { overrunLine } from "./report.ts";
 import { createQueue } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
+import { expandTouches, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
 export const conflictLine = (c: { files: string[]; with: string[] }) =>
   (c.with.length ? `with ${c.with.map(refOf).join(", ")}: ` : "") +
   `${c.files.slice(0, 3).join(", ")}${c.files.length > 3 ? ` and ${c.files.length - 3} more` : ""}`;
 
+/**
+ * The paths the branch changed that its ticket's `Touches:` line did not declare; `[]` for a ticket
+ * with no line. The line is agent-written, so this only ever warns. A glob names the files a ref
+ * has, so it is read against the branch head (a new file the glob covers) as well as the base (a
+ * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
+ */
+export const touchesOverrun = (root: string, base: string, head: string, body: string): string[] => {
+  const patterns = parseTouches(body);
+  if (!patterns.length) return [];
+  const declared = new Set([...expandTouches(root, base, patterns), ...expandTouches(root, head, patterns)]);
+  return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${head}`], root)
+    .split("\0")
+    .filter((f) => f && !declared.has(f));
+};
+
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
 export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] } },
+  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -39,6 +56,7 @@ export const closeComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
@@ -315,6 +333,15 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     land(o.issue, "not landed", reason);
     return { kind: "skipped", reason };
   }
+  // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
+  // costs the warning only.
+  let overrun: string[] = [];
+  try {
+    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "");
+    if (overrun.length) run.ticket(o.issue, { overrun });
+  } catch {
+    overrun = [];
+  }
   const touched = protectedChanges(project, o.branch);
   if (touched.length) {
     const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`;
@@ -483,7 +510,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // landed" sent a human to merge work already on the base branch.
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }) };
   try {
-    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated }, gateNames, reports.get(o.issue))), trackerMade(root));
+    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated, overrun }, gateNames, reports.get(o.issue))), trackerMade(root));
     land(o.issue, "merged", regenerated ? "merged and closed (generated files regenerated)" : "merged and closed");
     return { kind: "merged", ...merged };
   } catch (error) {
