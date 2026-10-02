@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es2023",
+    "target": "es2024",
     "module": "esnext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -9,5 +9,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "test/autonomy.test.ts", "test/herdr.test.ts", "test/herdr-panes.test.ts", "test/herdr-counts.test.ts", "test/report.test.ts", "test/run-record-types.test.ts"]
+  "include": ["src", "test"]
 }

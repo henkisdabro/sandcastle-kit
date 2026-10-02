@@ -30,11 +30,12 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview,
 import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
-import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
+import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
-import { isTicketState, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
+import { registerRun } from "./live-runs.ts";
+import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
@@ -51,8 +52,11 @@ import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
-import { conflictLine, createFlow, createHostGit, createLanding, createSettling, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
-import { createFileHold, createQueue, fileWaitNote, startHold, type TicketFiles } from "./schedule.ts";
+import {
+  accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
+  trackerMade, withdrawnRecord,
+} from "./landing.ts";
+import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -227,6 +231,65 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
   return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
 };
 
+/**
+ * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
+ * is said and put on `waiting` (before the run record exists), and each pair that starts together
+ * sharing a mergeable file is named. `tell`: what the scheduler tells of the hold as the run goes -
+ * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
+ * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
+ */
+export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void }) => {
+  // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
+  const started = new Set<string>();
+  type Record = { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
+  const write = (run: Record, fields: RunRecord = {}) => run.update({ waiting: o.waiting.filter((w) => !started.has(w.issue)), ...fields });
+  // What the ticket waits for: the ticket that holds its file now (`holder`), not the one it was
+  // parked behind first. With no holder left (a stopped run) `was` is dropped from it, and a ticket
+  // that waits for nothing more leaves the list.
+  const waitsFor = (run: Record, id: string, was: string | undefined, holder?: string) => {
+    const at = o.waiting.findIndex((w) => w.issue === id);
+    const on = holder ? [o.ref(holder)] : at >= 0 ? o.waiting[at].on.filter((b) => b !== (was && o.ref(was))) : [];
+    if (at >= 0) {
+      if (on.length) o.waiting[at].on = on;
+      else o.waiting.splice(at, 1);
+    } else if (on.length) o.waiting.push({ issue: id, on });
+    write(run);
+  };
+  return {
+    start(candidates: readonly Start<{ id: string }>[]) {
+      for (const { ticket, file, shares } of candidates) {
+        if (file) {
+          o.waiting.push({ issue: ticket.id, on: [o.ref(file.with)] });
+          o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
+        }
+        for (const share of shares ?? []) o.say(`  ${fileShareLine(o.ref, ticket.id, share)}`);
+      }
+    },
+    tell(run: Record, c: HoldChange) {
+      switch (c.kind) {
+        case "started":
+          started.add(c.id);
+          o.say(`  ${o.ref(c.id)} starts: ${c.after.kind === "blockers" ? "its last blocker has landed" : `${o.ref(c.after.freed)} is done with the file they both change`}`);
+          for (const share of c.shares) o.say(`  ${fileShareLine(o.ref, c.id, share)}`);
+          run.ticket(c.id, { state: "queued", note: null });
+          write(run, { stage: "running" });
+          return;
+        case "waits":
+          if (c.parked) o.say(`  ${o.ref(c.id)} ${fileWaitNote(o.ref, c.wait)}`);
+          run.ticket(c.id, { state: "blocked", note: fileWaitNote(o.ref, c.wait) });
+          waitsFor(run, c.id, undefined, c.wait.with);
+          return;
+        case "next run":
+          run.ticket(c.id, { note: stoppedWaitNote(o.ref, c.wait) });
+          waitsFor(run, c.id, c.freed, c.wait?.with);
+      }
+    },
+  };
+};
+
+/** The record of a ticket whose label refuses it, found as it would have started. */
+export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
+
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
@@ -293,18 +356,17 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // whatever the order, so one ticket at a time has it in flight; the others wait for that one to
   // land or leave the run. Files git can merge never hold a ticket: landing and the requeue resolve
   // them, and the start says which tickets will meet. A dry run lands nothing, so it holds nothing.
+  // The scheduler decides all of it, here, before the run is recorded.
   const laterOverrides = new Map<string, ReturnType<typeof ticketOverride>>();
-  const hold = DRY_RUN ? undefined : createFileHold<Issue>((t) => ticketFiles(project, t), (t, files) => refreshFiles(project, t, files));
-  const start = startHold(hold, ready, {
-    ref,
-    waiting,
-    // A parked ticket starts in this run, so a ticket that waits for it as a blocker does too.
-    // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
-    dependants: (starting) => {
-      const startable = dependantsInRun(starting.map((i) => i.id), held);
-      for (const id of [...held.keys()]) if (!startable.has(id)) held.delete(id);
-      return [...held.values()].map((h) => h.ticket);
-    },
+  // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
+  // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
+  // first conflict or red sent back once, the file hold, and the release of what waits, as each ticket ends.
+  const schedule = createSchedule<Issue, Outcome, Outcome, Blocker>({
+    tickets: ready,
+    files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
+    // A held ticket that also waits on something outside this run is the next run's. A dry run
+    // lands nothing, so it releases nothing.
+    blockers: { held: [...held.values()], ticketOf: blockerTicket, ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
     // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
     // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
     // holds that ticket, never the run), but its model is still read now, for the preflight.
@@ -316,9 +378,15 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return error.message;
       }
     },
-    say: (line) => console.log(line),
   });
-  const { issues, parked, dependants, candidates, order, badLabels } = start;
+  const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
+  holds.start(schedule.start);
+  const candidates = schedule.start.map((c) => c.ticket);
+  const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
+  const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
+  const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
+  // `order` in run.json: a released ticket queues behind the ones already waiting for a sandbox.
+  const order = new Map(candidates.map((t, at) => [t.id, at] as const));
   if (issues.length === 0) {
     console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
@@ -338,7 +406,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     const o = overrides.get(i.id) ?? {};
     const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
     const later = parked.find((p) => p.ticket.id === i.id);
-    console.log(`  ${ref(i.id)} ${i.title}${own}${held.has(i.id) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
+    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
@@ -360,19 +428,18 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // `tickets` is where the status view reads each ticket's state from; a
   // held-back one says whether this run can reach it.
   // Notes are short: the view's activity column is about 30 characters in an 80-column pane.
-  const waits = createDependants(project, tracker, candidates, held, queued.map((i) => i.id));
-  const heldNote = new Map(waits.notes().map((n) => [n.id, n.note]));
+  const inRun = new Set(candidates.map((c) => c.id));
   // Typed as entries, so `Object.fromEntries` cannot widen a misspelt state to `any`.
   const startTickets: [string, TicketRecord][] = [
     ...issues.map((i): [string, TicketRecord] => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
     // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
-    ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: heldNote.get(i.id), title: i.title }]),
+    ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: blockedNote(held.get(i.id)!.on, inRun), title: i.title }]),
     // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
     ...parked.map((p): [string, TicketRecord] => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
     // Waiting, but not this turn's to run (a later turn's tickets): on record all the same.
     ...[...wholeOpen]
       .filter(([id]) => !candidates.some((c) => c.id === id))
-      .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, new Set(candidates.map((c) => c.id))), title: whole.find((q) => q.id === id)?.title }]),
+      .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, inRun), title: whole.find((q) => q.id === id)?.title }]),
   ];
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
@@ -384,6 +451,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
+  // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
+  registerRun(project.root);
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
@@ -504,12 +573,23 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   Object.assign(summary, { due: true, printed: false });
   // The one writer of host git, and the `.git` fingerprint whose base it moves with its own writes.
   const host = createHostGit(project, gitFingerprint(project));
-  // Set when the shared .git changed under us; no further issue starts.
-  let tampered: string | undefined;
-  // Every failed .git check's message: each in-flight pipeline fails its own
-  // once the base moves, and one string was overwritten between a throw and
-  // its handler, so a stopped ticket read as crashed.
-  const stops = new Set<string>();
+  // The `.git` check after a ticket's pipeline that failed, by ticket: its attempt's result carries
+  // it to the scheduler as the cause that stops the run (schedule.ts), which no one else may add.
+  const tampered = new Map<string, unknown>();
+  // How a cause reads in the skipped tickets' notes and the closing summary.
+  const stopWords = (c: StopCause): string => {
+    switch (c.kind) {
+      case "plan limit":
+        return `${ref(c.ticket)} hit the plan's usage limit`;
+      case "usage limit":
+        return c.line;
+      case "tampered":
+      case "host failed":
+        return "the shared .git changed";
+    }
+  };
+  // What a stopped run throws: a safety stop's own error, which names what moved.
+  const stopError = (c: StopCause) => ("error" in c ? c.error : new OperatorError(stopWords(c)));
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
@@ -1045,8 +1125,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       try {
         await host.settle(branch, `after ${ref(issue.id)}`);
       } catch (error) {
-        stops.add(String(error));
-        tampered ??= String(error);
+        tampered.set(issue.id, error);
         // A pipeline that crashed on its own keeps its own error; the run
         // stops either way.
         if (failed === undefined) throw error;
@@ -1056,8 +1135,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
 
   // A spent plan allowance fails every issue after it the same way, each one
   // after paying for a sandbox and an install. The first one stops the queue.
-  let limitHit: string | undefined;
-  let usageHit: string | undefined;
   const hitLimit = (issue: string) => {
     const logs = join(project.root, ".sandcastle/logs");
     if (!existsSync(logs)) return false;
@@ -1067,22 +1144,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
   };
 
-  // What landing decided, for the closing report. The landing worker fills these as each ticket lands.
   const gateNames = project.gates.map((g) => g.name).join(", ");
-  const merged: string[] = [];
-  // Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen.
-  const regenerated = new Map<string, { files: string[]; regen: string[] }>();
-  const conflicted: { issue: string; branch: string; files: string[]; with: string[] }[] = [];
-  // Green alone, red once merged: the pair is named, and nothing is landed.
-  const redMerged: { issue: string; branch: string; with: string[]; gates: string[] }[] = [];
-  const heldBack: { issue: string; paths: string[] }[] = [];
-  const failedToLand: { issue: string; reason: string }[] = [];
-  const skipped: { issue: string; reason: string }[] = [];
-  const withdrawn: { issue: string; reason: string }[] = [];
-  // Marked for a human by a person during the run: theirs now, not a merge to make.
-  const takenBack: string[] = [];
-  const closedEarlier: string[] = [];
-  const closeFailed: string[] = [];
   // The ticket's state as landing decides it, for the notes below.
   const land = (id: string, state: TicketState, note: string) => run.ticket(id, { state, note });
 
@@ -1102,85 +1164,15 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     landed: new Map(),
     slotWanted,
   };
-  // How many of the greens have been dealt with, for the run line's "landing 6/25" once the pipelines are done.
-  let pushed = 0;
-  let dealt = 0;
-  // A requeued ticket can come back to the pipelines from landing, and a release can start one, so they are
-  // done once none runs and none waits. Only the run line: a failed write must not skip the `afterLanding`
-  // after it, whose `finish` is what closes the pipeline queue - the run would wait for it for ever.
-  const landingStage = () => {
-    try {
-      if (flow.working === 0 && queue.size === 0 && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
-    } catch {
-      /* the next landing writes it again */
-    }
-  };
-  const byId = new Map(candidates.map((i) => [i.id, i]));
+
+  const results: PromiseSettledResult<Outcome>[] = [];
+  const crashed = new Map<string, string>();
+  const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
   // A requeued ticket's second pipeline replaces its first in the per-issue lines.
   const dropFirstResult = (id: string) => {
     const earlier = results.findIndex((r) => r.status === "fulfilled" && r.value.issue === id);
     if (earlier >= 0) results.splice(earlier, 1);
   };
-  // The landing worker's word on each ticket, and the bookkeeping of one it sent back (landing.ts).
-  const settling = createSettling<Issue>({
-    lists: { merged, regenerated, conflicted, redMerged, heldBack, failedToLand, skipped, withdrawn, takenBack, closedEarlier, closeFailed },
-    run,
-    flow: { retry: (...a) => flow.retry(...a), earlier: (id) => flow.earlier(id) },
-    byId,
-    stopping: () => landing.stop !== undefined || host.failed !== undefined,
-    dealt: () => {
-      dealt++;
-      landingStage();
-    },
-    afterLanding: (id, closed) => afterLanding(id, closed),
-    onStop: (why) => {
-      tampered ??= String(why);
-    },
-    outcomes: (lines) => recordOutcomes(project, runId, lines),
-    ref,
-    say: (line) => console.log(line),
-  });
-  const { requeuedAs, keepFirst } = settling;
-  const landing = createLanding(ctx, { settled: settling.settled, stopped: settling.stopped });
-
-  // Bounded fan-out: a sliding pool, not a batch barrier, inside the
-  // machine-wide sandbox limit.
-  const results: PromiseSettledResult<Outcome>[] = [];
-  const crashed = new Map<string, string>();
-  // Every ticket that starts now goes in up front. Not closed up front: a ticket that conflicts at landing
-  // comes back to it, and one that waits for a blocker in this run is started when that blocker has landed
-  // and closed (createFlow closes it when every ticket has had its last word).
-  const queue = createQueue<Issue>();
-  // The tickets that went into the queue, for what is said of the ones that never began.
-  const entered: Issue[] = [];
-  for (const i of issues) {
-    entered.push(i);
-    queue.push(i);
-  }
-  const flow = createFlow(issues.length, queue, landing);
-  const enter = (i: Issue) => {
-    entered.push(i);
-    flow.start(i);
-  };
-  const begun = new Set<string>();
-  const calledOff = new Set<string>();
-  const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
-  const stopped = () => limitHit !== undefined || usageHit || tampered || landing.stop || host.failed;
-  // A landing that has closed its ticket frees the tickets that waited for it, on the landing
-  // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
-  const { afterLanding } = createRelease({
-    dependants: waits,
-    hold,
-    start: enter,
-    finish: () => flow.finish(),
-    stopped,
-    dryRun: DRY_RUN,
-    badLabel: (id) => badLabels.get(id),
-    record: run,
-    waiting,
-    ref,
-    say: (line) => console.log(line),
-  });
   // The ticket's state once its pipeline ends. A green branch that changes
   // hooks, CI or install scripts says so now: before, a human merge was news
   // only at the end of the run.
@@ -1197,8 +1189,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return o.status === "held" ? settledUnlanded(o, handedBack) : noCommitRecord(o, keptWorktrees, project.root, handedBack);
   };
   // What the view and the records say about a finished pipeline. A throw here
-  // (a git call, a full disk) would escape the settle handlers and reject the
-  // whole pool: every green branch left unlanded for want of a status line.
+  // (a git call, a full disk) would escape to the scheduler and cost the ticket
+  // its ending: every green branch left unlanded for want of a status line.
   const bookkeep = (id: string, fn: () => void) => {
     try {
       fn();
@@ -1206,20 +1198,16 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
-  const work = flow.work(async (issue) => {
-    // Whether the ticket went on to landing, which says its last word; otherwise this pipeline did.
-    let handed = false;
-    // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered || landing.stop) {
-      keepFirst(issue.id);
-      return false;
-    }
-    const stop = await usageStop(env);
-    if (stop) {
-      usageHit ??= stop;
-      keepFirst(issue.id);
-      return false;
-    }
+  // The record's side of a requeue: the line the second attempt's setup carries (`requeuedAs`), and
+  // what a second conflict or red was held as, for the outcome the status view reads (`againNote`).
+  const requeues = createRequeueRecord({ run, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
+  const { requeuedAs, againNote } = requeues;
+
+  // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
+  // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
+  const attempt = async (issue: Issue, { last }: { last(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
+    const line = await usageStop(env);
+    if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
     const called = (() => {
       try {
@@ -1228,109 +1216,149 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return undefined;
       }
     })();
-    if (called) {
-      calledOff.add(issue.id);
-      settling.withdraw(issue.id, called, () => dropFirstResult(issue.id));
-      return false;
-    }
-    begun.add(issue.id);
-    settling.began(issue.id);
-    const result =
-      await slotTurn(slotWanted).then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue))).then(
-        (value) => {
-          bookkeep(issue.id, () => {
-            const tokens = spent.get(issue.id);
-            run.ticket(issue.id, {
-              ...settled(value),
-              commits: value.commits,
-              minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-              ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
-              ...(value.failing?.length ? { failing: value.failing } : {}),
-              ...(value.ungated ? { ungated: value.ungated } : {}),
-            });
-            run.update({ typical: typicalTimes(project, [...took.values()]) });
-            // With nothing left to start, the pane closes: five panes each
-            // frozen on a finished agent's summary read as five stuck sandboxes.
-            view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), queue.size === 0 && !waits.waitsForFlight && !hold?.size);
-            // Recorded now, not only at the report: a branch waiting for
-            // landing had no outcome for this run, and its row read as an
-            // earlier run's leftover. Landing overwrites it.
-            recordOutcomes(project, runId, { [issue.id]: uncommittedWork(value) ? "uncommitted" : outcomeText(value) });
-          });
-          // To the landing worker as it ends, not when the slowest pipeline does.
-          if (value.status === "green" || value.status === "merged-earlier") {
-            pushed++;
-            handed = true;
-            landing.push(value);
-          }
-          return { status: "fulfilled", value } as const;
-        },
-        (reason) => {
-          // The .git check after this ticket's pipeline failed: its work
-          // finished, and the whole run stops. Not a crash of the ticket.
-          if (stops.has(String(reason))) {
-            bookkeep(issue.id, () => {
-              run.ticket(issue.id, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
-              recordOutcomes(project, runId, { [issue.id]: "stopped: the run stopped before landing" });
-              view.finish(issue.id, "stopped");
-            });
-            return { status: "rejected", reason } as const;
-          }
-          crashed.set(issue.id, String(reason));
-          bookkeep(issue.id, () => {
-            run.ticket(issue.id, { state: "crashed", note: String(reason).split("\n")[0].slice(0, 160) });
-            // Kept open even at the end of the queue: a crash is for a human to read.
-            view.finish(issue.id, "crashed");
-            if (hitLimit(issue.id)) limitHit = issue.id;
-          });
-          return { status: "rejected", reason } as const;
-        },
+    if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
+    const result = await slotTurn(slotWanted)
+      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)))
+      .then(
+        (value) => ({ status: "fulfilled", value }) as const,
+        (reason: unknown) => ({ status: "rejected", reason }) as const,
       );
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
     dropFirstResult(issue.id);
     results.push(result);
-    return handed;
-  }, (issue) => afterLanding(issue.id, false));
-  // The run line follows each pipeline's end, handed on to landing or not.
-  const pipelines = queue.run(workers, async (issue) => {
-    try {
-      await work(issue);
-    } finally {
-      landingStage();
+    if (result.status === "fulfilled") {
+      const value = result.value;
+      bookkeep(issue.id, () => {
+        const tokens = spent.get(issue.id);
+        run.ticket(issue.id, {
+          ...settled(value),
+          commits: value.commits,
+          minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
+          ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
+          ...(value.failing?.length ? { failing: value.failing } : {}),
+          ...(value.ungated ? { ungated: value.ungated } : {}),
+        });
+        run.update({ typical: typicalTimes(project, [...took.values()]) });
+        // With nothing left to start, the pane closes: five panes each
+        // frozen on a finished agent's summary read as five stuck sandboxes.
+        // A stopped run starts nothing, whatever is still queued or parked.
+        view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), last());
+        // Recorded now, not only at the report: a branch waiting for
+        // landing had no outcome for this run, and its row read as an
+        // earlier run's leftover. Landing overwrites it.
+        recordOutcomes(project, runId, { [issue.id]: uncommittedWork(value) ? "uncommitted" : outcomeText(value) });
+      });
+      // To the landing worker as it ends, not when the slowest pipeline does.
+      return value.status === "green" || value.status === "merged-earlier" ? { kind: "green", green: value } : { kind: "pipeline", outcome: value };
     }
-  });
-  // Landing ends when every ticket has had its last word (createFlow); a pipeline that throws ends both queues.
-  const pipelinesEnded = pipelines.finally(() => {
-    queue.close();
-    landing.close();
-    landingStage();
-  });
-  // Settled, not all: a landing that throws must not end the run while pipelines still work. A landing
-  // that ends early closes the pipelines too: nothing is left to send a ticket back to them, and the
-  // pipelines would wait for it for ever.
-  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run().finally(() => queue.close())]);
-  clearInterval(heartbeat);
-  const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
-  for (const i of entered) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
+    const reason = result.reason;
+    const checked = tampered.has(issue.id);
+    const tamper = tampered.get(issue.id);
+    tampered.delete(issue.id);
+    // The .git check after this ticket's pipeline failed: its work
+    // finished, and the whole run stops. Not a crash of the ticket.
+    if (checked && tamper === reason) {
+      bookkeep(issue.id, () => {
+        run.ticket(issue.id, STOPPED_GREEN.record);
+        recordOutcomes(project, runId, { [issue.id]: STOPPED_GREEN.outcome });
+        // The run starts nothing more, so nothing will reuse the pane.
+        view.finish(issue.id, "stopped", true);
+      });
+      return { kind: "stopped", cause: { kind: "tampered", error: reason } };
+    }
+    crashed.set(issue.id, String(reason));
+    let limited = false;
+    bookkeep(issue.id, () => {
+      run.ticket(issue.id, { state: "crashed", note: String(reason).split("\n")[0].slice(0, 160) });
+      // Kept open even at the end of the queue: a crash is for a human to read.
+      view.finish(issue.id, "crashed");
+      limited = hitLimit(issue.id);
+    });
+    // A pipeline that crashed on its own keeps its own error; a failed check after it stops the run all the same.
+    const causes: StopCause[] = [...(checked ? [{ kind: "tampered" as const, error: tamper }] : []), ...(limited ? [{ kind: "plan limit" as const, ticket: issue.id }] : [])];
+    return { kind: "crashed", error: reason, causes };
+  };
+
+  // How each ticket's part in the run ended, as the scheduler tells it, written to the record.
+  const ended = (id: string, e: Ending<Outcome, Outcome>) => {
+    if (e.kind === "landing") {
+      requeues.ended(id, e);
+    } else if (e.kind === "not begun" && e.why.kind === "withdrawn") {
+      const { reason } = e.why;
+      bookkeep(id, () => run.ticket(id, withdrawnRecord(reason)));
+    } else if (e.kind === "not begun" && e.why.kind === "refused label") {
+      // Its label refuses it, found as it would have started: that ticket only, never the run.
+      const { reason } = e.why;
+      console.log(`  ${reason}`);
+      bookkeep(id, () => run.ticket(id, refusedRecord(reason)));
+    } else if (e.kind === "stopped" && e.green) {
+      bookkeep(id, () => {
+        run.ticket(id, STOPPED_GREEN.record);
+        recordOutcomes(project, runId, { [id]: STOPPED_GREEN.outcome });
+      });
+    } else if (e.kind === "crashed" && e.green) {
+      // The land port threw rather than say how the landing went: this ticket only.
+      crashed.set(id, String(e.error));
+      bookkeep(id, () => run.ticket(id, { state: "crashed", note: errorLine(e.error) }));
+    }
+  };
+  const tell = (c: Change<Outcome, Outcome, Blocker>) => {
+    switch (c.kind) {
+      case "landing":
+        // Only the run line: the next landing writes it again.
+        run.update({ stage: `landing ${c.at}/${c.of}` });
+        return;
+      case "requeued":
+        // Written before the ticket is queued again, with the line its second pipeline's setup carries.
+        return requeues.requeued(c.id, c.again);
+      case "ended":
+        return ended(c.id, c.ending);
+      case "blocked":
+        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight)) }));
+      case "unreleased":
+        console.log(`${ref(c.id)}: could not start the tickets that wait for it (${errorLine(c.error)}); they wait for the next run.`);
+        return;
+      default:
+        return holds.tell(run, c);
+    }
+  };
 
   // The run stops: the summary still prints, headed by why - a stack trace was all a
   // stopped run left, and its report then said "Run finished".
-  const stopLanding = async (error: unknown) => {
+  const stopLanding = async (error: unknown): Promise<never> => {
     const why = String((error as Error).message ?? error);
     run.update({ stopped: why });
     console.log(`\n${await closingReport(project)}\n`);
     throw error;
   };
-  if (landing.stop) await stopLanding(landing.stop);
-  for (const r of [ended, landed]) if (r.status === "rejected") await stopLanding(r.reason);
-  // A pipeline's own check failed and nothing was left to land: the run still stops, as it did before landing.
-  if (tampered) {
-    try {
-      await host.check("before landing");
-    } catch (error) {
-      await stopLanding(error);
-    }
+
+  const { endings, stop } = await schedule
+    .run({ workers, attempt, ...landingWork(ctx), tell })
+    .catch((error: unknown) => {
+      clearInterval(heartbeat);
+      return stopLanding(error);
+    });
+  clearInterval(heartbeat);
+  // A pipeline that fails its own `.git` check after the base moved finished its work: it is
+  // stopped, not crashed. Each one's error is kept as a cause, so none reads as a crash.
+  const stoppedBy = (reason: unknown) => stop.causes.some((c) => c.kind === "tampered" && String(c.error) === String(reason));
+  // The cause the closing summary names: the most severe, a `.git` change before a limit.
+  const headline = stop.headline;
+  const stopLine = headline && stopWords(headline);
+  // The tickets the pipelines took in, and the ones of them no attempt began for.
+  const entered = [...endings.values()].filter((e) => e.kind !== "waiting" && !(e.kind === "not begun" && e.why.kind === "refused label"));
+  const notStarted = entered.filter((e) => e.kind === "not begun").length;
+  for (const [id, e] of endings) {
+    if (e.kind === "not begun" && e.why.kind !== "withdrawn" && e.why.kind !== "refused label") run.ticket(id, { state: "skipped", note: `not started: ${stopLine ?? "the run stopped"}` });
   }
+  // What landing decided, for the closing report: each landing ending, in the order they came.
+  const landings = newLandings();
+  for (const e of endings.values()) if (e.kind === "landing") accountLanding(landings, e.green, e.landed);
+  const { merged, regenerated, conflicted, redMerged, heldBack, failedToLand, skipped, withdrawn, takenBack, closedEarlier, closeFailed } = landings;
+
+  // A safety stop (a `.git` change, after a pipeline or under the landing worker, or a refused
+  // write) landed nothing more: the run stops, headed by the most severe of them.
+  if (stop.landsNothing && headline) await stopLanding(stopError(headline));
 
   // An agent that can write to the tracker (GitHub) hands a ticket back
   // itself - hold label on, queue label off - and commits nothing, so its
@@ -1375,7 +1403,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     }
   }
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
-  if (host.failed) await stopLanding(host.failed);
+  if (stop.landsNothing) await stopLanding(stopError(stop.headline!));
   for (const n of merged) view.landed(n, true, closeFailed.includes(n) ? "merged, not closed" : "merged");
   for (const n of closedEarlier) view.landed(n, true, "closed");
   for (const c of conflicted) view.landed(c.issue, false, "merge conflict");
@@ -1410,7 +1438,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     if (r.status !== "fulfilled") continue;
     outcome.set(r.value.issue, uncommittedWork(r.value) ? "uncommitted" : outcomeText(r.value));
   }
-  for (const [id, line] of settling.lines()) outcome.set(id, line);
+  for (const [id, line] of landingLines(landings, againNote)) outcome.set(id, line);
   for (const id of handedBack) outcome.set(id, "needs a human: handed back");
   if (DRY_RUN) for (const r of results) if (r.status === "fulfilled" && r.value.status === "green") outcome.set(r.value.issue, "dry run: gated green, would merge");
   for (const [n] of crashed) outcome.set(n, "crashed");
@@ -1427,7 +1455,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const final = run.tickets();
   for (const r of results) {
     if (r.status === "rejected") {
-      console.log(`  ${stops.has(String(r.reason)) ? "STOPPED" : "CRASHED"}  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
+      console.log(`  ${stoppedBy(r.reason) ? "STOPPED" : "CRASHED"}  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
       continue;
     }
     const o = r.value;
@@ -1440,9 +1468,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
   if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
-  if (limitHit !== undefined || usageHit) {
-    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${entered.length - begun.size} queued ticket(s) were not started.`);
-  }
+  if (stopLine) console.log(`\nSTOPPED EARLY: ${stopLine}; ${notStarted} queued ticket(s) were not started.`);
   let dryRunCheck: string | undefined;
   if (before) {
     const after = tracker.snapshot([...before.keys()].filter((k) => k !== LATEST_ISSUE));

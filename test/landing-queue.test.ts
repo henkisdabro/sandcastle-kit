@@ -1,7 +1,7 @@
-// The in-run landing worker (src/landing.ts, src/schedule.ts): pipelines push a green outcome as
-// theirs ends, one worker lands them in arrival order and moves the run's expected base with its
-// own writes. Fake pipelines, temp repos, a fake tracker and a host worktree for the sandbox: no
-// Docker, no gh, no network.
+// The in-run landing worker (src/schedule.ts, src/landing.ts): through the scheduler, each attempt's
+// green outcome goes to one worker as it ends, which lands them in arrival order and moves the run's
+// expected base with its own writes. Fake attempts, temp repos, a fake tracker and a host worktree
+// for the sandbox: no Docker, no gh, no network.
 //
 //   pnpm exec tsx --test test/landing-queue.test.ts
 
@@ -17,13 +17,14 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { createHostGit, createLanding, landOne, pipelineWorkers } = await import("../src/landing.ts");
+const { createHostGit, landingWork, landOne, pipelineWorkers } = await import("../src/landing.ts");
 const { disableHostGitGc, gitFingerprint } = await import("../src/guard.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
-const { createQueue } = await import("../src/schedule.ts");
+const { createQueue, createSchedule, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
+type StopState = import("../src/schedule.ts").StopState;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 
@@ -89,7 +90,7 @@ type Over = { land?: "merge" | "squash"; dryRun?: boolean; gate?: Ctx["gate"] };
 const harness = (root: string, over: Over = {}) => {
   const calls: string[] = [];
   const history: Record<string, string[]> = {};
-  const states: Record<string, { state?: string; note?: string }> = {};
+  const states: Record<string, { state?: string; note?: string | null }> = {};
   const tracker = {
     ref: (id: string) => `#${id}`,
     close: (id: string) => void calls.push(`close ${id}`),
@@ -119,33 +120,61 @@ const harness = (root: string, over: Over = {}) => {
   };
   const settled: { issue: string; landed: Landed }[] = [];
   const stopped: string[] = [];
-  const landing = createLanding(ctx, {
-    settled: (o, landed) => void settled.push({ issue: o.issue, landed }),
-    stopped: (o) => void stopped.push(o.issue),
-  });
-  return { ctx, host, landing, calls, history, states, settled, stopped };
+  // The run's stop state once `schedule` has run.
+  const stop: StopState = createStopState();
+  return { ctx, host, stop, calls, history, states, settled, stopped, beforeLand: undefined as ((id: string) => Promise<void>) | undefined };
 };
 
-// Fake pipelines: each ends after `ms`, makes the check a real pipeline makes once its sandbox is
-// closed, and pushes its green outcome. Landing closes once they are all done.
+/**
+ * Runs `ids` through the scheduler: each attempt is `attempt`, and its green outcome goes to the
+ * landing worker, which lands with the real `landOne`. A second attempt (landing sent the ticket
+ * back) is landing-requeue's to test: here it ends in its pipeline.
+ */
+const schedule = async (h: ReturnType<typeof harness>, ids: string[], attempt: (id: string) => Promise<Waiting>) => {
+  const ports = landingWork(h.ctx);
+  const { endings, stop } = await createSchedule<{ id: string }, Waiting>({ tickets: ids.map((id) => ({ id })) }).run({
+    workers: ids.length,
+    attempt: async ({ id }, { n }) => (n === 1 ? { kind: "green", green: await attempt(id) } : { kind: "pipeline", outcome: undefined }),
+    land: async (o) => {
+      await h.beforeLand?.(o.issue);
+      const landed = await ports.land(o);
+      h.settled.push({ issue: o.issue, landed });
+      return landed;
+    },
+    host: ports.host,
+    tell: () => {},
+  });
+  for (const [id, e] of endings) if (e.kind === "stopped") h.stopped.push(id);
+  h.stop = stop;
+  return endings;
+};
+
+// Green outcomes, one per ticket, handed to landing at once and in order.
+const landNow = (root: string, h: ReturnType<typeof harness>, ids: string[], extra: Record<string, Record<string, unknown>> = {}) =>
+  schedule(h, ids, async (id) => outcome(root, id, extra[id]));
+
+// The run's headline stop as "<kind>: <error>": a `.git` check or a refused write.
+const why = (stop: StopState) => {
+  const c = stop.headline;
+  return c && "error" in c ? `${c.kind}: ${String(c.error)}` : c?.kind;
+};
+
+// Fake attempts: each ends after `ms`, makes the check a real pipeline makes once its sandbox is
+// closed, and hands on its green outcome. The run ends once they have all landed.
 const runPipelines = async (root: string, h: ReturnType<typeof harness>, ends: Record<string, number>, extra: Record<string, Record<string, unknown>> = {}) => {
   const finished = new Set<string>();
   const seen: { issue: string; finishedThen: string[] }[] = [];
-  const done = Promise.all(
-    Object.entries(ends).map(async ([id, ms]) => {
-      await sleep(ms);
-      await h.host.check(`after #${id}`);
-      finished.add(id);
-      h.landing.push(outcome(root, id, extra[id]));
-    }),
-  ).then(() => h.landing.close());
   // What was still running as each ticket settled, for "while others still run".
-  const worker = h.landing.run();
   const poll = setInterval(() => {
     for (const s of h.settled) if (!seen.some((x) => x.issue === s.issue)) seen.push({ issue: s.issue, finishedThen: [...finished] });
   }, 1);
   try {
-    await Promise.all([done, worker]);
+    await schedule(h, Object.keys(ends), async (id) => {
+      await sleep(ends[id]);
+      await h.host.check(`after #${id}`);
+      finished.add(id);
+      return outcome(root, id, extra[id]);
+    });
   } finally {
     clearInterval(poll);
   }
@@ -172,13 +201,14 @@ test("three tickets finishing at different times land in arrival order, each whi
 });
 
 test("a carried branch goes before a new one when both are waiting", async () => {
-  const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" }, 3: { "c.txt": "c\n" } });
+  const root = makeRepo({ 0: { ".github/workflows/ci.yml": "on: push\n" }, 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" }, 3: { "c.txt": "c\n" } });
   const h = harness(root);
-  h.landing.push(outcome(root, "1"));
-  h.landing.push(outcome(root, "2"));
-  h.landing.push(outcome(root, "3", { carried: true }));
-  h.landing.close();
-  await h.landing.run();
+  // 0 is held for a human, landing nothing, and slowly: 1, 2 and then 3 arrive and wait behind it.
+  h.beforeLand = async (id) => void (id === "0" && (await sleep(80)));
+  await schedule(h, ["0", "1", "2", "3"], async (id) => {
+    if (id !== "0") await sleep(10 * Number(id));
+    return outcome(root, id, id === "3" ? { carried: true } : {});
+  });
   assert.deepEqual(mergeOrder(root), ["3", "1", "2"]);
 });
 
@@ -227,9 +257,7 @@ test("a pipeline finishing during a landing does not trip the guard", async () =
 test("a hand commit on the base mid-run still stops the run", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" }, 3: { "c.txt": "c\n" } });
   const h = harness(root);
-  h.landing.push(outcome(root, "1"));
-  h.landing.close();
-  await h.landing.run();
+  await landNow(root, h, ["1"]);
   assert.deepEqual(mergeOrder(root), ["1"]);
   // A person commits to the base while the other pipelines run.
   git(root, "commit", "-q", "--allow-empty", "-m", "by hand");
@@ -238,11 +266,8 @@ test("a hand commit on the base mid-run still stops the run", async () => {
   // ... and so does the worker, before it merges anything over it.
   const next = harness(root);
   next.host.expected.base = h.host.expected.base;
-  next.landing.push(outcome(root, "2"));
-  next.landing.push(outcome(root, "3"));
-  next.landing.close();
-  await next.landing.run();
-  assert.match(String(next.landing.stop), /STOPPED before landing #2: main moved/);
+  await landNow(root, next, ["2", "3"]);
+  assert.match(String(why(next.stop)), /^tampered: .*STOPPED before landing #2: main moved/);
   assert.deepEqual(next.stopped, ["2", "3"]);
   assert.deepEqual(next.settled, []);
   assert.deepEqual(mergeOrder(root), ["1"]);
@@ -256,11 +281,8 @@ test("a hand commit while a merge is gated in a sandbox stops the run and the me
       return GREEN;
     },
   });
-  h.landing.push(outcome(root, "1"));
-  h.landing.push(outcome(root, "2"));
-  h.landing.close();
-  await h.landing.run();
-  assert.match(String(h.landing.stop), /STOPPED after landing agent\/issue-2 in a sandbox: main moved/);
+  await landNow(root, h, ["1", "2"]);
+  assert.match(String(why(h.stop)), /^tampered: .*STOPPED after landing agent\/issue-2 in a sandbox: main moved/);
   assert.deepEqual(mergeOrder(root), ["1"]);
   assert.equal(git(root, "log", "-1", "--format=%s", "main"), "by hand");
   assert.deepEqual(h.stopped, ["2"]);
@@ -281,13 +303,9 @@ test("the second of two tickets on the same lines is a conflict naming the first
 test("a conflict is attributed to the record, so a squashed branch deleted at its landing is still named", async () => {
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" }, 3: { "c.txt": "c\n" } });
   const h = harness(root, { land: "squash" });
-  h.landing.push(outcome(root, "1"));
-  h.landing.push(outcome(root, "3"));
-  h.landing.push(outcome(root, "2"));
-  h.landing.close();
   // Squashed and gone right after its landing, not at the end of the run.
   let seenAfterFirst: string | undefined;
-  const run = h.landing.run();
+  const run = landNow(root, h, ["1", "3", "2"]);
   while (h.settled.length < 1) await sleep(1);
   seenAfterFirst = git(root, "branch", "--list", "agent/issue-1");
   await run;
@@ -335,9 +353,7 @@ test("gc.auto is 0 in the environment of every host git", async () => {
   // The same process environment every sh() call passes to git: the landing merge and the sandbox's host-side git.
   assert.equal(git(root, "config", "--show-origin", "--get", "gc.auto"), "command line:\t0");
   const h = harness(root);
-  h.landing.push(outcome(root, "1"));
-  h.landing.close();
-  await h.landing.run();
+  await landNow(root, h, ["1"]);
   assert.equal(git(root, "config", "--get", "gc.auto"), "0");
   // And the run turns it on at the start, beside the hooks.
   assert.match(readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8"), /disableHostGitHooks\(\);\n\s+disableHostGitGc\(\);/);
@@ -404,12 +420,11 @@ test("a .git change found by the writer's own check stops landing, and no host g
     git(root, "config", "core.fsmonitor", `touch ${marker}`);
     return undefined;
   };
-  h.landing.push(outcome(root, "1"));
-  h.landing.push(outcome(root, "2"));
-  h.landing.close();
-  await h.landing.run();
+  await landNow(root, h, ["1", "2"]);
   assert.equal(existsSync(marker), false, "a host git call ran the planted command");
-  assert.match(String(h.landing.stop), /STOPPED before writing to the base branch: .*config changed while sandboxes ran/);
+  // The writer's refusal is the host's failure, which the stop state reads without being told.
+  assert.match(String(why(h.stop)), /^host failed: .*STOPPED before writing to the base branch: .*config changed while sandboxes ran/);
+  assert.deepEqual(h.stop.causes.map((c) => c.kind), ["host failed"]);
   assert.deepEqual(h.stopped, ["1", "2"]);
   assert.deepEqual(h.settled, []);
 });
@@ -423,10 +438,8 @@ test("a hand commit made after the worker's check is not merged over, even on th
     git(root, "commit", "-q", "--allow-empty", "-m", "by hand");
     return undefined;
   };
-  h.landing.push(outcome(root, "1"));
-  h.landing.close();
-  await h.landing.run();
-  assert.match(String(h.landing.stop), /STOPPED before landing agent\/issue-1 in a sandbox: main moved/);
+  await landNow(root, h, ["1"]);
+  assert.match(String(why(h.stop)), /^tampered: .*STOPPED before landing agent\/issue-1 in a sandbox: main moved/);
   assert.deepEqual(h.stopped, ["1"]);
   assert.deepEqual(mergeOrder(root), []);
   assert.equal(git(root, "log", "-1", "--format=%s", "main"), "by hand");

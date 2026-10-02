@@ -18,10 +18,12 @@ import { after, test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
-const { createHostGit, createLanding } = await import("../src/landing.ts");
+const { createSchedule } = await import("../src/schedule.ts");
+const { createHostGit, landingWork } = await import("../src/landing.ts");
 const { assertGitUnchanged, backupRepo, gitFingerprint } = await import("../src/guard.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
+type Waiting = import("../src/landing.ts").Waiting;
 type Project = import("../src/config.ts").Project;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-backup-branches-"));
@@ -248,10 +250,19 @@ test("a squash landing, which deletes its branch, raises no alarm and drops the 
     gate: async () => ({ gates: [], failures: [] }),
     landed: new Map(),
   };
-  const landing = createLanding(ctx, { settled: (_o, landed) => void settled.push(landed), stopped: () => {} });
-  landing.push({ issue: "1", branch: "agent/issue-1", status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", "agent/issue-1") });
-  landing.close();
-  await landing.run();
+  // Through the scheduler: one green attempt, landed.
+  const ports = landingWork(ctx);
+  await createSchedule<{ id: string }, Waiting>({ tickets: [{ id: "1" }] }).run({
+    workers: 1,
+    attempt: async () => ({ kind: "green", green: { issue: "1", branch: "agent/issue-1", status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", "agent/issue-1") } }),
+    land: async (o) => {
+      const landed = await ports.land(o);
+      settled.push(landed);
+      return landed;
+    },
+    host: ports.host,
+    tell: () => {},
+  });
   assert.equal(settled[0]?.kind, "merged");
   assert.equal(settled[0] && "squashed" in settled[0] && settled[0].squashed, true);
   assert.throws(() => git(root, "rev-parse", "--verify", "-q", "refs/heads/agent/issue-1"), "the squashed branch is still there");

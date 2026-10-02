@@ -1,5 +1,6 @@
 // The pipeline queue (src/schedule.ts): items pushed while workers run are processed, `run`
-// resolves only once the queue is closed and empty, and the worker count is respected.
+// resolves only once the queue is closed and empty, and the worker count is respected. The
+// scheduler that runs the queues is test/schedule-run.test.ts.
 //
 //   pnpm exec tsx --test test/schedule.test.ts
 
@@ -69,7 +70,10 @@ test("falsy items are items, and a push after close is refused", async () => {
   const queue = createQueue<number>();
   const seen: number[] = [];
   queue.push(0);
+  assert.equal(queue.closed, false);
   queue.close();
+  // Read before a push, so a caller never has to undo what it wrote for an item the queue refused.
+  assert.equal(queue.closed, true);
   assert.throws(() => queue.push(1), /closed/);
   await queue.run(2, async (n) => void seen.push(n));
   assert.deepEqual(seen, [0]);

@@ -13,9 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
-import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
-import { errorLine, sh, USER_CONFIG } from "./sandbox.ts";
-import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, stoppedWaitNote } from "./schedule.ts";
+import { USER_CONFIG } from "./sandbox.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
@@ -315,222 +313,36 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
   return lines;
 };
 
+/** The ticket of a run a blocker can be: a GitHub issue or a ticket on the project's own tracker. */
+export const blockerTicket = (b: Blocker): string | undefined => (b.kind === "github" || b.kind === "ticket" ? b.id : undefined);
+
 /**
  * The words after the ticket's name in the status view. A blocker still in flight lands in this
  * run, which is when its dependant starts; any other is not this run's to land.
  */
 export const blockedNote = (on: Blocker[], inFlight: Set<string>): string => {
-  const here = on.filter((b) => (b.kind === "github" || b.kind === "ticket") && inFlight.has(b.id)).map(refLabel);
-  const away = on.filter((b) => !((b.kind === "github" || b.kind === "ticket") && inFlight.has(b.id))).map(refLabel);
-  return `waits for ${[here.length && `${here.join(", ")} (lands this run)`, away.length && `${away.join(", ")} (not in this run)`].filter(Boolean).join(", ")}`;
+  const here = (b: Blocker) => {
+    const id = blockerTicket(b);
+    return id !== undefined && inFlight.has(id);
+  };
+  const lands = on.filter(here).map(refLabel);
+  const away = on.filter((b) => !here(b)).map(refLabel);
+  return `waits for ${[lands.length && `${lands.join(", ")} (lands this run)`, away.length && `${away.join(", ")} (not in this run)`].filter(Boolean).join(", ")}`;
 };
 
 /**
- * The held tickets that can start in this run: every open blocker is a ticket that starts now
- * (`starting`) or another such dependant. One that also waits on anything else (an outside issue,
- * a Linear key) is the next run's; counting it inflated the workers, the estimate and the start
- * line, which named it "waits for a blocker in this run".
+ * The scheduler's blockers port (`Plan.blockers.open` in schedule.ts): the open blockers of each
+ * of `tickets` now, asked as a ticket they waited for lands. `queued`: the ids of the queued
+ * tickets. One that has not landed is open without a lookup, which is wrong once it lands - the
+ * tracker has closed it by then - so every call makes a fresh resolver (the cache keeps the answer
+ * it gave first) over the ones not `landed`, shared by the tickets of that call.
  */
-export const dependantsInRun = (starting: Iterable<string>, held: Map<string, { on: Blocker[] }>): Set<string> => {
-  const inRun = new Set(starting);
-  const kept = new Set<string>();
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const [id, h] of held) {
-      if (kept.has(id) || !h.on.every((b) => (b.kind === "github" || b.kind === "ticket") && inRun.has(b.id))) continue;
-      kept.add(id);
-      inRun.add(id);
-      grew = true;
-    }
-  }
-  return kept;
-};
-
-/**
- * The tickets a run holds back for a blocker, and which of them a landing frees. The run's
- * candidate set is every queued ticket, including those that wait on a blocker in the same run:
- * `held` is the ones that wait, with the blockers they waited on, and `release()` reads those
- * blockers again after a landing and takes out each ticket that is now free.
- *
- * `known`: the ids of the queued tickets that have not landed. A blocker in it is open without a
- * lookup, which is wrong once it lands - the tracker has closed it by then - so every `release`
- * makes a fresh resolver (the cache keeps the answer it gave first) over the ids still not landed.
- * `inFlight`: the candidates that have not ended; a blocker in it "lands this run".
- */
-export const createDependants = <T extends Blocked>(
-  project: Project,
-  tracker: Tracker,
-  candidates: T[],
-  held: Map<string, { ticket: T; on: Blocker[] }>,
-  queued: Iterable<string> = candidates.map((t) => t.id),
-) => {
-  const known = new Set(queued);
-  const inFlight = new Set(candidates.map((t) => t.id));
-  return {
-    /** The ticket is on the base and closed: a blocker no more. */
-    landed(id: string) {
-      known.delete(id);
-      inFlight.delete(id);
-    },
-    /** The ticket will not land in this run (red, nothing to change, crashed, held, not started). */
-    ended(id: string) {
-      inFlight.delete(id);
-    },
-    /** Tickets still held back, and whether one of them waits on a blocker that is still in flight. */
-    get size() {
-      return held.size;
-    },
-    get waitsForFlight() {
-      return [...held.values()].some((h) => h.on.some((b) => (b.kind === "github" || b.kind === "ticket") && inFlight.has(b.id)));
-    },
-    /** Each held ticket's note as it reads now, with no lookup: `ended` and `landed` change it. */
-    notes: () => [...held].map(([id, h]) => ({ id, note: blockedNote(h.on, inFlight) })),
-    /**
-     * Read again the blockers of each held ticket that waited for `landed`; the ones with none open
-     * are taken out and returned, in candidate order. Only those: re-reading every held ticket after
-     * every landing cost one tracker call per blocker, in turn, on the landing worker.
-     */
-    async release(landed: string): Promise<{ free: T[]; held: { id: string; on: string[]; note: string }[] }> {
-      const resolve = blockerResolver(project, tracker, known);
-      const free: T[] = [];
-      for (const [id, h] of [...held]) {
-        if (!h.on.some((b) => (b.kind === "github" || b.kind === "ticket") && b.id === landed)) continue;
-        const open = await openBlockers(project, tracker, resolve, h.ticket);
-        if (open.length) held.set(id, { ticket: h.ticket, on: open });
-        else {
-          held.delete(id);
-          free.push(h.ticket);
-        }
-      }
-      return { free, held: [...held].map(([id, h]) => ({ id, on: h.on.map(refLabel), note: blockedNote(h.on, inFlight) })) };
-    },
-  };
-};
-
-export type Dependants<T extends Blocked> = ReturnType<typeof createDependants<T>>;
-
-/**
- * What a run does as each ticket is done with it. `afterLanding(id, true)`: the ticket landed and
- * its close has been written, so every held ticket that has no open blocker now starts (`start`),
- * and a bad label on one holds that ticket, never the run. `afterLanding(id, false)`: it will not
- * land; nothing is released. Either way `finish` comes last, after `start`, so a flow that closes
- * its queue at zero never reads empty between a landing and the tickets it frees. A run that has
- * stopped (`stopped()`), and a dry run, release nothing.
- */
-export const createRelease = <T extends Blocked>(o: {
-  dependants: Dependants<T>;
-  /** Tickets that share a file git cannot merge start one at a time (schedule.ts); absent for a dry run, which lands nothing. */
-  hold?: FileHold<T>;
-  start(ticket: T): void;
-  finish(): void;
-  stopped(): unknown;
-  dryRun: boolean;
-  /** The refusal for a ticket's label, found when it is released rather than at the start. */
-  badLabel(id: string): string | undefined;
-  record: { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
-  /** The run record's start-of-run `waiting` list, minus what has started. */
-  waiting: { issue: string; on: string[] }[];
-  ref(id: string): string;
-  say(line: string): void;
-}) => {
-  // Every ticket started so far: `waiting` is the start-of-run list, so each release filters against all of them.
-  const released = new Set<string>();
-  const skip = (t: T, bad: string) => {
-    o.say(`  ${bad}`);
-    o.record.ticket(t.id, { state: "skipped", note: bad.replace(/^NOT STARTED: /, "not started: ") });
-    o.dependants.ended(t.id);
-  };
-  // Started before it is recorded queued: a push to a closed queue throws, and must not leave it marked queued.
-  const begin = (t: T, why: string, shares: FileShare[]) => {
-    o.start(t);
-    released.add(t.id);
-    o.say(`  ${o.ref(t.id)} starts: ${why}`);
-    for (const s of shares) o.say(`  ${fileShareLine(o.ref, t.id, s)}`);
-    o.record.ticket(t.id, { state: "queued", note: null });
-  };
-  // What the ticket waits for on the run record's `waiting` list: the ticket that holds its file now,
-  // not the one it was parked behind first. A ticket with no holder left (a stopped run) is dropped from it.
-  const waitsFor = (id: string, was: string | undefined, holder?: string) => {
-    const at = o.waiting.findIndex((w) => w.issue === id);
-    const on = holder ? [o.ref(holder)] : at >= 0 ? o.waiting[at].on.filter((b) => b !== (was && o.ref(was))) : [];
-    if (at >= 0) {
-      if (on.length) o.waiting[at].on = on;
-      else o.waiting.splice(at, 1);
-    } else if (on.length) o.waiting.push({ issue: id, on });
-    o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)) });
-  };
-  const park = (id: string, wait: FileWait) => {
-    o.record.ticket(id, { state: "blocked", note: fileWaitNote(o.ref, wait) });
-    waitsFor(id, undefined, wait.with);
-  };
-  // The run is stopping, so nothing starts: the ticket's files are free, and what each parked
-  // ticket waits for is said as it is now, so none keeps naming a ticket that has landed.
-  const settle = (id: string) => {
-    if (!o.hold) return;
-    for (const w of o.hold.stop(id)) {
-      o.record.ticket(w.id, { note: stoppedWaitNote(o.ref, w.wait) });
-      waitsFor(w.id, id, w.wait?.with);
-    }
-  };
-  const release = async (landed: string) => {
-    const { free, held } = await o.dependants.release(landed);
-    for (const h of held) o.record.ticket(h.id, { note: h.note });
-    let started = false;
-    for (const t of free) {
-      const bad = o.badLabel(t.id);
-      if (bad) {
-        skip(t, bad);
-        continue;
-      }
-      const at = o.hold?.admit(t);
-      if (at && "wait" in at) {
-        park(t.id, at.wait);
-        o.say(`  ${o.ref(t.id)} ${fileWaitNote(o.ref, at.wait)}`);
-        continue;
-      }
-      begin(t, "its last blocker has landed", at?.shares ?? []);
-      started = true;
-    }
-    if (started) o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)), stage: "running" });
-  };
-  // The ticket's files are free: the tickets parked for them start, or wait for the next in flight.
-  // Either way, not only after a landing - a ticket that left the run holds nothing either.
-  const unpark = (id: string) => {
-    if (!o.hold) return;
-    const work = [o.hold.end(id)];
-    let started = false;
-    for (let step = work.shift(); step; step = work.shift()) {
-      for (const w of step.waits) park(w.id, w.wait);
-      for (const f of step.freed) {
-        // Admitted, so its files are claimed: a ticket not started gives them back.
-        const bad = o.badLabel(f.ticket.id);
-        if (bad) {
-          skip(f.ticket, bad);
-          work.push(o.hold.end(f.ticket.id));
-          continue;
-        }
-        begin(f.ticket, `${o.ref(id)} is done with the file they both change`, f.shares);
-        started = true;
-      }
-    }
-    if (started) o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)), stage: "running" });
-  };
-  return {
-    async afterLanding(id: string, landed: boolean) {
-      try {
-        if (landed) o.dependants.landed(id);
-        else o.dependants.ended(id);
-        const going = !o.dryRun && !o.stopped();
-        // Before the blockers: a dependant that shares a file with this ticket must not find it still in flight.
-        if (going) unpark(id);
-        else if (!o.dryRun) settle(id);
-        if (landed && going) await release(id);
-        else for (const n of o.dependants.notes()) o.record.ticket(n.id, { note: n.note });
-      } catch (error) {
-        o.say(`${o.ref(id)}: could not start the tickets that wait for it (${errorLine(error)}); they wait for the next run.`);
-      } finally {
-        o.finish();
-      }
-    },
+export const openBlockersNow = (project: Project, tracker: Tracker, queued: Iterable<string>) => {
+  const ids = [...queued];
+  return async (tickets: Blocked[], landed: ReadonlySet<string>): Promise<Blocker[][]> => {
+    const resolve = blockerResolver(project, tracker, new Set(ids.filter((id) => !landed.has(id))));
+    const open: Blocker[][] = [];
+    for (const t of tickets) open.push(await openBlockers(project, tracker, resolve, t));
+    return open;
   };
 };

@@ -120,11 +120,20 @@ export type TicketRecord = {
   overrun?: string[];
 };
 
+/**
+ * A Claude Code session id as an environment variable or a record holds it, or undefined when
+ * the value is not one. The record is a file in a repository, so only a short id of letters,
+ * digits, `-` and `_` passes.
+ */
+export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
+
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
 export type RunRecord = {
   /** The project's name. */
   orchestrator?: string;
   pid?: number;
+  /** The Claude Code session that started the run (`CLAUDE_CODE_SESSION_ID`, nothing else of its environment); absent from a plain terminal, Codex or OpenCode. */
+  session?: string;
   startedAt?: string;
   /** Written on a clean exit; a pid that is gone without it is a run that was killed. */
   finishedAt?: string;

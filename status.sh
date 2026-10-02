@@ -167,11 +167,40 @@ cells_line() {
 }
 # The inner bar positions of the current OW, computed once per band.
 bars_of() { local p=0 i; BARS=""; for (( i=0; i<${#OW[@]}-1; i++ )); do p=$(( p + OW[i] + 1 )); BARS="$BARS $p"; done; BARS="${BARS# }"; }
+# Moves each inner bar of OW that lies within 4 columns of a bar of the band
+# above ($1, positions as bars_of gives them) onto it, so the two meet in one
+# ┼ rather than a near-miss like ┴┬. The widths after $1 are the least each
+# cell may be (one already narrower keeps its width): a bar whose move would
+# cut a cell stays, and the band still fills the window, the last cell taking
+# the remainder. A few integer comparisons per band, never per cell or row.
+snap_w() {
+  local -a refs=($1) mn=() pos=() suf=()
+  local n=${#OW[@]} i r p prev=0 best bd d acc=0
+  shift
+  for (( i=0; i<n; i++ )); do mn[i]=${1:-0}; [ "${mn[i]}" -gt "${OW[i]}" ] && mn[i]=${OW[i]}; [ $# -gt 0 ] && shift; done
+  # suf[i]: columns the cells from i on need, each with the bar that ends it.
+  suf[n]=0
+  for (( i=n-1; i>=0; i-- )); do suf[i]=$(( suf[i+1] + mn[i] + 1 )); done
+  for (( i=0; i<n-1; i++ )); do
+    acc=$(( acc + OW[i] + 1 )); p=$acc; best=$p; bd=5
+    for r in ${refs[@]+"${refs[@]}"}; do
+      d=$(( r > p ? r - p : p - r ))
+      [ "$d" -lt "$bd" ] && { bd=$d; best=$r; }
+    done
+    # A move that cuts this cell or leaves the later ones too little stays put.
+    if [ "$best" != "$p" ] && { [ $(( best - prev - 1 )) -lt "${mn[i]}" ] || [ $(( WIN - 1 - best )) -lt "${suf[i+1]}" ]; }; then best=$p; fi
+    # An earlier move right may have squeezed this cell.
+    [ "$best" -lt $(( prev + 1 + mn[i] )) ] && best=$(( prev + 1 + mn[i] ))
+    pos[i]=$best; prev=$best
+  done
+  prev=0
+  for (( i=0; i<n-1; i++ )); do OW[i]=$(( pos[i] - prev - 1 )); prev=${pos[i]}; done
+  OW[n-1]=$(( WIN - 2 - prev ))
+}
 # A rule across the window whose joints meet the bars above ($4) and below
-# ($5): $1 left end, $2 right end, $3 fill (─ or ═). Into REPLY.
+# ($5): $1 left end, $2 right end, $3 fill (─). Into REPLY.
 junction() {
-  local f="$3" up=" $4 " dn=" $5 " i out="" a b x y z
-  if [ "$f" = ═ ]; then x='╪'; y='╧'; z='╤'; else x='┼'; y='┴'; z='┬'; fi
+  local f="$3" up=" $4 " dn=" $5 " i out="" a b x='┼' y='┴' z='┬'
   for (( i=1; i<WIN-1; i++ )); do
     a=0; b=0; [[ "$up" == *" $i "* ]] && a=1; [[ "$dn" == *" $i "* ]] && b=1
     if [ $a = 1 ] && [ $b = 1 ]; then out="$out$x"
@@ -927,7 +956,9 @@ render() {
     { [ "$per" -le 2 ] || [ $(( sumw + per + 1 )) -le "$WIN" ]; } && break
     per=$(( per / 2 ))
   done
-  split_cols "${LWT[@]}"; bars_of; lbars="$BARS"
+  # The legend's bars snap onto the table's, so the seam between them has no near-miss joints.
+  OW=("${TW[@]}"); bars_of; tbars="$BARS"
+  split_cols "${LWT[@]}"; snap_w "$tbars" "${LWT[@]}"; bars_of; lbars="$BARS"
   AL=(c c c c c c c c)
   for (( r=0; r<8; r+=per )); do CELL=("${LEG[@]:r:per}"); cells_line; put "$REPLY"; done
   junction '├' '┤' '─' "$lbars" ""; put "$REPLY"
@@ -948,7 +979,7 @@ render() {
       done <<<"$tail_lines"
     fi
   fi
-  FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the double rule that opens it
+  FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the rule that opens it
 
   # A short pane: the logo folds to one row, so the table keeps some rows.
   if [ "$SHOW_ALL" != all ] && [ $(( rows - HDR_N - ftr_n - 1 )) -lt 5 ]; then build_header 1; fi
@@ -1014,7 +1045,7 @@ render() {
       up=""
     fi
   fi
-  junction '╞' '╡' '═' "$up" "$lbars"
+  junction '├' '┤' '─' "$up" "$lbars"
   printf '%s%s%s\n%s' "$HDR" "$BUF" "$REPLY" "$FTR"
 }
 
@@ -1022,7 +1053,10 @@ render() {
 # models and the queue error when there are any, and the table's headings.
 # $1: the logo's rows, 3 or 1. Reads render's locals.
 build_header() {
-  local l m=0 prev
+  local l m=0 prev i j tb
+  local -a need=()
+  # The table's bars, which the band above the headings snaps onto.
+  OW=("${TW[@]}"); bars_of; tb="$BARS"
   if [ "$1" = 3 ]; then
     LG=(" ${moon}▄ ▄ ▄${off} ${star}+${off}   ${bold}${moon}s a n d c a s t l e${off} ${night}- k i t${off}  ${star}·   +   ·${off}"
       " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
@@ -1036,7 +1070,14 @@ build_header() {
   BUF=""; BUF_N=0
   if [ "$cols" -ge 170 ]; then
     # Wide: the logo, the run, the machine and the models side by side.
-    split_cols 40 20 20 20; bars_of
+    # No cell narrower than its widest row needs (a cell's text plus a space each side).
+    need=($(( m + 2 )) 0 0 0)
+    for i in 0 1 2; do
+      vlen "${RUNC[i]:-}"; [ $(( VN + 2 )) -gt "${need[1]}" ] && need[1]=$(( VN + 2 ))
+      vlen "${MAC[i]:-}"; [ $(( VN + 2 )) -gt "${need[2]}" ] && need[2]=$(( VN + 2 ))
+      vlen "${MOD[i]:-}"; [ $(( VN + 2 )) -gt "${need[3]}" ] && need[3]=$(( VN + 2 ))
+    done
+    split_cols 40 20 20 20; snap_w "$tb" "${need[@]}"; bars_of
     junction '┌' '┐' '─' "" "$BARS"; put "$REPLY"
     AL=(c l l l)
     for i in 0 1 2; do CELL=("${LG[i]:-}" "${RUNC[i]}" "${MAC[i]}" "${MOD[i]:-}"); cells_line; put "$REPLY"; done
@@ -1044,7 +1085,12 @@ build_header() {
     split_cols 1; AL=(c)
     junction '┌' '┐' '─' "" ""; put "$REPLY"
     for l in "${LG[@]}"; do CELL=("$l"); cells_line; put "$REPLY"; done
-    split_cols 1 1; AL=(l l); bars_of
+    need=(0 0)
+    for i in 0 1 2; do
+      vlen "${RUNC[i]:-}"; [ $(( VN + 2 )) -gt "${need[0]}" ] && need[0]=$(( VN + 2 ))
+      vlen "${MAC[i]:-}"; [ $(( VN + 2 )) -gt "${need[1]}" ] && need[1]=$(( VN + 2 ))
+    done
+    split_cols 1 1; snap_w "$tb" "${need[@]}"; AL=(l l); bars_of
     junction '├' '┤' '─' "" "$BARS"; put "$REPLY"
     for i in 0 1 2; do CELL=("${RUNC[i]}" "${MAC[i]}"); cells_line; put "$REPLY"; done
     if [ -n "$models" ]; then
@@ -1062,9 +1108,9 @@ build_header() {
     CELL=("${mute}queue: could not read - ${QUEUE_ERR}${off}"); cells_line; put "$REPLY"
     prev=""
   fi
-  # The table's headings, under a double rule.
+  # The table's headings, under a light rule: their bold text sets them apart.
   OW=("${TW[@]}"); bars_of
-  junction '╞' '╡' '═' "$prev" "$BARS"; put "$REPLY"
+  junction '├' '┤' '─' "$prev" "$BARS"; put "$REPLY"
   CELL=("${bold}${head}TICKET${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
   [ "$wide" -ge 1 ] && CELL[4]="${bold}${head}CPU${off}"
   [ "$wide" = 2 ] && CELL[5]="${bold}${head}MEM${off}"
@@ -1074,7 +1120,20 @@ build_header() {
   HDR="$BUF"; HDR_N=$BUF_N
 }
 
-if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
+# The pane's size from its terminal; without one (a test, an agent's tool), the
+# size given. render asks tput from inside $(...), which cannot see the
+# terminal and falls back to 80 columns - the snapshot was 80 wide in any pane.
+# A pty that reports 0 0 counts as no terminal.
+tty_size() {
+  local size
+  if size=$( { stty size </dev/tty; } 2>/dev/null) && [[ "$size" =~ ^[1-9][0-9]*\ [1-9][0-9]*$ ]]; then
+    TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"
+  fi
+  export TERM_ROWS TERM_COLS
+}
+
+# A size given (the tests, the frame checks) wins over the terminal's.
+if [ "$INTERVAL" = "0" ]; then [ -n "${TERM_COLS:-}" ] || tty_size; load_queue; render; exit 0; fi
 
 # Alternate screen + hidden cursor, restored on exit. INT and TERM must exit
 # explicitly: a handler that only restores the screen returns into the loop,
@@ -1115,9 +1174,7 @@ SLEEP_PID=""; RESIZED=0; frame=""
 trap 'RESIZED=1; [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
 
 while true; do
-  # The pane's size from its terminal; without one (a test), the size given.
-  if size=$( { stty size </dev/tty; } 2>/dev/null) && [ -n "$size" ]; then TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"; fi
-  export TERM_ROWS TERM_COLS
+  tty_size
   if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "$TERM_ROWS" =~ ^[0-9]+$ ]]; then
     printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi

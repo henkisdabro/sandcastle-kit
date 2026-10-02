@@ -34,9 +34,7 @@
 // or on any herdr error, it does nothing and the run carries on.
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
@@ -169,12 +167,6 @@ export const askingInPane = async <T>(about: string, ask: () => Promise<T>): Pro
   }
 };
 
-// Live runs, one file per project holding its root, so the tab bar can show every run on
-// the machine whichever pane has focus. A run that dies without its exit handler leaves
-// its file; readers check the run's pid and drop it.
-export const RUNS_DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "runs");
-export const runFile = (root: string) => join(RUNS_DIR, createHash("sha1").update(root).digest("hex").slice(0, 12));
-
 type Slot = { pane: string; issue?: string; closed?: boolean };
 export type SandboxView = {
   /** The status view's pane; undefined when this view is off and the caller opens one. */
@@ -199,7 +191,7 @@ const TTL = "150000";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
 // Gates have one too: the orchestrator writes their output as it arrives
-// (burndown.ts), so a pane shows the test run instead of the review's last words.
+// (burndown.ts), so a pane shows the test run instead of the review's closing lines.
 const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
 
 export const openSandboxView = (
@@ -410,12 +402,6 @@ export const openSandboxView = (
     reportRunAndSpace();
   }), 60_000);
   tick.unref();
-  // The tab bar's `sandcastle herdr line` finds the run here.
-  safe(() => {
-    mkdirSync(RUNS_DIR, { recursive: true });
-    writeFileSync(runFile(project.root), project.root);
-  });
-
   // Reported states outlive the process: a finished run's panes went on
   // saying "blocked" in the sidebar an hour later. The sandbox panes close
   // with the run - the outcomes are in the report and the status view.
@@ -443,7 +429,6 @@ export const openSandboxView = (
         /* the pane or the server is gone */
       }
     }
-    rmSync(runFile(project.root), { force: true });
     try {
       if (workspace) herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--clear-token", "sandcastle"]);
     } catch {

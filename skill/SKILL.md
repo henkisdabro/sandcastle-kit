@@ -256,9 +256,10 @@ comments, and the gates can prove it.
    person's terminal alone in a Herdr tab it adopts that tab.
 3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - this text then
    ends with a note saying so - skip this step: the mod submits a prompt when the run's process
-   is gone, and that prompt is your cue for step 4. The mod follows the run's record, which a
-   run writes just before it opens its status view; a run that `--detach` refused gets no
-   prompt, so step 2's check of the printed line still matters. With no such note, arrange it
+   is gone, and that prompt is your cue for step 4. The mod follows the run this session
+   started wherever its project lives (a second clone, a package of a monorepo), by the session
+   id the run records; a run that `--detach` refused gets no prompt, so step 2's check of the
+   printed line still matters. With no such note, arrange it
    yourself: the detached run is not your own process, so your harness never tells you it
    finished. Right after starting it, run `sandcastle wait` as a background
    command your harness reports back on when it exits (`run_in_background` in Claude Code): it

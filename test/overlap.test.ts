@@ -1,5 +1,5 @@
-// Which tickets start together (createFileHold in src/schedule.ts, wired by createRelease in
-// src/blockers.ts and burndown.ts as burndown.ts does). Tickets that share a file git cannot merge
+// Which tickets start together: the file hold, inside `createSchedule` (src/schedule.ts), driven
+// through `createSchedule(plan).run(work)` with fake ports. Tickets that share a file git cannot merge
 // (a lockfile, a minified blob) run one at a time; tickets that share a mergeable file start
 // together and the start line names it. A ticket's files are its branch's changed files and its
 // `Touches:` line. Real git in a temp repo and fake pipelines; no Docker, model calls or network.
@@ -19,10 +19,9 @@ import { test } from "node:test";
 // Importing burndown.ts must not touch the real config or cache.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { branchFiles, refreshFiles, ticketFiles } = await import("../src/burndown.ts");
-const { createDependants, createRelease } = await import("../src/blockers.ts");
-const { createFlow } = await import("../src/landing.ts");
-const { createFileHold, createQueue, fileShareLine, fileWaitNote, startHold } = await import("../src/schedule.ts");
+const { branchFiles, createHoldRecord, refreshFiles, refusedRecord, ticketFiles } = await import("../src/burndown.ts");
+const { createSchedule, fileShareLine, fileWaitNote } = await import("../src/schedule.ts");
+type Ending<G, O> = import("../src/schedule.ts").Ending<G, O>;
 type Project = import("../src/config.ts").Project;
 type Ticket = import("../src/tracker.ts").Ticket;
 
@@ -76,6 +75,7 @@ type Flow = {
   skipped: string[];
   /** Each `waiting` list written to the run record, as JSON. */
   updates: string[];
+  endings: Map<string, Ending<{ issue: string }, string>>;
 };
 
 type FlowOptions = {
@@ -87,23 +87,26 @@ type FlowOptions = {
   after?: Record<string, string>;
   /** Runs inside a ticket's pipeline, as the branch gains its commits (`attempt` is 2 for a requeue). */
   work?: (t: Ticket, attempt: number) => void | Promise<void>;
-  /** Tickets whose first landing conflicts: the flow requeues them once. */
+  /** Tickets whose first landing conflicts: the scheduler requeues them once. */
   requeue?: string[];
-  /** The run has stopped from the nth landing on (1 = the first). */
-  stopAfter?: number;
+  /** Tickets whose attempt finds a usage limit: it does not begin, and the run starts nothing more. */
+  usageLimit?: string[];
   /** A ticket's label refusal. */
   badLabels?: Record<string, string>;
+  /** A dry run: no files, so nothing is held. */
+  dryRun?: boolean;
 };
 
 /**
- * Wires what burndown.ts wires: the start of the run through `startHold` (the function burndown()
- * calls), the real hold with the same `refreshFiles`, `createFlow` over the pipeline queue,
- * `createRelease` with the hold after each ticket's last word. A fake pipeline works `delay` ms,
- * then "lands" (or, for a ticket in `leave`, ends without landing).
+ * Drives the scheduler as burndown.ts does: `createSchedule` with the real files (`ticketFiles`,
+ * `refreshFiles`) and a fake blockers port, and the burndown's record of
+ * the hold (`createHoldRecord`) given what `start` decided and what `tell` says. A fake attempt
+ * works `delay` ms, then is green (or, for a ticket in `leave`, ends in its pipeline); a fake
+ * landing merges it, or conflicts on a first landing in `requeue`.
  */
 const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = {}): Promise<Flow> => {
   const after = opts.after ?? {};
-  const out: Flow = { events: [], said: [], notes: {}, noted: [], peak: 0, started: [], waiting: [], order: new Map(), skipped: [], updates: [] };
+  const out: Flow = { events: [], said: [], notes: {}, noted: [], peak: 0, started: [], waiting: [], order: new Map(), skipped: [], updates: [], endings: new Map() };
   const record = {
     ticket: (id: string, fields: { state?: string; note?: string | null }) => {
       if ("note" in fields) {
@@ -117,77 +120,58 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
       if (fields.waiting) out.updates.push(JSON.stringify(fields.waiting));
     },
   };
+  const say = (line: string) => void out.said.push(line.trim());
   const waiting = Object.entries(after).map(([issue, on]) => ({ issue, on: [ref(on)] }));
-  const waits = new Set(Object.keys(after));
-  const hold = createFileHold<Ticket>((t) => ticketFiles(project, t), (t, files) => refreshFiles(project, t, files));
-  const start = startHold(hold, tickets.filter((t) => !waits.has(t.id)), {
-    ref,
-    waiting,
-    dependants: () => tickets.filter((t) => waits.has(t.id)),
+  // A ticket is released when the one it waits for lands: its one blocker reads as closed then.
+  const held = tickets.filter((t) => after[t.id]);
+  const schedule = createSchedule<Ticket, { issue: string }, string, string>({
+    tickets: tickets.filter((t) => !after[t.id]),
+    files: opts.dryRun ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
+    blockers: { held: held.map((t) => ({ ticket: t, on: [after[t.id]] })), ticketOf: (b) => b, open: async (ts) => ts.map(() => []) },
     checkLabel: (t) => opts.badLabels?.[t.id],
-    say: (line) => out.said.push(line.trim()),
   });
-  out.order = start.order;
-  for (const p of start.parked) record.ticket(p.ticket.id, { state: "blocked", note: fileWaitNote(ref, p.wait) });
-  const queue = createQueue<Ticket>();
-  const flow = createFlow(start.issues.length, queue, { close() {} });
-  let landings = 0;
-  // A fake `createDependants`: a ticket is released when the one it waits for lands.
-  const dependants = {
-    landed: () => {},
-    ended: () => {},
-    notes: () => [] as { id: string; note: string }[],
-    release: async (landed: string) => ({
-      free: tickets.filter((t) => after[t.id] === landed && waits.delete(t.id)),
-      held: [],
-    }),
-  };
-  const { afterLanding } = createRelease({
-    dependants: dependants as never,
-    hold,
-    start: (t) => flow.start(t),
-    finish: () => flow.finish(),
-    stopped: () => opts.stopAfter !== undefined && landings >= opts.stopAfter,
-    dryRun: false,
-    badLabel: (id) => start.badLabels.get(id),
-    record,
-    waiting,
-    ref,
-    say: (line) => out.said.push(line.trim()),
-  });
+  const holds = createHoldRecord({ waiting, ref, say });
+  holds.start(schedule.start);
+  out.order = new Map(schedule.start.map((c, at) => [c.ticket.id, at] as const));
+  for (const c of schedule.start) if (c.file) record.ticket(c.ticket.id, { state: "blocked", note: fileWaitNote(ref, c.file) });
   out.waiting = waiting;
-  const attempts = new Map<string, number>();
   let running = 0;
-  const pipelines = queue.run(
-    tickets.length,
-    flow.work(
-      async (t) => {
-        const attempt = (attempts.get(t.id) ?? 0) + 1;
-        attempts.set(t.id, attempt);
-        running++;
-        out.peak = Math.max(out.peak, running);
-        out.events.push(`start ${t.id}`);
-        out.started.push(t.id);
-        await opts.work?.(t, attempt);
-        const delay = typeof opts.delay === "number" ? opts.delay : (opts.delay?.[t.id] ?? 20);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        running--;
-        if (opts.leave?.includes(t.id)) return false;
-        if (attempt === 1 && opts.requeue?.includes(t.id)) {
-          out.events.push(`requeue ${t.id}`);
-          flow.retry(t, { kind: "conflict", with: [] } as never);
-          return true;
-        }
-        out.events.push(`land ${t.id}`);
-        landings++;
-        await afterLanding(t.id, true);
-        return true;
-      },
-      (t) => afterLanding(t.id, false),
-    ),
-  );
-  for (const t of start.issues) queue.push(t);
-  await pipelines;
+  const landedOnce = new Set<string>();
+  const { endings } = await schedule.run({
+    workers: tickets.length,
+    attempt: async (t, at) => {
+      if (opts.usageLimit?.includes(t.id)) return { kind: "not begun", why: { kind: "usage limit", line: "usage 97% of the 5-hour window" } };
+      running++;
+      out.peak = Math.max(out.peak, running);
+      out.events.push(`start ${t.id}`);
+      out.started.push(t.id);
+      await opts.work?.(t, at.n);
+      const delay = typeof opts.delay === "number" ? opts.delay : (opts.delay?.[t.id] ?? 20);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      running--;
+      if (opts.leave?.includes(t.id)) return { kind: "pipeline", outcome: "red" };
+      return { kind: "green", green: { issue: t.id } };
+    },
+    land: async (g) => {
+      if (opts.requeue?.includes(g.issue) && !landedOnce.has(g.issue)) {
+        landedOnce.add(g.issue);
+        return { kind: "conflict", files: [], with: [] };
+      }
+      out.events.push(`land ${g.issue}`);
+      return { kind: "merged" };
+    },
+    host: { check: async () => {}, failed: undefined },
+    tell: (c) => {
+      if (c.kind === "requeued") out.events.push(`requeue ${c.id}`);
+      else if (c.kind === "started" || c.kind === "waits" || c.kind === "next run") holds.tell(record, c);
+      // The burndown's wording of a refused label.
+      else if (c.kind === "ended" && c.ending.kind === "not begun" && c.ending.why.kind === "refused label") {
+        say(c.ending.why.reason);
+        record.ticket(c.id, refusedRecord(c.ending.why.reason));
+      }
+    },
+  });
+  out.endings = endings;
   return out;
 };
 
@@ -260,11 +244,11 @@ test("a ticket waits only for the tickets that share its file", async () => {
 });
 
 test("mergeable files are named for each pair, three at most", () => {
-  const hold = createFileHold<Ticket>((t) => ({ all: t.id === "1" ? ["a", "b", "c", "d", "e"] : ["e", "d", "c", "b", "a", "z"], unmergeable: [] }));
-  hold.admit(ticket("1"));
-  const at = hold.admit(ticket("2"));
-  assert.ok("shares" in at);
-  assert.deepEqual(at.shares.map((s) => fileShareLine(ref, "2", s)), ["#1 and #2 both change a, b, c and 2 more - landing resolves it"]);
+  const { start } = createSchedule<Ticket, { issue: string }>({
+    tickets: [ticket("1"), ticket("2")],
+    files: { of: (t) => ({ all: t.id === "1" ? ["a", "b", "c", "d", "e"] : ["e", "d", "c", "b", "a", "z"], unmergeable: [] }) },
+  });
+  assert.deepEqual(start[1].shares?.map((s) => fileShareLine(ref, "2", s)), ["#1 and #2 both change a, b, c and 2 more - landing resolves it"]);
 });
 
 test("ticketFiles: the branch's files and the Touches line, and which of them git cannot merge", () => {
@@ -343,8 +327,9 @@ test("a ticket parked again behind another holder names the new one in waiting",
 
 test("a stopped run leaves each parked ticket with the next-run note and a waiting entry for its holder now", async () => {
   const r = repo();
-  const out = await runFlow(r.project, [ticket("1", "pnpm-lock.yaml"), ticket("4", "yarn.lock"), ticket("2", "pnpm-lock.yaml"), ticket("3", "pnpm-lock.yaml, yarn.lock")], {
-    stopAfter: 1,
+  // 5 finds a usage limit as it would begin: the run starts nothing more, and what is green still lands.
+  const out = await runFlow(r.project, [ticket("1", "pnpm-lock.yaml"), ticket("4", "yarn.lock"), ticket("2", "pnpm-lock.yaml"), ticket("3", "pnpm-lock.yaml, yarn.lock"), ticket("5")], {
+    usageLimit: ["5"],
     delay: { "1": 20, "4": 150 },
   });
   // Nothing parked starts. 1 landed, so 3 waits for 4 (which still has yarn.lock) and 2 for nobody.
@@ -356,6 +341,7 @@ test("a stopped run leaves each parked ticket with the next-run note and a waiti
   assert.equal(out.notes["3"], "stopped before it could start - next run");
   assert.deepEqual(JSON.parse(out.updates.at(-1) ?? "[]"), []);
   assert.deepEqual(out.waiting, []);
+  assert.deepEqual([out.endings.get("2"), out.endings.get("3")], [{ kind: "waiting", on: "file" }, { kind: "waiting", on: "file" }]);
 });
 
 test("refreshFiles adds the branch's files to what was read, and recomputes which git cannot merge", () => {
