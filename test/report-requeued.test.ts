@@ -43,6 +43,7 @@ test("a queued ticket whose requeued is null is not listed as requeued", () => {
 test("a requeued ticket is not also reported as not started when the run ended early", () => {
   const line = "requeued after red with #42";
   const out = render({ ...facts({ "43": { state: "queued", requeued: line, note: line } }), killed: true }, true);
-  assert.equal(out.match(/#43/g)?.filter(Boolean).length, out.match(/#43/g)?.length);
+  assert.match(out, /Requeued: #43 - requeued after red with #42 - still queued for the next run/);
   assert.doesNotMatch(out, /Not started \(the run ended early\)/);
+  assert.doesNotMatch(out, /Cut short when the run ended/);
 });
