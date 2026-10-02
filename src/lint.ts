@@ -95,7 +95,8 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   for (const [f, by] of shared) out.push(`    ${f}: ${names(by)}`);
   out.push(problems.length ? "  problems:" : "  problems: none");
   for (const p of problems) out.push(`    ${p}`);
-  const turns = chain.length + (shared.length ? 1 : 0);
-  out.push(`  rough estimate: about ${turns} turn(s) = blocker depth ${chain.length}${shared.length ? " + 1 for a shared unmergeable file" : ""}; a guess from the Touches hints, not a promise`);
+  // Dependants start in the same run once their last blocker lands, so depth costs time inside one run, not turns.
+  const order = chain.length > 1 ? `${chain.length} tickets one after another in it` : "no ticket waits for another";
+  out.push(`  rough estimate: one run; ${order} (blocker depth ${chain.length})${shared.length ? ", maybe one more turn for a shared unmergeable file" : ""}; a guess from the Touches hints, not a promise`);
   return out;
 };
