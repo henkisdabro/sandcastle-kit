@@ -1017,10 +1017,26 @@ if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
 # which leaves Ctrl-C unable to stop the script at all.
 # Line wrap off as well: a line wider than the pane would wrap onto a second
 # row, and enough of them push the frame's top off the screen.
-restore() { printf '\e[?7h\e[?25h\e[?1049l'; }
+# The input side too, when there is a terminal: in cooked mode the kernel
+# echoes every key at the cursor (on the frame's free bottom row) and keeps it
+# queued for the shell once the view exits. So echo is off, input is
+# unbuffered (-icanon, min 0 time 0: a read returns at once, empty or not) so it
+# can be drained, and the wheel's alternate-scroll (?1007) is off so it does
+# not arrive as arrow keys. isig stays on: Ctrl-C must still stop the view.
+# A background view would be stopped by SIGTTIN/SIGTTOU on those tty calls, so
+# both are ignored (the calls then fail and the view carries on as before).
+TTY_SAVED=$( { stty -g </dev/tty; } 2>/dev/null) || TTY_SAVED=""
+drain() { [ -n "$TTY_SAVED" ] && { dd if=/dev/tty of=/dev/null bs=1024 count=4; } 2>/dev/null; return 0; }
+restore() {
+  drain
+  [ -n "$TTY_SAVED" ] && { stty "$TTY_SAVED" </dev/tty; } 2>/dev/null
+  printf '\e[?1007h\e[?7h\e[?25h\e[?1049l'
+}
 trap restore EXIT
 trap 'restore; exit 130' INT TERM
-printf '\e[?1049h\e[?25l\e[?7l\e[2J'
+trap '' TTIN TTOU
+[ -n "$TTY_SAVED" ] && { stty -echo -icanon min 0 time 0 </dev/tty; } 2>/dev/null
+printf '\e[?1049h\e[?25l\e[?7l\e[?1007l\e[2J'
 
 # Redraw on a pane resize instead of waiting out the interval. A render takes
 # seconds (docker stats, git), and a resize that lands during one used to be
@@ -1038,6 +1054,7 @@ while true; do
     printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi
   RESIZED=0
+  drain
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be
