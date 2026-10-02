@@ -31,7 +31,7 @@ test("a SIGTERM during a 1.5 s stall still runs the exit handler", async () => {
   );
   // The launcher's last line, with the fixture in place of the CLI.
   const exec = readFileSync(join(KIT, "bin/sandcastle"), "utf8").trim().split("\n").at(-1)!;
-  assert.match(exec, /^exec node --import /, "the launcher runs one node process with tsx's loader");
+  assert.match(exec, /^exec node (--[a-z-]+ )*--import /, "the launcher runs one node process with tsx's loader");
   const script = exec.replace('"$KIT/src/cli.ts"', JSON.stringify(fixture));
   const code = await new Promise<number | null>((resolve) => {
     const child = spawn("bash", ["-c", `KIT=${JSON.stringify(KIT)}; ${script}`], { env: { ...process.env, OUT: out }, stdio: ["ignore", "pipe", "inherit"] });
