@@ -318,9 +318,16 @@ export const blockerTicket = (b: Blocker): string | undefined => (b.kind === "gi
 
 /**
  * The words after the ticket's name in the status view. A blocker still in flight lands in this
- * run, which is when its dependant starts; any other is not this run's to land.
+ * run, which is when its dependant starts; any other is not this run's to land. One that has
+ * `landed` is no blocker any more and is left out, never called "not in this run".
  */
-export const blockedNote = (on: Blocker[], inFlight: Set<string>): string => {
+export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: ReadonlySet<string> = new Set()): string => {
+  on = on.filter((b) => {
+    const id = blockerTicket(b);
+    return id === undefined || !landed.has(id);
+  });
+  // Every blocker landed but the read that frees the ticket has not: it starts with the next one.
+  if (!on.length) return "waits for the next landing";
   const here = (b: Blocker) => {
     const id = blockerTicket(b);
     return id !== undefined && inFlight.has(id);
