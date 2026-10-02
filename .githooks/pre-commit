@@ -8,6 +8,10 @@
 #    matches. Blank lines and lines starting with # are skipped. It lives
 #    OUTSIDE the repo so it is never published:
 #      ${XDG_CONFIG_HOME:-~/.config}/sandcastle-kit/denylist
+#    A staged line that also matches a pattern in the allowlist beside it
+#    (same format, case-sensitive) passes: your name in an author credit you
+#    mean to publish. Match the whole credit, not the bare name, so the name
+#    is still blocked everywhere else.
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 set -eu
@@ -19,13 +23,17 @@ fi
 gitleaks protect --staged --redact --no-banner
 
 deny="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/denylist"
+allow="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/allowlist"
 if [ -f "$deny" ]; then
   # An empty pattern matches every line, so a blank line in the file blocked every commit.
   patterns=$(mktemp)
-  trap 'rm -f "$patterns"' EXIT
+  allowed=$(mktemp)
+  trap 'rm -f "$patterns" "$allowed"' EXIT
   grep -vE '^[[:space:]]*(#|$)' "$deny" > "$patterns" || true
+  if [ -f "$allow" ]; then grep -vE '^[[:space:]]*(#|$)' "$allow" > "$allowed" || true; fi
   hits=""
-  [ -s "$patterns" ] && hits=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' | grep -inEf "$patterns" || true)
+  [ -s "$patterns" ] && hits=$(git diff --cached -U0 --no-color | grep '^+' | grep -v '^+++' \
+    | { if [ -s "$allowed" ]; then grep -vEf "$allowed"; else cat; fi; } | grep -inEf "$patterns" || true)
   if [ -n "$hits" ]; then
     echo "pre-commit: staged lines match your personal denylist ($deny):" >&2
     echo "$hits" | head -20 >&2

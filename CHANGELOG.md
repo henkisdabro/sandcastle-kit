@@ -72,6 +72,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   git cannot merge. Nothing schedules on it yet.
 - The audit action clusters findings that touch the same files before filing, and separates real
   dependencies from order-only ones.
+- **A project website** at <https://henkisdabro.github.io/sandcastle-kit/>: who the kit is for, a
+  live status view playing an overnight run, how a run works, the safety model and the install
+  steps. It lives in `site/` (static, no build step) and deploys from `main` by a GitHub Pages
+  workflow.
+- The pre-commit hook reads an **allowlist** beside your denylist
+  (`~/.config/sandcastle-kit/allowlist`): a staged line matching it passes, so an author credit
+  you mean to publish can carry a name the denylist blocks everywhere else.
 
 ## [0.3.0] - 2026-10-01
 

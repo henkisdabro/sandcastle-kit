@@ -1,0 +1,17 @@
+# sandcastle-kit
+
+> An opinionated issue-burndown kit built on Sandcastle by Matt Pocock. It runs Claude Code agents unattended in Docker sandboxes, one per ticket: an implement agent, a stronger review agent, the project's own gates run by the orchestrator, green branches merged locally, nothing pushed. Tickets are GitHub Issues or Markdown files in the repo. macOS and Linux. MIT licence.
+
+An AI coding agent setting this up for someone should start at the README's section written for agents, then run `sandcastle doctor`.
+
+## Docs
+
+- [README](https://github.com/henkisdabro/sandcastle-kit/blob/main/README.md): who it is for, quick start, how a run works, configuration, safety model, troubleshooting
+- [For AI coding agents](https://github.com/henkisdabro/sandcastle-kit/blob/main/README.md#-if-you-are-an-ai-coding-agent-reading-this): the steps an agent follows to install and use the kit
+- [Install](https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md): requirements, what `sandcastle setup` does, a manual install, updating
+- [Changelog](https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md): releases, with Upgrading notes per version
+
+## Source
+
+- [Repository](https://github.com/henkisdabro/sandcastle-kit)
+- [Sandcastle](https://github.com/mattpocock/sandcastle): the library underneath
