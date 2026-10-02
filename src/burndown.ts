@@ -551,8 +551,10 @@ export const burndown = async (project: Project): Promise<boolean> => {
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
-      // The base as the merge below sees it, for checking the resolution against git's own merge.
-      const baseTip = sh("git", ["rev-parse", base]);
+      // The base commit the merge below joined, for checking the resolution against git's own
+      // merge. Read from the merge itself: the landing worker can move the base between a host
+      // rev-parse and the merge, and the newly landed lines would then read as strays.
+      let baseTip: string | undefined;
       if (behind > 0 && carried) {
         const identity = hostIdentity(project.root);
         const merge = `git ${identity} merge --no-edit ${shq(base)}`;
@@ -596,6 +598,10 @@ export const burndown = async (project: Project): Promise<boolean> => {
           console.log(`${ref(issue.id)}: could not merge ${base} into its branch (${(pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160)}); it may conflict at landing.`);
         }
       }
+      if (mergeConflicted) {
+        const head = await sandbox.exec("git rev-parse -q --verify MERGE_HEAD");
+        if (head.exitCode === 0) baseTip = head.stdout.trim();
+      }
       // A conflicted merge on a branch that is already reviewed and green needs
       // only the merge resolved, not the issue implemented again: a short prompt
       // on the same sandbox. A resolver that leaves the merge in progress could
@@ -625,7 +631,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
           landOnly = false;
         }
       }
-      if (landOnly && mergeConflicted && greenHead !== undefined) {
+      if (landOnly && mergeConflicted && greenHead !== undefined && baseTip !== undefined) {
         // A resolution may touch only what git could not merge itself: a change to any other
         // path can drop another ticket's landed lines with every gate green.
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
