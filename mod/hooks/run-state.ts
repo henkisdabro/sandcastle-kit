@@ -13,11 +13,30 @@ export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedA
 
 // The status view's sand palette, as hex: a mod's Text takes no 256-colour index. Dry sand at
 // the castle's top, wet sand at its base.
-export const SAND = { top: "#e8d6b4", base: "#705c42", name: "#cdb894", stage: "#c0a478", muted: "#927c5e" };
+export const SAND = { top: "#e8d6b4", mid: "#cdb894", base: "#705c42", name: "#cdb894", stage: "#c0a478", muted: "#927c5e" };
 
-// The first and last rows of the status view's castle: the battlements and the gate. Its
-// one-row fold (a bare slab) reads as no castle at all.
-export const CASTLE = { top: "▄ ▄ ▄", base: "██▀██" };
+/** The castle's three rows, each five cells wide. */
+export type Castle = { top: string; mid: string; base: string };
+
+// The status view's three-row castle: the battlements stand a row above the text beside it.
+// Its one-row fold (a bare slab) reads as no castle at all.
+export const CASTLE: Castle = { top: "▄ ▄ ▄", mid: "█████", base: "██▀██" };
+
+// While a ticket is in work the castle builds from level sand, half a row at a time, and holds
+// complete for most of the cycle: a part-built frame reads as going up only when the finished
+// castle is what the eye mostly sees. Every row of every frame is five cells, so the text beside
+// it never moves, and the band's height never changes.
+const AIR = "     ";
+export const CASTLE_FRAMES: (Castle & { ms: number })[] = [
+  { top: AIR, mid: AIR, base: "▁▁▁▁▁", ms: 800 },
+  { top: AIR, mid: AIR, base: "▄▄▄▄▄", ms: 350 },
+  { top: AIR, mid: AIR, base: CASTLE.base, ms: 350 },
+  { top: AIR, mid: "▄▄▄▄▄", base: CASTLE.base, ms: 350 },
+  { top: AIR, mid: CASTLE.mid, base: CASTLE.base, ms: 350 },
+  { ...CASTLE, ms: 16000 },
+];
+/** The held frame: the castle as the status view draws it. */
+export const HELD = CASTLE_FRAMES.length - 1;
 
 /** The status view's legend: its order, glyphs, words and colours. */
 export const LEGEND: { group: Group; glyph: string; label: string; colour: string }[] = [
@@ -105,28 +124,32 @@ export const summarise = (run: Run): Summary => ({
 
 export type Segment = { text: string; colour: string; bold?: true; count?: number };
 
+/** Whether the run has a ticket in work: the castle builds only then. */
+export const building = (s: Summary): boolean => (s.counts[LEGEND.findIndex((g) => g.group === "working")] ?? 0) > 0;
+
 /**
- * The band's two rows, each cut to the width it is drawn in: the castle's top with the run
- * (name, stage, tokens), and its base with the legend - in words while they fit, then the
- * glyphs alone. A row that wraps would push the prompt down every time a count gains a digit.
+ * The band's three rows, each cut to the width it is drawn in: the castle's battlements alone,
+ * its walls with the run (name, stage, tokens), and its base with the legend - in words while
+ * they fit, then the glyphs alone. A row that wraps would push the prompt down every time a
+ * count gains a digit.
  */
-export const band = (s: Summary, columns: number): Segment[][] => {
+export const band = (s: Summary, columns: number, castle: Castle = CASTLE): Segment[][] => {
   // Two columns between segments, one between a segment's text and its count.
   const width = (row: Segment[]) => row.reduce((n, seg) => n + seg.text.length + (seg.count === undefined ? 0 : 1 + String(seg.count).length), 2 * (row.length - 1));
   const fit = (tries: Segment[][]) => tries.find((row) => width(row) <= columns) ?? tries.at(-1) ?? [];
   const run = (name: boolean, tokens: boolean): Segment[] =>
     [
-      { text: CASTLE.top, colour: SAND.top },
+      { text: castle.mid, colour: SAND.mid },
       { text: "sandcastle", colour: SAND.top, bold: true as const },
       { text: name ? s.name : "", colour: SAND.name },
       { text: s.stage, colour: SAND.stage },
       { text: tokens ? s.tokens : "", colour: SAND.muted },
     ].filter((seg) => seg.text);
   const legend = (words: boolean): Segment[] => [
-    { text: CASTLE.base, colour: SAND.base },
+    { text: castle.base, colour: SAND.base },
     ...LEGEND.map((g, i) => ({ text: words ? `${g.glyph} ${g.label}` : g.glyph, count: s.counts[i] ?? 0, colour: g.colour })).filter((seg) => seg.count),
   ];
-  return [fit([run(true, true), run(true, false), run(false, false)]), fit([legend(true), legend(false)])];
+  return [[{ text: castle.top, colour: SAND.top }], fit([run(true, true), run(true, false), run(false, false)]), fit([legend(true), legend(false)])];
 };
 
 /** The same summary as one line of text, for `/sandcastle-status`. A run that is over has no stage. */

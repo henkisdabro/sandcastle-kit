@@ -25,6 +25,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The mod's castle stands taller and builds while a run works.** The band above the prompt draws
+  the status view's whole three-row castle, so the battlements stand a row above the run's text.
+  While a ticket is in work the castle builds from level sand and holds complete for most of each
+  18-second cycle; with nothing in work it stands still. The frames run on a timer of their own,
+  apart from the 3-second read of the run record. The band is now three rows tall.
 - **The update record keeps the Upgrading notes, not a kit commit.** `sandcastle updated` now
   records the release and every note acted on, so doctor and a run can tell what is new in a
   shallow clone, a kit outside git or another clone of the kit - where a commit could not be read

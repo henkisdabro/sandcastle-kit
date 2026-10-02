@@ -3,6 +3,7 @@ export type View = { name: string; stage: string; counts: number[]; tokens: stri
 
 declare module "claude-code" {
   interface PluginState {
-    sandcastle: { view: View };
+    /** `castle`: the frame of the castle the band draws, an index into run-state.ts's `CASTLE_FRAMES`. */
+    sandcastle: { view: View; castle: number };
   }
 }
