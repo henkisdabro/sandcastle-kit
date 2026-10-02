@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [After a run](#-after-a-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Website](https://henkisdabro.github.io/sandcastle-kit/) · [Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [After a run](#-after-a-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -971,7 +971,8 @@ fix its cause or ask the user.
 `AGENTS.md` has the layout and conventions. This repository is public and used daily by its
 maintainer, so nothing personal, client-specific or secret may be committed: enable the guard with
 `git config core.hooksPath .githooks` (requires `gitleaks`; add your own denylist at
-`~/.config/sandcastle-kit/denylist`). CI scans every push for secrets.
+`~/.config/sandcastle-kit/denylist`, and in `allowlist` beside it the few lines you mean to
+publish anyway, such as an author credit). CI scans every push for secrets.
 
 ## 🙏 Credits and licence
 
@@ -982,3 +983,5 @@ are the place to start if you want to build your own workflow. If this kit helps
 the original.
 
 MIT - see [`LICENSE`](LICENSE). Sandcastle's licence is reproduced in [`NOTICE`](NOTICE).
+
+Built by [Henrik Söderlund](https://www.henriksoderlund.com/?utm_source=github&utm_medium=referral&utm_campaign=oss-sandcastle-kit&utm_content=readme-author-link).
