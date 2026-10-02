@@ -9,6 +9,28 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **Agent branches are checked and backed up.** The run's `.git` check now covers each
+  `agent/issue-*` tip: a branch a sandbox deleted is restored from `.sandcastle/backup.git`, a
+  moved tip for a ticket that is not running stops the run, a worktree record rewritten by
+  `git worktree repair` is named, and a deleted or moved base stops with the `git update-ref`
+  that restores it.
+- **A managed Claude Code hook guards the shared `.git` inside every sandbox.** The kit's
+  `container/` is mounted read-only at `/etc/claude-code`, and its hook refuses commands and
+  writes that would damage the shared `.git`: `update-ref`, `gc`, `prune`, `push`,
+  `reflog expire`, `worktree prune` and `repair`, deleting `agent/*` branches, and `rm`, `mv` or
+  Write inside it. It reduces accidents; the host-side checks remain the protection.
+
+### Fixed
+
+- **A live run's header in the status view says when it ends** (`ends ~HH:MM`), never when it
+  lands.
+- **The closing report lists tickets requeued during the run** (the `Requeued:` line and the
+  run-again next step). It looked for a ticket state the kit never writes.
+- **The Herdr sidebar counts a ticket left uncommitted as needing you**, as the status view and
+  the Claude Code mod do.
+
 ## [0.4.1] - 2026-10-02
 
 ### Upgrading
