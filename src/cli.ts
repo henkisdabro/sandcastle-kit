@@ -50,7 +50,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, nextTurn, noRerunCause, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
+import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -60,7 +60,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { closingReport, gather, summary } from "./report.ts";
+import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
@@ -134,7 +134,7 @@ try {
       // says how many turns ran, what they landed and why the loop stopped.
       const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, unblocked: [] as string[], cause: undefined as string | undefined };
       for (let turn = 1; ; turn++) {
-        if (!(await burndown(project))) {
+        if (!(await burndown(project, { level, turn }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -142,28 +142,19 @@ try {
         const facts = await gather(project);
         drain.turns = turn;
         drain.landed += Object.values(facts.tickets).filter((t) => t.state === "merged").length;
-        const again = rerunnable(facts);
-        if (!again) {
+        const tracker = makeTracker(project);
+        // A ticket closed by hand since the turn would make the ISSUES path throw: afterTurn drops it.
+        const after = afterTurn(facts, level, turn, stillOpen(tracker));
+        if (!after) {
           drain.cause = noRerunCause(facts);
           break;
         }
-        // A ticket closed by hand since the turn would make the ISSUES path throw.
-        const tracker = makeTracker(project);
-        const open = (id: string) => {
-          try {
-            return tracker.get(id).open;
-          } catch {
-            return false;
-          }
-        };
-        const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open) };
-        const ids = [...left.conflicted, ...left.unblocked];
-        const list = rerunList(left, tracker.ref);
-        const verdict = nextTurn(level, turn, left);
-        if (verdict === "stop") {
+        if (after.verdict === "stop") {
           drain.cause = "no ticket is left to run again";
           break;
         }
+        const { left, ids, verdict } = after;
+        const list = rerunList(left, tracker.ref);
         if (level === "drain") {
           const now: DrainTurn = {
             landed: Object.values(facts.tickets).filter((t) => t.state === "merged").length,
@@ -175,6 +166,8 @@ try {
           drain.unblocked = left.unblocked;
           if (why) {
             drain.cause = why;
+            // The turn's summary said the loop runs again; it does not, so the steps are the operator's after all.
+            console.log(await operatorSteps(project));
             break;
           }
         }

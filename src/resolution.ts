@@ -69,3 +69,7 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
     return unavailable(`git failed (${String(error).split("\n")[0].slice(0, 120)})`);
   }
 };
+
+/** The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it. */
+export const strayNote = (stray: string[]): string =>
+  `conflict resolution changed ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;
