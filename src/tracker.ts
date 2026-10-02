@@ -46,7 +46,7 @@ export interface Tracker {
   close(id: string, text: string): void;
   /** Out of the queue and marked for a human, with the reason. */
   hold(id: string, text: string): void;
-  /** Back in the queue: the queue label (GitHub) or status (files) on, needs-human off, the note (if any) as a comment first. */
+  /** Back in the queue: the queue label (GitHub) or status (files) on, the hold off, the note (if any) as a comment first. */
   requeue(id: string, note?: string): void;
   /** State, labels, comment count and a title/body hash (GitHub also keys LATEST_ISSUE), to prove a dry run wrote nothing. */
   snapshot(ids: string[]): Map<string, string>;
@@ -68,6 +68,12 @@ export const LATEST_ISSUE = "latest issue";
 export const isNumeric = (id: string) => /^\d+$/.test(id);
 export const refOf = (id: string) => (isNumeric(id) ? `#${id}` : id);
 
+// The kit's hold label before it took Matt Pocock's `ready-for-human`. Still read as held, so a
+// ticket a person marked with it before an upgrade is not taken by the next run.
+const OLD_HELD = "needs-human";
+// Without case: GitHub labels ignore it, and a ticket file's status is read lowercased.
+const isHeld = (project: Project, name?: string) => !!name && [project.tracker.held.toLowerCase(), OLD_HELD].includes(name.toLowerCase());
+
 // A fence one backtick longer than any run inside, so ticket text cannot close it.
 const fence = (text: string) => {
   const f = "`".repeat(Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
@@ -82,21 +88,21 @@ const fence = (text: string) => {
 const LIST_LIMIT = 500;
 
 /**
- * Makes sure the `needs-triage` label exists, so agents can put it on the
- * follow-up issues they file. Created here, on the host with its own `gh`
- * login: the sandbox token can add a label but not create one. No --force, so a
- * label a person already made keeps its colour and description. A failure only
- * costs the label, never the run.
+ * Makes sure the triage label (`needs-triage` unless the repo maps it) exists,
+ * so agents can put it on the follow-up issues they file. Created here, on the
+ * host with its own `gh` login: the sandbox token can add a label but not
+ * create one. No --force, so a label a person already made keeps its colour and
+ * description. A failure only costs the label, never the run.
  */
-export const ensureTriageLabel = (gh = (args: string[]) => sh("gh", args)) => {
+export const ensureTriageLabel = (label: string, gh = (args: string[]) => sh("gh", args)) => {
   try {
     // `gh label list --search` prints nothing at all, not `[]`, when no label matches.
-    const found = JSON.parse(gh(["label", "list", "--search", "needs-triage", "--json", "name", "--limit", "100"]) || "[]") as { name: string }[];
-    if (found.some((l) => l.name === "needs-triage")) return;
-    gh(["label", "create", "needs-triage", "--color", "FBCA04", "--description", "Filed by a sandcastle agent; triage before queueing"]);
+    const found = JSON.parse(gh(["label", "list", "--search", label, "--json", "name", "--limit", "100"]) || "[]") as { name: string }[];
+    if (found.some((l) => l.name === label)) return;
+    gh(["label", "create", label, "--color", "FBCA04", "--description", "Filed by a sandcastle agent; triage before queueing"]);
   } catch (e) {
     const why = (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 160);
-    console.log(`  warning: could not create the needs-triage label: ${why}; agent-filed tickets will be unlabelled`);
+    console.log(`  warning: could not create the ${label} label: ${why}; agent-filed tickets will be unlabelled`);
   }
 };
 
@@ -124,17 +130,17 @@ const github = (project: Project): Tracker => {
   };
   const list = (extra: string[], withComments: boolean): Ticket[] => {
     const listed = JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[];
-    // Counted before the needs-human filter below: a full page is full whatever
+    // Counted before the hold-label filter below: a full page is full whatever
     // is dropped from it. stderr, because `queue --json` is parsed from stdout.
     if (listed.length === LIST_LIMIT) {
       const label = extra[extra.indexOf("--label") + 1];
       console.warn(`gh returned the limit of ${LIST_LIMIT} open tickets${extra.includes("--label") ? ` labelled ${label}` : ""}; any beyond it are not seen.`);
     }
     return listed
-      // A person who marks a queued issue needs-human by hand leaves the queue
-      // label on (hold() takes it off). Listed, it came back every run only to
-      // be withdrawn unstarted; it is a human's until they requeue it.
-      .filter((i) => !extra.includes("--label") || !i.labels.some((l: { name: string }) => l.name === "needs-human"))
+      // A person who adds the hold label to a queued issue by hand leaves the
+      // queue label on (hold() takes it off). Listed, it came back every run
+      // only to be withdrawn unstarted; it is a human's until they requeue it.
+      .filter((i) => !extra.includes("--label") || !i.labels.some((l: { name: string }) => isHeld(project, l.name)))
       .map((i) => ({
       id: String(i.number),
       title: i.title,
@@ -161,7 +167,7 @@ const github = (project: Project): Tracker => {
         comments: i.comments.map((c: { body: string }) => c.body),
         labels: (i.labels ?? []).map((l: { name: string }) => l.name),
         open: i.state === "OPEN",
-        held: i.labels.some((l: { name: string }) => l.name === "needs-human"),
+        held: i.labels.some((l: { name: string }) => isHeld(project, l.name)),
         status: i.labels.some((l: { name: string }) => l.name === project.label) ? project.label : undefined,
       };
     },
@@ -187,20 +193,20 @@ const github = (project: Project): Tracker => {
       // already has. Only "already exists" is expected; any other failure
       // (permissions, network) still stops the hold.
       try {
-        gh(["label", "create", "needs-human", "--color", "D93F0B"]);
+        gh(["label", "create", project.tracker.held, "--color", "D93F0B"]);
       } catch (e) {
         if (!/already exists/i.test(e instanceof Error ? e.message : String(e))) throw e;
       }
-      gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", "needs-human"]);
+      gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", project.tracker.held]);
       gh(["issue", "comment", id, "--body", text]);
     },
     requeue: (id, note) => {
       // The note first: a run that picks the ticket up straight away already sees it.
       if (note) gh(["issue", "comment", id, "--body", note]);
-      // --remove-label only when the label is on the issue: a repo that has
-      // never had a needs-human label makes gh fail on it.
-      const held = (JSON.parse(gh(["issue", "view", id, "--json", "labels"])).labels as { name: string }[]).some((l) => l.name === "needs-human");
-      gh(["issue", "edit", id, "--add-label", project.label, ...(held ? ["--remove-label", "needs-human"] : [])]);
+      // --remove-label only for a hold label on the issue: a repo that has
+      // never had that label makes gh fail on it.
+      const held = (JSON.parse(gh(["issue", "view", id, "--json", "labels"])).labels as { name: string }[]).filter((l) => isHeld(project, l.name));
+      gh(["issue", "edit", id, "--add-label", project.label, ...held.flatMap((l) => ["--remove-label", l.name])]);
     },
     snapshot: (ids) => {
       const seen = new Map(
@@ -243,8 +249,8 @@ const github = (project: Project): Tracker => {
       LOST: "comment on the ticket that the sandbox's git record was lost",
       TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
       COMMENTS_VIEW: "# Comments on the ticket\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
-      NEW_TICKET: "GitHub issue (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
-      NEW_TICKET_REVIEW: "open a new GitHub issue\n  (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
+      NEW_TICKET: `GitHub issue (\`gh issue create --label ${project.tracker.triage}\`; if that label is refused, create it without the label)`,
+      NEW_TICKET_REVIEW: `open a new GitHub issue\n  (\`gh issue create --label ${project.tracker.triage}\`; if that label is refused, create it without the label)`,
       RECORD:
         "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
         "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +
@@ -252,7 +258,7 @@ const github = (project: Project): Tracker => {
       NOCHANGE: "Comment on the ticket with the evidence.",
       BLOCKED:
         "Comment on ticket {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
-        "```\ngh label create needs-human --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label needs-human --remove-label {{KIT_LABEL}}\n```",
+        `\`\`\`\ngh label create ${project.tracker.held} --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label ${project.tracker.held} --remove-label {{KIT_LABEL}}\n\`\`\``,
       SAY: "in a comment on the ticket",
     },
     dryRunNote:
@@ -269,7 +275,6 @@ const github = (project: Project): Tracker => {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_DONE = ["done", "closed", "resolved", "wontfix"];
-const HELD = "needs-human";
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
@@ -402,7 +407,7 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
     open: () => scan().filter((t) => !isDone(t)).map(toTicket),
     get: (id) => {
       const t = find(id);
-      return { ...toTicket(t), open: !isDone(t), held: t.status === HELD };
+      return { ...toTicket(t), open: !isDone(t), held: isHeld(project, t.status) };
     },
     // The ticket's text as the host has it now, not the sandbox's checkout: an
     // agent branch kept from an earlier run would show an older copy. Passed
@@ -420,7 +425,7 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
     },
     hold: (id, text) => {
       const t = find(id);
-      write(t, HELD, text);
+      write(t, project.tracker.held, text);
       commit(t.path, `sandcastle: hold ${id} for a human`);
     },
     requeue: (id, note) => {
@@ -522,17 +527,27 @@ export const requeueTicket = (tracker: Tracker, label: string, args: string[]): 
     return `${ref} is still in the queue; added your note.`;
   }
   tracker.requeue(id, text);
-  return `${ref} is back in the queue (${label})${t.held ? ", needs-human removed" : ""}${note ? ", with your note" : ""}.`;
+  return `${ref} is back in the queue (${label})${t.held ? ", no longer held" : ""}${note ? ", with your note" : ""}.`;
 };
 
 // ---------------------------------------------------------------------------
 // Choosing one
 // ---------------------------------------------------------------------------
 
-export type Resolved = { kind: "github" | "files"; dir: string; done: string[]; source: "config" | "docs/agents" | "default"; note?: string };
+export type Resolved = {
+  kind: "github" | "files";
+  dir: string;
+  done: string[];
+  source: "config" | "docs/agents" | "default";
+  /** The label (GitHub) or status (files) of a ticket held for a person: the `ready-for-human` role. */
+  held: string;
+  /** The label agents put on the follow-up tickets they file: the `needs-triage` role. */
+  triage: string;
+  note?: string;
+};
 
 /** Matt Pocock's setup skill writes these; a project may never have run it. */
-export const detectFromDocs = (root: string): { kind?: "github" | "files"; label?: string; unsupported?: string } => {
+export const detectFromDocs = (root: string): { kind?: "github" | "files"; labels?: Record<string, string>; unsupported?: string } => {
   const out: ReturnType<typeof detectFromDocs> = {};
   const tracker = join(root, "docs/agents/issue-tracker.md");
   if (existsSync(tracker)) {
@@ -542,25 +557,34 @@ export const detectFromDocs = (root: string): { kind?: "github" | "files"; label
     else if (title.startsWith("local")) out.kind = "files";
     else if (title) out.unsupported = named;
   }
+  // Each row maps one of Matt's triage roles to this repo's label: "| `ready-for-agent` | `agent-ready` | ...".
   const labels = join(root, "docs/agents/triage-labels.md");
   if (existsSync(labels)) {
-    out.label = readFileSync(labels, "utf8").match(/^\|\s*`ready-for-agent`\s*\|\s*`?([^`|]+?)`?\s*\|/im)?.[1];
+    const rows = [...readFileSync(labels, "utf8").matchAll(/^\|\s*`([a-z-]+)`\s*\|\s*`?([^`|]+?)`?\s*\|/gim)];
+    if (rows.length) out.labels = Object.fromEntries(rows.map((m) => [m[1].toLowerCase(), m[2]]));
   }
   return out;
 };
 
 export const resolveTracker = (root: string, config?: TrackerConfig): Resolved => {
+  const found = detectFromDocs(root);
+  const held = found.labels?.["ready-for-human"] ?? "ready-for-human";
+  const triage = found.labels?.["needs-triage"] ?? "needs-triage";
+  // A repo that calls `wontfix` something else closes ticket files with that status too.
+  const wontfix = found.labels?.wontfix?.toLowerCase();
+  const done = wontfix && !DEFAULT_DONE.includes(wontfix) ? [...DEFAULT_DONE, wontfix] : DEFAULT_DONE;
   if (config) {
     const c = typeof config === "string" ? { type: config } : config;
-    return { kind: c.type, dir: (c as { dir?: string }).dir ?? ".scratch", done: (c as { done?: string[] }).done ?? DEFAULT_DONE, source: "config" };
+    return { kind: c.type, dir: (c as { dir?: string }).dir ?? ".scratch", done: (c as { done?: string[] }).done ?? done, source: "config", held, triage };
   }
-  const found = detectFromDocs(root);
-  if (found.kind) return { kind: found.kind, dir: ".scratch", done: DEFAULT_DONE, source: "docs/agents" };
+  if (found.kind) return { kind: found.kind, dir: ".scratch", done, source: "docs/agents", held, triage };
   return {
     kind: "github",
     dir: ".scratch",
-    done: DEFAULT_DONE,
+    done,
     source: "default",
+    held,
+    triage,
     note: found.unsupported ? `docs/agents/issue-tracker.md names "${found.unsupported}", which the kit does not support yet; using GitHub. Set \`tracker\` in .sandcastle/config.ts to choose.` : undefined,
   };
 };

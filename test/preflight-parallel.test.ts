@@ -46,7 +46,7 @@ delete process.env.CROSS_REVIEW;
 const { configureModels } = await import("../src/agents.ts");
 const { preflight } = await import("../src/run.ts");
 configureModels();
-const project = { root: tmp, tracker: { kind: "github" } } as unknown as Parameters<typeof preflight>[0];
+const project = { root: tmp, tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Parameters<typeof preflight>[0];
 
 test("both models are asked at once: two 2 s replies take well under 4 s", async () => {
   process.env.FAKE_MODE = "ok";

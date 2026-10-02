@@ -26,7 +26,7 @@ const repo = (tickets: Record<string, string>, extra: object = {}) => {
   for (const [name, text] of Object.entries(tickets)) writeFileSync(join(root, ".scratch/shop/issues", name), text);
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "add", "-A"], { cwd: root });
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "t"], { cwd: root });
-  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" }, ...extra } as unknown as Project;
+  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" }, ...extra } as unknown as Project;
   const tracker = makeTracker(project);
   return { project, tracker };
 };

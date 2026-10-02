@@ -27,7 +27,7 @@ const project = {
   name: "demo",
   root,
   baseBranch: "main",
-  tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" },
+  tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
   label: "ready-for-agent",
 } as unknown as Project;
 const tracker = makeTracker(project);

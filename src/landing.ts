@@ -800,7 +800,7 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
     againNote,
     keepFirst,
     /**
-     * A ticket the tracker withdrew (closed, unqueued, marked needs-human) before its pipeline starts:
+     * A ticket the tracker withdrew (closed, unqueued, marked for a human) before its pipeline starts:
      * recorded as withdrawn, never as the green the first pipeline left. `dropFirst` removes that
      * pipeline's entry from the per-issue results, when the ticket had been sent back.
      */
@@ -867,7 +867,7 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
       for (const k of lists.skipped) out.set(k.issue, `not merged: ${k.reason}`);
       for (const w of lists.withdrawn) out.set(w.issue, `withdrawn: ${w.reason}`);
       for (const h of lists.heldBack) out.set(h.issue, "needs a human merge");
-      for (const id of lists.takenBack) out.set(id, "needs a human: marked needs-human during the run");
+      for (const id of lists.takenBack) out.set(id, "needs a human: marked for a human during the run");
       return out;
     },
   };

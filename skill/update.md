@@ -74,6 +74,14 @@ was set up with.
          the sandbox. If it reports a refused hook, the tool the hook needs is missing from the
          image: add it to `.sandcastle/Dockerfile` with the user's agreement, then
          `sandcastle build` and `sandcastle gates` again.
+   11. **Hold label.** The kit holds a ticket for a person with `ready-for-human` (or what
+       `docs/agents/triage-labels.md` maps that role to), and still treats the older `needs-human`
+       as held. Skip this step if that file maps `ready-for-human` to `needs-human`. Otherwise
+       look for open tickets carrying the old one: `gh issue list --state open --label needs-human`
+       (GitHub), or `Status: needs-human` under the ticket directory (files). If there are any,
+       offer either to move them across (`gh issue edit <n> --add-label ready-for-human
+       --remove-label needs-human`, or the `Status:` line), or to keep `needs-human` by mapping
+       `ready-for-human` to it in `triage-labels.md`. Apply after the user agrees.
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every

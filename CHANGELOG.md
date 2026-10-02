@@ -9,6 +9,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **The hold label is now `ready-for-human`**, Matt Pocock's name for the role, instead of
+  `needs-human`. A run that holds a ticket for a person (a risky path, an agent's hand-back) adds
+  `ready-for-human`, creating it if missing. A ticket still carrying `needs-human` stays held, and
+  `sandcastle requeue` takes either off. To keep `needs-human`, map `ready-for-human` to it in
+  `docs/agents/triage-labels.md`; otherwise `/sandcastle update` offers to move open tickets across.
+
+### Changed
+
+- **Every triage role is read from `docs/agents/triage-labels.md`**, not only the queue label: the
+  hold label (`ready-for-human`), the label agents put on the follow-ups they file
+  (`needs-triage`), and, for ticket files, the `wontfix` status as done. A repo that renamed one
+  needs no setting; without the file the kit uses Matt Pocock's names.
+
 ## [0.4.0] - 2026-10-02
 
 ### Upgrading

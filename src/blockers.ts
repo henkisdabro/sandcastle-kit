@@ -165,7 +165,7 @@ export type Why = "not-planned" | "held" | "unqueued";
 /** The words after "waits for #B" in the closing summary. */
 export const whyShort: Record<Why, string> = {
   "not-planned": "closed as not planned",
-  held: "held for a human (needs-human)",
+  held: "held for a human",
   unqueued: "open but not queued",
 };
 
@@ -265,7 +265,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
       const name = refLabel(b);
       const why = whyOf(b);
       if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. Remove the line, or reopen ${name}.`);
-      else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human (needs-human) - it starts once ${name} is closed.`);
+      else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human - it starts once ${name} is closed.`);
       else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or remove the line.`);
       if (b.state !== "unreadable") continue;
       lines.push(

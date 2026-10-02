@@ -206,7 +206,7 @@ test("closingReport marks a turn the loop continues from, and only that one", as
     baseBranch: "main",
     label: "ready-for-agent",
     gates: [],
-    tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
   } as unknown as Project;
   recordRun(project, {
     issues: ["shop-01"],

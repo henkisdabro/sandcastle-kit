@@ -67,7 +67,7 @@ test("the landing merge is committed by the agent, authored by the operator, and
 
 test("the sandbox env names the committer, keeps the credentials and sets no author", () => {
   const root = makeRepo();
-  const project = { root, tracker: { kind: "github" } } as unknown as Project;
+  const project = { root, tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
   const env = sandboxEnv(project);
   assert.equal(env.GIT_COMMITTER_NAME, "Sandcastle agent");
   assert.equal(env.GIT_COMMITTER_EMAIL, "agent@sandcastle.invalid");

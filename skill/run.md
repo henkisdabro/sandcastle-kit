@@ -67,7 +67,7 @@ This continues the run steps 1-3 in SKILL.md.
    `ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
 
    Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
-   person marked the ticket `needs-human` during the run; `held` with "no commits" is a ticket an
+   person marked the ticket `ready-for-human` during the run; `held` with "no commits" is a ticket an
    agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
    unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
    after its gates or the merge failed for a reason other than a conflict. A run headed **Run

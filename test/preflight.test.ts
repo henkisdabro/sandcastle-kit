@@ -99,7 +99,7 @@ test("a Codex-only rejection does not blame the Claude credential", async () => 
   const root = mkdtempSync(join(tmpdir(), "sandcastle-test-project-"));
   mkdirSync(join(root, ".sandcastle"));
   writeFileSync(join(root, ".sandcastle/.env"), "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
-  const project = { root, tracker: { kind: "files" } } as Parameters<typeof preflight>[0];
+  const project = { root, tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage" } } as Parameters<typeof preflight>[0];
 
   const path = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${path}`;

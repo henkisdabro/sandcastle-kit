@@ -154,7 +154,7 @@ test("either variable's list picks the same tickets from the tracker", () => {
     baseBranch: "main",
     label: "ready-for-agent",
     gates: [],
-    tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
   } as unknown as Project;
   const tracker = makeTracker(project);
   const pick = (env: NodeJS.ProcessEnv) => namedTickets(tracker, namedTicketsFromEnv(env).list!).map((t) => t.id);

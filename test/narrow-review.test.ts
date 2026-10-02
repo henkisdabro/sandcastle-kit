@@ -116,7 +116,7 @@ const project = (root: string): Project => ({
   implement: {},
   review: {},
   repair: {},
-  tracker: { kind: "github", dir: "", done: [], source: "default" },
+  tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
 });
 
 test("a conflict resolved inside the merge is still merge-only, and the narrow prompt's log shows the resolution", (t) => {

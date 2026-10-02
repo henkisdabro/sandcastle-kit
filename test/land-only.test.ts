@@ -100,7 +100,7 @@ test("the resolver prompt is rendered with the others, with every kit placeholde
     implement: {},
     review: {},
     repair: {},
-    tracker: { kind: "github", dir: "", done: [], source: "default" },
+    tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
   };
   const { resolve } = renderPrompts(project, makeTracker(project));
   assert.equal(resolve, join(root, ".sandcastle/.run", "resolve.md"));

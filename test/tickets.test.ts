@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 // Keep the import from reading the user's real config, as in blockers.test.ts.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { detectFromDocs, headerOf, readTicket, statusOf } = await import("../src/tracker.ts");
+const { detectFromDocs, headerOf, readTicket, resolveTracker, statusOf } = await import("../src/tracker.ts");
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sandcastle-tickets-"));
 
@@ -78,8 +78,22 @@ test("detectFromDocs reports a tracker the kit does not support", () => {
   assert.deepEqual(detectFromDocs(root), { unsupported: "Jira" });
 });
 
-test("detectFromDocs reads the ready-for-agent label from the triage table", () => {
+test("detectFromDocs reads each role's label from the triage table", () => {
   const root = tmp();
   docs(root, "triage-labels.md", "# Labels\n\n| Role | Label |\n|---|---|\n| `ready-for-agent` | `agent-ready` |\n");
-  assert.deepEqual(detectFromDocs(root), { label: "agent-ready" });
+  assert.deepEqual(detectFromDocs(root), { labels: { "ready-for-agent": "agent-ready" } });
+});
+
+test("resolveTracker takes the hold, triage and wontfix labels from Matt's table, else his names", () => {
+  const plain = resolveTracker(tmp());
+  assert.deepEqual([plain.held, plain.triage, plain.done], ["ready-for-human", "needs-triage", ["done", "closed", "resolved", "wontfix"]]);
+  const root = tmp();
+  docs(
+    root,
+    "triage-labels.md",
+    "| Label in mattpocock/skills | Label in our tracker | Meaning |\n| --- | --- | --- |\n" +
+      "| `needs-triage` | `triage-me` | x |\n| `ready-for-human` | `needs-human` | x |\n| `wontfix` | `Not-Doing` | x |\n",
+  );
+  const mapped = resolveTracker(root, "files");
+  assert.deepEqual([mapped.held, mapped.triage, mapped.done.at(-1)], ["needs-human", "triage-me", "not-doing"]);
 });

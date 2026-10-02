@@ -229,7 +229,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     ...config,
     // Defaults to [] when unset; a leading ./ is stripped so a path compares equal to git's.
     generated: generated.map((g) => ({ ...g, paths: g.paths.map((p) => p.replace(/^\.\//, "")) })),
-    label: config.label ?? detectFromDocs(root).label ?? "ready-for-agent",
+    label: config.label ?? detectFromDocs(root).labels?.["ready-for-agent"] ??"ready-for-agent",
     tracker: resolveTracker(root, config.tracker),
     lean: { keep: config.lean?.keep ?? [], dropHooks: config.lean?.dropHooks ?? [] },
   };

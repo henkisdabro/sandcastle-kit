@@ -32,7 +32,7 @@ esac
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github" } } as any;
+const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
 const tracker = makeTracker(project);
 
 const set = (env: Record<string, string | undefined>) => {

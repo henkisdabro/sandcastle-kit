@@ -28,7 +28,7 @@
 //   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
 //                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0
 //   requeue <ticket> [--note TEXT]
-//                    put a ticket back in the queue (needs-human off) with an optional
+//                    put a ticket back in the queue (hold label off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
 //   blockers         open tickets whose comments say "blocked by" while the body does not
 //                    (a run reads only the body), and queued ones whose blockers can never

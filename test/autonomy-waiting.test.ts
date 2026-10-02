@@ -39,7 +39,7 @@ const project = {
   baseBranch: "main",
   label: "ready-for-agent",
   gates: [],
-  tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" },
+  tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
 } as unknown as Project;
 const tracker = makeTracker(project);
 

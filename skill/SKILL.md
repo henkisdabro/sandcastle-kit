@@ -191,7 +191,7 @@ comments, and the gates can prove it.
    |---|---|
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
-   | Human-only - console, device, secret, production, legal | `needs-human` (the kit's human label: a run never takes a ticket carrying it), with a comment saying why |
+   | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
    | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text: a line inside a code block or backticks is not read either. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
@@ -288,7 +288,7 @@ working, ready to land, need you, queued, blocked, merged. The states:
 - **Needs you** - `gate red`, `conflict`, `held`, `crashed`, `not landed`, `stopped` (finished,
   but the run stopped before landing), `orphaned` (its run was killed and its container still
   works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed, unqueued or
-  marked `needs-human` during the run) is greyed with the leftovers.
+  marked `ready-for-human` during the run) is greyed with the leftovers.
 - **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**,

@@ -75,7 +75,7 @@ const fixture = (o: { gate?: string; generated?: boolean; mainChange?: "same-lin
     name: "demo",
     root,
     baseBranch: "main",
-    tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
     label: "ready-for-agent",
     gates: [{ name: "check", command: o.gate ?? "test -f feature.txt" }],
     setup: [`cat feature.txt >> ${marker} 2>/dev/null || true`],

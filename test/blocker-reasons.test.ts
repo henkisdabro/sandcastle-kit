@@ -44,7 +44,7 @@ esac
 chmodSync(join(bin, "gh"), 0o755);
 process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 
-const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "github" } } as unknown as Project;
+const project = { root: tmpdir(), name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
 const tracker = makeTracker(project);
 const queue = (...bodies: string[]) => bodies.map((body, i) => ({ id: String(i + 1), body }));
 
@@ -60,7 +60,7 @@ test("each way a blocker holds a ticket is named, with the fix", async () => {
   const lines = await blockerProblems(project, tracker, queue("Blocked by #10", "Blocked by #11", "Blocked by #12", "Blocked by #13"));
   assert.deepEqual(lines, [
     "#1 waits for #10, which was closed as not planned - it will never start. Remove the line, or reopen #10.",
-    "#2 waits for #11, which is held for a human (needs-human) - it starts once #11 is closed.",
+    "#2 waits for #11, which is held for a human - it starts once #11 is closed.",
     "#3 waits for #12, which is open but not queued - queue #12 or remove the line.",
   ]);
 });
@@ -69,8 +69,8 @@ test("a blocker in the queue is not reported, and a blocker is looked up once ho
   writeFileSync(log, "");
   const lines = await blockerProblems(project, tracker, [{ id: "12", body: "" }, { id: "1", body: "Blocked by #12" }, { id: "2", body: "Blocked by #11" }, { id: "3", body: "Blocked by #11" }]);
   assert.deepEqual(lines, [
-    "#2 waits for #11, which is held for a human (needs-human) - it starts once #11 is closed.",
-    "#3 waits for #11, which is held for a human (needs-human) - it starts once #11 is closed.",
+    "#2 waits for #11, which is held for a human - it starts once #11 is closed.",
+    "#3 waits for #11, which is held for a human - it starts once #11 is closed.",
   ]);
   const views = readFileSync(log, "utf8").split("\n").filter(Boolean);
   assert.deepEqual(views, ["11"]);

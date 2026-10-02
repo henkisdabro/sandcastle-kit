@@ -90,7 +90,7 @@ New to GitHub or to agents? These are the only terms you need.
 | **Gate** | A command that must pass before anything merges: your linter, type checker, tests, build. You list them once in `config.ts`. |
 | **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
 | **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
-| **`needs-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. |
+| **`ready-for-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. (Earlier versions called it `needs-human`; a ticket carrying that is still held.) |
 | **`needs-triage`** | Put by agents on follow-up tickets they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
 
 > [!TIP]
@@ -168,7 +168,7 @@ flowchart LR
     D3 --> E
     E -- "yes" --> F["✅ Merged locally<br/>ticket closed"]
     E -- "no" --> G["🔴 Left red<br/>for you"]
-    E -- "risky paths" --> H["🙋 needs-human"]
+    E -- "risky paths" --> H["🙋 ready-for-human"]
     F --> I["📊 Report<br/>you review and push"]
     G --> I
     H --> I
@@ -233,7 +233,7 @@ flowchart TD
     G -- "green" --> PP{"🛡️ Touches hooks, CI,<br/>install scripts?"}
     G -- "still red" --> RED["🔴 Reported red"]
     PP -- "no" --> M["✅ Merge (or squash) into base<br/>close ticket with a comment"]
-    PP -- "yes" --> NH["🙋 Labelled needs-human<br/>not merged"]
+    PP -- "yes" --> NH["🙋 Labelled ready-for-human<br/>not merged"]
     M --> V["🔁 Verify: gates once more<br/>on the merged base branch"]
     V --> REP(["📊 Report: merged · red · held back<br/>Nothing is pushed"])
     RED --> REP
@@ -448,9 +448,10 @@ A tracker is where tickets live. The kit ships two:
 1. `tracker` in `.sandcastle/config.ts`: `"github"`, `"files"`, or `{ type: "files", dir: "tickets", done: [...] }`.
 2. **Matt Pocock's setup, if the repo has it.** [`/setup-matt-pocock-skills`](https://github.com/mattpocock/skills)
    writes `docs/agents/issue-tracker.md` (`# Issue tracker: GitHub` or `Local Markdown`) and
-   `docs/agents/triage-labels.md`. The kit reads both: the tracker from the first, and the queue
-   value from the row that maps `ready-for-agent`, so a repo that renamed that label needs no `label`
-   setting. GitLab and "other" trackers are noticed and reported by `sandcastle doctor`; the kit falls
+   `docs/agents/triage-labels.md`. The kit reads both: the tracker from the first, and from the
+   second the labels it uses for Matt's triage roles - the queue (`ready-for-agent`), the hold
+   (`ready-for-human`), agents' follow-ups (`needs-triage`) and, for ticket files, `wontfix` as a
+   done status. A repo that renamed a label needs no setting; without the file the kit uses Matt's names. GitLab and "other" trackers are noticed and reported by `sandcastle doctor`; the kit falls
    back to GitHub.
 3. GitHub.
 
@@ -488,7 +489,7 @@ logs and the status view. `sandcastle queue` lists the queue and what holds each
 **Who writes to the tracker.** With GitHub, agents comment and label themselves, as before. With
 `files`, agents write nothing to the tickets: they end with `<report>...</report>` (or
 `<blocked>...</blocked>` to hand the ticket to a human), and the orchestrator posts it, commits it to
-the base branch and marks the ticket `done` or `needs-human`. That keeps ticket files out of the
+the base branch and marks the ticket `done` or `ready-for-human`. That keeps ticket files out of the
 agents' branches, and the GitHub token out of the sandbox when nothing needs it (a `files` project
 does not require `GH_TOKEN`).
 
@@ -540,7 +541,7 @@ with the run:
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
 | `gate red` `conflict` `held` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person |
 | `stopped` `orphaned` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it |
-| `withdrawn` | Closed, taken out of the queue or marked `needs-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
+| `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
 | `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 
@@ -610,7 +611,7 @@ are now. Then:
   the way a run does, gates the merge in a sandbox and closes the ticket - never a hand-written
   `git merge`. Or leave it queued: its next run resumes the branch (see [Re-runs](#-re-runs)).
 - **A ticket that needs a new attempt:** `sandcastle requeue <n> --note "..."` puts it back in the
-  queue with your note as a comment, takes `needs-human` off, and makes the next run re-implement it
+  queue with your note as a comment, takes the hold label (`ready-for-human`) off, and makes the next run re-implement it
   rather than land the old branch.
 - **Several unlanded branches:** `sandcastle preview` dry-merges them onto the base in landing order
   and names the ones that would conflict, before anything is merged.
@@ -886,7 +887,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
-| `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes `needs-human` off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
+| `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
 | `sandcastle run [--detach]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)) | 💸 yes |
@@ -1070,7 +1071,7 @@ and the kit narrows what can cross it:
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run.
 - 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or
-  labelled `needs-human` during the run means no merge - and the merge takes the exact commit
+  labelled `ready-for-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
 - 🏷️ **Who committed.** Sandbox commits and the kit's merges carry the committer
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author. `git log --format='%h %an / %cn %s'`
@@ -1078,7 +1079,7 @@ and the kit narrows what can cross it:
 - 🛡️ **Protected paths.** A green branch that changes hooks (git, Claude Code, pre-commit tools), CI,
   agent settings (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`,
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
-  `needs-human` and left for you to merge; `sandcastle land` refuses it too.
+  `ready-for-human` and left for you to merge; `sandcastle land` refuses it too.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.
@@ -1118,7 +1119,7 @@ starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
 | `waits for #N to close` / `waiting, not started` | The ticket body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to tickets named in `TICKETS=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
-| `gated green but not merged` | The ticket was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
+| `gated green but not merged` | The ticket was closed, unqueued or labelled `ready-for-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
 | A branch conflicts at landing | The run sends it back once, in the same run: its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued: its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |

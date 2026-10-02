@@ -34,7 +34,7 @@ const repo = (tickets: Record<string, string>) => {
   writeFileSync(join(root, "app.ts"), "export {};\n");
   execFileSync("git", [...GIT, "add", "-A"], { cwd: root });
   execFileSync("git", [...GIT, "commit", "-qm", "t"], { cwd: root });
-  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", dir: ".scratch", done: ["done"], source: "config" } } as unknown as Project;
+  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" } } as unknown as Project;
   const tracker = makeTracker(project);
   return { root, project, tracker };
 };

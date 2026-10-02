@@ -20,7 +20,7 @@ test("ensureTriageLabel creates the label when the search prints nothing", () =>
   const real = console.log;
   console.log = (...a: unknown[]) => void lines.push(a.join(" "));
   try {
-    ensureTriageLabel((args) => (calls.push(args.join(" ")), ""));
+    ensureTriageLabel("needs-triage", (args) => (calls.push(args.join(" ")), ""));
   } finally {
     console.log = real;
   }

@@ -1,4 +1,5 @@
-// `sandcastle requeue`: the note, the queue label, needs-human off - on GitHub (a fake `gh`
+// `sandcastle requeue`: the note, the queue label, the hold off (here the old needs-human, still
+// read as held) - on GitHub (a fake `gh`
 // first on PATH logs its calls) and on ticket files (a temp git repo) - and forgetting a
 // recorded green head. No Docker, no model calls, no network.
 //
@@ -39,7 +40,7 @@ exit 0
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const ghProject = { root: dir, label: "ready-for-agent", tracker: { kind: "github" } } as any;
+const ghProject = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
 const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
 const writes = () => calls().filter((c) => /^issue (comment|edit)/.test(c));
 const as = (issue: string) => {
@@ -53,7 +54,7 @@ test("GitHub, held, with a note: the note first, then the label swap", () => {
   const w = writes();
   // The comment body spans lines in the log; its first line is the marker.
   assert.deepEqual(w, ["issue comment 5 --body Note for the next run, from `sandcastle requeue`:", "issue edit 5 --add-label ready-for-agent --remove-label needs-human"]);
-  assert.equal(out, "#5 is back in the queue (ready-for-agent), needs-human removed, with your note.");
+  assert.equal(out, "#5 is back in the queue (ready-for-agent), no longer held, with your note.");
 });
 
 test("GitHub, not held, no note: one edit, no --remove-label, no comment", () => {
@@ -101,10 +102,10 @@ test("ticket files: status, comment, commit subject, clean tree, queued, reopene
   writeFileSync(join(repo, ".scratch/demo/issues/04-pick.md"), "# Pick the colour\n\nStatus: needs-human\n\nChoose one.\n");
   git("add", "-A");
   git("commit", "-q", "-m", "ticket");
-  const project = { root: repo, label: "ready-for-agent", tracker: { kind: "files", dir: ".scratch", done: ["done"] } } as any;
+  const project = { root: repo, label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"] } } as any;
   const tracker = makeTracker(project);
   const before = Date.now() - 2000;
-  assert.match(requeueTicket(tracker, "ready-for-agent", ["demo-04", "--note", "Use the blue."]), /demo-04 is back in the queue \(ready-for-agent\), needs-human removed, with your note\./);
+  assert.match(requeueTicket(tracker, "ready-for-agent", ["demo-04", "--note", "Use the blue."]), /demo-04 is back in the queue \(ready-for-agent\), no longer held, with your note\./);
   const text = readFileSync(join(repo, ".scratch/demo/issues/04-pick.md"), "utf8");
   assert.match(text, /Status: ready-for-agent/);
   assert.match(text, /## Comments[\s\S]*Use the blue\./);

@@ -119,7 +119,7 @@ test("the review prompt asks for the <ungated> line and gains no placeholder", (
     implement: {},
     review: {},
     repair: {},
-    tracker: { kind: "github", dir: "", done: [], source: "default" },
+    tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
   };
   const paths = renderPrompts(project, makeTracker(project));
   for (const file of [paths.review, paths.rereview]) {

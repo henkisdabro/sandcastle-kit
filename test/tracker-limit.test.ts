@@ -20,7 +20,7 @@ writeFileSync(gh, `#!/bin/sh\ncat "${join(dir, "issues.json")}"\n`);
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github" } } as any;
+const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
 
 const issues = (n: number) =>
   JSON.stringify(Array.from({ length: n }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, body: "", labels: [], updatedAt: "2026-01-01T00:00:00Z" })));

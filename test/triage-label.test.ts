@@ -75,14 +75,14 @@ const needsYou = (text: string) => {
 test("report: a filed issue is listed under Needs you; with none, the section says none", () => {
   const section = needsYou(render(facts({ filed: [{ id: "301", title: "x" }] })));
   assert.match(section, /#301 x/);
-  assert.match(section, /needs-triage/);
+  assert.match(section, /triage it/);
   assert.match(needsYou(render(facts())), /none/);
 });
 
 test("ensureTriageLabel: an existing label is left alone", () => {
   reset();
   process.env.FAKE_GH_LABELS = '[{"name":"needs-triage-old"},{"name":"needs-triage"}]';
-  ensureTriageLabel();
+  ensureTriageLabel("needs-triage");
   assert.ok(calls().some((c) => c.startsWith("label list")));
   assert.ok(!calls().some((c) => c.includes("label create")));
 });
@@ -90,7 +90,7 @@ test("ensureTriageLabel: an existing label is left alone", () => {
 test("ensureTriageLabel: a lookalike does not count, and create never passes --force", () => {
   reset();
   process.env.FAKE_GH_LABELS = '[{"name":"needs-triage-old"}]';
-  ensureTriageLabel();
+  ensureTriageLabel("needs-triage");
   const create = calls().filter((c) => c.startsWith("label create needs-triage"));
   assert.equal(create.length, 1);
   assert.ok(!calls().some((c) => c.includes("--force")));
@@ -103,7 +103,7 @@ test("ensureTriageLabel: a failing gh warns and does not throw", () => {
   const real = console.log;
   console.log = (...a: unknown[]) => void lines.push(a.join(" "));
   try {
-    assert.doesNotThrow(() => ensureTriageLabel());
+    assert.doesNotThrow(() => ensureTriageLabel("needs-triage"));
   } finally {
     console.log = real;
   }
@@ -130,7 +130,7 @@ test("gather: only needs-triage issues created since the run started are filed",
     { number: 40, title: "older", createdAt: "2026-09-29T12:00:00Z" },
     { number: 41, title: "newer", createdAt: "2026-09-30T06:30:00Z" },
   ]);
-  const project = { root, baseBranch: "main", tracker: { kind: "github" }, gates: [] } as any;
+  const project = { root, baseBranch: "main", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" }, gates: [] } as any;
   const f = await gather(project);
   assert.deepEqual(f.filed, [{ id: "41", title: "newer" }]);
   assert.ok(calls().some((c) => c.includes("issue list") && c.includes("--label needs-triage")));

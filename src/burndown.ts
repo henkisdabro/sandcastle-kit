@@ -492,7 +492,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // What the tracker says about each ticket now, to prove a dry run left it alone.
   const before = DRY_RUN ? tracker.snapshot(issues.map((i) => i.id)) : undefined;
   // Agents label the follow-up issues they file; the sandbox token cannot create the label.
-  if (tracker.kind === "github" && !DRY_RUN) ensureTriageLabel();
+  if (tracker.kind === "github" && !DRY_RUN) ensureTriageLabel(project.tracker.triage);
   run.update({ stage: "running" });
   Object.assign(summary, { due: true, printed: false });
   // The one writer of host git, and the `.git` fingerprint whose base it moves with its own writes.
@@ -549,7 +549,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const withdrawal = (id: string): { held: boolean; reason: string } | undefined => {
     const now = tracker.get(id);
     const startedAs = candidates.find((i) => i.id === id)?.status;
-    if (now.held) return { held: true, reason: "marked needs-human during the run" };
+    if (now.held) return { held: true, reason: "marked for a human during the run" };
     if (!now.open) return { held: false, reason: "ticket closed during the run" };
     if (startedAs === undefined || now.status === startedAs) return undefined;
     return { held: false, reason: now.status === undefined ? "taken out of the queue during the run" : `status changed from ${startedAs} to ${now.status} during the run` };
@@ -1067,7 +1067,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const failedToLand: { issue: string; reason: string }[] = [];
   const skipped: { issue: string; reason: string }[] = [];
   const withdrawn: { issue: string; reason: string }[] = [];
-  // Marked needs-human by a person during the run: theirs now, not a merge to make.
+  // Marked for a human by a person during the run: theirs now, not a merge to make.
   const takenBack: string[] = [];
   const closedEarlier: string[] = [];
   const closeFailed: string[] = [];
@@ -1321,7 +1321,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   }
 
   // An agent that can write to the tracker (GitHub) hands a ticket back
-  // itself - needs-human on, queue label off - and commits nothing, so its
+  // itself - hold label on, queue label off - and commits nothing, so its
   // pipeline ends as nochange. Reported as "nothing to change", a question
   // for a human read as a ticket that needed no work.
   const handedBack: string[] = [];
