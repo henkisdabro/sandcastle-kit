@@ -22,7 +22,7 @@ case "${1:-}" in
   # Follows the log live, like tail -f, once it is longer than the popup: +F opens at the end
   # and shows new lines as the agent writes them. While following, less ignores q and takes
   # only Ctrl-C, which stops the following - so -K makes Ctrl-C close the popup outright:
-  # Ctrl-C closes it (q or Esc closes it too when it is not following).
+  # Ctrl-C closes it (q closes it too when it is not following; Esc is a prefix key in less).
   # A log shorter than the popup keeps the plain view, from its top line: +F, like +G, jumps
   # to the end first, and a short file jumped to the end sat at the bottom of an empty
   # popup. (Chosen for that reason; less was not at hand to prove +F differs.)
