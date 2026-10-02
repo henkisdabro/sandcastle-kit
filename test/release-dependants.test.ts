@@ -1,6 +1,6 @@
 // A ticket whose blocker is in the same run starts in that run, once the blocker has landed and
-// closed (src/blockers.ts createDependants / createRelease, src/landing.ts createFlow, wired as
-// burndown.ts wires them). Fake pipelines that branch from the base as it is when they start,
+// closed (src/blockers.ts createDependants / createRelease, wired as the scheduler in
+// src/schedule.ts wires them). Fake pipelines that branch from the base as it is when they start,
 // the real landing worker on a temp repo, a fake tracker and a `gh` shim on PATH that reads each
 // blocker's state from a file the tracker's close writes: no Docker, no network.
 //
@@ -32,9 +32,9 @@ chmodSync(join(SHIM, "gh"), 0o755);
 process.env.PATH = `${SHIM}${delimiter}${process.env.PATH}`;
 
 const { blockedNote, createDependants, createRelease, dependantsInRun, openBlockers, blockerResolver } = await import("../src/blockers.ts");
-const { createFlow, createHostGit, landingWork } = await import("../src/landing.ts");
+const { createHostGit, landingWork } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
-const { createLanding, createQueue, createStopState } = await import("../src/schedule.ts");
+const { createLanding, createQueue, createSchedule, createStopState } = await import("../src/schedule.ts");
 type StopWriter = import("../src/schedule.ts").StopWriter;
 type Project = import("../src/config.ts").Project;
 type Ctx = import("../src/landing.ts").LandContext;
@@ -96,11 +96,48 @@ type Run = {
 
 /**
  * Wires what burndown.ts wires: the candidate set, `createDependants` over the blockers read at
- * the start, landing.ts' `createFlow` (which keeps the pipeline queue open, requeues a conflict or
- * red once, and takes a released dependant), the real landing worker, and `createRelease` called
+ * the start, a copy of the scheduler's open count and requeue (`openCount`: it keeps the pipeline
+ * queue open, requeues a conflict or red once, and takes a released dependant - a stand-in until
+ * this harness drives `createSchedule`), the real landing worker, and `createRelease` called
  * after each landing. `pipeline` is the fake pipeline: it branches from the base as it is when the
  * ticket starts (`attempt` is 2 for a requeued ticket), and returns what to do with the branch.
  */
+/** The scheduler's open count and requeue-once rule (schedule.ts), copied for the hand wiring below. */
+const openCount = <I extends { id: string }>(tickets: number, queue: ReturnType<typeof createQueue<I>>, landing: { close(): void }) => {
+  let open = tickets;
+  const sent = new Set<string>();
+  const close = () => {
+    queue.close();
+    landing.close();
+  };
+  const finish = () => {
+    if (--open <= 0) close();
+  };
+  if (open <= 0) close();
+  return {
+    start(item: I) {
+      open++;
+      queue.push(item);
+    },
+    finish,
+    /** Sends a first conflict or red back, unless the run starts nothing or the queue is closed; true when it did. */
+    retry(item: I, landed: { kind: string }, stopping: boolean) {
+      if (stopping || queue.closed || (landed.kind !== "conflict" && landed.kind !== "red") || sent.has(item.id)) return false;
+      sent.add(item.id);
+      queue.push(item);
+      return true;
+    },
+    work: (fn: (item: I) => Promise<boolean>, ended: (item: I) => Promise<void>) => async (item: I) => {
+      let handed = false;
+      try {
+        handed = await fn(item);
+      } finally {
+        if (!handed) await ended(item);
+      }
+    },
+  };
+};
+
 const runWith = async (
   tickets: Ticket[],
   opts: {
@@ -173,7 +210,7 @@ const runWith = async (
   // eslint-disable-next-line prefer-const
   let landing!: ReturnType<typeof createLanding<Waiting>>;
   const stop = createStopState(host);
-  const flow = createFlow(ready.length, queue, { close: () => landing.close() });
+  const flow = openCount(ready.length, queue, { close: () => landing.close() });
   const { afterLanding } = createRelease({
     dependants: waits,
     start: (t) => flow.start(t),
@@ -191,10 +228,9 @@ const runWith = async (
       if (landed.kind === "merged" || landed.kind === "close-failed") run.landed.push(o.issue);
       run.events.push(`settled ${o.issue} ${landed.kind}`);
       // As the scheduler: a first conflict or red goes back to the pipelines, and its ending waits.
-      const again = flow.retry(tickets.find((t) => t.id === o.issue)!, landed, stop.startsNothing);
-      if (again !== undefined) {
+      if (flow.retry(tickets.find((t) => t.id === o.issue)!, landed, stop.startsNothing)) {
         run.events.push(`requeued ${o.issue}`);
-        record.ticket(o.issue, { state: "queued", note: again });
+        record.ticket(o.issue, { state: "queued", note: `requeued after ${landed.kind}` });
         return;
       }
       await afterLanding(o.issue, landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier");
@@ -395,21 +431,29 @@ test("blockedNote: in flight lands this run, anything else is not this run's", (
   assert.equal(blockedNote([b("5"), b("6")], new Set(["5"])), "waits for #5 (lands this run), #6 (not in this run)");
 });
 
-test("the flow takes a released ticket and closes its queues only when nothing started is left", async () => {
-  const queue = createQueue<{ id: string }>();
-  let closed = false;
-  const flow = createFlow(1, queue, { close: () => void (closed = true) });
-  const seen: string[] = [];
-  queue.push({ id: "1" });
-  const done = queue.run(1, async (i) => void seen.push(i.id));
-  await sleep(5);
-  // Released before the landed one's own finish: the count never touches zero between them.
-  flow.start({ id: "2" });
-  flow.finish();
-  await sleep(5);
-  assert.deepEqual(seen, ["1", "2"]);
-  assert.equal(closed, false);
-  flow.finish();
-  await done;
-  assert.equal(closed, true);
+test("the scheduler takes a released ticket and ends the run only when nothing started is left", async () => {
+  const attempted: string[] = [];
+  let finished = 0;
+  const { endings } = await createSchedule<{ id: string }, { issue: string }>({
+    tickets: [{ id: "1" }],
+    later: [{ ticket: { id: "2" }, on: "blockers" }],
+    release: (s) => ({
+      afterLanding: (id) => {
+        // Released before the landed one's own finish: the count never touches zero between them.
+        if (id === "1") s.start({ id: "2" });
+        finished++;
+        s.finish();
+      },
+      more: false,
+    }),
+  }).run({
+    workers: 1,
+    attempt: async (t) => (attempted.push(t.id), { kind: "green", green: { issue: t.id } }),
+    land: async () => ({ kind: "merged" }),
+    host: { check: async () => {}, failed: undefined },
+    tell: () => {},
+  });
+  assert.deepEqual(attempted, ["1", "2"]);
+  assert.equal(finished, 2);
+  assert.deepEqual([endings.get("1")?.kind, endings.get("2")?.kind], ["landing", "landing"]);
 });
