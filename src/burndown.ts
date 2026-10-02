@@ -27,24 +27,29 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview,
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, largeFiles, largeFilesNote, lockRun, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, dirtyFiles, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { AGENT_COMMITTER, credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
+import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { landInSandbox, sandboxOpener, squashBody } from "./land.ts";
+import { sandboxOpener } from "./land.ts";
+import { conflictLine, type Landed, type LandContext, landOne, LandingStop } from "./landing.ts";
+import { createQueue } from "./schedule.ts";
+
+// Where they lived before landing.ts; callers and tests still import them from here.
+export { abortLanding, closeComment, mergeBranch } from "./landing.ts";
 
 type Issue = Ticket;
 type Outcome = {
@@ -78,11 +83,6 @@ const outcomeText = (o: Outcome) =>
 const finishWord = (o: Outcome) =>
   ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land" })[o.status];
 
-// "with #12" names the branches merged before it that changed the same files.
-const conflictLine = (c: { files: string[]; with: string[] }) =>
-  (c.with.length ? `with ${c.with.map(refOf).join(", ")}: ` : "") +
-  `${c.files.slice(0, 3).join(", ")}${c.files.length > 3 ? ` and ${c.files.length - 3} more` : ""}`;
-
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.
 export const notLandedComment = (
@@ -107,21 +107,6 @@ const fence = (text: string) => {
   return `${f}\n${text}\n${f}`;
 };
 
-// The ticket closes on the local merge, so the comment says the work is not on
-// the remote yet: a repo that deploys on push has nothing live when this reads "done".
-export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] } },
-  gateNames: string,
-  report?: string,
-): string =>
-  `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
-  (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
-  `); ${gateNames} all green before merge.` +
-  (o.regenerated
-    ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
-    : "") +
-  (report ? `\n\n${report}` : "");
-
 // The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
 // exercises the change. Same rules as `tags()` in the pipeline - the last tag wins, an empty
 // one or the echoed placeholder "..." does not count - and the text is one line, cut to 200.
@@ -130,55 +115,6 @@ export const ungatedOf = (text: string): string | undefined => {
   const said = last?.[1].replace(/\s+/g, " ").trim().slice(0, 200).trim();
   return said && said !== "..." ? said : undefined;
 };
-
-// The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
-// `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
-// the agent's, the author the operator's (see AGENT_COMMITTER).
-// --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
-// green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
-export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge") => {
-  if (mode === "merge") {
-    return sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
-  }
-  const body = squashBody(root, "HEAD", head);
-  // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
-  sh("git", ["merge", "--squash", "--no-verify", head], root, AGENT_COMMITTER);
-  // --allow-empty: a green branch whose change is already on the base still gets its commit, so
-  // `mergedEarlier` and status.sh find the ticket as landed.
-  return sh(
-    "git",
-    [
-      "commit",
-      "--no-verify",
-      "--allow-empty",
-      "-m",
-      `Merge ${branch} (closes ${ticket})`,
-      ...(body ? ["-m", body] : []),
-    ],
-    root,
-    AGENT_COMMITTER,
-  );
-};
-
-// Every place that decides "landed", and why each works with a squash (whose commits are not
-// ancestors of the base, and whose branch is deleted once the loop has landed everything):
-// - `mergedEarlier`, burndown.ts: a subject `--grep` on the base - works unchanged.
-// - carried / nochange, burndown.ts (`rev-list --count base..branch`): only for a branch that
-//   exists; a squashed branch is deleted, so a reopened ticket starts fresh from the base, which
-//   holds its work - correct.
-// - `sandcastle clean`, cli.ts (`git cherry`): the deleted branch is not listed - correct.
-// - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
-// - the log archive, `archiveFinishedLogs` in run.ts: a deleted branch counts as finished, so its
-//   log is archived - correct.
-// - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
-// - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
-//   base reads `merged`, not `no branch`.
-// - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
-//   the branch exists - unaffected.
-// A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
-// staged squash and keeps unrelated local changes.
-export const abortLanding = (root: string, mode: "merge" | "squash") =>
-  sh("git", mode === "squash" ? ["reset", "--merge"] : ["merge", "--abort"], root);
 
 /** The tickets `ISSUES` (or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
@@ -980,7 +916,10 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // machine-wide sandbox limit.
   const results: PromiseSettledResult<Outcome>[] = [];
   const crashed = new Map<string, string>();
-  const queue = [...issues];
+  // Every ticket up front, closed at once: the same fixed set of tickets a sliding pool drained before.
+  const queue = createQueue<Issue>();
+  for (const i of issues) queue.push(i);
+  queue.close();
   const begun = new Set<string>();
   const calledOff = new Set<string>();
   // The ticket's state once its pipeline ends. A green branch that changes
@@ -1007,78 +946,75 @@ export const burndown = async (project: Project): Promise<boolean> => {
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
-  await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, issues.length) }, async () => {
-      for (let next = queue.shift(); next && limitHit === undefined && !usageHit && !tampered; next = queue.shift()) {
-        const issue = next;
-        const stop = await usageStop(env);
-        if (stop) {
-          usageHit ??= stop;
-          break;
-        }
-        // A tracker that cannot be read is no reason to skip: the check before landing asks again.
-        const called = (() => {
-          try {
-            return withdrawal(issue.id);
-          } catch {
-            return undefined;
-          }
-        })();
-        if (called) {
-          calledOff.add(issue.id);
-          run.ticket(issue.id, { state: "withdrawn", note: `${called.reason.replace(" during the run", "")} - not started` });
-          continue;
-        }
-        begun.add(issue.id);
-        results.push(
-          await withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)).then(
-            (value) => {
-              bookkeep(issue.id, () => {
-                const tokens = spent.get(issue.id);
-                run.ticket(issue.id, {
-                  ...settled(value),
-                  commits: value.commits,
-                  minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
-                  ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
-                  ...(value.failing?.length ? { failing: value.failing } : {}),
-                  ...(value.ungated ? { ungated: value.ungated } : {}),
-                });
-                run.update({ typical: typicalTimes(project, [...took.values()]) });
-                // With nothing left to start, the pane closes: five panes each
-                // frozen on a finished agent's summary read as five stuck sandboxes.
-                view.finish(issue.id, finishWord(value), queue.length === 0);
-                // Recorded now, not only at the report: a branch waiting for
-                // landing had no outcome for this run, and its row read as an
-                // earlier run's leftover. Landing overwrites it.
-                recordOutcomes(project, runId, { [issue.id]: outcomeText(value) });
-              });
-              return { status: "fulfilled", value } as const;
-            },
-            (reason) => {
-              // The .git check after this ticket's pipeline failed: its work
-              // finished, and the whole run stops. Not a crash of the ticket.
-              if (stops.has(String(reason))) {
-                bookkeep(issue.id, () => {
-                  run.ticket(issue.id, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
-                  recordOutcomes(project, runId, { [issue.id]: "stopped: the run stopped before landing" });
-                  view.finish(issue.id, "stopped");
-                });
-                return { status: "rejected", reason } as const;
-              }
-              crashed.set(issue.id, String(reason));
-              bookkeep(issue.id, () => {
-                run.ticket(issue.id, { state: "crashed", note: String(reason).split("\n")[0].slice(0, 160) });
-                // Kept open even at the end of the queue: a crash is for a human to read.
-                view.finish(issue.id, "crashed");
-                if (hitLimit(issue.id)) limitHit = issue.id;
-              });
-              return { status: "rejected", reason } as const;
-            },
-          ),
-        );
+  await queue.run(Math.min(CONCURRENCY, issues.length), async (issue) => {
+    // A stopped run drains what is left without starting it; those tickets read as skipped.
+    if (limitHit !== undefined || usageHit || tampered) return;
+    const stop = await usageStop(env);
+    if (stop) {
+      usageHit ??= stop;
+      return;
+    }
+    // A tracker that cannot be read is no reason to skip: the check before landing asks again.
+    const called = (() => {
+      try {
+        return withdrawal(issue.id);
+      } catch {
+        return undefined;
       }
-    }),
-  );
+    })();
+    if (called) {
+      calledOff.add(issue.id);
+      run.ticket(issue.id, { state: "withdrawn", note: `${called.reason.replace(" during the run", "")} - not started` });
+      return;
+    }
+    begun.add(issue.id);
+    results.push(
+      await withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)).then(
+        (value) => {
+          bookkeep(issue.id, () => {
+            const tokens = spent.get(issue.id);
+            run.ticket(issue.id, {
+              ...settled(value),
+              commits: value.commits,
+              minutes: Math.round((took.get(issue.id) ?? 0) / 60_000),
+              ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
+              ...(value.failing?.length ? { failing: value.failing } : {}),
+              ...(value.ungated ? { ungated: value.ungated } : {}),
+            });
+            run.update({ typical: typicalTimes(project, [...took.values()]) });
+            // With nothing left to start, the pane closes: five panes each
+            // frozen on a finished agent's summary read as five stuck sandboxes.
+            view.finish(issue.id, finishWord(value), queue.size === 0);
+            // Recorded now, not only at the report: a branch waiting for
+            // landing had no outcome for this run, and its row read as an
+            // earlier run's leftover. Landing overwrites it.
+            recordOutcomes(project, runId, { [issue.id]: outcomeText(value) });
+          });
+          return { status: "fulfilled", value } as const;
+        },
+        (reason) => {
+          // The .git check after this ticket's pipeline failed: its work
+          // finished, and the whole run stops. Not a crash of the ticket.
+          if (stops.has(String(reason))) {
+            bookkeep(issue.id, () => {
+              run.ticket(issue.id, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
+              recordOutcomes(project, runId, { [issue.id]: "stopped: the run stopped before landing" });
+              view.finish(issue.id, "stopped");
+            });
+            return { status: "rejected", reason } as const;
+          }
+          crashed.set(issue.id, String(reason));
+          bookkeep(issue.id, () => {
+            run.ticket(issue.id, { state: "crashed", note: String(reason).split("\n")[0].slice(0, 160) });
+            // Kept open even at the end of the queue: a crash is for a human to read.
+            view.finish(issue.id, "crashed");
+            if (hitLimit(issue.id)) limitHit = issue.id;
+          });
+          return { status: "rejected", reason } as const;
+        },
+      ),
+    );
+  });
   clearInterval(heartbeat);
   const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
   for (const i of issues) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
@@ -1133,176 +1069,61 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const closedEarlier: string[] = [];
   const closeFailed: string[] = [];
 
-  // Each ticket's state as landing decides it, so the view counts landing
-  // down rather than showing one opaque stage for minutes.
+  const ctx: LandContext = {
+    project,
+    tracker,
+    base,
+    startBase,
+    gateNames,
+    reports,
+    run,
+    dryRun: DRY_RUN,
+    opener: sandboxOpener(project, image, planFile),
+    withdrawal,
+    merged,
+  };
+  // The ticket's state as landing decides it, for the notes below.
   const land = (id: string, state: string, note: string) => run.ticket(id, { state, note });
   for (const [at, o] of green.entries()) {
     run.update({ stage: `landing ${at + 1}/${green.length}` });
-    run.ticket(o.issue, { state: "landing" });
-    // The issue can change during a long run: closed by hand, or sent to a
-    // human. Merging then would land work nobody still wants. A gh error here
-    // costs this issue, never the landing of every green branch after it.
+    let landed: Landed;
     try {
-      // Someone's decision, not a failure: reported as "not landed", it came
-      // back as a branch to fix and merge. A ticket sent to a human is theirs
-      // now, its branch there if it helps; one closed or unqueued is done with.
-      const called = withdrawal(o.issue);
-      if (called?.held) {
-        takenBack.push(o.issue);
-        land(o.issue, "held", called.reason);
-        continue;
-      }
-      if (called) {
-        withdrawn.push({ issue: o.issue, reason: called.reason });
-        land(o.issue, "withdrawn", called.reason);
-        continue;
-      }
-      if (o.status === "merged-earlier") {
-        if (DRY_RUN) {
-          console.log(`[dry run] would close ${ref(o.issue)} - merged by an earlier run (${o.head})`);
-          land(o.issue, "ready", "dry run: would close");
-          continue;
-        }
-        tracker.close(o.issue, `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`);
-        closedEarlier.push(o.issue);
-        land(o.issue, "merged", `closed, merged earlier (${o.head})`);
-        continue;
-      }
+      landed = await landOne(ctx, o);
     } catch (error) {
-      failedToLand.push({ issue: o.issue, reason: errorLine(error) });
-      land(o.issue, "not landed", errorLine(error));
-      continue;
+      if (error instanceof LandingStop) return await stopLanding(error, green.slice(at));
+      throw error;
     }
-    // The gates vouched for one commit. Anything added after it is ungated.
-    if (sh("git", ["rev-parse", o.branch]) !== o.head) {
-      skipped.push({ issue: o.issue, reason: `${o.branch} moved after its gates passed` });
-      land(o.issue, "not landed", skipped.at(-1)!.reason);
-      continue;
-    }
-    const touched = protectedChanges(project, o.branch);
-    if (touched.length) {
-      heldBack.push({ issue: o.issue, paths: touched });
-      land(o.issue, "held", `${DRY_RUN ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`);
-      run.ticket(o.issue, { files: touched });
-      if (!DRY_RUN) {
-        tracker.hold(
-          o.issue,
-          `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it changes how the repo ` +
-            `executes (${touched.join(", ")}), which its own gates cannot vouch for. Review and merge by hand.` +
-            (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""),
-        );
-      }
-      continue;
-    }
-    const large = largeFiles(project, o.branch);
-    if (large.length) {
-      heldBack.push({ issue: o.issue, paths: large });
-      land(o.issue, "held", `${DRY_RUN ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`);
-      run.ticket(o.issue, { files: large });
-      if (!DRY_RUN) tracker.hold(o.issue, `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it ${largeFilesNote(large)}.` + (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""));
-      continue;
-    }
-    if (o.unreviewed) {
-      const why = "repair commits not reviewed: the review after repair failed";
-      heldBack.push({ issue: o.issue, paths: [] });
-      land(o.issue, "held", `${DRY_RUN ? "dry run: would hold" : "human merge"}: ${why}`);
-      if (!DRY_RUN) tracker.hold(o.issue, `Gated green on \`${o.branch}\` after a repair, but not merged: ${why}. Review the repair commits and merge by hand.`);
-      continue;
-    }
-    if (DRY_RUN) {
-      console.log(`[dry run] would merge ${o.branch} and close ${ref(o.issue)}`);
-      land(o.issue, "ready", "dry run: would merge");
-      continue;
-    }
-    try {
-      // The commit the gates passed on, not whatever the branch names now.
-      mergeBranch(project.root, o.branch, o.head!, ref(o.issue), project.land);
-      merged.push(o.issue);
-      if (project.land === "squash") squashed.push(o.branch);
-    } catch (error) {
-      // A real conflict and a merge that failed for another reason (a dirty
-      // index, a full disk) are reported apart - calling both "conflict" sent us
-      // looking for conflicts that were not there.
-      const unmerged = (() => {
-        try {
-          return sh("git", ["diff", "--name-only", "--diff-filter=U"]);
-        } catch {
-          return "";
-        }
-      })();
-      try {
-        abortLanding(project.root, project.land);
-      } catch {
-        /* nothing to abort */
-      }
-      const files = unmerged.split("\n").filter(Boolean);
-      // The host never runs project code, so a conflict confined to generated files is
-      // redone in a sandbox, where `regen` can run.
-      let sandboxed: Awaited<ReturnType<typeof landInSandbox>> | undefined;
-      if (unmerged && regensFor(files, project.generated)) {
-        try {
-          sandboxed = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () =>
-            landInSandbox(project, { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})`, squash: project.land === "squash" }, sandboxOpener(project, image, planFile)),
-          );
-        } catch (sandboxError) {
-          // The .git check stops the run, as before landing; a sandbox that would not start is a conflict.
-          if (sandboxError instanceof OperatorError) return await stopLanding(sandboxError, green.slice(at));
-          console.log(`${ref(o.issue)}: could not land it in a sandbox (${errorLine(sandboxError)}); left as a conflict.`);
-        }
-      }
-      if (sandboxed?.kind === "merged") {
+    switch (landed.kind) {
+      case "merged":
+      case "close-failed":
         merged.push(o.issue);
-        if (project.land === "squash") squashed.push(o.branch);
-        regenerated.set(o.issue, { files: sandboxed.files, regen: sandboxed.regen });
-        console.log(
-          `${ref(o.issue)}: conflicted only in generated files (${sandboxed.files.join(", ")}); merged by regenerating them with ${sandboxed.regen.map((c) => `\`${c}\``).join(", ")}.`,
-        );
-      } else if (unmerged) {
-        if (sandboxed?.kind === "conflict" && sandboxed.note) console.log(`${ref(o.issue)}: ${sandboxed.note}; left as a conflict.`);
-        if (sandboxed?.kind === "regen-failed") {
-          console.log(`${ref(o.issue)}: regenerating ${sandboxed.files.join(", ")} failed (${sandboxed.reason}); left as a conflict.`);
-        }
-        // Named, with the branch it collides with: "merge conflict" alone
-        // left a human to find both.
-        const other = merged.filter((m) => {
-          const changed = sh("git", ["diff", "--name-only", `${startBase}...agent/issue-${m}`]).split("\n");
-          return files.some((f) => changed.includes(f));
-        });
-        conflicted.push({ issue: o.issue, branch: o.branch, files, with: other });
-        land(o.issue, "conflict", conflictLine(conflicted.at(-1)!));
-        run.ticket(o.issue, { files });
-        continue;
-      } else {
-        // git's own last line ("Merge with strategy ort failed.") names no file, and
-        // its wording varies by version, so the reason comes from the working tree.
-        const dirty = (() => {
-          try {
-            return dirtyFiles(project.root);
-          } catch {
-            return [];
-          }
-        })();
-        const reason =
-          dirty.length > 0
-            ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
-            : errorLine(error);
-        failedToLand.push({ issue: o.issue, reason });
-        land(o.issue, "not landed", reason);
-        continue;
-      }
-    }
-    // The merge stands whatever the tracker says next: a failed close is a
-    // merged ticket still open, not one that failed to land - calling it "not
-    // landed" sent a human to merge work already on the base branch.
-    try {
-      tracker.close(
-        o.issue,
-        closeComment({ ...o, regenerated: regenerated.get(o.issue) }, gateNames, reports.get(o.issue)),
-      );
-      land(o.issue, "merged", regenerated.has(o.issue) ? "merged and closed (generated files regenerated)" : "merged and closed");
-    } catch (error) {
-      closeFailed.push(o.issue);
-      run.ticket(o.issue, { state: "merged", note: "merged; closing the ticket failed", closeFailed: errorLine(error) });
+        if (landed.squashed) squashed.push(o.branch);
+        if (landed.regenerated) regenerated.set(o.issue, landed.regenerated);
+        if (landed.kind === "close-failed") closeFailed.push(o.issue);
+        break;
+      case "conflict":
+        conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
+        break;
+      case "held":
+        heldBack.push({ issue: o.issue, paths: landed.paths });
+        break;
+      case "withdrawn":
+        withdrawn.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "taken-back":
+        takenBack.push(o.issue);
+        break;
+      case "closed-earlier":
+        closedEarlier.push(o.issue);
+        break;
+      case "skipped":
+        skipped.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "not-landed":
+        failedToLand.push({ issue: o.issue, reason: landed.reason });
+        break;
+      case "dry-run":
+        break;
     }
   }
 
