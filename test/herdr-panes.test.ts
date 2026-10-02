@@ -11,7 +11,7 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { loadProject, type Project } from "../src/config.ts";
 import { OperatorError } from "../src/errors.ts";
-import type { TicketRecord } from "../src/run.ts";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 
 const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"

@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import type { RunRecord } from "../mod/hooks/run-record.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -63,7 +64,7 @@ const facts: Facts = {
   dryRun: false,
   verify: { green: true, line: "" },
   gateCount: 1,
-  tickets: { 1: { state: "conflict" }, 2: { state: "merged" }, 3: { state: "blocked" }, 4: { state: "red" } },
+  tickets: { 1: { state: "conflict" }, 2: { state: "merged" }, 3: { state: "blocked" }, 4: { state: "red" } } satisfies RunRecord["tickets"],
   runnable: ["3"],
   blocked: [],
   standing: [],
@@ -178,16 +179,16 @@ const project = (): Project => ({ root: mkdtempSync(join(tmpdir(), "sandcastle-a
 
 test("recordRun twice in one process: the first run is finished in history, the second is live", () => {
   const p = project();
-  recordRun(p, { marker: 1 });
-  recordRun(p, { marker: 2 });
+  recordRun(p, { stage: "first" });
+  recordRun(p, { stage: "second" });
   const lines = readFileSync(join(p.root, ".sandcastle/logs/history.jsonl"), "utf8").trim().split("\n");
   assert.equal(lines.length, 1);
   const first = JSON.parse(lines[0]);
-  assert.equal(first.marker, 1);
+  assert.equal(first.stage, "first");
   assert.ok(first.finishedAt);
   assert.equal(first.exitCode, 0);
   const live = JSON.parse(readFileSync(join(p.root, ".sandcastle/logs/run.json"), "utf8"));
-  assert.equal(live.marker, 2);
+  assert.equal(live.stage, "second");
   assert.equal(live.finishedAt, undefined);
 });
 

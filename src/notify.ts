@@ -4,6 +4,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
+import type { RunRecord, TicketState } from "../mod/hooks/run-record.ts";
 import { NEEDS_FIXING } from "./report.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
 
@@ -21,10 +22,10 @@ export const notifyCommand = (): string[] | undefined => {
 };
 
 // One line from the final run record, the same shape the closing summary's counts use.
-export const endSummary = (run: Record<string, unknown>): string => {
-  const all = Object.values((run.tickets ?? {}) as Record<string, { state?: string; closeFailed?: unknown }>);
+export const endSummary = (run: RunRecord): string => {
+  const all = Object.values(run.tickets ?? {});
   const tickets = all.filter((t) => t.state !== "blocked");
-  const count = (states: string[]) => tickets.filter((t) => states.includes(t.state ?? "")).length;
+  const count = (states: TicketState[]) => tickets.filter((t) => t.state && states.includes(t.state)).length;
   const merged = count(["merged"]);
   const needYou = count(["held"]) + tickets.filter((t) => t.state === "merged" && t.closeFailed).length;
   const fixing = count(NEEDS_FIXING);
@@ -36,7 +37,7 @@ export const endSummary = (run: Record<string, unknown>): string => {
 
 // Synchronous on purpose: an exit handler cannot wait for an async child. Nothing here
 // may throw out of the handler or change the process's exit code.
-export const runNotify = (cmd: string[], name: string, run: Record<string, unknown>): void => {
+export const runNotify = (cmd: string[], name: string, run: RunRecord): void => {
   try {
     const r = spawnSync(cmd[0], cmd.slice(1), {
       stdio: "ignore",

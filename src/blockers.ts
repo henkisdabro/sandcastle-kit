@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
+import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
 import { errorLine, sh, USER_CONFIG } from "./sandbox.ts";
 import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, stoppedWaitNote } from "./schedule.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
@@ -426,7 +427,7 @@ export const createRelease = <T extends Blocked>(o: {
   dryRun: boolean;
   /** The refusal for a ticket's label, found when it is released rather than at the start. */
   badLabel(id: string): string | undefined;
-  record: { ticket(id: string, fields: { state?: string; note?: string | null }): void; update(fields: Record<string, unknown>): void };
+  record: { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
   /** The run record's start-of-run `waiting` list, minus what has started. */
   waiting: { issue: string; on: string[] }[];
   ref(id: string): string;

@@ -15,9 +15,10 @@ import { join } from "node:path";
 import { afterTurn, DRAIN_CAP, type Level, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, NO_TOKENS, type TicketRecord, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, NO_TOKENS, type Tokens, tokenLine } from "./run.ts";
 import { sh } from "./sandbox.ts";
 import { makeTracker, refOf } from "./tracker.ts";
+import { isTicketState, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 export type Facts = {
   base: string;
@@ -68,14 +69,43 @@ export type Facts = {
 /** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
 export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${paths.join(", ")}`;
 
-export const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
-const LEFT = ["blocked", "skipped"];
+/**
+ * The report's own sections, finer than the status view's groups: where a ticket's part in a run
+ * ends. `needs fixing`, `settled` and `left` are where it ends; `working` is a ticket the run stopped
+ * mid-work ("ready" outside a dry run too). Keyed by the closed set: a new ticket state must be placed.
+ */
+type Section = "needs fixing" | "settled" | "left" | "working";
+const SECTIONS: Record<TicketState, Section> = {
+  red: "needs fixing",
+  conflict: "needs fixing",
+  crashed: "needs fixing",
+  "not landed": "needs fixing",
+  blocked: "left",
+  skipped: "left",
+  merged: "settled",
+  nochange: "settled",
+  uncommitted: "settled",
+  withdrawn: "settled",
+  stopped: "settled",
+  held: "settled",
+  queued: "settled",
+  setup: "working",
+  implement: "working",
+  review: "working",
+  "cross-review": "working",
+  gates: "working",
+  repair: "working",
+  ready: "working",
+  landing: "working",
+};
+const statesIn = (section: Section) => TICKET_STATES.filter((s) => SECTIONS[s] === section);
+/** A state outside the set is in no section: a record of an older kit is not the person's to fix, nor a ticket cut short. */
+const sectionOf = (state: string | undefined) => (isTicketState(state) ? SECTIONS[state] : undefined);
+export const NEEDS_FIXING = statesIn("needs fixing");
+const LEFT = statesIn("left");
 // A ticket the landing worker found green alone and red once merged says so in its note (src/landing.ts);
 // a red gate in its own pipeline names the failing gates instead. The difference is the pair, not the gate.
 const redTogether = (t: TicketRecord) => t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "");
-// Where a ticket's part in a run ends. Any other state at the end - a phase, or
-// "ready" outside a dry run - is a ticket the run stopped mid-work.
-const SETTLED = ["merged", "nochange", "uncommitted", "withdrawn", "stopped", "held", "queued", ...NEEDS_FIXING, ...LEFT];
 
 // A run that started agents owes a summary (due); an exit before it is printed
 // (Ctrl-C, a crash) says where to find one instead of ending silently.
@@ -115,7 +145,7 @@ export const gather = async (project: Project): Promise<Facts> => {
   const root = project.root;
   const base = project.baseBranch;
   const run = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
-  const tickets = (run.tickets ?? {}) as Record<string, TicketRecord>;
+  const tickets = readTickets(run);
   const pid = Number(run.pid);
   const live = !run.finishedAt && (() => {
     try {
@@ -218,7 +248,7 @@ const span = (ms: number) => {
 
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
-  const ids = (states: string[]) => Object.entries(f.tickets).filter(([, t]) => states.includes(t.state ?? "")).map(([id]) => id);
+  const ids = (states: TicketState[]) => Object.entries(f.tickets).filter(([, t]) => !!t.state && states.includes(t.state)).map(([id]) => id);
   const name = (id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
   const list = (xs: string[]) => xs.map(refOf).join(" ") || "none";
   const merged = ids(["merged"]);
@@ -249,7 +279,7 @@ export const render = (f: Facts, plain = false): string => {
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
     (!!f.killed || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
-  const cut = early ? Object.keys(f.tickets).filter((id) => !SETTLED.includes(f.tickets[id].state ?? "") && !(f.dryRun && f.tickets[id].state === "ready")) : [];
+  const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
@@ -261,7 +291,7 @@ export const render = (f: Facts, plain = false): string => {
   // A dry run's green branches end as "ready": they would have merged.
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
-  const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => !LEFT.includes(t.state ?? "") && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
+  const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => sectionOf(t.state) && !LEFT.includes(t.state!) && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.

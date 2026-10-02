@@ -25,16 +25,6 @@ test("every ticket state has a group, and the group table holds no other", () =>
   assert.equal(new Set(TICKET_STATES).size, TICKET_STATES.length, "no state is listed twice");
   for (const s of TICKET_STATES) assert.ok(isTicketState(s), s);
   for (const s of [...DERIVED_STATES, "constructor", "toString", "", undefined, 3]) assert.ok(!isTicketState(s), String(s));
-  // The kit documents the same states where it writes them, both ways: src/run.ts's own
-  // TicketRecord still types its state as any string, so a state it starts writing is caught here.
-  const doc = read("src", "run.ts").match(/`state` is one of:([\s\S]*?)\*\//)?.[1] ?? "";
-  const documented = doc
-    .replace(/\n\s*\*/g, " ")
-    .replace(/\([^)]*\)/g, "")
-    .split(",")
-    .map((s) => s.trim().replace(/\.$/, ""))
-    .filter(Boolean);
-  assert.deepEqual(documented.sort(), [...TICKET_STATES].sort(), "src/run.ts documents the ticket states run-record.ts lists");
 });
 
 test("the words and the derived states are the status view's", () => {
