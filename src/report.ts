@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { blockerResolver, openBlockers, refLabel } from "./blockers.ts";
+import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, type TicketRecord, type Tokens, tokenLine } from "./run.ts";
 import { sh } from "./sandbox.ts";
@@ -38,7 +38,8 @@ export type Facts = {
   /** Blocked tickets whose blockers are all closed now, after landing. */
   runnable: string[];
   /** Blocked tickets still waiting, with each open blocker's label. */
-  blocked: { id: string; on: string[] }[];
+  // `why`: by blocker label, what keeps one from closing (not planned, held, not queued).
+  blocked: { id: string; on: string[]; why?: Record<string, string> }[];
   /** Why the blockers could not be re-read, if they could not. */
   blockCheck?: string;
   /** Commits on the base branch not on its upstream (as of the last fetch); undefined with no upstream. */
@@ -126,11 +127,14 @@ export const gather = async (project: Project): Promise<Facts> => {
     try {
       const tracker = makeTracker(project);
       const resolve = blockerResolver(project, tracker);
+      const whyOf = blockerWhy(project, tracker);
       for (const id of waiting) {
         const t = tracker.get(id);
         if (!t.open) continue;
-        const on = (await openBlockers(project, tracker, resolve, t)).map(refLabel);
-        if (on.length) blocked.push({ id, on });
+        const open = await openBlockers(project, tracker, resolve, t);
+        const on = open.map(refLabel);
+        const why = Object.fromEntries(open.flatMap((b) => { const w = whyOf(b); return w ? [[refLabel(b), whyShort[w]]] : []; }));
+        if (on.length) blocked.push({ id, on, ...(Object.keys(why).length ? { why } : {}) });
         else runnable.push(id);
       }
     } catch (error) {
@@ -353,7 +357,7 @@ export const render = (f: Facts, plain = false): string => {
   const anyLeft = f.runnable.length + f.blocked.length + skipped.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
-    ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}`).join(", ") || "blockers that could not be read"}`),
+    ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
     ...(cut.length ? [`Cut short when the run ended: ${cut.map((id) => `${refOf(id)} (${f.tickets[id].state})`).join(", ")} - still queued`] : []),
     ...(unstarted.length ? [`Not started (the run ended early): ${list(unstarted)}`] : []),
