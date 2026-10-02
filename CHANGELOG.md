@@ -51,6 +51,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The Herdr log and report popups' bottom line is readable on any theme.** `less` drew its prompt
+  ("Waiting for data..." while following a log) with the standout colours of the user's own
+  `LESS_TERMCAP_so`, which could come out as yellow on light blue; the popups now use the
+  terminal's own standout.
 - **A test file a ticket adds no longer reads as a change beyond its Touches line**, in the report
   or the close comment. Its name cannot be known when the ticket is written. A modified test file,
   or a file added outside the conventional test paths, still counts.
