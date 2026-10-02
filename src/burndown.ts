@@ -58,6 +58,7 @@ import {
 } from "./landing.ts";
 import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { blockerChain } from "./lint.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
 export { abortLanding, closeComment, mergeBranch } from "./landing.ts";
@@ -421,7 +422,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, candidates.length, slots);
+  const rough = estimate(project, candidates.length, slots, blockerChain(project, tracker, candidates).length);
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
