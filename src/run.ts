@@ -384,8 +384,8 @@ export type TicketRecord = {
   failing?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
-  /** Sent back to the pipelines once after a conflict or red at landing ("requeued after conflict with #3"), for the status view. */
-  requeued?: string;
+  /** Sent back to the pipelines once after a conflict or red at landing ("requeued after conflict with #3"), for the status view; null once that second attempt is not going to run. */
+  requeued?: string | null;
   /** Merged, but the tracker refused the close: the error, short. */
   closeFailed?: string;
   /** What the reviewer said no gate exercises (its <ungated> line); a merged ticket with one is listed under Needs you. */
