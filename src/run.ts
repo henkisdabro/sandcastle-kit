@@ -388,6 +388,8 @@ export type TicketRecord = {
   closeFailed?: string;
   /** What the reviewer said no gate exercises (its <ungated> line); a merged ticket with one is listed under Needs you. */
   ungated?: string;
+  /** Paths the branch changed beyond its ticket's `Touches:` line; a warning, never a hold. */
+  overrun?: string[];
 };
 
 let current: ((code: number | undefined) => void) | undefined;
