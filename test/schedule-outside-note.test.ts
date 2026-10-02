@@ -67,5 +67,5 @@ test("blockedNote leaves a landed blocker out rather than relabelling it", () =>
   const on = [blocker("1"), blocker("50")];
   assert.equal(blockedNote(on, new Set(["1"])), "waits for #1 (lands this run), #50 (not in this run)");
   assert.equal(blockedNote(on, new Set(), new Set(["1"])), "waits for #50 (not in this run)");
-  assert.equal(blockedNote([blocker("1")], new Set(), new Set(["1"])), "waits for the next landing");
+  assert.equal(blockedNote([blocker("1")], new Set(), new Set(["1"])), "waits for the next run");
 });

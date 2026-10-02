@@ -326,8 +326,9 @@ export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: Readon
     const id = blockerTicket(b);
     return id === undefined || !landed.has(id);
   });
-  // Every blocker landed but the read that frees the ticket has not: it starts with the next one.
-  if (!on.length) return "waits for the next landing";
+  // Every blocker landed but the read that frees the ticket threw, or the run stopped first: no
+  // later landing reads its blockers again, so nothing starts it before the next run.
+  if (!on.length) return "waits for the next run";
   const here = (b: Blocker) => {
     const id = blockerTicket(b);
     return id !== undefined && inFlight.has(id);
