@@ -54,6 +54,11 @@ const seenAt = (root: string): Seen => seen.get(root) ?? (seen.set(root, { prime
  * registry file goes when the run exits, and the end is still to be announced.
  */
 const followed = new Set<string>();
+/**
+ * Every id this session has had in this process. `/clear` gives the session a new one, and a run
+ * started before it records the old: the terminal that started the run still closes it.
+ */
+const known = new Set<string>();
 let drawn = "";
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
 let pinned: string | undefined | null = null;
@@ -99,6 +104,16 @@ async function remember($: EngineInterface, root: string) {
   await $.store.set(root, { session: await $.session.id(), ...(since === undefined ? {} : { since }) });
 }
 
+/** The session's id, kept in `known`. */
+async function me($: EngineInterface): Promise<string> {
+  const id = await $.session.id();
+  known.add(id);
+  return id;
+}
+
+/** Whether `run` records an id this session has had. */
+const ours = (run: Run | undefined) => [...known].some((id) => startedBy(run, id));
+
 async function owns($: EngineInterface, kept: Kept): Promise<boolean> {
   return kept?.session === (await $.session.id());
 }
@@ -117,16 +132,16 @@ async function draw($: EngineInterface, run: Run | undefined) {
 }
 
 /**
- * One look at one project's record: the live run, if there is one. `session` is set for a
+ * One look at one project's record: the live run, if there is one. `follow` is set for a
  * followed root: its run is this session's by the id it records, so it is never "old" and needs
  * no store entry; a record that is another session's run, or none, ends the following.
  */
-async function look($: EngineInterface, root: string, session?: string): Promise<Run | undefined> {
+async function look($: EngineInterface, root: string, follow = false): Promise<Run | undefined> {
   const run = await record($, root);
   const w = seenAt(root);
-  const first = session === undefined && !w.primed;
+  const first = !follow && !w.primed;
   w.primed = true;
-  if (session !== undefined && !startedBy(run, session)) {
+  if (follow && !ours(run)) {
     followed.delete(root);
     seen.delete(root);
     return undefined;
@@ -142,10 +157,13 @@ async function look($: EngineInterface, root: string, session?: string): Promise
   w.needs = [];
   if (!run?.startedAt || run.startedAt === w.since) return undefined;
   // Read before `since` moves: a store that cannot be read leaves the end to the next look.
-  const mine = armed && (session !== undefined || (await owns($, (await $.store.get(root)) as Kept)));
+  // A run that records the session that started it is that session's, wherever it was started
+  // from: the store's "later session owns the project" would have a second session close it too.
+  // A run with no id (a plain terminal, Codex, OpenCode) is the store's.
+  const mine = armed && (follow || (run.session ? ours(run) : await owns($, (await $.store.get(root)) as Kept)));
   w.since = run.startedAt;
   // The end is accounted for: a later run of this session in that root is found again.
-  if (session !== undefined) {
+  if (follow) {
     followed.delete(root);
     seen.delete(root);
   }
@@ -156,7 +174,7 @@ async function look($: EngineInterface, root: string, session?: string): Promise
     // The store keeps the old `since` until the turn this starts has begun, which may be much
     // later: a session quit with the prompt still queued hears it again when it is resumed.
     const text = `The sandcastle run in ${root} ${how}. Close it now: read run.md in the sandcastle skill's directory and follow it.`;
-    void $.prompt.submit({ text }).then(() => (session === undefined ? remember($, root) : undefined)).catch(() => {});
+    void $.prompt.submit({ text }).then(() => (follow ? undefined : remember($, root))).catch(() => {});
   }
   $.ui.toast(`run ${how}`, { timeoutMs: 10000 });
   return undefined;
@@ -164,9 +182,10 @@ async function look($: EngineInterface, root: string, session?: string): Promise
 
 /**
  * Finds runs this session started outside its own root: the registered live runs whose record
- * names this session's id. Fails closed - a shell or a record that cannot be read adds nothing.
+ * names an id this session has had. Fails closed - a shell or a record that cannot be read adds
+ * nothing.
  */
-async function discover($: EngineInterface, root: string, session: string) {
+async function discover($: EngineInterface, root: string) {
   let out: string;
   try {
     const ls = await exec($, ["sh", "-c", REGISTRY_SCRIPT, "sh", root]);
@@ -178,7 +197,7 @@ async function discover($: EngineInterface, root: string, session: string) {
   for (const other of followable(parseRegistry(out))) {
     if (followed.has(other)) continue;
     const run = await record($, other);
-    if (startedBy(run, session) && run?.pid !== undefined && (await alive($, run.pid))) followed.add(other);
+    if (ours(run) && run?.pid !== undefined && (await alive($, run.pid))) followed.add(other);
   }
 }
 
@@ -197,13 +216,13 @@ async function adopt($: EngineInterface, root: string) {
 /** One round: every watched project once; true while a run is alive. The newest live run is the one drawn. */
 async function round($: EngineInterface, root: string): Promise<boolean> {
   await adopt($, root);
-  const session = await $.session.id();
-  if (armed) await discover($, root, session);
+  await me($);
+  if (armed) await discover($, root);
   const live: Run[] = [];
   const own = adopted ? await look($, root) : undefined;
   if (own) live.push(own);
   for (const other of [...followed]) {
-    const run = await look($, other, session);
+    const run = await look($, other, true);
     if (run) live.push(run);
   }
   const shown = live.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
@@ -276,6 +295,7 @@ export const register: Register = (on) => {
     // is followed wherever it lives, so the end prompt arrives. (`sandcastle init` may have made
     // the project after this session started; a `/cd` leaves the watch on the first root, which
     // the id-based follow does not depend on.)
+    await me($);
     await begin($, root, true);
     await remember($, root);
     armed = true;

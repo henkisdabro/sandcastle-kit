@@ -257,6 +257,29 @@ test("after /clear the arming stays with the terminal, and the store learns the 
   expect(w.prompts.length).toBe(1);
 });
 
+test("a run that records another session is that session's to close, whoever used the skill here last", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "implement" } }, { session: "session-2" });
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.toasts).toEqual(["run ended without a clean exit"]);
+  expect(w.prompts).toEqual([]);
+});
+
+test("a run that records this session's id from before /clear is still closed here", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "implement" } }, { session: "session-1" });
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  w.session = "session-9";
+  await $.classic.SessionStart({ source: "clear" });
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.prompts.length).toBe(1);
+});
+
 test("a session moved to another project still gets the note: a run it starts there is followed by the session's id", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
