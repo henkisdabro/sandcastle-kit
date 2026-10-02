@@ -56,9 +56,25 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
 7. **Ask in batched rounds** as the queue action does: up to four questions a round, each
    standalone, the recommended option first. Ask the decisions, and keep-or-drop for
    `medium`-confidence findings.
-8. **Show the filing list** - title, lens, severity, touches, what it waits for, queued or not -
-   and get the user's yes before filing anything: filing writes to the tracker.
-9. **File in dependency order**, so a blocker exists (and has its number) before what waits on
+8. **Cluster findings that touch the same files**, before the filing list. One issue per finding
+   born overlapping makes a queue whose tickets all want the same few files.
+   - Group the findings by shared `touches` paths (a directory covers everything under it, a glob
+     its matches).
+   - Where three or more small findings share most of their files, propose **one ticket per file
+     cluster** instead: the findings become its checklist, and its `doneWhen` is the checks of all
+     of them. Name the findings each cluster merges.
+   - Where findings must stay separate (too big together, or different gates prove them), say
+     which edges are real dependencies - one cannot be done without the other - and which only
+     order overlapping work. Only a real dependency becomes a blocker line. Write no
+     order-only blocker line: a run lands overlapping branches in turn, and holding a ticket back
+     for a file it shares is a run each time.
+   - Where the findings cannot share a ticket, keep their `touches` accurate: the kit reads them
+     to warn of tickets that will meet at landing.
+9. **Show the filing list** - title, lens, severity, touches, what it waits for, queued or not,
+   with each cluster from step 8 shown as one row naming the findings it merges and the edges
+   called real or order-only - and get the user's yes before filing anything: filing writes to the
+   tracker. The user can split a cluster back into its findings.
+10. **File in dependency order**, so a blocker exists (and has its number) before what waits on
    it.
    - GitHub: `gh issue create --title ... --body-file <temp file>`. The body has `## Problem`,
      `## Evidence`, `## Fix` and `## Done when`, a `Touches:` line, and a blocker line in plain
@@ -81,6 +97,6 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
      queued ones, and a `Blocked by: NN` header line for a blocker in the same feature. Then
      commit them in one commit by the repo's rules.
    - Record each filed number or path in its finding's file (`filed`).
-10. **Report**: a table of what was filed (number, title, queued or not), merged, and dropped with
+11. **Report**: a table of what was filed (number, title, queued or not), merged, and dropped with
     the reason. The next step is `/sandcastle run`, or `/sandcastle queue` for anything filed
     unqueued.
