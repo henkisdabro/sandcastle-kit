@@ -1,6 +1,6 @@
 You are repairing branch `{{SOURCE_BRANCH}}` for ticket {{TICKET}}. Another agent implemented
-the issue and a reviewer checked it, but a gate the orchestrator runs after them came back red. Your
-job is to make it green without changing what the issue asked for. Nobody will answer a question for
+the ticket and a reviewer checked it, but a gate the orchestrator runs after them came back red. Your
+job is to make it green without changing what the ticket asked for. Nobody will answer a question for
 you.
 
 {{KIT_DRY_RUN}}**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
@@ -9,7 +9,7 @@ by hand. From inside this container no other agent's worktree path exists, so a 
 their records mid-run. If git ever tells you this worktree is not a git repository, stop and output
 `<promise>COMPLETE</promise>` - do not rebuild it.
 
-# The issue
+# The ticket
 
 {{KIT_TICKET_VIEW}}
 
@@ -36,7 +36,7 @@ see the whole set, and fix all of them.
 - **Fix the cause.** A failing assertion, lint rule or type error is a signal. Never delete, skip or
   weaken a test, an assertion or a guard to make the gate pass, and never change the gate's
   configuration.
-- **Stay inside the issue.** If the failure comes from code this branch did not touch and cannot be
+- **Stay inside the ticket.** If the failure comes from code this branch did not touch and cannot be
   fixed without scope creep, commit nothing and say so {{KIT_SAY}}.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
 

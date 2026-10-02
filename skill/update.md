@@ -26,11 +26,11 @@ was set up with.
    3. **Gates.** Check they still match what CI runs; CI drifts. Run `sandcastle queue`: it names
       the tracker and queue label the kit chose (`docs/agents/` can change either). If that is not where this project's tickets live (a repo that
       moved to `.scratch/` files, or back), set `tracker` in the config.
-   4. **Blocked issues recorded the old way.** Earlier triage left blocked issues with a "blocked
+   4. **Blocked tickets recorded the old way.** Earlier triage left blocked tickets with a "blocked
       by" comment, which runs do not read. Run `sandcastle blockers`: it lists open tickets - queued
       or not - whose comment names a blocker the body does not, and marks those whose blockers are
       all closed as stale. For each that is not stale, propose moving the line into the body as `Blocked by ...`
-      (and, for an unlabelled issue, adding the queue label - only if its spec is otherwise closed,
+      (and, for an unlabelled ticket, adding the queue label - only if its spec is otherwise closed,
       see queue). If the project tracks work in Linear or task files, check `blockers` in its
       config covers them. Apply after the user agrees.
    5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no

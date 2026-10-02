@@ -199,7 +199,7 @@ export const init = (root: string) => {
           "with no package.json.") +
       "\nNext, in order: `sandcastle build`, `sandcastle lean`, `sandcastle gates`." +
       "\nBefore the first run, answer the three questions in .sandcastle/rules.md: generated files (also `generated` in config.ts), paths agents must never touch, and the gate that catches drift in generated files." +
-      "\nAgents only work on queued tickets, so file issues (or ticket files) for the work, then triage them into the queue with " +
+      "\nAgents only work on queued tickets, so file tickets (GitHub issues or ticket files) for the work, then triage them into the queue with " +
       "`/sandcastle queue` (the queue label is `label` in .sandcastle/config.ts, default ready-for-agent).\n",
   );
 };

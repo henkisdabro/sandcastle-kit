@@ -38,11 +38,11 @@ const stderrOf = (fn: () => unknown) => {
   return written;
 };
 
-test("500 open issues back: one warning naming 500, on stderr", () => {
+test("500 open tickets back: one warning naming 500, on stderr", () => {
   writeFileSync(join(dir, "issues.json"), issues(500));
   const written = stderrOf(() => assert.equal(makeTracker(project).open(false).length, 500));
   assert.equal(written.length, 1);
-  assert.match(written[0], /gh returned the limit of 500 open issues; any beyond it are not seen\./);
+  assert.match(written[0], /gh returned the limit of 500 open tickets; any beyond it are not seen\./);
 });
 
 test("499 back: no warning", () => {
@@ -56,5 +56,5 @@ test("a full queue list names the label, and counts before the needs-human filte
   writeFileSync(join(dir, "issues.json"), JSON.stringify(all));
   const written: string[] = stderrOf(() => assert.equal(makeTracker(project).queued(false).length, 499));
   assert.equal(written.length, 1);
-  assert.match(written[0], /500 open issues labelled ready-for-agent;/);
+  assert.match(written[0], /500 open tickets labelled ready-for-agent;/);
 });

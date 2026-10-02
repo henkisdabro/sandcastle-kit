@@ -192,13 +192,13 @@ export const setup = async (repoRoot?: string) => {
     const url = new URL("https://github.com/settings/personal-access-tokens/new");
     url.search = new URLSearchParams({
       name: "sandcastle-kit",
-      description: "sandcastle-kit agents: read and comment on issues",
+      description: "sandcastle-kit agents: read and comment on GitHub issues",
       ...(login ? { target_name: login } : {}),
       issues: "write",
       metadata: "read",
     }).toString();
     console.log(
-      "\nThe agents need a fine-grained GitHub token that can only read and comment on issues." +
+      "\nThe agents need a fine-grained GitHub token that can only read and comment on GitHub issues." +
         "\nThe page below comes pre-filled (Issues: read and write, Metadata: read). On it:" +
         "\n  - Resource owner: whoever owns the repos you will run (you, or an organisation)" +
         "\n  - Repository access: Only select repositories -> pick those repos" +

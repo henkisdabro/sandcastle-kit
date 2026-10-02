@@ -9,7 +9,7 @@
 //   run [TICKET ...] [--dry] [--concurrency N]
 //                    burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge;
-//                    the arguments are the same as ISSUES, DRY_RUN and CONCURRENCY
+//                    the arguments are the same as TICKETS, DRY_RUN and CONCURRENCY
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -17,13 +17,13 @@
 //   build [--force]  build the base and project images
 //   preflight        one reply from every model, nothing else
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
-//                    GitHub Issues or ticket files; see README, Trackers); no model calls
+//                    GitHub issues or ticket files; see README, Trackers); no model calls
 //   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
 //                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0
 //   requeue <ticket> [--note TEXT]
 //                    put a ticket back in the queue (needs-human off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
-//   blockers         open issues whose comments say "blocked by" while the body does not
+//   blockers         open tickets whose comments say "blocked by" while the body does not
 //                    (a run reads only the body), and queued ones whose blockers can never
 //                    close (missing, a cycle) or are ignored; no model calls
 //   gates            every gate on the base branch in a sandbox, as a run's
@@ -42,7 +42,7 @@
 //   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
 //                    and list unmerged ones; --all deletes those too, without asking
 //
-// Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
@@ -112,7 +112,11 @@ try {
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
-      if (given.issues) process.env.ISSUES = given.issues.join(",");
+      if (given.issues) {
+        // An argument overrides both names, so the older one is dropped rather than reported as a clash.
+        delete process.env.ISSUES;
+        process.env.TICKETS = given.issues.join(",");
+      }
       if (given.dry) process.env.DRY_RUN = "1";
       if (given.concurrency !== undefined) process.env.CONCURRENCY = String(given.concurrency);
       // An agent that started the run in another pane (Herdr's `pane run`) is
@@ -147,7 +151,7 @@ try {
           drain.cause = noRerunCause(facts);
           break;
         }
-        // A ticket closed by hand since the turn would make the ISSUES path throw.
+        // A ticket closed by hand since the turn would make the TICKETS path throw.
         const tracker = makeTracker(project);
         const open = (id: string) => {
           try {
@@ -200,7 +204,8 @@ try {
           console.log(`Autonomy level ${level}: running again (turn ${turn + 1} of ${level === "drain" ? `at most ${DRAIN_CAP}` : level}) for ${list}.`);
         }
         // Exactly the re-runnable tickets, never the whole queue: red ones still queued stay out.
-        process.env.ISSUES = ids.join(",");
+        delete process.env.ISSUES;
+        process.env.TICKETS = ids.join(",");
       }
       if (level === "drain" && drain.turns > 0) {
         const cause = drain.cause ?? "the run ended";
@@ -275,11 +280,10 @@ try {
           try {
             open = tracker.open(false).length;
           } catch {}
-          const noun = tracker.kind === "files" ? "ticket(s)" : "issue(s)";
           console.log(
             open === undefined
               ? "  (empty)"
-              : `  (empty) - ${open} open ${noun} not in the queue. File issues for the work, or run /sandcastle queue to triage the open ones.`,
+              : `  (empty) - ${open} open ticket(s) not in the queue. File tickets for the work, or run /sandcastle queue to triage the open ones.`,
           );
         }
       }

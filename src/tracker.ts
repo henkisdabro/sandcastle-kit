@@ -96,7 +96,7 @@ export const ensureTriageLabel = (gh = (args: string[]) => sh("gh", args)) => {
     gh(["label", "create", "needs-triage", "--color", "FBCA04", "--description", "Filed by a sandcastle agent; triage before queueing"]);
   } catch (e) {
     const why = (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 160);
-    console.log(`  warning: could not create the needs-triage label: ${why}; agent-filed issues will be unlabelled`);
+    console.log(`  warning: could not create the needs-triage label: ${why}; agent-filed tickets will be unlabelled`);
   }
 };
 
@@ -111,7 +111,7 @@ const github = (project: Project): Tracker => {
       const why = (String(err.stderr ?? "").trim() || String(err.message)).split("\n")[0].slice(0, 200);
       // gh's own words name no way out: a Go dial error, or a signed-out token.
       const fix = /no git remotes found|none of the git remotes .* point to a known GitHub host/i.test(why)
-        ? ` - this repository has no GitHub remote, so the github tracker has no issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
+        ? ` - this repository has no GitHub remote, so the github tracker has no GitHub issues to read. Add one (\`git remote add origin <url>\`), or keep tickets in files: \`tracker: "files"\` in .sandcastle/config.ts.`
         : /dial tcp|connection refused|no such host|i\/o timeout|proxyconnect|error connecting|TLS handshake|network is unreachable/i.test(why)
         ? " - GitHub could not be reached. Check the network (or proxy), then try again."
         : /HTTP 401|bad credentials|gh auth login|authentication/i.test(why)
@@ -128,7 +128,7 @@ const github = (project: Project): Tracker => {
     // is dropped from it. stderr, because `queue --json` is parsed from stdout.
     if (listed.length === LIST_LIMIT) {
       const label = extra[extra.indexOf("--label") + 1];
-      console.warn(`gh returned the limit of ${LIST_LIMIT} open issues${extra.includes("--label") ? ` labelled ${label}` : ""}; any beyond it are not seen.`);
+      console.warn(`gh returned the limit of ${LIST_LIMIT} open tickets${extra.includes("--label") ? ` labelled ${label}` : ""}; any beyond it are not seen.`);
     }
     return listed
       // A person who marks a queued issue needs-human by hand leaves the queue
@@ -240,26 +240,26 @@ const github = (project: Project): Tracker => {
     declaredBlockers: () => [],
     isClosed: () => undefined,
     words: {
-      LOST: "comment on the issue that the sandbox's git record was lost",
+      LOST: "comment on the ticket that the sandbox's git record was lost",
       TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
-      COMMENTS_VIEW: "# Comments on the issue\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
+      COMMENTS_VIEW: "# Comments on the ticket\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
       NEW_TICKET: "GitHub issue (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
       NEW_TICKET_REVIEW: "open a new GitHub issue\n  (`gh issue create --label needs-triage`; if that label is refused, create it without the label)",
       RECORD:
-        "**Before you finish, comment on the issue** with what you changed, the commit(s), and anything a\n" +
-        "human must still do. The issue is closed automatically when your branch merges, so that comment is\n" +
+        "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
+        "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +
         "the record.",
-      NOCHANGE: "Comment on the issue with the evidence.",
+      NOCHANGE: "Comment on the ticket with the evidence.",
       BLOCKED:
-        "Comment on issue {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
+        "Comment on ticket {{TICKET}} explaining what you\nlearned and what a human must decide, then add the labels:\n\n" +
         "```\ngh label create needs-human --color D93F0B 2>/dev/null || true\ngh issue edit {{ISSUE_NUMBER}} --add-label needs-human --remove-label {{KIT_LABEL}}\n```",
-      SAY: "in a comment on the issue",
+      SAY: "in a comment on the ticket",
     },
     dryRunNote:
-      "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any issue " +
+      "**This is a dry run.** Write nothing to GitHub: do not comment on, open, close or label any ticket " +
       "(`gh issue comment`, `gh issue create`, `gh issue close`, `gh issue edit`, `gh label`). Wherever these " +
       "instructions say to do one of those, put what you would have posted in your final message instead, under " +
-      "\"Would post:\". Reading issues with `gh` is fine. Everything else - the work, the commits, the gates - is " +
+      "\"Would post:\". Reading tickets with `gh` is fine. Everything else - the work, the commits, the gates - is " +
       "exactly as in a real run.\n\n",
   };
 };

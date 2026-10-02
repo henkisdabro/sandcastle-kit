@@ -614,10 +614,11 @@ render() {
     | log_ids | sort -u)
 
   # The table's columns. The fixed ones grow with the pane (a share of it,
-  # with a minimum each) and ACTIVITY takes the rest. The ISSUE column fits
+  # with a minimum each) and ACTIVITY takes the rest. The TICKET column fits
   # the longest ticket shown ("helpers-01" is longer than "#1234"), up to 16;
-  # a longer one is cut to it.
-  local id d longest=5 i sum=0 avail
+  # a longer one is cut to it. It is never narrower than its own heading
+  # (6 characters).
+  local id d longest=6 i sum=0 avail
   for id in $issues $QUEUE $TICKET_IDS; do d=$(disp "$id"); [ "${#d}" -gt "$longest" ] && longest=${#d}; done
   [ "$longest" -gt 16 ] && longest=16
   WIN="$cols"
@@ -829,7 +830,7 @@ render() {
       activity="USAGE LIMIT REACHED - $phase model"
       glyph='!'; colour="$hot"
     fi
-    # A suffixed branch shows its number in ISSUE and its suffix here.
+    # A suffixed branch shows its number in TICKET and its suffix here.
     legacy_id "$n" && [ "$n" != "${n%%-*}" ] && activity="[${n#*-}] $activity"
     emit "$RECORD"
   done
@@ -1017,7 +1018,7 @@ build_header() {
   # The table's headings, under a double rule.
   OW=("${TW[@]}"); bars_of
   junction '╞' '╡' '═' "$prev" "$BARS"; put "$REPLY"
-  CELL=("${bold}${head}ISSUE${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
+  CELL=("${bold}${head}TICKET${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
   [ "$wide" -ge 1 ] && CELL[4]="${bold}${head}CPU${off}"
   [ "$wide" = 2 ] && CELL[5]="${bold}${head}MEM${off}"
   CELL[${#TW[@]}-1]="${bold}${head}ACTIVITY${off}"

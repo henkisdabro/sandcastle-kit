@@ -1,6 +1,6 @@
 ---
 name: sandcastle
-description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues or ticket files in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as issues ready to queue), queue (triage open issues into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing issues for agents, or updating or upgrading sandcastle-kit."
+description: "sandcastle-kit: unattended coding agents that burn down a repo's GitHub issues or ticket files in Docker sandboxes. Actions: init (set a project up - gates, lean sandbox, hooks checked), audit (review the repo with read-only agents, one per lens, and file what they find as tickets ready to queue), queue (triage open tickets into the agent queue with the user), run (start a burndown with its status view), status (what a run is doing, or how the last one ended: `sandcastle report`), update (pull the latest kit and bring this project up to date with it). Use for sandcastle, burndown, AFK agents, auditing a repo to build a backlog, queueing tickets for agents, or updating or upgrading sandcastle-kit."
 argument-hint: "[init|audit|queue|run|status|update]"
 arguments: [action]
 ---
@@ -12,8 +12,8 @@ Requested action: `$action`
 | Action | Does | Done when |
 |---|---|---|
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
-| `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as issues that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
-| `queue` | Triages every open issue into the agent queue, with the user | Every open issue is labelled, parked, or left with a stated reason |
+| `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as tickets that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
+| `queue` | Triages every open ticket into the agent queue, with the user | Every open ticket is labelled, parked, or left with a stated reason |
 | `run` | Starts a burndown in a tab of its own, and closes it with a summary | The run is live in its own tab and its status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
 | `status` | Reports what a run is doing | The user has the snapshot and the cause of any failed row |
 | `update` | Pulls the latest kit and brings the current project up to date with it | The kit is current, the project's image and hook check are clean, and every change that affects it is reported or applied |
@@ -21,7 +21,7 @@ Requested action: `$action`
 With no action (blank, or the literal `$action` in a harness that does not fill it in), take it
 from the user's request; if that names none either, run `sandcastle status 0` and suggest the
 action that fits what it shows. When it shows no runs and `sandcastle queue` is empty, say so and
-name the next step (file issues or ticket files for the work, then the `queue` action) rather than
+name the next step (file tickets - GitHub issues or ticket files - for the work, then the `queue` action) rather than
 stopping.
 
 ## Before every action
@@ -126,13 +126,13 @@ the hook check and refuses to start while a kept hook cannot run.
 
 ## audit - find work and file it
 
-Read audit.md in this skill's directory (next to this file) and follow it. It files issues by
+Read audit.md in this skill's directory (next to this file) and follow it. It files tickets by
 the queue action's categories and its closed-spec test, so read the queue section below as well.
 
-## queue - triage every open issue into the queue
+## queue - triage every open ticket into the queue
 
 The queue is the config's `label` (default `ready-for-agent`). A ticket gets it only when its
-spec is **closed**: an unattended agent with no chat context can finish it from the issue and its
+spec is **closed**: an unattended agent with no chat context can finish it from the ticket and its
 comments, and the gates can prove it.
 
 0. **Which tracker?** `sandcastle queue` names it and why. `github`: use `gh` as below. `files`:
@@ -140,69 +140,69 @@ comments, and the gates can prove it.
    `## Comments`, and queue by setting `Status: <label>` (commit it). If the repo has
    `docs/agents/issue-tracker.md`, its conventions win. The kit reads that file (Matt Pocock's setup
    skill writes it) but does not need it.
-1. **List every open issue**: `gh issue list --state open --limit 500 --json
+1. **List every open ticket**: `gh issue list --state open --limit 500 --json
    number,title,labels,updatedAt` (files: every ticket whose `Status:` is not done). If exactly 500
-   come back, the list was cut off: raise `--limit` and list again. Already-queued issues get a quick sanity check only.
-2. **Facts first.** Fan out read-only subagents, about seven issues each (without subagents, work
-   through them in the same batches). Each reads the issue, its comments, the code it names,
+   come back, the list was cut off: raise `--limit` and list again. Already-queued tickets get a quick sanity check only.
+2. **Facts first.** Fan out read-only subagents, about seven tickets each (without subagents, work
+   through them in the same batches). Each reads the ticket, its comments, the code it names,
    recent history, the repo's decision records (`docs/adr/` or similar), its label vocabulary
    (e.g. `docs/agents/triage-labels.md`), and any earlier decision or `PARKED:` comment - a
-   recorded decision or revival condition is checked, not re-asked. Each returns per issue: the
+   recorded decision or revival condition is checked, not re-asked. Each returns per ticket: the
    category below, the evidence, and for a decision the concrete question with options and a
    recommendation. Ask the user only what the code and history cannot answer.
 
    **Persist each result.** The chat can be compacted and the results lost; files survive it. So
    each subagent writes its result for each ticket, as soon as it has it, to
-   `.sandcastle/triage/<id>.json` in the project (`<id>` is the issue number, or the ticket id for
+   `.sandcastle/triage/<id>.json` in the project (`<id>` is the ticket number, or the ticket id for
    the files tracker; the directory is gitignored). Fields: `issue`, `category` (one of the table's
    rows), `evidence`, `triagedAt` (an ISO 8601 timestamp), and for a decision `question`, `options`
    (recommended first) and `recommendation`. A ticket that already has a file is not re-triaged
-   unless the issue was updated after the file was written (the issue's `updatedAt` is later than
+   unless the ticket was updated after the file was written (the ticket's `updatedAt` is later than
    the file's `triagedAt`). The subagents' file writes are the one exception to "no edits" in the
    brief below.
 
-   Write the batch's issue numbers into the `Issues:` line before sending; never send a brief with
+   Write the batch's ticket numbers into the `Tickets:` line before sending; never send a brief with
    a placeholder left in it.
 
    ```text
    Brief for each subagent
-   You are triaging issues. Read-only: read files, search, run `git log`, `git show`, `git blame`,
+   You are triaging tickets. Read-only: read files, search, run `git log`, `git show`, `git blame`,
    and `gh issue view N --json title,body,comments,updatedAt` (files tracker: read the ticket
    file). No edits (bar the triage file below), no commits, no tracker writes (no `gh issue
    comment`, `gh issue edit`, `gh issue close`, `gh issue create`, no `gh label`), and no
    `sandcastle run`, `preflight` or anything else that spends model allowance.
-   Issues: <the batch's numbers>
-   For each issue read: the issue and its comments, the code it names, recent history, the repo's
+   Tickets: <the batch's numbers>
+   For each ticket read: the ticket and its comments, the code it names, recent history, the repo's
    decision records and label vocabulary, and any earlier decision or `PARKED:` comment.
-   Classify each issue as exactly one of: ready, needs a decision, human-only, blocked by another
-   issue, already fixed or false, epic or too big, parked.
-   Return per issue: the number, the category, and the evidence with file:line. For a decision, add
+   Classify each ticket as exactly one of: ready, needs a decision, human-only, blocked by another
+   ticket, already fixed or false, epic or too big, parked.
+   Return per ticket: the number, the category, and the evidence with file:line. For a decision, add
    one self-contained question with 2-4 options, recommended first. For blocked, name the blocking
-   issue. For too big, list the proposed child issues.
+   ticket. For too big, list the proposed child tickets.
    Also write each result as soon as you have it to `.sandcastle/triage/<id>.json` (the only file
    you may write): `issue`, `category`, `evidence`, `triagedAt` (ISO 8601 now) and, for a
-   decision, `question`, `options`, `recommendation`. Skip an issue whose file's `triagedAt` is
-   later than the issue's `updatedAt`.
+   decision, `question`, `options`, `recommendation`. Skip a ticket whose file's `triagedAt` is
+   later than the ticket's `updatedAt`.
    ```
 
    | Category | Action |
    |---|---|
-   | Ready - spec closed, provable by the gates | label now; add a short triage note if the issue is stale or half-fixed |
+   | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | `needs-human` (the kit's human label: a run never takes a ticket carrying it), with a comment saying why |
-   | Blocked by another issue | label it, with a `Blocked by #N` line in the issue *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text: a line inside a code block or backticks is not read either. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
+   | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text: a line inside a code block or backticks is not read either. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
-   | Epic or too big for one agent run | propose child issues; ask before creating them |
+   | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
    question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
-   theme. Each question stands alone - enough context to decide without opening GitHub, the issue
-   link, the recommended option first. Continue until every decision is answered. An issue the
+   theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
+   link, the recommended option first. Continue until every decision is answered. A ticket the
    user says needs a design discussion stays unlabelled, with that noted.
 4. **Close the spec, then label.** Take each decision from its file, and record the user's answer
-   in it as `answer`. Then comment the decision on the issue - the implementing agent reads the
-   issue and its comments, never this chat - then add the queue label. Create a missing label with
+   in it as `answer`. Then comment the decision on the ticket - the implementing agent reads the
+   ticket and its comments, never this chat - then add the queue label. Create a missing label with
    `gh label create`. A hard ticket can carry `model:`/`effort:` labels (GitHub) for a stronger
    implementer; offer it, do not add it unasked.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built

@@ -434,8 +434,8 @@ export const render = (f: Facts, plain = false): string => {
   if (lone.length) next.push(`Look at ${list(lone)}: still queued - add a comment for the implementer if it helps, and the next \`sandcastle run\` resumes its branch; or fix the branch yourself and land it: \`sandcastle land ${lone.length === 1 ? lone[0] : "<n>"}\`.`);
   // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
-  if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
-  if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
+  if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} ticket(s) this run unblocked: \`sandcastle run\`.`);
+  if (skipped.length) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (cut.length + unstarted.length) {

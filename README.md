@@ -23,7 +23,7 @@ gated and merged while you are away from the keyboard.
 </div>
 
 > [!NOTE]
-> sandcastle-kit is an opinionated issue-burndown kit built on
+> sandcastle-kit is an opinionated ticket-burndown kit built on
 > **[Sandcastle](https://github.com/mattpocock/sandcastle) by [Matt Pocock](https://github.com/mattpocock)**.
 > Sandcastle does the heavy lifting - sandboxing, worktrees and agent orchestration. This kit is
 > one way to put it to work, learned from and improved on with gratitude.
@@ -72,7 +72,7 @@ and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
 **[Matt Pocock's skills](https://github.com/mattpocock/skills)** - the same author as Sandcastle,
 which this kit is built on - and we recommend installing them: `/grill-with-docs`, `/to-spec`
 and `/to-tickets` are a good way to turn an idea into tickets an unattended agent can finish, and
-`/triage` keeps incoming issues in shape. Run his `/setup-matt-pocock-skills` in your repo once
+`/triage` keeps incoming tickets in shape. Run his `/setup-matt-pocock-skills` in your repo once
 and the kit reads what it wrote (which tracker, which label), with no extra configuration. It stays
 optional: skip his skills and one line in `config.ts` does the same job.
 
@@ -84,14 +84,14 @@ New to GitHub or to agents? These are the only terms you need.
 |---|---|
 | **Ticket** | One piece of work, written down: a title, a description of what should change, and how you will know it is done. On GitHub a ticket is an **issue**; in the files tracker it is a Markdown file. |
 | **GitHub issue** | GitHub's built-in ticket: a page in your repository (the **Issues** tab) with a title, a description and a comment thread. |
-| **Label** | A coloured tag you stick on a GitHub issue, such as `bug` or `ready-for-agent`. Labels are how this kit knows which issues to work on: it only touches the ones carrying its queue label. |
+| **Label** | A coloured tag you stick on a GitHub issue, such as `bug` or `ready-for-agent`. Labels are how this kit knows which tickets to work on: it only touches the ones carrying its queue label. |
 | **`ready-for-agent`** | The kit's default queue label. It means "an agent may do this without asking me anything". Putting it on a ticket is you saying yes. [How to add it](#-how-to-mark-a-ticket-ready). |
 | **Queue** | Every ticket currently marked `ready-for-agent`. A run works through it. |
 | **Gate** | A command that must pass before anything merges: your linter, type checker, tests, build. You list them once in `config.ts`. |
 | **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
 | **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
 | **`needs-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. |
-| **`needs-triage`** | Put by agents on follow-up issues they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
+| **`needs-triage`** | Put by agents on follow-up tickets they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
 
 > [!TIP]
 > **AI coding agent?** Start at [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this), then run `sandcastle doctor`.
@@ -147,7 +147,7 @@ context between chats. sandcastle-kit is the next step up.
 - 🎫 **Your tickets stay where they are.** GitHub Issues or Markdown files in the repo: write a
   ticket an agent could finish with no chat context, mark it ready, and it joins the queue. No new
   tool to learn.
-- 🏭 **A software factory per repository.** Each queued issue gets its own git worktree and its
+- 🏭 **A software factory per repository.** Each queued ticket gets its own git worktree and its
   own Docker sandbox, several at once, across several projects.
 - 🧪 **Proof, not promises.** The orchestrator - not the agent - runs your gates. Only green
   branches merge, and the merged branch is gated again.
@@ -160,13 +160,13 @@ context between chats. sandcastle-kit is the next step up.
 flowchart LR
     A["📝 You write tickets<br/>GitHub or repo files"] --> B["🏷️ Label<br/>ready-for-agent"]
     B --> C["🚀 sandcastle run"]
-    C --> D1["🐳 Sandbox<br/>issue #12"]
-    C --> D2["🐳 Sandbox<br/>issue #15"]
-    C --> D3["🐳 Sandbox<br/>issue #18"]
+    C --> D1["🐳 Sandbox<br/>ticket #12"]
+    C --> D2["🐳 Sandbox<br/>ticket #15"]
+    C --> D3["🐳 Sandbox<br/>ticket #18"]
     D1 --> E{"🚦 Your gates<br/>green?"}
     D2 --> E
     D3 --> E
-    E -- "yes" --> F["✅ Merged locally<br/>issue closed"]
+    E -- "yes" --> F["✅ Merged locally<br/>ticket closed"]
     E -- "no" --> G["🔴 Left red<br/>for you"]
     E -- "risky paths" --> H["🙋 needs-human"]
     F --> I["📊 Report<br/>you review and push"]
@@ -191,7 +191,7 @@ flowchart LR
 | 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. |
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
-| 🔗 | **Issue dependencies** | `Blocked by #12` in an issue body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
+| 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -203,22 +203,22 @@ flowchart LR
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
 | 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab: the status view and a pane per sandbox, each shown in Herdr's agent sidebar as working, done or blocked - see [Works best in Herdr](#-works-best-in-herdr). |
-| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, issue triage, starting and closing runs, and updating. |
+| 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 
 ## 🔄 How it works
 
 A run starts in a project, on its base branch, with a clean tree. It checks everything first,
-then fans out one sandbox per issue, up to `CONCURRENCY` at once and within the machine-wide limit.
+then fans out one sandbox per ticket, up to `CONCURRENCY` at once and within the machine-wide limit.
 
 ```mermaid
 flowchart TD
     S(["🚀 sandcastle run"]) --> P["🔍 Checks<br/>token type · images (build if stale) · preflight<br/>prompts · hook check · git fingerprint"]
-    P --> Q["📋 Queue: open issues labelled ready-for-agent"]
+    P --> Q["📋 Queue: open tickets labelled ready-for-agent"]
     Q --> B{"🧱 Every gate on the base commit<br/>(skipped if green before at this commit)"}
     B -- "red" --> STOP(["⛔ Stop - no agent started"])
     B -- "green" --> W
 
-    subgraph W ["🐳 Per issue - git worktree + Docker sandbox on branch agent/issue-N"]
+    subgraph W ["🐳 Per ticket - git worktree + Docker sandbox on branch agent/issue-N"]
         direction TB
         L["🪶 Lean strip · lock worktree · setup install"] --> I["🧑‍💻 Implement agent<br/>commits on the branch"]
         I --> R["🔎 Review agent<br/>fixes on the branch<br/>(fallback model if it fails)"]
@@ -231,7 +231,7 @@ flowchart TD
 
     G -- "green" --> PP{"🛡️ Touches hooks, CI,<br/>install scripts?"}
     G -- "still red" --> RED["🔴 Reported red"]
-    PP -- "no" --> M["✅ Merge (or squash) into base<br/>close issue with a comment"]
+    PP -- "no" --> M["✅ Merge (or squash) into base<br/>close ticket with a comment"]
     PP -- "yes" --> NH["🙋 Labelled needs-human<br/>not merged"]
     M --> V["🔁 Verify: gates once more<br/>on the merged base branch"]
     V --> REP(["📊 Report: merged · red · held back<br/>Nothing is pushed"])
@@ -248,7 +248,7 @@ flowchart TD
     class G,PP,P gate
 ```
 
-A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is checked by the review agent, not the gates, which is why every branch is reviewed before it is gated and a repaired branch is reviewed again. A live run rarely reaches the repair path, because agents run the gates themselves before they finish. `SANDCASTLE_TEST_RED_GATE=1` (see the [Configuration](#-configuration) table) counts each issue's first gate run as red to exercise it, at the cost of one repair pass per issue.
+A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is checked by the review agent, not the gates, which is why every branch is reviewed before it is gated and a repaired branch is reviewed again. A live run rarely reaches the repair path, because agents run the gates themselves before they finish. `SANDCASTLE_TEST_RED_GATE=1` (see the [Configuration](#-configuration) table) counts each ticket's first gate run as red to exercise it, at the cost of one repair pass per ticket.
 
 ## 🧱 Set up a project
 
@@ -340,12 +340,12 @@ the sources when the merged base is gated again at the end of the run.
 ## 📋 Queue: what agents work on
 
 The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
-the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the issue and its comments,
-and your gates could prove it. The `/sandcastle queue` skill action walks every open issue,
-gathers the facts, asks you the open decisions in batches, writes each decision on its issue, then
-labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
+the value is `label` in `config.ts`). Mark a ticket only when an agent with no chat context could finish it from the ticket and its comments,
+and your gates could prove it. The `/sandcastle queue` skill action walks every open ticket,
+gathers the facts, asks you the open decisions in batches, writes each decision on its ticket, then
+labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
-An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
+A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
 soon as #12 has landed and closed (a chain of tickets drains in one run); a blocker outside the run
 holds it for a later one. A blocker can also live outside
@@ -377,7 +377,7 @@ commit it. See [Trackers](#-trackers-github-or-ticket-files).
 **Before you do, check the ticket is ready.** An agent has only the ticket and the code, never your
 chat. A good one says what should change, where to look, and how you will know it worked ("the
 signup form rejects an empty email; `pnpm test` covers it"). If you are unsure, the
-`/sandcastle queue` skill action reads your open issues with you and only labels the ones that
+`/sandcastle queue` skill action reads your open tickets with you and only labels the ones that
 qualify.
 
 Where the queue lives is your choice - see [Trackers](#-trackers-github-or-ticket-files). Blockers
@@ -385,9 +385,9 @@ can also be Linear issues or ticket files.
 
 ```mermaid
 flowchart LR
-    O["📥 Open issues"] --> T{"🧐 Could an agent finish it<br/>with no chat context,<br/>and could the gates prove it?"}
+    O["📥 Open tickets"] --> T{"🧐 Could an agent finish it<br/>with no chat context,<br/>and could the gates prove it?"}
     T -- "yes" --> L["🏷️ ready-for-agent"]
-    T -- "open decisions" --> D["💬 You decide<br/>decision written on the issue"]
+    T -- "open decisions" --> D["💬 You decide<br/>decision written on the ticket"]
     D --> L
     T -- "no" --> K["🧑 Keep for a human"]
 
@@ -456,7 +456,7 @@ A tracker is where tickets live. The kit ships two:
 **Matt Pocock's skills are supported and recommended, never required.** Install
 [his skills](https://github.com/mattpocock/skills) and run `/setup-matt-pocock-skills` in the
 project: that writes `docs/agents/`, the kit detects it, and tickets that `/to-tickets` writes
-(`.scratch/...`) or issues that `/triage` labels `ready-for-agent` are picked up as they are - the
+(`.scratch/...`) or tickets that `/triage` labels `ready-for-agent` are picked up as they are - the
 skills plan and shape the work, the kit burns it down unattended. Without them, `tracker: "files"`
 and a `.scratch/` folder (or plain GitHub Issues) is the whole setup.
 
@@ -498,8 +498,8 @@ changes there). Linear as a full tracker is not built; Linear issues work as blo
 ## 🚀 Run
 
 ```bash
-sandcastle run                        # every queued issue
-ISSUES=12,15 sandcastle run           # just these
+sandcastle run                        # every queued ticket
+TICKETS=12,15 sandcastle run           # just these
 sandcastle run 12 15                  # the same, as arguments
 DRY_RUN=1 sandcastle run              # implement, review, gate - never merge or close
 sandcastle run --dry                  # the same, as an argument
@@ -526,7 +526,7 @@ cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a
 every five minutes while agents work, and the status view flags a sandbox whose log has been quiet
 for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
 `.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
-`USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each issue.
+`USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
 with the run:
@@ -552,13 +552,13 @@ locally and not yet pushed, and the merged base branch is gated once more. A dry
 and ends by checking that its tickets and the tracker are unchanged.
 
 > [!TIP]
-> Start with `DRY_RUN=1` on a couple of issues to see the whole loop - implement, review, gates -
+> Start with `DRY_RUN=1` on a couple of tickets to see the whole loop - implement, review, gates -
 > without anything being merged or closed.
 
 ### 📊 After a run
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
-branches, merged tickets the reviewer says no gate proves, follow-up issues agents filed); **Needs
+branches, merged tickets the reviewer says no gate proves, follow-up tickets agents filed); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
@@ -653,7 +653,7 @@ out its own view:
   does), the run adopts that tab, names it `sandcastle <project>` and puts the status view beside
   its own output. Started anywhere else, it opens that tab itself and the tab you launched from
   gets nothing new. Either way one pane per concurrent sandbox stacks on the right, named after
-  its issue and following that sandbox's log through implement, review, gates and repair. Once
+  its ticket and following that sandbox's log through implement, review, gates and repair. Once
   nothing is left to start, each pane closes as its sandbox finishes (a crashed one stays open). The
   run prints `Status view: pane <id> (tab <id>)`.
 - 🚦 **Agent states in the sidebar.** Herdr cannot see an agent inside a container, so the run
@@ -678,7 +678,7 @@ The run never moves your focus: it works in the background until you switch to i
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
 │ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
 │ $ sandcastle run                       │   │ #12 ● review   3m  2 ... │ Bash(pnpm test)        │
-│ 2 issue(s), 2 at a time ...            │   │ #15 ● impl     1m  0 ... │                        │
+│ 2 ticket(s), 2 at a time ...            │   │ #15 ● impl     1m  0 ... │                        │
 │ Gates on main: lint=pass test=pass     │   │ #18 ○ queued   not in .. ├ #15 Fix date parsing ──┤
 │ [impl-12] Started ...                  │   │                          │ Edit(src/date.ts)      │
 └────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘
@@ -752,14 +752,14 @@ Examples: [`examples/`](examples/).
 | `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer |
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
-| `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; the same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
+| `TICKETS`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; `ISSUES` is the older name for `TICKETS` (if both are set, `TICKETS` wins). The same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
 | `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off, `drain` runs until the queue is drained) |
 | `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the per-sandbox Herdr tab (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
-| `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each issue's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per issue; ignored when `repair.attempts` is 0 |
-| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each issue starts, and start no new issue once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why (a rate limit, or HTTP 403 for a token that may not read usage - the guard is then off for that token) |
+| `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why (a rate limit, or HTTP 403 for a token that may not read usage - the guard is then off for that token) |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
 | `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |
@@ -884,12 +884,12 @@ and the kit narrows what can cross it:
   checkout or commit. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run.
-- 🎯 **Landing checks.** Before a green branch merges, its issue is read again - closed or
+- 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or
   labelled `needs-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.
 - 🏷️ **Who committed.** Sandbox commits and the kit's merges carry the committer
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author. `git log --format='%h %an / %cn %s'`
-  tells them from your own commits. Issues and comments the agents write still show your GitHub account.
+  tells them from your own commits. GitHub issues and comments the agents write still show your GitHub account.
 - 🛡️ **Protected paths.** A green branch that changes hooks (git, Claude Code, pre-commit tools), CI,
   agent settings (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`,
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
@@ -909,8 +909,8 @@ wait on the model, so the sandbox cap mainly limits memory and plan usage; gates
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
 [personal settings](#personal-settings). The status header
 shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
-first issue that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
-starting issues before that, once a usage window passes `USAGE_STOP` percent.
+first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
+starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 
 ## 🩺 Troubleshooting
 
@@ -929,11 +929,11 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `Another sandcastle run of this project is live` | One run per project. Wait; if that process is gone, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |
 | `STOPPED ... <path under .git> changed while sandboxes ran` | Inspect `git config --local --list` and `.git/info/` before any other git command in that repo. |
 | `STOPPED ... <base> moved while sandboxes ran` | A commit landed on the base branch mid-run - often your own (a ticket-file edit). It names the commits. If they are yours, run again: finished branches land then. |
-| An issue `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
+| A ticket `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
-| `waits for #N to close` / `waiting, not started` | The issue body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to issues named in `ISSUES=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
+| `waits for #N to close` / `waiting, not started` | The ticket body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to tickets named in `TICKETS=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
-| `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
+| `gated green but not merged` | The ticket was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
 | A branch conflicts at landing | Leave it queued: its next run merges the base into it first and resolves the conflict (see [Re-runs](#-re-runs)); `autonomy` can do that within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |

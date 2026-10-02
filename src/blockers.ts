@@ -273,7 +273,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
           ? `${who} waits for ${name}, which does not exist - it will never start. Fix the "Blocked by" line, or remove it.`
           : b.kind === "linear"
             ? `${who} waits for ${name}, which could not be read from Linear${linearKey() ? "" : " (no LINEAR_API_KEY in ~/.config/sandcastle-kit/.env)"} - a blocker that cannot be read counts as open, so it waits.`
-            : `${who} waits for ${name}, which gh could not read (no such issue, or no access) - it counts as open, so it waits.`,
+            : `${who} waits for ${name}, which gh could not read (no such GitHub issue, or no access) - it counts as open, so it waits.`,
       );
     }
     // Stripped on purpose, so a run starts the ticket without waiting: say so, as the author thinks it waits.

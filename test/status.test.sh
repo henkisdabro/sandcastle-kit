@@ -123,6 +123,9 @@ cat >"$L/run.json" <<EOF
   } }
 EOF
 render "101 102 103 104 105 106 107 108 109 110 120"
+# The first column is headed TICKET (6 characters), not the GitHub word; the widths are sized for it.
+has '^│ +TICKET +│ +STATE +│'
+hasnt 'ISSUE'
 row '#101' impl 'Bash|\$ pnpm test'
 row '#102' gates 'usually 1m - 2/3 pytest'
 row '#103' ready 'gates green'
