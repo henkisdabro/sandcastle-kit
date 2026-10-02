@@ -77,7 +77,7 @@ was set up with.
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every
-   harness, but a session that was already open keeps the skill it loaded at its start. Tell the
-   user to start a new session (Claude Code, Codex or OpenCode) before the next `/sandcastle`
+   harness, but a session that was already open keeps the skill it loaded at its start (and a mod
+   linked in step 1 loads only in a new session). Tell the user to start a new session (Claude Code, Codex or OpenCode) before the next `/sandcastle`
    action, and to run this update once in each other project that uses the kit: the kit is
    shared, the project steps (3) are per project.

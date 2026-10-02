@@ -90,6 +90,7 @@
     <nav aria-label="Sections">
       <a href="#how">How it works</a>
       <a href="#herdr">Herdr</a>
+      <a href="#claude-code">Claude Code</a>
       <a href="#safety">Safety</a>
       <a href="#install">Install</a>
       <a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a>
@@ -241,7 +242,27 @@
           </ul>
         </div>
       </div>
-      <!-- CLAUDE CODE MOD: the run in your Claude Code session - add here when it lands -->
+    </section>
+
+    <section class="safety mod" id="claude-code" aria-labelledby="mod-title">
+      <h2 id="mod-title">The run in your Claude Code session</h2>
+      <p class="section-lede">Most runs start from Claude Code, with <code>/sandcastle run</code>. With the kit's optional <a href="https://code.claude.com/docs/en/plugins/mods/overview">Claude Code mod</a> linked, that session shows the run in the status view's castle, glyphs and colours.</p>
+      <div class="bounds">
+        <div class="bound">
+          <h3>Above the prompt</h3>
+          <ul>
+            <li><b>A band while it runs.</b> The run's stage and tokens, and how many tickets are working, need you, are ready to land, are blocked or have merged.</li>
+            <li><b>A line when you are needed.</b> A conflict, a red gate, a held branch or a crash pins a line naming the tickets, until they are dealt with or the run ends.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>When it ends</h3>
+          <ul>
+            <li><b>A closing prompt.</b> When the run's process is gone, the session where you used <code>/sandcastle</code> gets a prompt and writes the closing summary, even if you quit Claude Code and came back in between.</li>
+            <li><b>Ticket status on demand.</b> <code>/sandcastle-status</code> lists every ticket and where it is, without a model turn.</li>
+          </ul>
+        </div>
+      </div>
     </section>
 
     <section class="safety" id="safety" aria-labelledby="safety-title">
