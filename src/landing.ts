@@ -23,7 +23,7 @@ import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
-import type { LandPorts, Queue, StopState } from "./schedule.ts";
+import type { Again, Ending, LandPorts, Queue, StopState } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -919,5 +919,64 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
     },
     /** Each landed ticket's outcome line for the status view, from what `settled` accounted. */
     lines: () => landingLines(lists, againNote),
+  };
+};
+
+/** The run record as the requeue's record uses it: a ticket's fields, and what is written so far. */
+export type RequeueRecordRun = { ticket(id: string, fields: TicketRecord): void; tickets(): Record<string, TicketRecord> };
+
+/**
+ * The run record's side of the requeue-once rule, which the scheduler decides (schedule.ts):
+ * `burndown()` hands it what the scheduler tells. A requeue is written as queued, with the line its
+ * second attempt's setup carries (`requeuedAs`), as it is told - before the ticket is pushed back.
+ * A second conflict or red is noted with the tickets of both attempts (`againNote`, for the outcome
+ * line). A requeued ticket whose second attempt never began ends with its first landing: its record
+ * goes back to what it was, or to withdrawn when the tracker took it back meanwhile, and `dropFirst`
+ * removes its first pipeline's entry from the per-issue lines.
+ */
+export const createRequeueRecord = (d: {
+  run: RequeueRecordRun;
+  /** A write that throws (a git call, a full disk) must not cost the ticket its ending. */
+  bookkeep(id: string, fn: () => void): void;
+  dropFirst(id: string): void;
+  ref(id: string): string;
+  say(line: string): void;
+}) => {
+  const requeuedAs = new Map<string, string>();
+  // A requeued ticket's record before it was sent back: put back if its second attempt never begins.
+  const before = new Map<string, TicketRecord | undefined>();
+  const againNote = new Map<string, string>();
+  return {
+    requeuedAs,
+    againNote,
+    requeued(id: string, again: Again) {
+      const line = requeuedLine(again.kind, again.with);
+      requeuedAs.set(id, line);
+      d.bookkeep(id, () => {
+        before.set(id, d.run.tickets()[id]);
+        d.run.ticket(id, { state: "queued", note: line, requeued: line });
+      });
+      d.say(`${d.ref(id)}: ${line}; its pipeline runs again in this run.`);
+    },
+    ended(id: string, e: Ending<unknown, unknown>) {
+      if (e.kind !== "landing") return;
+      const { landed } = e;
+      if (e.attempts === 1 && before.has(id)) {
+        // Sent back, and its second attempt never began: the first landing stands, or, withdrawn
+        // since, that - recorded as withdrawn, never as the green the first pipeline left.
+        requeuedAs.delete(id);
+        d.bookkeep(id, () => d.run.ticket(id, restoredRecord(before.get(id))));
+        if (landed.kind === "withdrawn") {
+          d.dropFirst(id);
+          d.bookkeep(id, () => d.run.ticket(id, withdrawnRecord(landed.reason)));
+        }
+      }
+      if (e.again && (landed.kind === "conflict" || landed.kind === "red")) {
+        // Held for the next run, with the tickets of both attempts named - in the outcome and in the comment.
+        const note = againNoteOf(landed);
+        againNote.set(id, note);
+        d.bookkeep(id, () => d.run.ticket(id, { note }));
+      }
+    },
   };
 };

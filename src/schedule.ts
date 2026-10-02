@@ -3,10 +3,10 @@
 // a small work queue, the pipeline fan-out's and the landing worker's (workers keep pulling while
 // the queue is open or still holds items, so an item can be pushed after the workers have started -
 // a green outcome as its pipeline ends; `run` resolves only after `close()` and an empty queue), the
-// landing worker (`createLanding`), and the file hold.
+// landing worker (`createLanding`), the requeue-once rule (inside `createSchedule`), and the file hold.
 
 import { OperatorError } from "./errors.ts";
-import { createFlow, type Landed } from "./landing.ts";
+import type { Landed } from "./landing.ts";
 
 export type Queue<T> = {
   /** Add an item; a waiting worker takes it at once. Refused after `close()`. */
@@ -472,11 +472,11 @@ export type Work<T, G extends Green, O> = LandPorts<G> & {
 /**
  * The run's one path for attempts and landings. `start` is the candidates in start order. `run`
  * fans the attempts out over `workers`, hands each green one to the landing worker, sends a first
- * conflict or red back for a second attempt (`createFlow`) unless the run starts nothing, and calls
- * the plan's release as each ticket ends. A cause reaches the stop state only from an attempt's
- * result, a landing's `.git` check or refused write, or the host's failure read live. It resolves
- * once every ticket has its ending, with the endings and the stop state; it writes no run record and
- * no wording - `tell` and the endings carry what the burndown records.
+ * conflict or red back for a second attempt (the requeue-once rule, `requeue` below) unless the run
+ * starts nothing, and calls the plan's release as each ticket ends. A cause reaches the stop state
+ * only from an attempt's result, a landing's `.git` check or refused write, or the host's failure
+ * read live. It resolves once every ticket has its ending, with the endings and the stop state; it
+ * writes no run record and no wording - `tell` and the endings carry what the burndown records.
  */
 export const createSchedule = <T extends { id: string }, G extends Green, O = unknown>(plan: Plan<T>) => {
   const later = plan.later ?? [];
@@ -495,6 +495,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const byId = new Map(plan.tickets.map((t) => [t.id, t] as const));
       // Attempts that began, by ticket.
       const attempts = new Map<string, 1 | 2>();
+      // What a requeued ticket's first attempt collided with: its second carries it, and a second collision is final.
+      const first = new Map<string, Again>();
       // A ticket landing sent back, until its second attempt begins: if that never begins, this landing is its ending.
       const sentBack = new Map<string, { green: G; landed: Landed }>();
       let working = 0;
@@ -511,25 +513,37 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         await release.afterLanding(id, landed);
       };
 
+      /**
+       * The requeue-once rule, decided here and nowhere else: a first conflict or red at landing
+       * sends the ticket back for a second attempt that carries what it collided with. Not when the
+       * run starts nothing (the second attempt would never begin, and the record would promise it),
+       * nor when the pipelines are closed (a worker failed: nothing would take it) - both checked
+       * before anything is told, so a requeue told is a requeue pushed, and nothing is undone.
+       * Told before the push: no view shows a queued ticket the record does not know about.
+       */
+      const requeue = (g: G, landed: Landed): boolean => {
+        if (landed.kind !== "conflict" && landed.kind !== "red") return false;
+        const t = byId.get(g.issue);
+        if (!t || first.has(t.id) || stop.startsNothing || pipelines.closed) return false;
+        const again: Again = { kind: landed.kind, with: landed.with };
+        first.set(t.id, again);
+        sentBack.set(t.id, { green: g, landed });
+        tell({ kind: "requeued", id: t.id, again });
+        pipelines.push(t);
+        return true;
+      };
+
       const landing = createLanding(work, stop, {
         settled: async (g, got) => {
           dealt++;
           stage();
+          if (requeue(g, got)) return;
           const id = g.issue;
-          const t = byId.get(id);
-          // A first conflict or red goes back to the pipelines once, in this run: told, then queued.
-          if (t && !pipelines.closed && (got.kind === "conflict" || got.kind === "red")) {
-            const again: Again = { kind: got.kind, with: got.with };
-            if (flow.retry(t, got, stop.startsNothing, () => tell({ kind: "requeued", id, again })) !== undefined) {
-              sentBack.set(id, { green: g, landed: got });
-              return;
-            }
-          }
-          const first = flow.earlier(id);
+          const again = first.get(id);
           // A second collision names the tickets of both attempts.
-          const landed = first && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...first.with, ...got.with])] } : got;
+          const landed = again && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...again.with, ...got.with])] } : got;
           const closed = landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier";
-          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(first && { again: first }) }, closed);
+          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(again && { again }) }, closed);
         },
         stopped: (g) => {
           dealt++;
@@ -542,30 +556,40 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
-      // Keeps the pipeline queue open until every ticket has its ending: a landing can send one back.
-      const flow = createFlow(plan.tickets.length, pipelines, landing);
+      // Tickets without their ending. The queues stay open until none is left: a landing can send
+      // one back after every other pipeline has ended. A ticket the release starts counts before the
+      // ending that freed it drops the count, so it never touches zero between them.
+      let open = plan.tickets.length;
+      const closeAll = () => {
+        pipelines.close();
+        landing.close();
+      };
+      const finish = () => {
+        if (--open <= 0) closeAll();
+      };
       const release: Release = plan.release?.({
         start: (t) => {
           byId.set(t.id, t);
-          flow.start(t);
+          open++;
+          pipelines.push(t);
         },
-        finish: () => flow.finish(),
+        finish,
         refuse: (id, reason) => {
           const ending: Ending<G, O> = { kind: "not begun", why: { kind: "refused label", reason } };
           endings.set(id, ending);
           tell({ kind: "ended", id, ending });
         },
         stop: readings(stop),
-      }) ?? { afterLanding: () => flow.finish(), more: false };
+      }) ?? { afterLanding: finish, more: false };
       const last = () => stop.startsNothing || (pipelines.size === 0 && !release.more);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
       const notBegun = (t: T, why: StopCause | Withdrawn) => {
-        const first = sentBack.get(t.id);
+        const back = sentBack.get(t.id);
         sentBack.delete(t.id);
-        if (!first) return end(t.id, { kind: "not begun", why });
-        const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : first.landed;
-        return end(t.id, { kind: "landing", green: first.green, landed, attempts: 1 });
+        if (!back) return end(t.id, { kind: "not begun", why });
+        const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : back.landed;
+        return end(t.id, { kind: "landing", green: back.green, landed, attempts: 1 });
       };
       const attempt = async (t: T) => {
         working++;
@@ -574,7 +598,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           const n = attempts.has(t.id) ? 2 : 1;
           let r: Attempted<G, O>;
           try {
-            r = await work.attempt(t, { n, again: flow.earlier(t.id), last });
+            r = await work.attempt(t, { n, again: first.get(t.id), last });
           } catch (error) {
             r = { kind: "crashed", error };
           }
@@ -604,12 +628,12 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         }
       };
 
+      if (open <= 0) closeAll();
       for (const t of plan.tickets) pipelines.push(t);
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
       const fanOut = pipelines.run(work.workers, attempt).finally(() => {
-        pipelines.close();
-        landing.close();
+        closeAll();
         stage();
       });
       const lands = landing.run().finally(() => pipelines.close());

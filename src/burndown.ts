@@ -53,7 +53,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  accountLanding, againNoteOf, conflictLine, createHostGit, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, requeuedLine, restoredRecord, slotTurn, STOPPED_GREEN,
+  accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
 import { type Attempted, type Change, createFileHold, createSchedule, type Ending, fileWaitNote, type StopCause, startHold, type TicketFiles } from "./schedule.ts";
@@ -1110,12 +1110,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     const earlier = results.findIndex((r) => r.status === "fulfilled" && r.value.issue === id);
     if (earlier >= 0) results.splice(earlier, 1);
   };
-  // The second attempt's line for a ticket landing sent back; the setup of its pipeline carries it.
-  const requeuedAs = new Map<string, string>();
-  // A requeued ticket's record before it was sent back: put back if its second attempt never begins.
-  const requeuedFrom = new Map<string, TicketRecord | undefined>();
-  // What a second conflict or red was held as, for the outcome the status view reads.
-  const againNote = new Map<string, string>();
   // The ticket's state once its pipeline ends. A green branch that changes
   // hooks, CI or install scripts says so now: before, a human merge was news
   // only at the end of the run.
@@ -1141,6 +1135,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
+  // The record's side of a requeue: the line the second attempt's setup carries (`requeuedAs`), and
+  // what a second conflict or red was held as, for the outcome the status view reads (`againNote`).
+  const requeues = createRequeueRecord({ run, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
+  const { requeuedAs, againNote } = requeues;
 
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
@@ -1221,23 +1219,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // How each ticket's part in the run ended, as the scheduler tells it, written to the record.
   const ended = (id: string, e: Ending<Outcome, Outcome>) => {
     if (e.kind === "landing") {
-      const { landed } = e;
-      if (e.attempts === 1 && requeuedFrom.has(id)) {
-        // Sent back, and its second attempt never began: the first landing stands, or, withdrawn
-        // since, that - recorded as withdrawn, never as the green the first pipeline left.
-        requeuedAs.delete(id);
-        bookkeep(id, () => run.ticket(id, restoredRecord(requeuedFrom.get(id))));
-        if (landed.kind === "withdrawn") {
-          dropFirstResult(id);
-          bookkeep(id, () => run.ticket(id, withdrawnRecord(landed.reason)));
-        }
-      }
-      if (e.again && (landed.kind === "conflict" || landed.kind === "red")) {
-        // Held for the next run, with the tickets of both attempts named - in the outcome and in the comment.
-        const note = againNoteOf(landed);
-        againNote.set(id, note);
-        bookkeep(id, () => run.ticket(id, { note }));
-      }
+      requeues.ended(id, e);
     } else if (e.kind === "not begun" && e.why.kind === "withdrawn") {
       const { reason } = e.why;
       bookkeep(id, () => run.ticket(id, withdrawnRecord(reason)));
@@ -1258,17 +1240,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         // Only the run line: the next landing writes it again.
         run.update({ stage: `landing ${c.at}/${c.of}` });
         return;
-      case "requeued": {
+      case "requeued":
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
-        const line = requeuedLine(c.again.kind, c.again.with);
-        requeuedAs.set(c.id, line);
-        bookkeep(c.id, () => {
-          requeuedFrom.set(c.id, run.tickets()[c.id]);
-          run.ticket(c.id, { state: "queued", note: line, requeued: line });
-        });
-        console.log(`${ref(c.id)}: ${line}; its pipeline runs again in this run.`);
-        return;
-      }
+        return requeues.requeued(c.id, c.again);
       case "ended":
         return ended(c.id, c.ending);
     }
