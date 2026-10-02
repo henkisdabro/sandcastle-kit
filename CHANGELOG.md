@@ -11,6 +11,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **Run `/sandcastle update` in each project, then start a new session.** The update pulls the
+  kit, which updates the `/sandcastle` skill too (it is a link into the kit), and rebuilds each
+  project's image. A Claude Code, Codex or OpenCode session that was already open keeps the skill
+  it loaded at its start, so v0.4's run action (detached runs) needs a new one.
 - **A run now lands each ticket as soon as it goes green**, on one landing worker beside the
   pipelines, instead of landing everything at the end. A branch that does not already hold the
   current base is merged and gated in a sandbox before the base moves. If that merged tree is red,
