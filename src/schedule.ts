@@ -216,10 +216,13 @@ const dependantsInRun = <T extends { id: string }, B>(starting: Iterable<string>
  * `held` is the ones that wait, with the blockers they waited on, and `release` reads again the
  * blockers of each one that waited for the ticket that landed (`open`, the plan's port) and takes
  * out each ticket that is now free. `inFlight`: the candidates that have not ended; a blocker in
- * it "lands this run". The scheduler's own.
+ * it "lands this run". `outside`: the held tickets that are not candidates (one also waits on a
+ * blocker outside the run); they never start here and their blockers are never read again, but the
+ * note of each is told again as a blocker of theirs ends, from the run's own endings. The scheduler's own.
  */
 const createDependants = <T extends { id: string }, B>(
   held: Map<string, { ticket: T; on: B[] }>,
+  outside: { ticket: T; on: B[] }[],
   inFlight: Set<string>,
   ports: Pick<NonNullable<Plan<T, B>["blockers"]>, "ticketOf" | "open">,
 ) => {
@@ -242,8 +245,15 @@ const createDependants = <T extends { id: string }, B>(
     get waitsForFlight() {
       return [...held.values()].some((h) => h.on.some((b) => among(inFlight, ports.ticketOf(b))));
     },
-    /** Each held ticket with what it waits for now, and the candidates still in flight. */
-    notes: () => [...held].map(([id, h]) => ({ id, on: h.on, inFlight: [...inFlight] })),
+    /**
+     * What each held ticket waits for now, with the candidates still in flight and the tickets
+     * landed: every dependant, and of the others only the ones that waited for `id`, whose note
+     * changes with its ending. No lookup: a landed blocker is left out, any other ending is "not in this run".
+     */
+    notes: (id: string) => [
+      ...[...held].map(([k, h]) => ({ id: k, on: h.on, inFlight: [...inFlight], landed: [...landed] })),
+      ...outside.filter((h) => waitsOn(h, id)).map((h) => ({ id: h.ticket.id, on: h.on, inFlight: [...inFlight], landed: [...landed] })),
+    ],
     /**
      * Reads again the blockers of each held ticket that waited for `id`, and takes out and returns
      * the ones with none open, in held order. Only those: re-reading every held ticket after every
@@ -481,11 +491,14 @@ export type HoldChange =
 /**
  * What the scheduler tells of the tickets held for a blocker in this run. `blocked`: after every
  * ending, what each one still held waits for (`on`), and `inFlight`, the candidates that have not
- * ended - a blocker among them lands this run, any other is not this run's. `unreleased`: the
+ * ended - a blocker among them lands this run, any other is not this run's - and `landed`, the
+ * tickets that have landed and closed, which are no blocker any more though `on` may still name
+ * them. The held tickets that are not candidates (they also wait outside the run) are told too, as
+ * a blocker of theirs ends, with the `on` the start read. `unreleased`: the
  * blockers could not be read again after `id` landed, so what waits for it starts no earlier than
  * another landing frees it.
  */
-export type BlockerChange<B> = { kind: "blocked"; id: string; on: B[]; inFlight: string[] } | { kind: "unreleased"; id: string; error: unknown };
+export type BlockerChange<B> = { kind: "blocked"; id: string; on: B[]; inFlight: string[]; landed: string[] } | { kind: "unreleased"; id: string; error: unknown };
 
 /** What the scheduler tells as the run goes, for the run record and the views. */
 export type Change<G, O, B = unknown> =
@@ -598,6 +611,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Every candidate is in flight until it ends; a blocker in flight lands this run.
       const waits = createDependants<T, B>(
         new Map(dependants.map((h) => [h.ticket.id, h] as const)),
+        (blockers?.held ?? []).filter((h) => !dependants.includes(h)),
         new Set([...now, ...later].map((c) => c.ticket.id)),
         { ticketOf: blockers?.ticketOf ?? (() => undefined), open: blockers?.open },
       );
@@ -700,7 +714,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             tell({ kind: "unreleased", id, error });
           }
         }
-        for (const n of waits.notes()) tell({ kind: "blocked", ...n });
+        for (const n of waits.notes(id)) tell({ kind: "blocked", ...n });
         for (const t of free) {
           const bad = labels.get(t.id);
           if (bad) {

@@ -630,6 +630,11 @@ conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.
 merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is the backstop. After
 the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
 
+A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
+turn's re-runnable tickets, never the whole queue. So a ticket queued after the run started waits for
+the next `sandcastle run`, and the closing lines name each one
+(`#151 was queued after this run started: \`sandcastle run\` takes it`).
+
 ### 🔁 Re-runs
 
 A queued ticket with a branch from an earlier run builds on that branch:
@@ -749,7 +754,7 @@ nothing asks. What you get:
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
 | Sidebar rows | The run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
 
@@ -942,7 +947,7 @@ Examples: [`examples/`](examples/).
 
 | Variable | Default | |
 |---|---|---|
-| `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer |
+| `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer. The order, first wins: a ticket's `model:` / `effort:` label, then these, then `implement` in the config, then the kit's default. To override a label for one run, remove the label; `sandcastle queue` shows each ticket's label as `[implement <model>/<effort>]` |
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
 | `TICKETS`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; `ISSUES` is the older name for `TICKETS` (if both are set, `TICKETS` wins). The same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
@@ -955,7 +960,7 @@ Examples: [`examples/`](examples/).
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_LINKS=0` or `1` | on inside Herdr | The status view's links from each ticket to its latest log (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); off outside Herdr and into a pipe |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
-| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why (a rate limit, or HTTP 403 for a token that may not read usage - the guard is then off for that token) |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and a rate limit is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows that beforehand, as a `warn` line under the token |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
 | `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |

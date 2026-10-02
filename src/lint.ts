@@ -14,24 +14,23 @@ export const WIDE_FILES = 10;
 /** A file this many tickets declare is where a queue's conflicts will be. */
 export const HOT_TICKETS = 4;
 
-type Queued = { id: string; body?: string };
+export type Queued = { id: string; body?: string };
 
 const names = (ids: string[]) => ids.map(refOf).join(", ");
 
-/** The report, one line each; the caller prints it. */
-export const lintQueue = async (project: Project, tracker: Tracker, queued: Queued[]): Promise<string[]> => {
-  if (!queued.length) return [`queue "${project.label}" is empty - nothing to lint.`];
+/** Who waits for whom, among `queued` tickets only: a blocker outside them holds a ticket back, it does not order it. */
+const blockerWaits = (project: Project, tracker: Tracker, queued: Queued[]) => {
   const ids = new Set(queued.map((t) => t.id));
-
-  // Who waits for whom, among queued tickets only: a blocker outside the queue is a problem line.
   const waits = new Map<string, string[]>();
   for (const t of queued) {
     const on = refsOf(project, tracker, t).filter((r) => (r.kind === "ticket" || r.kind === "github") && ids.has(r.id) && r.id !== t.id).map((r) => r.id);
     waits.set(t.id, [...new Set(on)]);
   }
+  return waits;
+};
 
-  // The longest chain, as tickets in the order they must run. A cycle is cut where it closes
-  // (the problems section names it).
+/** The longest chain, as tickets in the order they must run. A cycle is cut where it closes (the problems section names it). */
+const longestChain = (queued: Queued[], waits: Map<string, string[]>): string[] => {
   const longest = new Map<string, string[]>();
   const walking = new Set<string>();
   const chainTo = (id: string): string[] => {
@@ -54,6 +53,19 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
     const c = chainTo(t.id);
     if (c.length > chain.length) chain = c;
   }
+  return chain;
+};
+
+/** The longest in-run `Blocked by` chain among `queued`: what `queue --lint` calls the blocker depth, and the run's estimate counts. */
+export const blockerChain = (project: Project, tracker: Tracker, queued: Queued[]): string[] => longestChain(queued, blockerWaits(project, tracker, queued));
+
+/** The report, one line each; the caller prints it. */
+export const lintQueue = async (project: Project, tracker: Tracker, queued: Queued[]): Promise<string[]> => {
+  if (!queued.length) return [`queue "${project.label}" is empty - nothing to lint.`];
+  const ids = new Set(queued.map((t) => t.id));
+
+  const waits = blockerWaits(project, tracker, queued);
+  const chain = longestChain(queued, waits);
 
   // The files each ticket declares, against the base branch's tree.
   const files = new Map<string, string[]>();

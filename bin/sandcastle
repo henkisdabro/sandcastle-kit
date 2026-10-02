@@ -21,5 +21,9 @@ fi
 # not, and died without its exit handler (no recorded end, no notify, sandboxes left working).
 # `herdr` (the Herdr plugin's verbs) loads only its own module: Herdr's tab bar runs
 # `sandcastle herdr line` every 10 seconds, and the whole CLI takes three times as long.
-if [ "${1:-}" = herdr ]; then exec node --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/herdr-plugin.ts" "$@"; fi
-exec node --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/cli.ts" "$@"
+# Concurrent Maglev and Sparkplug are off: on Node 24 a background compile can wait for a GC while
+# `process.exit` joins the platform workers, and the process then never ends (nodejs/node#66171).
+# Drop both flags once a Node release that `engines` covers carries the fix. A detached run
+# inherits them through `process.execArgv`.
+if [ "${1:-}" = herdr ]; then exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/herdr-plugin.ts" "$@"; fi
+exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/cli.ts" "$@"

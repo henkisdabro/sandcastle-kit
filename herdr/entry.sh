@@ -19,11 +19,16 @@ case "${1:-}" in
   # full-screen drawing is fine there, so the cause is narrower than that. The popup closes
   # with less, so nothing is left behind.
   report) "$kit/bin/sandcastle" report 2>&1 | less -R -X ;;
-  # From the end, where the agent is, once the log is longer than the popup (a short one
-  # jumped to the end sat at the bottom of an empty popup). F follows it live.
+  # Follows the log live, like tail -f, once it is longer than the popup: +F opens at the end
+  # and shows new lines as the agent writes them. While following, less ignores q and takes
+  # only Ctrl-C, which stops the following - so -K makes Ctrl-C close the popup outright:
+  # Ctrl-C closes it (q closes it too when it is not following; Esc is a prefix key in less).
+  # A log shorter than the popup keeps the plain view, from its top line: +F, like +G, jumps
+  # to the end first, and a short file jumped to the end sat at the bottom of an empty
+  # popup. (Chosen for that reason; less was not at hand to prove +F differs.)
   log)
     rows=$(stty size 2>/dev/null | cut -d' ' -f1)
-    if [ "$(wc -l <"$SANDCASTLE_LOG")" -gt "${rows:-40}" ]; then exec less -R -X +G "$SANDCASTLE_LOG"; fi
+    if [ "$(wc -l <"$SANDCASTLE_LOG")" -gt "${rows:-40}" ]; then exec less -R -X -K +F "$SANDCASTLE_LOG"; fi
     exec less -R -X "$SANDCASTLE_LOG" ;;
   *) exec "$kit/bin/sandcastle" herdr "$@" ;;
 esac

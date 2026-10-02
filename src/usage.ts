@@ -5,8 +5,9 @@
 // plan's usage windows before each issue starts lets a run stop short of the
 // wall instead. The endpoint is the one Claude Code's own usage view reads:
 // undocumented and hard rate-limited (it answered 429 on 20260930 while a
-// bogus token got 401), so the reading is cached for ten minutes and fails
-// open - an unknown reading never blocks a run.
+// bogus token got 401), so a reading is cached for ten minutes and fails
+// open - an unknown reading never blocks a run. A failed reading is asked for again before the next
+// ticket, except a 403 (this token cannot read usage): that turns the guard off for the run.
 
 import { OperatorError } from "./errors.ts";
 
@@ -42,15 +43,17 @@ const parse = (payload: Record<string, unknown>): Window[] => {
   });
 };
 
-// Windows, or why there are none: the start line said "rate-limited" for every failure.
-type Reading = Window[] | { why: string };
+// Windows, or why there are none: the start line said "rate-limited" for every failure. `off` is a
+// 403: the token cannot read plan usage, which no retry changes, so the guard is off for the run.
+type Reading = Window[] | { why: string; off?: true };
 const fetchWindows = async (token: string): Promise<Reading> => {
   try {
     const r = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!r.ok) return { why: `the usage endpoint answered HTTP ${r.status}${r.status === 429 ? ", rate-limited" : r.status === 401 ? ", token refused" : r.status === 403 ? ", this token may not read plan usage" : ""}` };
+    if (r.status === 403) return { why: "the usage endpoint answered HTTP 403: this token cannot read plan usage", off: true };
+    if (!r.ok) return { why: `the usage endpoint answered HTTP ${r.status}${r.status === 429 ? ", rate-limited" : r.status === 401 ? ", token refused" : ""}` };
     const windows = parse((await r.json()) as Record<string, unknown>);
     return windows.length ? windows : { why: "the usage endpoint's answer had no usage windows" };
   } catch {
@@ -71,8 +74,24 @@ export const probeOAuth = async (token: string): Promise<number | undefined> => 
   }
 };
 
-const read = (token: string) => {
-  if (!cache || Date.now() - cache.at >= 10 * 60_000) cache = { at: Date.now(), windows: fetchWindows(token) };
+// A 403 is final for the run: the endpoint is asked no more. The token it was told of is kept, so a
+// different token (a later turn after a config change) is asked afresh.
+let forbidden: { token: string; reading: Reading } | undefined;
+
+const read = (token: string): Promise<Reading> => {
+  if (forbidden?.token === token) return Promise.resolve(forbidden.reading);
+  if (!cache || Date.now() - cache.at >= 10 * 60_000) {
+    const windows = fetchWindows(token).then((reading) => {
+      if (!Array.isArray(reading)) {
+        // A reading that failed is not kept: the line promises another ask before each ticket, and a
+        // rate limit that has lifted should not wait out the ten minutes. Workers in flight still share this one.
+        if (cache?.windows === windows) cache = undefined;
+        if (reading.off) forbidden = { token, reading };
+      }
+      return reading;
+    });
+    cache = { at: Date.now(), windows };
+  }
   return cache.windows;
 };
 
@@ -84,9 +103,9 @@ export const usageLine = async (env: Record<string, string>) => {
   const stop = usageStopPercent();
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) return "Plan usage: not checked - it needs CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
   const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
-  return Array.isArray(windows)
-    ? `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`
-    : `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.`;
+  if (Array.isArray(windows)) return `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`;
+  if (windows.off) return `Plan usage: the usage guard is off for this run (${windows.why}; USAGE_CHECK=1 cannot work with it, and the endpoint is not asked again).`;
+  return `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.`;
 };
 
 /** Why no further issue should start, or undefined to carry on. */
