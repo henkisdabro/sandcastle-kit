@@ -173,7 +173,7 @@ test("with XDG_CACHE_HOME unset or empty the script reads ~/.cache, as the kit w
   const dir = join(home, ".cache/sandcastle-kit/runs");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "one"), other);
-  for (const env of [{ HOME: home }, { HOME: home, XDG_CACHE_HOME: "" }]) assert.deepEqual(followable(listing(project, env)), [other], JSON.stringify(env));
+  for (const env of [{ HOME: home }, { HOME: home, XDG_CACHE_HOME: "" }] as Record<string, string>[]) assert.deepEqual(followable(listing(project, env)), [other], JSON.stringify(env));
   // Written there too: an empty XDG_CACHE_HOME is unset for the kit as well.
   const res = spawnSync(process.execPath, [TSX, "-e", `import { RUNS_DIR } from ${href("src/live-runs.ts")}; console.log(RUNS_DIR)`], {
     encoding: "utf8",
