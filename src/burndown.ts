@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
-import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, openBlockers, refLabel, type Blocker } from "./blockers.ts";
+import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
@@ -256,6 +256,9 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // The run's candidate set: what starts now, then what waits for a blocker in this run and starts
   // once it has landed. A ticket queued mid-run is in neither: it waits for the next run. A ticket
   // held for its file overlap is in neither either.
+  // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
+  const startable = dependantsInRun(issues.map((i) => i.id), held);
+  for (const id of [...held.keys()]) if (!startable.has(id)) held.delete(id);
   const dependants = [...held.values()].map((h) => h.ticket);
   const candidates = [...issues, ...dependants];
   // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket

@@ -1,5 +1,5 @@
 // A ticket whose blocker is in the same run starts in that run, once the blocker has landed and
-// closed (src/blockers.ts createDependants / createRelease, src/schedule.ts createFlow, wired as
+// closed (src/blockers.ts createDependants / createRelease, src/landing.ts createFlow, wired as
 // burndown.ts wires them). Fake pipelines that branch from the base as it is when they start,
 // the real landing worker on a temp repo, a fake tracker and a `gh` shim on PATH that reads each
 // blocker's state from a file the tracker's close writes: no Docker, no network.
@@ -10,8 +10,8 @@
 //   pnpm exec tsx --test test/release-dependants.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -31,10 +31,10 @@ writeFileSync(join(SHIM, "gh"), `#!/bin/sh\nid="\${2##*/}"\nif [ -e "${STATE}/cl
 chmodSync(join(SHIM, "gh"), 0o755);
 process.env.PATH = `${SHIM}${delimiter}${process.env.PATH}`;
 
-const { blockedNote, createDependants, createRelease, openBlockers, blockerResolver } = await import("../src/blockers.ts");
-const { createHostGit, createLanding } = await import("../src/landing.ts");
+const { blockedNote, createDependants, createRelease, dependantsInRun, openBlockers, blockerResolver } = await import("../src/blockers.ts");
+const { createFlow, createHostGit, createLanding } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
-const { createFlow, createQueue } = await import("../src/schedule.ts");
+const { createQueue } = await import("../src/schedule.ts");
 type Project = import("../src/config.ts").Project;
 type Ctx = import("../src/landing.ts").LandContext;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -69,6 +69,20 @@ const ticket = (id: string, blockedBy: string[] = [], extra: Partial<Ticket> = {
   ...extra,
 });
 
+// The sandbox a merge that is not a fast-forward is made and gated in: a host worktree.
+const opener = (root: string): Ctx["opener"] => async (branch) => {
+  const path = join(TMP, `wt${n++}`);
+  git(root, "worktree", "add", "-q", "-b", branch, path, "main");
+  return {
+    worktreePath: path,
+    exec: async (cmd) => {
+      const r = spawnSync("sh", ["-c", cmd.replace(/^timeout -k \d+ \d+ /, "")], { cwd: path, encoding: "utf8" });
+      return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+    },
+    close: async () => git(root, "worktree", "remove", "--force", path),
+  };
+};
+
 type Run = {
   root: string;
   events: string[];
@@ -81,14 +95,15 @@ type Run = {
 
 /**
  * Wires what burndown.ts wires: the candidate set, `createDependants` over the blockers read at
- * the start, the pipeline queue kept open by `createFlow`, the real landing worker, and
- * `createRelease` called after each landing. `pipeline` is the fake pipeline: it branches from the
- * base as it is when the ticket starts, and returns what to do with the branch.
+ * the start, landing.ts' `createFlow` (which keeps the pipeline queue open, requeues a conflict or
+ * red once, and takes a released dependant), the real landing worker, and `createRelease` called
+ * after each landing. `pipeline` is the fake pipeline: it branches from the base as it is when the
+ * ticket starts (`attempt` is 2 for a requeued ticket), and returns what to do with the branch.
  */
 const runWith = async (
   tickets: Ticket[],
   opts: {
-    pipeline?: (t: Ticket, root: string) => Promise<"green" | "red">;
+    pipeline?: (t: Ticket, root: string, attempt: number) => Promise<"green" | "red">;
     stopped?: () => unknown;
     badLabel?: Record<string, string>;
     onStart?: (id: string, run: Run) => void;
@@ -146,9 +161,7 @@ const runWith = async (
     reports: new Map(),
     run: record,
     dryRun: opts.dryRun ?? false,
-    opener: async () => {
-      throw new Error("a sandbox landing is not expected: every branch holds the base");
-    },
+    opener: opener(root),
     withdrawal: () => undefined,
     host,
     gate: async () => ({ gates: [{ name: "test", pass: true }], failures: [] }),
@@ -156,9 +169,9 @@ const runWith = async (
   };
 
   const queue = createQueue<Ticket>();
-  const flow = createFlow(queue);
   // eslint-disable-next-line prefer-const
   let landing!: ReturnType<typeof createLanding>;
+  const flow = createFlow(ready.length, queue, { close: () => landing.close() });
   const { afterLanding } = createRelease({
     dependants: waits,
     start: (t) => flow.start(t),
@@ -175,6 +188,13 @@ const runWith = async (
     settled: async (o, landed) => {
       if (landed.kind === "merged" || landed.kind === "close-failed") run.landed.push(o.issue);
       run.events.push(`settled ${o.issue} ${landed.kind}`);
+      // As burndown.ts: a first conflict or red goes back to the pipelines, and its last word waits.
+      const again = flow.retry(tickets.find((t) => t.id === o.issue)!, landed, landing.stop !== undefined || host.failed !== undefined);
+      if (again !== undefined) {
+        run.events.push(`requeued ${o.issue}`);
+        record.ticket(o.issue, { state: "queued", note: again });
+        return;
+      }
       await afterLanding(o.issue, landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier");
     },
     stopped: async (o) => afterLanding(o.issue, false),
@@ -188,28 +208,28 @@ const runWith = async (
       git(repo, "checkout", "-q", "main");
       return "green" as const;
     });
-  const pipelines = queue.run(2, async (t) => {
+  const attempts = new Map<string, number>();
+  const pipelines = queue.run(2, flow.work(async (t) => {
+    const attempt = (attempts.get(t.id) ?? 0) + 1;
+    attempts.set(t.id, attempt);
     run.started.push(t.id);
     run.events.push(`start ${t.id}`);
     opts.onStart?.(t.id, run);
     record.ticket(t.id, { state: "setup" });
-    let toLanding = false;
-    try {
-      // Branches are made one at a time: they share one working tree.
-      await sleep(opts.lead?.[t.id] ?? 0);
-      const result = await host.exclusive(() => fake(t, root));
-      await sleep(opts.delay?.[t.id] ?? 0);
-      if (result === "green") {
-        toLanding = true;
-        landing.push({ issue: t.id, branch: `agent/issue-${t.id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${t.id}`) } satisfies Waiting);
-      }
-    } finally {
-      if (!toLanding) await afterLanding(t.id, false);
-    }
+    // Branches are made one at a time: they share one working tree.
+    await sleep(opts.lead?.[t.id] ?? 0);
+    const result = await host.exclusive(() => fake(t, root, attempt));
+    await sleep(opts.delay?.[t.id] ?? 0);
+    if (result !== "green") return false;
+    landing.push({ issue: t.id, branch: `agent/issue-${t.id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${t.id}`) } satisfies Waiting);
+    return true;
+  }, (t) => afterLanding(t.id, false)));
+  for (const t of ready) queue.push(t);
+  const ended = pipelines.finally(() => {
+    queue.close();
+    landing.close();
   });
-  for (const t of ready) flow.start(t);
-  const ended = pipelines.finally(() => landing.close());
-  await Promise.all([ended, landing.run()]);
+  await Promise.all([ended, landing.run().finally(() => queue.close())]);
   return run;
 };
 
@@ -248,21 +268,35 @@ test("a diamond releases its dependant after the second blocker, not the first",
   assert.deepEqual(mergeOrder(run.root).sort(), ["1", "2", "3"]);
 });
 
-test("a blocker that conflicts at landing releases nothing, and the run still ends", async () => {
-  // 9 and 1 both change shared.txt from the same start, and 9 lands first (1 works on after
-  // branching), so 1 does not hold the base: it would need a sandbox, which this harness refuses.
-  const run = await runWith([ticket("9"), ticket("1"), ticket("2", ["1"])], {
-    pipeline: async (t, repo) => {
-      git(repo, "checkout", "-q", "-b", `agent/issue-${t.id}`, "main");
-      commitFile(repo, "shared.txt", `${t.id}\n`, `work on ${t.id}`);
-      git(repo, "checkout", "-q", "main");
-      return "green";
-    },
-    delay: { 1: 150 },
-  });
+// 9 and 1 both change shared.txt from the same start, and 9 lands first (1 works on after
+// branching), so 1's gated merge in its sandbox conflicts.
+const sharedEdit = (resolve: boolean) => async (t: Ticket, repo: string, attempt: number) => {
+  if (attempt === 1) {
+    git(repo, "checkout", "-q", "-b", `agent/issue-${t.id}`, "main");
+    commitFile(repo, "shared.txt", `${t.id}\n`, `work on ${t.id}`);
+  } else {
+    // The second attempt merges the base in, as the land-only path's resolver does: its own side wins.
+    git(repo, "checkout", "-q", `agent/issue-${t.id}`);
+    if (resolve) git(repo, "merge", "-q", "-X", "ours", "-m", "merge main", "main");
+  }
+  git(repo, "checkout", "-q", "main");
+  return "green" as const;
+};
+
+test("a blocker that conflicts at landing is requeued, lands on its second attempt, and releases its dependant", async () => {
+  const run = await runWith([ticket("9"), ticket("1"), ticket("2", ["1"])], { pipeline: sharedEdit(true), delay: { 1: 150 } });
+  const at = (e: string) => run.events.indexOf(e);
+  assert.ok(at("requeued 1") >= 0, `1 was not requeued: ${run.events.join(" | ")}`);
+  assert.ok(at("close 1") > at("requeued 1") && at("start 2") > at("close 1"), `2 started before 1 landed: ${run.events.join(" | ")}`);
+  assert.deepEqual(mergeOrder(run.root), ["9", "1", "2"]);
+  assert.deepEqual(run.started, ["9", "1", "1", "2"]);
+});
+
+test("a blocker that conflicts twice releases nothing, and the run still ends", async () => {
+  // The second attempt does not merge the base in, so it conflicts again: final for this run.
+  const run = await runWith([ticket("9"), ticket("1"), ticket("2", ["1"])], { pipeline: sharedEdit(false), delay: { 1: 150 } });
   assert.ok(!run.started.includes("2"), `2 started: ${run.events.join(" | ")}`);
   assert.deepEqual(mergeOrder(run.root), ["9"]);
-  assert.equal(run.states["1"].state, "not landed");
   assert.equal(run.states["2"].state, "blocked");
   assert.equal(run.states["2"].note, "waits for #1 (not in this run)");
 });
@@ -338,6 +372,19 @@ test("a fresh resolver reads a landed blocker as closed, where the first one rea
   rmSync(join(STATE, "closed-1"));
 });
 
+test("dependantsInRun: only tickets whose every open blocker is in this run, transitively", () => {
+  const b = (id: string, kind: "github" | "linear" = "github") => ({ kind, id, state: "open" as const });
+  const held = new Map([
+    ["2", { on: [b("1")] }],
+    ["3", { on: [b("2")] }],
+    ["4", { on: [b("1"), b("50")] }],
+    ["5", { on: [b("4")] }],
+    ["6", { on: [b("ENG-1", "linear")] }],
+  ]);
+  assert.deepEqual([...dependantsInRun(["1"], held)].sort(), ["2", "3"]);
+  assert.deepEqual([...dependantsInRun([], held)], []);
+});
+
 test("blockedNote: in flight lands this run, anything else is not this run's", () => {
   const b = (id: string) => ({ kind: "github" as const, id, state: "open" as const });
   assert.equal(blockedNote([b("5")], new Set(["5"])), "waits for #5 (lands this run)");
@@ -345,20 +392,21 @@ test("blockedNote: in flight lands this run, anything else is not this run's", (
   assert.equal(blockedNote([b("5"), b("6")], new Set(["5"])), "waits for #5 (lands this run), #6 (not in this run)");
 });
 
-test("the flow closes its queue only when nothing started is left", async () => {
+test("the flow takes a released ticket and closes its queues only when nothing started is left", async () => {
   const queue = createQueue<number>();
-  const flow = createFlow(queue);
+  let closed = false;
+  const flow = createFlow(1, queue, { close: () => void (closed = true) });
   const seen: number[] = [];
-  flow.start(1);
+  queue.push(1);
   const done = queue.run(1, async (i) => void seen.push(i));
   await sleep(5);
-  // One item still unfinished: the queue is open, and a later start is taken.
+  // Released before the landed one's own finish: the count never touches zero between them.
   flow.start(2);
+  flow.finish();
   await sleep(5);
   assert.deepEqual(seen, [1, 2]);
-  flow.finish();
-  assert.equal(flow.active, 1);
+  assert.equal(closed, false);
   flow.finish();
   await done;
-  assert.equal(existsSync(TMP), true);
+  assert.equal(closed, true);
 });
