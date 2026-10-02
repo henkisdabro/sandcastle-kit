@@ -626,8 +626,8 @@ test("requeued, then the run stops: the first outcome stands, and the status vie
 });
 
 test("a closed queue is checked before a requeue: the normal conflict outcome, nothing told or recorded as requeued", async () => {
-  // 1's pipeline ending fails its release, so the pipelines close while 2 is landing: 2's conflict
-  // has nowhere to go back to.
+  // Reading 2's files again as 1's pipeline ends fails, so the pipelines close while 2 is landing:
+  // 2's conflict has nowhere to go back to.
   const { record, written } = newRecord();
   const seen = observe(record);
   let landing!: () => void;
@@ -652,20 +652,25 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
       },
     },
   );
-  const boom = new Error("release failed");
+  const boom = new Error("git diff failed");
+  let ended = false;
   const run = createSchedule<Issue, Waiting, string>({
     tickets: [{ id: "1" }, { id: "2" }],
-    release: (s) => ({
-      afterLanding: (id) => {
-        if (id === "1") {
-          failed();
-          throw boom;
-        }
-        s.finish();
+    files: {
+      of: () => ({ all: [], unmergeable: [] }),
+      refresh: (t, files) => {
+        if (!ended) return files;
+        failed();
+        throw boom;
       },
-      more: false,
-    }),
-  }).run(work);
+    },
+  }).run({
+    ...work,
+    tell: (c) => {
+      if (c.kind === "ended" && c.id === "1") ended = true;
+      work.tell(c);
+    },
+  });
   await assert.rejects(run, boom);
   assert.equal(seen.told.some((c) => c.kind === "requeued"), false);
   assert.deepEqual(seen.said, []);

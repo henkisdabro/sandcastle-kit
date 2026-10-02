@@ -30,7 +30,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview,
 import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
-import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
+import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
@@ -56,7 +56,7 @@ import {
   accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
-import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Release, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -287,6 +287,9 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
   };
 };
 
+/** The record of a ticket whose label refuses it, found as it would have started. */
+export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
+
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
@@ -358,15 +361,12 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // Every attempt and every landing goes through the scheduler: a bounded fan-out (a sliding pool,
   // not a batch barrier, inside the machine-wide sandbox limit), one landing worker beside it, a
   // first conflict or red sent back once, the file hold, and the release of what waits, as each ticket ends.
-  const schedule = createSchedule<Issue, Outcome, Outcome>({
+  const schedule = createSchedule<Issue, Outcome, Outcome, Blocker>({
     tickets: ready,
     files: DRY_RUN ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
-    // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
-    dependants: (starting) => {
-      const startable = dependantsInRun(starting.map((i) => i.id), held);
-      for (const id of [...held.keys()]) if (!startable.has(id)) held.delete(id);
-      return [...held.values()].map((h) => h.ticket);
-    },
+    // A held ticket that also waits on something outside this run is the next run's. A dry run
+    // lands nothing, so it releases nothing.
+    blockers: { held: [...held.values()], ticketOf: blockerTicket, ...(DRY_RUN ? {} : { open: openBlockersNow(project, tracker, queued.map((i) => i.id)) }) },
     // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
     // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
     // holds that ticket, never the run), but its model is still read now, for the preflight.
@@ -377,29 +377,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         if (!(error instanceof OperatorError)) throw error;
         return error.message;
       }
-    },
-    release: (s): Release => {
-      // A landing that has closed its ticket frees the tickets that waited for it, on the landing
-      // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
-      const { afterLanding, skipped } = createRelease({
-        dependants: waits,
-        start: s.start,
-        finish: s.finish,
-        stop: s.stop,
-        dryRun: DRY_RUN,
-        // Asked only of a ticket being freed: a bad label holds it, and is its ending.
-        badLabel: s.badLabel,
-        record: run,
-        ref,
-        say: (line) => console.log(line),
-      });
-      return {
-        afterLanding,
-        skipped,
-        get more() {
-          return waits.waitsForFlight;
-        },
-      };
     },
   });
   const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
@@ -429,7 +406,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     const o = overrides.get(i.id) ?? {};
     const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
     const later = parked.find((p) => p.ticket.id === i.id);
-    console.log(`  ${ref(i.id)} ${i.title}${own}${held.has(i.id) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
+    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
@@ -451,19 +428,18 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // `tickets` is where the status view reads each ticket's state from; a
   // held-back one says whether this run can reach it.
   // Notes are short: the view's activity column is about 30 characters in an 80-column pane.
-  const waits = createDependants(project, tracker, candidates, held, queued.map((i) => i.id));
-  const heldNote = new Map(waits.notes().map((n) => [n.id, n.note]));
+  const inRun = new Set(candidates.map((c) => c.id));
   // Typed as entries, so `Object.fromEntries` cannot widen a misspelt state to `any`.
   const startTickets: [string, TicketRecord][] = [
     ...issues.map((i): [string, TicketRecord] => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
     // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
-    ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: heldNote.get(i.id), title: i.title }]),
+    ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: blockedNote(held.get(i.id)!.on, inRun), title: i.title }]),
     // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
     ...parked.map((p): [string, TicketRecord] => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
     // Waiting, but not this turn's to run (a later turn's tickets): on record all the same.
     ...[...wholeOpen]
       .filter(([id]) => !candidates.some((c) => c.id === id))
-      .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, new Set(candidates.map((c) => c.id))), title: whole.find((q) => q.id === id)?.title }]),
+      .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, inRun), title: whole.find((q) => q.id === id)?.title }]),
   ];
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
@@ -1310,6 +1286,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     } else if (e.kind === "not begun" && e.why.kind === "withdrawn") {
       const { reason } = e.why;
       bookkeep(id, () => run.ticket(id, withdrawnRecord(reason)));
+    } else if (e.kind === "not begun" && e.why.kind === "refused label") {
+      // Its label refuses it, found as it would have started: that ticket only, never the run.
+      const { reason } = e.why;
+      console.log(`  ${reason}`);
+      bookkeep(id, () => run.ticket(id, refusedRecord(reason)));
     } else if (e.kind === "stopped" && e.green) {
       bookkeep(id, () => {
         run.ticket(id, STOPPED_GREEN.record);
@@ -1321,7 +1302,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       bookkeep(id, () => run.ticket(id, { state: "crashed", note: errorLine(e.error) }));
     }
   };
-  const tell = (c: Change<Outcome, Outcome>) => {
+  const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     switch (c.kind) {
       case "landing":
         // Only the run line: the next landing writes it again.
@@ -1332,6 +1313,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return requeues.requeued(c.id, c.again);
       case "ended":
         return ended(c.id, c.ending);
+      case "blocked":
+        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight)) }));
+      case "unreleased":
+        console.log(`${ref(c.id)}: could not start the tickets that wait for it (${errorLine(c.error)}); they wait for the next run.`);
+        return;
       default:
         return holds.tell(run, c);
     }

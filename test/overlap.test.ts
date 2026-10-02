@@ -19,8 +19,7 @@ import { test } from "node:test";
 // Importing burndown.ts must not touch the real config or cache.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { branchFiles, createHoldRecord, refreshFiles, ticketFiles } = await import("../src/burndown.ts");
-const { createRelease } = await import("../src/blockers.ts");
+const { branchFiles, createHoldRecord, refreshFiles, refusedRecord, ticketFiles } = await import("../src/burndown.ts");
 const { createSchedule, fileShareLine, fileWaitNote } = await import("../src/schedule.ts");
 type Ending<G, O> = import("../src/schedule.ts").Ending<G, O>;
 type Project = import("../src/config.ts").Project;
@@ -100,7 +99,7 @@ type FlowOptions = {
 
 /**
  * Drives the scheduler as burndown.ts does: `createSchedule` with the real files (`ticketFiles`,
- * `refreshFiles`) and `createRelease` over a fake `createDependants`, and the burndown's record of
+ * `refreshFiles`) and a fake blockers port, and the burndown's record of
  * the hold (`createHoldRecord`) given what `start` decided and what `tell` says. A fake attempt
  * works `delay` ms, then is green (or, for a ticket in `leave`, ends in its pipeline); a fake
  * landing merges it, or conflicts on a first landing in `requeue`.
@@ -123,32 +122,13 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
   };
   const say = (line: string) => void out.said.push(line.trim());
   const waiting = Object.entries(after).map(([issue, on]) => ({ issue, on: [ref(on)] }));
-  const waits = new Set(Object.keys(after));
-  // A fake `createDependants`: a ticket is released when the one it waits for lands.
-  const dependants = {
-    landed: () => {},
-    ended: () => {},
-    notes: () => [] as { id: string; note: string }[],
-    release: async (landed: string) => ({
-      free: tickets.filter((t) => after[t.id] === landed && waits.delete(t.id)),
-      held: [],
-    }),
-  };
-  const schedule = createSchedule<Ticket, { issue: string }, string>({
-    tickets: tickets.filter((t) => !waits.has(t.id)),
+  // A ticket is released when the one it waits for lands: its one blocker reads as closed then.
+  const held = tickets.filter((t) => after[t.id]);
+  const schedule = createSchedule<Ticket, { issue: string }, string, string>({
+    tickets: tickets.filter((t) => !after[t.id]),
     files: opts.dryRun ? undefined : { of: (t) => ticketFiles(project, t), refresh: (t, files) => refreshFiles(project, t, files) },
-    dependants: () => tickets.filter((t) => waits.has(t.id)),
+    blockers: { held: held.map((t) => ({ ticket: t, on: [after[t.id]] })), ticketOf: (b) => b, open: async (ts) => ts.map(() => []) },
     checkLabel: (t) => opts.badLabels?.[t.id],
-    release: (s) => {
-      const { afterLanding, skipped } = createRelease({ dependants: dependants as never, start: s.start, finish: s.finish, stop: s.stop, dryRun: false, badLabel: s.badLabel, record, ref, say });
-      return {
-        afterLanding,
-        skipped,
-        get more() {
-          return waits.size > 0;
-        },
-      };
-    },
   });
   const holds = createHoldRecord({ waiting, ref, say });
   holds.start(schedule.start);
@@ -184,6 +164,11 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
     tell: (c) => {
       if (c.kind === "requeued") out.events.push(`requeue ${c.id}`);
       else if (c.kind === "started" || c.kind === "waits" || c.kind === "next run") holds.tell(record, c);
+      // The burndown's wording of a refused label.
+      else if (c.kind === "ended" && c.ending.kind === "not begun" && c.ending.why.kind === "refused label") {
+        say(c.ending.why.reason);
+        record.ticket(c.id, refusedRecord(c.ending.why.reason));
+      }
     },
   });
   out.endings = endings;

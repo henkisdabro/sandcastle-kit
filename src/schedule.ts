@@ -3,7 +3,8 @@
 // a small work queue, the pipeline fan-out's and the landing worker's (workers keep pulling while
 // the queue is open or still holds items, so an item can be pushed after the workers have started -
 // a green outcome as its pipeline ends; `run` resolves only after `close()` and an empty queue), the
-// landing worker (`createLanding`), and inside `createSchedule` the requeue-once rule and the file hold.
+// landing worker (`createLanding`), and inside `createSchedule` the requeue-once rule, the file hold
+// and the release of dependants (`createDependants`).
 
 import { OperatorError } from "./errors.ts";
 import type { Landed } from "./landing.ts";
@@ -182,6 +183,89 @@ const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => Ticket
     /** Tickets parked now. */
     get size() {
       return parked.length;
+    },
+  };
+};
+
+/** A blocker that is a ticket (`id`), and one of `ids`. */
+const among = (ids: ReadonlySet<string>, id: string | undefined) => id !== undefined && ids.has(id);
+
+/**
+ * The held tickets that can start in this run: every open blocker is a ticket that starts now
+ * (`starting`) or another such dependant. One that also waits on anything else (an outside issue,
+ * a Linear key) is the next run's; counting it inflated the workers, the estimate and the start
+ * line, which named it "waits for a blocker in this run". In `held`'s order.
+ */
+const dependantsInRun = <T extends { id: string }, B>(starting: Iterable<string>, held: { ticket: T; on: B[] }[], ticketOf: (b: B) => string | undefined) => {
+  const inRun = new Set(starting);
+  const kept = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const h of held) {
+      if (kept.has(h.ticket.id) || !h.on.every((b) => among(inRun, ticketOf(b)))) continue;
+      kept.add(h.ticket.id);
+      inRun.add(h.ticket.id);
+      grew = true;
+    }
+  }
+  return held.filter((h) => kept.has(h.ticket.id));
+};
+
+/**
+ * The tickets the run holds back for a blocker in the same run, and which of them a landing frees:
+ * `held` is the ones that wait, with the blockers they waited on, and `release` reads again the
+ * blockers of each one that waited for the ticket that landed (`open`, the plan's port) and takes
+ * out each ticket that is now free. `inFlight`: the candidates that have not ended; a blocker in
+ * it "lands this run". The scheduler's own.
+ */
+const createDependants = <T extends { id: string }, B>(
+  held: Map<string, { ticket: T; on: B[] }>,
+  inFlight: Set<string>,
+  ports: Pick<NonNullable<Plan<T, B>["blockers"]>, "ticketOf" | "open">,
+) => {
+  const landed = new Set<string>();
+  const waitsOn = (h: { on: B[] }, id: string) => h.on.some((b) => ports.ticketOf(b) === id);
+  return {
+    /** The ticket is on the base and closed: a blocker no more. */
+    landed(id: string) {
+      landed.add(id);
+      inFlight.delete(id);
+    },
+    /** The ticket will not land in this run (red, nothing to change, crashed, held, not begun). */
+    ended(id: string) {
+      inFlight.delete(id);
+    },
+    get size() {
+      return held.size;
+    },
+    /** A held ticket waits on a blocker that is still in flight: it may start in this run. */
+    get waitsForFlight() {
+      return [...held.values()].some((h) => h.on.some((b) => among(inFlight, ports.ticketOf(b))));
+    },
+    /** Each held ticket with what it waits for now, and the candidates still in flight. */
+    notes: () => [...held].map(([id, h]) => ({ id, on: h.on, inFlight: [...inFlight] })),
+    /**
+     * Reads again the blockers of each held ticket that waited for `id`, and takes out and returns
+     * the ones with none open, in held order. Only those: re-reading every held ticket after every
+     * landing cost one tracker call per blocker, in turn, on the landing worker. Nothing changes
+     * when the read throws, or when `stillStarts` is false once it is back (the run stopped meanwhile).
+     */
+    async release(id: string, stillStarts: () => boolean): Promise<T[]> {
+      if (!ports.open) return [];
+      const waiting = [...held.values()].filter((h) => waitsOn(h, id));
+      if (!waiting.length) return [];
+      const open = await ports.open(waiting.map((h) => h.ticket), new Set(landed));
+      if (!stillStarts()) return [];
+      const free: T[] = [];
+      waiting.forEach((h, at) => {
+        const on = open[at] ?? h.on;
+        if (on.length) held.set(h.ticket.id, { ticket: h.ticket, on });
+        else {
+          held.delete(h.ticket.id);
+          free.push(h.ticket);
+        }
+      });
+      return free;
     },
   };
 };
@@ -391,50 +475,54 @@ export type HoldChange =
   | { kind: "waits"; id: string; wait: FileWait; parked: boolean }
   | { kind: "next run"; id: string; freed: string; wait?: FileWait };
 
+/**
+ * What the scheduler tells of the tickets held for a blocker in this run. `blocked`: after every
+ * ending, what each one still held waits for (`on`), and `inFlight`, the candidates that have not
+ * ended - a blocker among them lands this run, any other is not this run's. `unreleased`: the
+ * blockers could not be read again after `id` landed, so what waits for it starts no earlier than
+ * another landing frees it.
+ */
+export type BlockerChange<B> = { kind: "blocked"; id: string; on: B[]; inFlight: string[] } | { kind: "unreleased"; id: string; error: unknown };
+
 /** What the scheduler tells as the run goes, for the run record and the views. */
-export type Change<G, O> =
+export type Change<G, O, B = unknown> =
   /** Told before the ticket is queued again, so no view shows a queued ticket the record does not know. */
   | { kind: "requeued"; id: string; again: Again }
   /** The ticket's ending, as it happens: before the tickets it frees start. */
   | { kind: "ended"; id: string; ending: Ending<G, O> }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
   | { kind: "landing"; at: number; of: number }
-  | HoldChange;
-
-/** The release of dependants, as the run's start set it up; the scheduler calls it as each ticket ends, after the file hold. */
-export type Release = {
-  /** The ticket is done with: `landed` when it landed and closed. Starts what it frees, then calls `finish` once. */
-  afterLanding(id: string, landed: boolean): void | Promise<void>;
-  /** A ticket the file hold freed never begins: its label refuses it. Said, recorded, and what waits for it told. */
-  skipped?(id: string, reason: string): void;
-  /** A ticket held for a blocker may still start in this run. */
-  readonly more: boolean;
-};
+  | HoldChange
+  | BlockerChange<B>;
 
 /** One candidate at the start, in start order: `wait` when it starts later, and `file` when that is behind a file git cannot merge. */
 export type Start<T> = { ticket: T; wait?: "file" | "blockers"; file?: FileWait; shares?: FileShare[] };
 
-export type Plan<T extends { id: string }> = {
+export type Plan<T extends { id: string }, B = unknown> = {
   /** The tickets ready to start, in start order; the file hold parks the ones that wait for a file. */
   tickets: T[];
   /** The files of each ticket (`of`), and of a ticket in flight read again (`refresh`). Without them (a dry run, which lands nothing) nothing is held. */
   files?: { of(ticket: T): TicketFiles; refresh?(ticket: T, files: TicketFiles): TicketFiles };
-  /** The tickets held for a blocker in this run, given every ticket that starts now or once a file is free. Asked once, at the start. */
-  dependants?(starting: T[]): T[];
+  /**
+   * The tickets held for a blocker. `held`: each with its open blockers as the start read them, in
+   * queue order; the ones whose every blocker starts in this run (`ticketOf`: the ticket a blocker
+   * is, if any) are candidates that start as their blockers land. `open`: the blockers of each of
+   * `tickets` that are open now, in order, asked as a ticket they waited for lands; `landed` is the
+   * tickets landed so far, closed now though the start read them as open. Without `open` (a dry run,
+   * which lands nothing) nothing is released.
+   */
+  blockers?: {
+    held: { ticket: T; on: B[] }[];
+    ticketOf(blocker: B): string | undefined;
+    open?(tickets: T[], landed: ReadonlySet<string>): Promise<B[][]>;
+  };
   /** Candidates decided elsewhere that start later in this run, if at all. */
   later?: { ticket: T; on: "file" | "blockers" }[];
   /** The refusal for a ticket's label, read at the start for each ticket that starts later: a bad one holds that ticket, never the run. */
   checkLabel?(ticket: T): string | undefined;
-  /**
-   * The release of dependants, given the scheduler's own `start` (a ticket its blockers freed: it
-   * starts or is parked behind a file), `finish` (a ticket is done), `badLabel` (a freed ticket's
-   * refusal, read at the start; one that has it is not begun, and that is its ending) and stop
-   * state. Without it, a ticket's end frees only what waited for its files.
-   */
-  release?(s: { start(ticket: T): void; finish(): void; badLabel(id: string): string | undefined; stop: StopState }): Release;
 };
 
-export type Work<T, G extends Green, O> = LandPorts<G> & {
+export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /** Pipelines at once. */
   workers: number;
   /**
@@ -444,22 +532,23 @@ export type Work<T, G extends Green, O> = LandPorts<G> & {
    */
   attempt(ticket: T, at: { n: 1 | 2; again?: Again; last(): boolean }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
-  tell(change: Change<G, O>): void;
+  tell(change: Change<G, O, B>): void;
 };
 
 /**
  * The run's one path for attempts and landings. `start` is the candidates in start order, decided
  * as the schedule is made, before the run record exists: the file hold admits each ready ticket or
- * parks it behind the one that has its file, and the dependants and labels are read. `run` fans the
- * attempts out over `workers`, hands each green one to the landing worker, sends a first conflict or
- * red back for a second attempt (the requeue-once rule, `requeue` below) unless the run starts
- * nothing, and as each ticket ends frees its files (`free` below), then calls the plan's release.
- * A cause reaches the stop state
- * only from an attempt's result, a landing's `.git` check or refused write, or the host's failure
- * read live. It resolves once every ticket has its ending, with the endings and the stop state; it
- * writes no run record and no wording - `tell` and the endings carry what the burndown records.
+ * parks it behind the one that has its file, the tickets held for a blocker that starts in this run
+ * join them, and the labels are read. `run` fans the attempts out over `workers`, hands each green
+ * one to the landing worker, sends a first conflict or red back for a second attempt (the
+ * requeue-once rule, `requeue` below) unless the run starts nothing, and as each ticket ends frees
+ * its files (`free` below), then releases its dependants (`release` below), and only then drops the
+ * open count. A cause reaches the stop state only from an attempt's result, a landing's `.git`
+ * check or refused write, or the host's failure read live. It resolves once every ticket has its
+ * ending, with the endings and the stop state; it writes no run record and no wording - `tell` and
+ * the endings carry what the burndown records.
  */
-export const createSchedule = <T extends { id: string }, G extends Green, O = unknown>(plan: Plan<T>) => {
+export const createSchedule = <T extends { id: string }, G extends Green, O = unknown, B = unknown>(plan: Plan<T, B>) => {
   // A file git cannot merge (a lockfile, a generated file, a minified blob) conflicts at landing
   // whatever the order, so one ticket at a time has it in flight. No files, no hold: a dry run lands
   // nothing, so it holds nothing.
@@ -471,14 +560,15 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
     if (at && "wait" in at) parked.push({ ticket, wait: "file", file: at.wait });
     else now.push({ ticket, ...(at?.shares.length ? { shares: at.shares } : {}) });
   }
-  // Asked once the tickets that start now are known: a parked ticket starts in this run, so a
-  // ticket that waits for it as a blocker does too.
-  const dependants = now.length && plan.dependants ? plan.dependants([...now, ...parked].map((c) => c.ticket)) : [];
+  // Decided once the tickets that start now are known: a parked ticket starts in this run, so a
+  // ticket that waits for it as a blocker does too. None when nothing starts now.
+  const blockers = plan.blockers;
+  const dependants = now.length && blockers ? dependantsInRun([...now, ...parked].map((c) => c.ticket.id), blockers.held, blockers.ticketOf) : [];
   // A ticket the release frees queues behind the ones already waiting for a sandbox: the ones that
   // start now, then dependants, then parked.
   const later: Start<T>[] = [
     ...(plan.later ?? []).map((l) => ({ ticket: l.ticket, wait: l.on })),
-    ...dependants.map((ticket) => ({ ticket, wait: "blockers" as const })),
+    ...dependants.map((h) => ({ ticket: h.ticket, wait: "blockers" as const })),
     ...parked,
   ];
   // Read now, before any sandbox starts; a bad label holds that ticket when it would start, never the run.
@@ -489,10 +579,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
   }
   return {
     start: [...now, ...later] as readonly Start<T>[],
-    async run(work: Work<T, G, O>): Promise<{ endings: Map<string, Ending<G, O>>; stop: StopState }> {
+    async run(work: Work<T, G, O, B>): Promise<{ endings: Map<string, Ending<G, O>>; stop: StopState }> {
       const stop = createStopState(work.host);
       const endings = new Map<string, Ending<G, O>>();
-      const tell = (change: Change<G, O>) => {
+      const tell = (change: Change<G, O, B>) => {
         try {
           work.tell(change);
         } catch {
@@ -502,6 +592,12 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const byId = new Map(now.map((c) => [c.ticket.id, c.ticket] as const));
       // Parked behind a file now: at the end, such a ticket waits for a file, whatever held it first.
       const behind = new Set(later.flatMap((c) => (c.wait === "file" ? [c.ticket.id] : [])));
+      // Every candidate is in flight until it ends; a blocker in flight lands this run.
+      const waits = createDependants<T, B>(
+        new Map(dependants.map((h) => [h.ticket.id, h] as const)),
+        new Set([...now, ...later].map((c) => c.ticket.id)),
+        { ticketOf: blockers?.ticketOf ?? (() => undefined), open: blockers?.open },
+      );
       // Attempts that began, by ticket.
       const attempts = new Map<string, 1 | 2>();
       // What a requeued ticket's first attempt collided with: its second carries it, and a second collision is final.
@@ -515,17 +611,32 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const stage = () => {
         if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
-      // Said before the tickets it frees start, and before `finish` drops the open count. Its files
-      // are freed before the blockers: a dependant that shares a file with it must not find it in flight.
+      // Tickets without their ending. The queues stay open until none is left: a landing can send
+      // one back after every other pipeline has ended. A ticket that starts counts before the ending
+      // that freed it drops the count, so it never touches zero between them.
+      let open = now.length;
+      const closeAll = () => {
+        pipelines.close();
+        landing.close();
+      };
+      // Said before the tickets it frees start. Its files are freed before its dependants are
+      // released (a dependant that shares a file with it must not find it in flight), and both
+      // before the open count drops: the queues close at zero, and a ticket started after that
+      // would never run.
       const end = async (id: string, ending: Ending<G, O>, landed = false) => {
         endings.set(id, ending);
         tell({ kind: "ended", id, ending });
-        free(id);
-        await release.afterLanding(id, landed);
+        try {
+          free(id);
+          await release(id, landed);
+        } finally {
+          if (--open <= 0) closeAll();
+        }
       };
       const refuse = (id: string, reason: string) => {
         const ending: Ending<G, O> = { kind: "not begun", why: { kind: "refused label", reason } };
         endings.set(id, ending);
+        waits.ended(id);
         tell({ kind: "ended", id, ending });
       };
       // A ticket that waited starts. Not into closed pipelines (a worker failed: nothing would take
@@ -558,13 +669,46 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             const bad = labels.get(f.ticket.id);
             if (bad) {
               refuse(f.ticket.id, bad);
-              release.skipped?.(f.ticket.id, bad);
               // Admitted, so its files are claimed: a ticket that never begins gives them back.
               steps.push(hold.end(f.ticket.id));
               continue;
             }
             begin(f.ticket, { kind: "file", freed: id }, f.shares);
           }
+        }
+      };
+      /**
+       * The ticket ended: what waits for it is told what it waits for now. One that landed and
+       * closed (`landed`) has the blockers of the tickets that waited for it read again, on the
+       * landing worker - a lookup is the worker's wait, never a pipeline's - and each with none open
+       * starts, or is parked behind the ticket in flight that has its file; a bad label holds that
+       * ticket, never the run. Any other end frees none, and neither does a run that starts nothing
+       * (asked again once the read is back) or one whose pipelines have closed.
+       */
+      const release = async (id: string, landed: boolean) => {
+        if (landed) waits.landed(id);
+        else waits.ended(id);
+        let free: T[] = [];
+        const starts = () => !stop.startsNothing && !pipelines.closed;
+        if (landed && starts()) {
+          try {
+            free = await waits.release(id, starts);
+          } catch (error) {
+            tell({ kind: "unreleased", id, error });
+          }
+        }
+        for (const n of waits.notes()) tell({ kind: "blocked", ...n });
+        for (const t of free) {
+          const bad = labels.get(t.id);
+          if (bad) {
+            refuse(t.id, bad);
+            continue;
+          }
+          const at = hold?.admit(t);
+          if (at && "wait" in at) {
+            behind.add(t.id);
+            tell({ kind: "waits", id: t.id, wait: at.wait, parked: true });
+          } else begin(t, { kind: "blockers" }, at?.shares ?? []);
         }
       };
 
@@ -611,36 +755,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
-      // Tickets without their ending. The queues stay open until none is left: a landing can send
-      // one back after every other pipeline has ended. A ticket the release starts counts before the
-      // ending that freed it drops the count, so it never touches zero between them.
-      let open = now.length;
-      const closeAll = () => {
-        pipelines.close();
-        landing.close();
-      };
-      const finish = () => {
-        if (--open <= 0) closeAll();
-      };
-      const release: Release = plan.release?.({
-        // Its blockers freed it: it starts, or is parked behind the ticket in flight that has its file.
-        start: (t) => {
-          if (pipelines.closed) return;
-          const at = hold?.admit(t);
-          if (at && "wait" in at) {
-            behind.add(t.id);
-            tell({ kind: "waits", id: t.id, wait: at.wait, parked: true });
-          } else begin(t, { kind: "blockers" }, at?.shares ?? []);
-        },
-        finish,
-        badLabel: (id) => {
-          const bad = labels.get(id);
-          if (bad) refuse(id, bad);
-          return bad;
-        },
-        stop: readings(stop),
-      }) ?? { afterLanding: finish, more: false };
-      const last = () => stop.startsNothing || (pipelines.size === 0 && !release.more && !hold?.size);
+      const last = () => stop.startsNothing || (pipelines.size === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
       const notBegun = (t: T, why: StopCause | Withdrawn) => {

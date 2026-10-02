@@ -21,12 +21,12 @@ const files = (unmergeable: Record<string, string[]>): Plan<T>["files"] => ({
 });
 
 /** Runs `plan` with fake work; returns what was told and the order of attempts and landings, with the most attempts at once. */
-const play = async (plan: Plan<T>, o: { attempt?: Work<T, G, string>["attempt"]; workers?: number } = {}) => {
-  const told: Change<G, string>[] = [];
+const play = async (plan: Plan<T, string>, o: { attempt?: Work<T, G, string>["attempt"]; workers?: number } = {}) => {
+  const told: Change<G, string, string>[] = [];
   const order: string[] = [];
   let running = 0;
   let peak = 0;
-  const schedule = createSchedule<T, G, string>(plan);
+  const schedule = createSchedule<T, G, string, string>(plan);
   const { endings, stop } = await schedule.run({
     workers: o.workers ?? 4,
     attempt: async (t, at) => {
@@ -44,10 +44,11 @@ const play = async (plan: Plan<T>, o: { attempt?: Work<T, G, string>["attempt"];
 };
 
 test("start gives the candidates in start order, each with its wait: now, then dependants, then parked", () => {
-  const { start } = createSchedule<T, G>({
+  const { start } = createSchedule<T, G, unknown, string>({
     tickets: [{ id: "1" }, { id: "2" }, { id: "3" }],
     files: files({ 1: ["lock"], 2: ["lock"] }),
-    dependants: (starting) => (assert.deepEqual(starting.map((t) => t.id), ["1", "3", "2"]), [{ id: "9" }]),
+    // 9 waits for 2, which is parked: it still starts in this run, so 9 does too.
+    blockers: { held: [{ ticket: { id: "9" }, on: ["2"] }], ticketOf: (b) => b },
   });
   assert.deepEqual(
     start.map((c) => [c.ticket.id, c.wait, c.file]),
@@ -96,22 +97,12 @@ test("a run that stops first tells a parked ticket it waits for the next run, an
 });
 
 test("a dependant its blocker frees is parked behind a file in flight, told as parked, and starts once that one ends", async () => {
-  let released = false;
   const { told, order, peak } = await play(
     {
       tickets: [{ id: "1" }, { id: "2" }],
       files: files({ 2: ["lock"], 9: ["lock"] }),
-      dependants: () => [{ id: "9" }],
-      release: (s) => ({
-        afterLanding: (id, landed) => {
-          if (id === "1" && landed) {
-            released = true;
-            s.start({ id: "9" });
-          }
-          s.finish();
-        },
-        more: !released,
-      }),
+      // 9 waits for 1; once 1 lands, its blockers read as all closed.
+      blockers: { held: [{ ticket: { id: "9" }, on: ["1"] }], ticketOf: (b) => b, open: async (ts) => ts.map(() => []) },
     },
     // 2 holds the lock until after 1 has landed and freed 9.
     { attempt: async (t) => (t.id === "2" ? new Promise((resolve) => setTimeout(() => resolve(green("2")), 30)) : green(t.id)) },
@@ -128,15 +119,14 @@ test("a dependant its blocker frees is parked behind a file in flight, told as p
 });
 
 test("a parked ticket whose label refuses it is not begun when freed, and gives the file to the next", async () => {
-  const skipped: string[] = [];
-  const { endings, order } = await play({
+  const { endings, order, told } = await play({
     tickets: [{ id: "1" }, { id: "2" }, { id: "3" }],
     files: files({ 1: ["lock"], 2: ["lock"], 3: ["lock"] }),
     checkLabel: (t) => (t.id === "2" ? "NOT STARTED: #2 has the label effort:turbo" : undefined),
-    release: (s) => ({ afterLanding: () => s.finish(), skipped: (id) => void skipped.push(id), more: false }),
   });
   assert.deepEqual(order, ["attempt 1", "land 1", "attempt 3", "land 3"]);
-  assert.deepEqual(skipped, ["2"]);
+  // Told once, as its ending: the burndown says and records the refusal from it.
+  assert.equal(told.filter((c) => c.kind === "ended" && c.id === "2").length, 1);
   assert.deepEqual(endings.get("2"), { kind: "not begun", why: { kind: "refused label", reason: "NOT STARTED: #2 has the label effort:turbo" } });
 });
 

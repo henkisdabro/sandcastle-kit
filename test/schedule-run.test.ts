@@ -30,12 +30,12 @@ const play = async (
     workers?: number;
     later?: Plan<T>["later"];
     checkLabel?: Plan<T>["checkLabel"];
-    release?: Plan<T>["release"];
+    blockers?: Plan<T, string>["blockers"];
   } = {},
 ) => {
-  const told: Change<G, O>[] = [];
+  const told: Change<G, O, string>[] = [];
   const order: string[] = [];
-  const { endings, stop } = await createSchedule<T, G, O>({ tickets: ids.map((id) => ({ id })), later: o.later, checkLabel: o.checkLabel, release: o.release }).run({
+  const { endings, stop } = await createSchedule<T, G, O, string>({ tickets: ids.map((id) => ({ id })), later: o.later, checkLabel: o.checkLabel, blockers: o.blockers }).run({
     workers: o.workers ?? ids.length,
     attempt: async (t, at) => {
       order.push(`attempt ${t.id}#${at.n}`);
@@ -89,25 +89,18 @@ test("last() is false while more may start, and true once the queue is empty or 
   });
   assert.deepEqual(seen, { 1: false, 2: false, 3: true });
 
-  // A ticket that may still be freed keeps the pane open.
-  let more = true;
+  // A ticket that may still be freed keeps the pane open: 2 waits for 1, in flight. Once 1 has
+  // landed, 2 still waits for 50, outside the run, so it is never attempted.
   const held: Record<string, boolean> = {};
-  await play(["1"], {
+  const freed = await play(["1"], {
     attempt: async (t, { last }) => {
       held[t.id] = last();
       return green(t.id);
     },
-    release: (s) => ({
-      afterLanding: () => {
-        more = false;
-        s.finish();
-      },
-      get more() {
-        return more;
-      },
-    }),
+    blockers: { held: [{ ticket: { id: "2" }, on: ["1"] }], ticketOf: (b) => (b === "50" ? undefined : b), open: async (ts) => ts.map(() => ["50"]) },
   });
   assert.deepEqual(held, { 1: false });
+  assert.deepEqual(freed.endings.get("2"), { kind: "waiting", on: "blockers" });
 
   // 2 finds a usage limit before it begins; 1, still running, then has 3 behind it but nothing will start it.
   const stopped: Record<string, boolean> = {};
@@ -262,34 +255,28 @@ test("a crash names its causes, and a throwing attempt or land port costs that t
   assert.deepEqual(landPort.stop.causes, []);
 });
 
-test("the release hears each ending after it is told, a landed ticket as landed, and may start or refuse a ticket", async () => {
-  const heard: string[] = [];
+test("a landed ticket's dependants have their blockers read again; a free one starts, one whose label refuses it is not begun", async () => {
+  const asked: [string[], string[]][] = [];
   const { endings, told, order } = await play(["1"], {
-    later: [
-      { ticket: { id: "2" }, on: "blockers" },
-      { ticket: { id: "3" }, on: "blockers" },
-    ],
+    blockers: {
+      held: [
+        { ticket: { id: "2" }, on: ["1"] },
+        { ticket: { id: "3" }, on: ["1"] },
+      ],
+      ticketOf: (b) => b,
+      open: async (ts, landed) => (asked.push([ts.map((t) => t.id), [...landed]]), ts.map(() => [])),
+    },
     // Read at the start; it holds 3 once 3 is freed.
     checkLabel: (t) => (t.id === "3" ? "NOT STARTED: #3 has the label effort:turbo" : undefined),
-    release: (s) => ({
-      afterLanding: (id, landed) => {
-        heard.push(`${id} ${landed}`);
-        // 1 landed: 2 is freed, 3's label holds it. Started before the finish, so the run waits for 2.
-        if (id === "1") {
-          s.start({ id: "2" });
-          assert.equal(s.badLabel("3"), "NOT STARTED: #3 has the label effort:turbo");
-          assert.equal(s.badLabel("2"), undefined);
-        }
-        s.finish();
-      },
-      more: false,
-    }),
   });
-  assert.deepEqual(heard, ["1 true", "2 true"]);
+  // Asked once, after 1 landed, of the tickets that waited for it; nothing waits for 2.
+  assert.deepEqual(asked, [[["2", "3"], ["1"]]]);
   assert.deepEqual(order, ["attempt 1#1", "land 1", "attempt 2#1", "land 2"]);
   assert.deepEqual(endings.get("3"), { kind: "not begun", why: { kind: "refused label", reason: "NOT STARTED: #3 has the label effort:turbo" } });
   assert.equal(endings.get("2")?.kind, "landing");
-  assert.ok(told.findIndex((c) => c.kind === "ended" && c.id === "1") >= 0);
+  const at = (kind: string, id: string) => told.findIndex((c) => c.kind === kind && "id" in c && c.id === id);
+  assert.ok(at("ended", "1") < at("started", "2"));
+  assert.deepEqual(told[at("started", "2")], { kind: "started", id: "2", after: { kind: "blockers" }, shares: [] });
 });
 
 test("the landing stage is told once the pipelines are idle and greens wait", async () => {
