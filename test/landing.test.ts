@@ -76,7 +76,7 @@ const opener = (root: string): Ctx["opener"] => async (branch) => {
 // `landed` is shared by the calls of one test, as one run's landing record is.
 const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boolean; landed?: Ctx["landed"]; withdrawal?: Ctx["withdrawal"]; failClose?: boolean } = {}) => {
   const calls: string[] = [];
-  const states: Record<string, { state?: string; note?: string }> = {};
+  const states: Record<string, { state?: string; note?: string | null }> = {};
   const tracker = {
     ref: (id: string) => `#${id}`,
     close: (id: string) => {

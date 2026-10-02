@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Facts, render } from "../src/report.ts";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 
 const SECTIONS = ["## 🏁 Run", "## ✅ Done", "## 🙋 Needs you", "## ❌ Needs fixing", "## ▶️ Runnable now", "## 📤 Local state", "## 👉 Next step"];
 
@@ -35,7 +36,7 @@ const body = (text: string, heading: string) => {
   return lines.slice(at + 1, next < 0 ? undefined : next).join("\n");
 };
 
-const queued = Object.fromEntries(["1", "2", "3", "4", "5", "6"].map((id, order) => [id, { state: "queued", order, title: `t${id}` }]));
+const queued: Record<string, TicketRecord> = Object.fromEntries(["1", "2", "3", "4", "5", "6"].map((id, order) => [id, { state: "queued", order, title: `t${id}` }]));
 
 const redBase = () =>
   facts({

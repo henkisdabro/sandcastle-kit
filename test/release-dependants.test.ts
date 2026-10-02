@@ -393,18 +393,18 @@ test("blockedNote: in flight lands this run, anything else is not this run's", (
 });
 
 test("the flow takes a released ticket and closes its queues only when nothing started is left", async () => {
-  const queue = createQueue<number>();
+  const queue = createQueue<{ id: string }>();
   let closed = false;
   const flow = createFlow(1, queue, { close: () => void (closed = true) });
-  const seen: number[] = [];
-  queue.push(1);
-  const done = queue.run(1, async (i) => void seen.push(i));
+  const seen: string[] = [];
+  queue.push({ id: "1" });
+  const done = queue.run(1, async (i) => void seen.push(i.id));
   await sleep(5);
   // Released before the landed one's own finish: the count never touches zero between them.
-  flow.start(2);
+  flow.start({ id: "2" });
   flow.finish();
   await sleep(5);
-  assert.deepEqual(seen, [1, 2]);
+  assert.deepEqual(seen, ["1", "2"]);
   assert.equal(closed, false);
   flow.finish();
   await done;

@@ -97,6 +97,8 @@ test("the resolver prompt is rendered with the others, with every kit placeholde
     lean: { keep: [], dropHooks: [] },
     gates: [{ name: "unit", command: "echo gate-ok" }],
     hookTests: [],
+    land: "merge",
+    generated: [],
     implement: {},
     review: {},
     repair: {},

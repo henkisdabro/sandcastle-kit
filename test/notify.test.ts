@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 
 const KIT = join(import.meta.dirname, "..");
 // The loader in one process, as bin/sandcastle runs the CLI: the tsx binary's child is SIGKILLed
@@ -136,7 +137,7 @@ test("notifyCommand refuses a shell string, an empty list and a non-string eleme
 
 test("endSummary: stopped, dry run, and a merged ticket whose close failed", async () => {
   const { endSummary } = await import("../src/notify.ts");
-  const tickets = { 1: { state: "merged" }, 2: { state: "merged", closeFailed: "boom" }, 3: { state: "crashed" }, 4: { state: "blocked" } };
+  const tickets: Record<string, TicketRecord> = { 1: { state: "merged" }, 2: { state: "merged", closeFailed: "boom" }, 3: { state: "crashed" }, 4: { state: "blocked" } };
   assert.equal(endSummary({ exitCode: 0, tickets }), "run finished - 2 merged, 1 need you, 1 need fixing, of 3");
   assert.equal(endSummary({ exitCode: 0, tickets, stopped: "usage" }), "run STOPPED before landing - 2 merged, 1 need you, 1 need fixing, of 3");
   assert.equal(endSummary({ exitCode: 0, tickets, dryRun: true }), "run finished (dry run) - 2 merged, 1 need you, 1 need fixing, of 3");

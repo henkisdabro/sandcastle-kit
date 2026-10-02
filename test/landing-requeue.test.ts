@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import type { TicketState } from "../mod/hooks/run-record.ts";
 
 // pool.ts and sandbox.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -392,7 +393,7 @@ test("a run that is stopping does not requeue, and the lines read as the status 
 
 const waiting = (id: string): Waiting => ({ issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0 });
 // What landOne writes to the ticket before `settled` hears of it.
-const landedAs = (record: ReturnType<typeof recordRun>, id: string, state: string, note: string) => record.ticket(id, { state, note });
+const landedAs = (record: ReturnType<typeof recordRun>, id: string, state: TicketState, note: string) => record.ticket(id, { state, note });
 
 test("conflict, requeued, merged: the second landing is the outcome and the status view is not left prefixed", async () => {
   const { record, written } = newRecord();
