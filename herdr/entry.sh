@@ -3,8 +3,10 @@
 # argv, with no shell around it: from this directory for an action or hook, from the
 # project for a pane. The pagers stay in shell; the rest is `sandcastle herdr <verb>`.
 kit=$(cd "${HERDR_PLUGIN_ROOT:-$(dirname "$0")}/.." && pwd)
+# A pager here shows what agents wrote: no shell escape, no editor, no input preprocessor.
+export LESSSECURE=1
 case "${1:-}" in
-  # Refreshed every 5 seconds; q or Esc closes the popup.
+  # Refreshed every 5 seconds; q or Esc closes the overlay.
   status) SANDCASTLE_STATUS_KEYS=1 exec "$kit/bin/sandcastle" status 5 ;;
   # less -X: in a Herdr 0.9.3 popup, a pager that switches to the alternate screen stayed
   # blank until a key was pressed. The popup closes with less, so nothing is left behind.

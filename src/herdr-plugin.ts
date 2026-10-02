@@ -8,12 +8,12 @@
 //
 // Nothing here is needed for a run: without the plugin, or outside Herdr, a run and its
 // status view work as before. The plugin adds what only Herdr can host - keys that open the
-// status view or the report as a popup over any tab, Ctrl-click on a ticket for its log,
+// status view (an overlay) or the report (a popup) over any tab, Ctrl-click on a ticket for its log,
 // and "sandboxes first" in the Agents panel - and `configure` adds the sidebar rows that
 // show the tokens a run reports (src/herdr.ts).
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -108,7 +108,11 @@ export const withBlock = (text: string, kit = KIT) => {
 export const configConflicts = (text: string): string[] => {
   const own = withoutBlock(text);
   const found: string[] = [];
-  if (/^\s*\[\s*ui\.sidebar(\.agents|\.spaces)?\s*\]/m.test(own) || /^\s*sidebar\s*[.=]/m.test(own)) found.push("sidebar rows (ui.sidebar.agents or ui.sidebar.spaces)");
+  // An inline `ui = {...}` or `keys = {...}` cannot be extended by a table header at all.
+  if (/^\s*(ui|keys)\s*=/m.test(own)) found.push("an inline `ui` or `keys` table");
+  // An inline `command = [...]` of key bindings cannot take `[[keys.command]]` entries.
+  if (/^\s*(keys\s*\.\s*)?command\s*=\s*\[/m.test(own)) found.push("key bindings written as an inline array (keys.command = [...])");
+  if (/^\s*\[\s*ui\.sidebar(\.agents|\.spaces)?\s*\]/m.test(own) || /^\s*(ui\s*\.\s*)?sidebar\s*[.=]/m.test(own)) found.push("sidebar rows (ui.sidebar.agents or ui.sidebar.spaces)");
   if (/tab_bar_right/.test(own)) found.push("tab bar entries (ui.tab_bar_right)");
   for (const key of ["prefix+shift+s", "prefix+shift+e", "prefix+shift+a"]) {
     if (own.toLowerCase().includes(`"${key}"`)) found.push(`the key ${key}`);
@@ -138,12 +142,21 @@ const linked = () => {
   }
 };
 
+// A plugin root that no longer exists (a deleted worktree) compares as written.
+const real = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
 /** For doctor: whether the plugin is linked from this checkout, and the block is in the config. */
 export const pluginState = () => {
   const plugin = linked();
   const path = herdrConfigPath();
   return {
-    linkedHere: !!plugin?.plugin_root && realpathSync(plugin.plugin_root) === realpathSync(PLUGIN_DIR),
+    linkedHere: !!plugin?.plugin_root && real(plugin.plugin_root) === real(PLUGIN_DIR),
     linkedFrom: plugin?.plugin_root,
     block: existsSync(path) && readFileSync(path, "utf8").includes(BEGIN),
   };
@@ -153,18 +166,21 @@ export const configure = async (remove: boolean, yes: boolean) => {
   if (spawnSync("herdr", ["--version"]).status !== 0) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
   const path = herdrConfigPath();
   const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const plugin = pluginState();
 
   if (remove) {
     const after = withoutBlock(before);
     if (after !== before) writeFileSync(path, after);
-    const was = linked();
-    if (was) herdr(["plugin", "unlink", PLUGIN_ID]);
-    if (after === before && !was) {
-      console.log(`Nothing to remove: no sandcastle-kit block in ${path}, and the plugin is not linked.`);
+    // Only this checkout's link: the one in use may be another clone's or worktree's.
+    if (plugin.linkedHere) herdr(["plugin", "unlink", PLUGIN_ID]);
+    else if (plugin.linkedFrom) console.log(`The plugin is linked from another checkout (${plugin.linkedFrom}), so it stays linked: \`sandcastle herdr configure --remove\` there unlinks it.`);
+    const done = [...(after !== before ? [`the sandcastle-kit block from ${path}`] : []), ...(plugin.linkedHere ? ["the plugin"] : [])];
+    if (!done.length) {
+      console.log(`Nothing to remove from this checkout: no sandcastle-kit block in ${path}, and the plugin is not linked from here.`);
       return;
     }
     const reload = reloadConfig();
-    console.log(`Removed${after !== before ? ` the sandcastle-kit block from ${path}` : ""}${after !== before && was ? " and" : ""}${was ? " the plugin" : ""}.${reload.ok ? " Herdr reloaded its config." : ""}`);
+    console.log(`Removed ${done.join(" and ")}.${reload.ok ? " Herdr reloaded its config." : ""}`);
     return;
   }
 
@@ -175,9 +191,11 @@ export const configure = async (remove: boolean, yes: boolean) => {
         "Then link the plugin: `herdr plugin link " + PLUGIN_DIR + "`.",
     );
   }
+  const elsewhere = plugin.linkedFrom && !plugin.linkedHere ? plugin.linkedFrom : undefined;
   console.log(
-    `This will:\n  1. link the sandcastle-kit plugin from ${PLUGIN_DIR} (\`herdr plugin link\`; no build, a \`git pull\` of the kit updates it)\n` +
-      `  2. add the block below to the end of ${path}\n  3. reload Herdr's config (nothing restarts; your panes are untouched)\n` +
+    `This will:\n  1. link the sandcastle-kit plugin from ${PLUGIN_DIR} (\`herdr plugin link\`; no build, a \`git pull\` of the kit updates it)` +
+      (elsewhere ? `,\n     in place of the link to ${elsewhere}` : "") +
+      `\n  2. add the block below to the end of ${path}\n  3. reload Herdr's config (nothing restarts; your panes are untouched)\n` +
       `\`sandcastle herdr configure --remove\` undoes all three.\n\n${configBlock()}\n`,
   );
   if (!yes) {
@@ -188,21 +206,28 @@ export const configure = async (remove: boolean, yes: boolean) => {
       return;
     }
   }
-  const wasLinked = !!linked();
+  if (elsewhere) herdr(["plugin", "unlink", PLUGIN_ID]);
   herdr(["plugin", "link", PLUGIN_DIR]);
   mkdirSync(dirname(path), { recursive: true });
   if (before) writeFileSync(`${path}.sandcastle-kit.bak`, before);
   writeFileSync(path, withBlock(before));
   const reload = reloadConfig();
-  if (reload.ok && reload.diagnostics.length) {
-    // Herdr found something wrong with the result: put the user's config back as it was.
-    writeFileSync(path, before);
+  // Herdr is the only full check of the result, so anything short of a clean reload - its
+  // diagnostics, an error, an answer that would not parse - puts everything back. Only a
+  // Herdr that is not running keeps the block: it reads the file when it starts.
+  if (!(reload.ok ? !reload.diagnostics.length : reload.reason === "not running")) {
+    if (before) writeFileSync(path, before);
+    else rmSync(path, { force: true });
     reloadConfig();
-    if (!wasLinked) herdr(["plugin", "unlink", PLUGIN_ID]);
-    throw new OperatorError(`Herdr refused the new config, so ${path} is back as it was:\n${JSON.stringify(reload.diagnostics, null, 2)}`);
+    if (!plugin.linkedHere) herdr(["plugin", "unlink", PLUGIN_ID]);
+    if (elsewhere) herdr(["plugin", "link", elsewhere]);
+    throw new OperatorError(
+      `Herdr did not take the new config, so ${path} and the plugin link are back as they were:\n` +
+        (reload.ok ? JSON.stringify(reload.diagnostics, null, 2) : reload.reason),
+    );
   }
   console.log(
-    `Done${reload.ok ? " - Herdr reloaded its config" : reload.reason === "not running" ? " - Herdr reads it when it next starts" : ` - reload failed (${reload.reason}); \`herdr server reload-config\` retries`}.` +
+    `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove` takes the block out"}.` +
       `\n  prefix+shift+s  status view    prefix+shift+e  last run's report    prefix+shift+a  sandboxes first in Agents` +
       `\n  (the prefix is ctrl+b unless you changed it). Ctrl-click a ticket in the status view for its log.`,
   );
@@ -259,10 +284,30 @@ const projectAt = (cwd: string | undefined) => {
   return root && existsSync(join(root, CONFIG_PATH)) ? root : undefined;
 };
 
-/** The project the action is about: the focused pane's, else the newest live run's. */
-export const contextProject = (context = process.env.HERDR_PLUGIN_CONTEXT_JSON, runs = () => liveRuns()) => {
-  const ctx = JSON.parse(context || "{}") as { focused_pane_cwd?: string; workspace_cwd?: string };
-  return projectAt(ctx.focused_pane_cwd) ?? projectAt(ctx.workspace_cwd) ?? runs()[0]?.root;
+// The workspace a run's Herdr tab is in, from the record src/herdr.ts keeps (`w1:t2` is in `w1`).
+const runWorkspace = (root: string) => {
+  try {
+    return (JSON.parse(readFileSync(join(root, ".sandcastle/logs/herdr-view.json"), "utf8")).tab as string).split(":")[0];
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The project an action is about: the focused pane's (or its workspace's), else the only live
+ * run, else the one live run whose tab is in this workspace. With several runs and none here,
+ * `why` asks the user to pick by focus: showing one at random reads as the right one.
+ */
+export const contextProject = (context = process.env.HERDR_PLUGIN_CONTEXT_JSON, runs = () => liveRuns()): { root?: string; why?: string } => {
+  const ctx = JSON.parse(context || "{}") as { focused_pane_cwd?: string; workspace_cwd?: string; workspace_id?: string };
+  const here = projectAt(ctx.focused_pane_cwd) ?? projectAt(ctx.workspace_cwd);
+  if (here) return { root: here };
+  const live = runs();
+  if (live.length === 0) return { why: "No sandcastle project in the focused pane, and no run going." };
+  if (live.length === 1) return { root: live[0].root };
+  const inWorkspace = live.filter((r) => runWorkspace(r.root) === ctx.workspace_id);
+  if (inWorkspace.length === 1) return { root: inWorkspace[0].root };
+  return { why: `${live.length} runs going (${live.map((r) => r.orchestrator ?? basename(r.root)).join(", ")}): focus a pane in the project you mean.` };
 };
 
 const notify = (body: string) => {
@@ -276,13 +321,18 @@ const notify = (body: string) => {
 const openPane = (entrypoint: string, cwd: string, env: Record<string, string> = {}) =>
   herdr(["plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", entrypoint, "--cwd", cwd, ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`])]);
 
-// A ticket's log, from a Ctrl-click in the status view. Only a log under some project's
-// .sandcastle/logs is opened: the link handler's pattern says the same, and this is the
-// check that holds whatever printed the link.
+// A ticket's log, from a Ctrl-click in the status view. Herdr routes a matching link from
+// any pane, and an agent's log shown in a sandbox pane can print one, so the link proves
+// nothing: what opens is a regular file whose real path, symlinks resolved, is a log under
+// some project's .sandcastle/logs. entry.sh pages it with LESSSECURE (no shell, no editor).
 export const logOf = (url: string | undefined) => {
   if (!url?.startsWith("file://")) return undefined;
-  const path = fileURLToPath(url);
-  return /\/\.sandcastle\/logs\/[^/]+\.log$/.test(path) && existsSync(path) ? path : undefined;
+  try {
+    const path = realpathSync(fileURLToPath(url));
+    return /\/\.sandcastle\/logs\/[^/]+\.log$/.test(path) && statSync(path).isFile() ? path : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -303,23 +353,42 @@ const VIEW = {
   ],
 };
 
-const request = (method: string, params: object) =>
+// A handoff can close the socket without an answer, and a hung server never sends one: the
+// startup hook and the key must not wait forever.
+const request = (method: string, params: object, timeoutMs = 5000) =>
   new Promise<Record<string, unknown>>((resolve, reject) => {
     const path = process.env.HERDR_SOCKET_PATH;
     if (!path) return reject(new OperatorError("Not inside Herdr (no HERDR_SOCKET_PATH)."));
     const c = createConnection(path, () => c.write(JSON.stringify({ id: "sandcastle", method, params }) + "\n"));
+    const timer = setTimeout(() => {
+      c.destroy();
+      reject(new OperatorError(`herdr ${method}: no answer in ${timeoutMs / 1000} s.`));
+    }, timeoutMs);
     let buf = "";
     c.setEncoding("utf8");
     c.on("data", (d) => {
       buf += d;
       const nl = buf.indexOf("\n");
       if (nl < 0) return;
+      clearTimeout(timer);
       c.end();
-      const r = JSON.parse(buf.slice(0, nl));
-      if (r.error) reject(new OperatorError(`herdr ${method}: ${r.error.message}`));
-      else resolve(r.result);
+      try {
+        const r = JSON.parse(buf.slice(0, nl));
+        if (r.error) reject(new OperatorError(`herdr ${method}: ${r.error.message}`));
+        else resolve(r.result);
+      } catch {
+        reject(new OperatorError(`herdr ${method}: an answer that is not JSON.`));
+      }
     });
-    c.on("error", reject);
+    // After an answer this rejects a settled promise, which does nothing.
+    c.on("close", () => {
+      clearTimeout(timer);
+      reject(new OperatorError(`herdr ${method}: the connection closed without an answer.`));
+    });
+    c.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 
 const viewFlag = () => join(process.env.HERDR_PLUGIN_STATE_DIR ?? join(homedir(), ".cache", "sandcastle-kit"), "sandboxes-first");
@@ -354,8 +423,8 @@ export const herdrCommand = async (args: string[]) => {
     case "open": {
       const kind = rest[0];
       if (kind !== "status" && kind !== "report") throw new OperatorError("Usage: sandcastle herdr open status|report");
-      const root = contextProject();
-      if (!root) return notify("No sandcastle project in the focused pane, and no run going.");
+      const { root, why } = contextProject();
+      if (!root) return notify(why ?? "No sandcastle project here.");
       openPane(kind, root);
       return;
     }

@@ -7,16 +7,48 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// A fake `herdr` for `configure`: logs every call, lists the plugin as linked from
+// $FAKE_ROOT (none when empty), and answers a reload with $FAKE_RELOAD.
+const FAKE = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "--version ") echo "herdr 0.9.3" ;;
+  "plugin list") if [ -n "$FAKE_ROOT" ]; then printf '{"result":{"plugins":[{"plugin_id":"sandcastle-kit","plugin_root":"%s"}]}}\\n' "$FAKE_ROOT"; else echo '{"result":{"plugins":[]}}'; fi ;;
+  "server reload-config") printf '%s\\n' "$FAKE_RELOAD" ;;
+  *) echo '{}' ;;
+esac
+`;
+const bin = mkdtempSync(join(tmpdir(), "sandcastle-plugin-bin-"));
+writeFileSync(join(bin, "herdr"), FAKE);
+chmodSync(join(bin, "herdr"), 0o755);
+process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-plugin-cache-"));
-const { configBlock, configConflicts, contextProject, herdrConfigPath, liveRuns, logOf, PLUGIN_ID, runsLine, withBlock, withoutBlock } = await import(
-  "../src/herdr-plugin.ts"
-);
+const { configBlock, configConflicts, configure, contextProject, herdrConfigPath, liveRuns, logOf, PLUGIN_DIR, PLUGIN_ID, runsLine, withBlock, withoutBlock } =
+  await import("../src/herdr-plugin.ts");
+
+const APPLIED = '{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}';
+const fakeHerdr = (root: string, reload = APPLIED) => {
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-plugin-config-"));
+  const log = join(dir, "calls.log");
+  writeFileSync(log, "");
+  Object.assign(process.env, { FAKE_LOG: log, FAKE_ROOT: root, FAKE_RELOAD: reload, HERDR_CONFIG_PATH: join(dir, "config.toml") });
+  return { config: join(dir, "config.toml"), calls: () => readFileSync(log, "utf8").split("\n") };
+};
+const quietly = async (fn: () => Promise<unknown>) => {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = log;
+  }
+};
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const MANIFEST = readFileSync(join(KIT, "herdr/herdr-plugin.toml"), "utf8");
@@ -92,18 +124,81 @@ test("logOf: only a log under some project's .sandcastle/logs opens", () => {
   assert.equal(logOf(pathToFileURL(join(root, ".sandcastle/config.ts")).href), undefined);
   assert.equal(logOf(pathToFileURL(join(root, ".sandcastle/logs/missing.log")).href), undefined);
   assert.equal(logOf("https://example.com/.sandcastle/logs/a.log"), undefined);
+  assert.equal(logOf("file://remote-host/x/.sandcastle/logs/a.log"), undefined);
   assert.equal(logOf(undefined), undefined);
+  // An agent's log can print a link too: a `.log` symlink under logs/ to some other file
+  // is judged by where it points, not by its name.
+  const secret = join(root, "secret.txt");
+  writeFileSync(secret, "token\n");
+  symlinkSync(secret, join(root, ".sandcastle/logs/innocent.log"));
+  assert.equal(logOf(pathToFileURL(join(root, ".sandcastle/logs/innocent.log")).href), undefined);
+  // Nor a directory that only looks like a log.
+  mkdirSync(join(root, ".sandcastle/logs/dir.log"));
+  assert.equal(logOf(pathToFileURL(join(root, ".sandcastle/logs/dir.log")).href), undefined);
 });
 
-test("contextProject: the focused pane's project, else the newest live run's", () => {
+test("contextProject: the focused pane's project, else the only run, else the run in this workspace, else ask", () => {
   const root = project();
   mkdirSync(join(root, "src/deep"), { recursive: true });
-  const ctx = (cwd: string) => JSON.stringify({ focused_pane_cwd: cwd });
-  assert.equal(contextProject(ctx(join(root, "src/deep")), () => []), root);
+  const ctx = (cwd: string, workspace_id = "w1") => JSON.stringify({ focused_pane_cwd: cwd, workspace_id });
+  assert.deepEqual(contextProject(ctx(join(root, "src/deep")), () => []), { root });
   const elsewhere = mkdtempSync(join(tmpdir(), "sandcastle-plugin-elsewhere-"));
-  assert.equal(contextProject(ctx(elsewhere), () => [{ root: "/the/run" }]), "/the/run");
-  assert.equal(contextProject(ctx(elsewhere), () => []), undefined);
-  assert.equal(contextProject(undefined, () => []), undefined);
+  assert.deepEqual(contextProject(ctx(elsewhere), () => [{ root: "/the/run" }]), { root: "/the/run" });
+  assert.match(contextProject(ctx(elsewhere), () => [])?.why ?? "", /no run going/);
+  // Two runs: the one whose Herdr tab is in this workspace; from a third workspace, neither.
+  const [a, b] = [project(), project()];
+  writeFileSync(join(a, ".sandcastle/logs/herdr-view.json"), JSON.stringify({ tab: "w1:t3" }));
+  writeFileSync(join(b, ".sandcastle/logs/herdr-view.json"), JSON.stringify({ tab: "w2:t1" }));
+  const two = () => [{ root: a, orchestrator: "shop" }, { root: b, orchestrator: "api" }];
+  assert.deepEqual(contextProject(ctx(elsewhere, "w2"), two), { root: b });
+  assert.match(contextProject(ctx(elsewhere, "w9"), two)?.why ?? "", /2 runs going \(shop, api\)/);
+});
+
+test("configConflicts: inline tables and arrays the block could not extend", () => {
+  assert.equal(configConflicts('ui = { status_indicators = "symbols" }\n').length, 1);
+  assert.equal(configConflicts('keys = { prefix = "ctrl+a" }\n').length, 1);
+  assert.equal(configConflicts('[keys]\ncommand = [{ key = "prefix+t", type = "popup", command = "sh" }]\n').length, 1);
+  assert.equal(configConflicts('ui.sidebar.agents.rows = [["agent"]]\n').length, 1);
+  // A user's own `[[keys.command]]` entry is fine: the block's are appended to the same array.
+  assert.deepEqual(configConflicts('[[keys.command]]\nkey = "prefix+t"\ntype = "popup"\ncommand = "lazygit"\n'), []);
+});
+
+test("configure --remove unlinks only this checkout's plugin", async () => {
+  const fake = fakeHerdr("/some/other/checkout/herdr");
+  writeFileSync(fake.config, withBlock("[ui]\nx = 1\n"));
+  await quietly(() => configure(true, true));
+  assert.equal(readFileSync(fake.config, "utf8"), "[ui]\nx = 1\n");
+  assert.equal(fake.calls().some((c) => c.startsWith("plugin unlink")), false, fake.calls().join("\n"));
+  const here = fakeHerdr(PLUGIN_DIR);
+  await quietly(() => configure(true, true));
+  assert.ok(here.calls().includes(`plugin unlink ${PLUGIN_ID}`));
+});
+
+test("configure puts the config and the old link back unless Herdr reloads it cleanly", async () => {
+  for (const reload of [
+    '{"result":{"status":"applied","diagnostics":[{"message":"bad"}]}}',
+    '{"error":{"code":"internal","message":"boom"}}',
+    "not json",
+  ]) {
+    const fake = fakeHerdr("/some/other/checkout/herdr", reload);
+    writeFileSync(fake.config, "[ui]\nx = 1\n");
+    await assert.rejects(quietly(() => configure(false, true)), /back as they were/);
+    assert.equal(readFileSync(fake.config, "utf8"), "[ui]\nx = 1\n", reload);
+    const calls = fake.calls();
+    assert.ok(calls.includes("plugin link /some/other/checkout/herdr"), `the other checkout's link is restored: ${calls.join(" | ")}`);
+  }
+  // A config that did not exist is removed again, not left empty.
+  const fresh = fakeHerdr("", '{"error":{"code":"internal","message":"boom"}}');
+  await assert.rejects(quietly(() => configure(false, true)));
+  assert.equal(existsSync(fresh.config), false);
+});
+
+test("configure keeps the block when Herdr is not running: it reads it at start", async () => {
+  const fake = fakeHerdr("", '{"error":{"code":"server_not_running","message":"no server"}}');
+  writeFileSync(fake.config, "[ui]\nx = 1\n");
+  await quietly(() => configure(false, true));
+  assert.equal(readFileSync(fake.config, "utf8"), withBlock("[ui]\nx = 1\n"));
+  assert.equal(readFileSync(`${fake.config}.sandcastle-kit.bak`, "utf8"), "[ui]\nx = 1\n");
 });
 
 test("the manifest: Herdr's id, the kit's version, and every command through an executable entry.sh", () => {

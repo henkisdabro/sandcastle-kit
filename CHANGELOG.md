@@ -94,8 +94,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The pre-commit hook reads an **allowlist** beside your denylist
   (`~/.config/sandcastle-kit/allowlist`): a staged line matching it passes, so an author credit
   you mean to publish can carry a name the denylist blocks everywhere else.
-- **The Herdr plugin** (`herdr/`, set up by `sandcastle herdr configure`): the status view and the
-  last run's report as popups over any tab (`prefix+shift+s`, `prefix+shift+e`), Ctrl-click a
+- **The Herdr plugin** (`herdr/`, set up by `sandcastle herdr configure`): the status view over
+  any tab and the last run's report as a popup (`prefix+shift+s`, `prefix+shift+e`), Ctrl-click a
   ticket in the status view to read its log in a popup, "sandboxes first" in the Agents panel
   (`prefix+shift+a`, restored after a Herdr restart), each sandbox's step and time and the run's
   progress in the sidebar, and every live run on the machine in the tab bar. `sandcastle setup`
