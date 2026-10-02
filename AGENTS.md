@@ -81,7 +81,7 @@ read a module's section there before changing it.
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
-| `docs/img/` | The README's logos: `logo.svg` (the pixel castle and wordmark) and `terminal-logo.svg` (the castle as the status view and the mod draw it); the castle's colours are the status view's |
+| `docs/img/` | The README's logos: `logo.svg` (the pixel castle and wordmark) and `terminal-logo.svg` (the mod's band above the prompt, animated); the castle's colours are the status view's |
 | `docs/architecture.md` | What each larger module owns, in more detail than this table |
 | `test/full-check.sh` | Every check below on this machine, then in a Linux container, then the outbound scan of the commits not yet on `origin/main` |
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |

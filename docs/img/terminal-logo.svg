@@ -1,15 +1,52 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="150" viewBox="0 0 720 150" role="img" aria-labelledby="t">
-  <title id="t">The sandcastle-kit castle as a terminal draws it: three rows of block characters beside a live run</title>
-  <rect x="0.5" y="0.5" width="719" height="149" rx="12" fill="#0e1116" stroke="#2a2f38"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="236" viewBox="0 0 720 236" role="img" aria-labelledby="t">
+  <title id="t">The Claude Code mod's band above the prompt: the sandcastle-kit castle builds from the sand up beside a live run's stage, tokens and counts, and a pinned line names the ticket that needs you</title>
+  <style>
+    /* Four frames of a run, 3s each; a frame shows in its quarter of the cycle. */
+    .f { opacity: 0; animation: frame 12s infinite; }
+    .f1 { animation-delay: -9s; }
+    .f2 { animation-delay: -6s; opacity: 1; }
+    .f3 { animation-delay: -3s; }
+    @keyframes frame { 0%, 24.99% { opacity: 1; } 25%, 100% { opacity: 0; } }
+    /* The castle builds from the sand up, then holds. */
+    .walls { animation: walls 12s infinite; }
+    .merlons { animation: merlons 12s infinite; }
+    @keyframes walls { 0%, 24.99% { opacity: 0; } 25%, 100% { opacity: 1; } }
+    @keyframes merlons { 0%, 49.99% { opacity: 0; } 50%, 100% { opacity: 1; } }
+    .cursor { animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    /* Without motion, the frame halfway through the run stands still. */
+    @media (prefers-reduced-motion: reduce) { .f, .walls, .merlons, .cursor { animation: none; } }
+  </style>
+  <rect x="0.5" y="0.5" width="719" height="235" rx="12" fill="#0e1116" stroke="#2a2f38"/>
   <circle cx="22" cy="20" r="5.5" fill="#ff5f57"/><circle cx="40" cy="20" r="5.5" fill="#febc2e"/><circle cx="58" cy="20" r="5.5" fill="#28c840"/>
   <!-- One character cell is 14 x 28: ▄ is its lower half, ▀ its upper half, █ all of it. -->
   <g transform="translate(28 46)" shape-rendering="crispEdges">
-    <path fill="#e8d6b4" d="M0 14h14v14H0zM28 14h14v14H28zM56 14h14v14H56z"/>
-    <path fill="#cdb894" d="M0 28h70v28H0z"/>
+    <path class="merlons" fill="#e8d6b4" d="M0 14h14v14H0zM28 14h14v14H28zM56 14h14v14H56z"/>
+    <path class="walls" fill="#cdb894" d="M0 28h70v28H0z"/>
     <path fill="#705c42" d="M0 56h70v14H0zM0 70h28v14H0zM42 70h28v14H42z"/>
   </g>
   <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="17">
-    <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">landing 2/4</tspan><tspan fill="#927c5e" dx="18">1.7M in / 30k out</tspan></text>
-    <text x="126" y="122"><tspan fill="#ffd75f">● working 1</tspan><tspan fill="#ff5f5f" dx="18">! needs you 1</tspan><tspan fill="#5fd7d7" dx="18">&gt; ready 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 4</tspan></text>
+    <g class="f f0">
+      <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">implementing</tspan><tspan fill="#927c5e" dx="18">0.4M in / 7k out</tspan></text>
+      <text x="126" y="122"><tspan fill="#ffd75f">● working 3</tspan><tspan fill="#5fd7d7" dx="18">&gt; ready 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 0</tspan></text>
+    </g>
+    <g class="f f1">
+      <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">landing 1/4</tspan><tspan fill="#927c5e" dx="18">0.9M in / 16k out</tspan></text>
+      <text x="126" y="122"><tspan fill="#ffd75f">● working 2</tspan><tspan fill="#ff5f5f" dx="18">! needs you 1</tspan><tspan fill="#5fd7d7" dx="18">&gt; ready 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 1</tspan></text>
+      <text x="28" y="214" fill="#ffd75f">⚠ sandcastle: #105 conflict - /sandcastle-status</text>
+    </g>
+    <g class="f f2">
+      <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">landing 2/4</tspan><tspan fill="#927c5e" dx="18">1.7M in / 30k out</tspan></text>
+      <text x="126" y="122"><tspan fill="#ffd75f">● working 1</tspan><tspan fill="#ff5f5f" dx="18">! needs you 1</tspan><tspan fill="#5fd7d7" dx="18">&gt; ready 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 2</tspan></text>
+      <text x="28" y="214" fill="#ffd75f">⚠ sandcastle: #105 conflict - /sandcastle-status</text>
+    </g>
+    <g class="f f3">
+      <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">landing 4/4</tspan><tspan fill="#927c5e" dx="18">2.3M in / 41k out</tspan></text>
+      <text x="126" y="122"><tspan fill="#ff5f5f">! needs you 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 4</tspan></text>
+      <text x="28" y="214" fill="#ffd75f">⚠ sandcastle: #105 conflict - /sandcastle-status</text>
+    </g>
+    <path stroke="#2a2f38" d="M28 150h664M28 190h664"/>
+    <text x="28" y="176" fill="#cdb894">❯</text>
+    <rect class="cursor" x="48" y="162" width="10" height="19" fill="#cdb894"/>
   </g>
 </svg>

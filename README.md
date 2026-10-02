@@ -2,8 +2,6 @@
 
 <a href="https://henkisdabro.github.io/sandcastle-kit/"><img src="docs/img/logo.svg" alt="sandcastle-kit - turn your ticket backlog into a software factory" width="720"></a>
 
-<img src="docs/img/terminal-logo.svg" alt="The castle as a terminal draws it, three rows of block characters beside a live run: working, needs you, ready and merged counts" width="720">
-
 Unattended coding agents burn down your queue of GitHub issues or ticket files in Docker sandboxes - implemented, reviewed,
 gated and merged while you are away from the keyboard.
 
@@ -806,15 +804,7 @@ Most runs start from a Claude Code session, with `/sandcastle run`. With the kit
 [mod](https://code.claude.com/docs/en/plugins/mods/overview) linked, that session shows the run
 itself, in the status view's castle, glyphs and colours:
 
-```
-▄ ▄ ▄
-█████  sandcastle  my-app  landing 2/4  1.7M in / 30k out
-██▀██  ● working 1  ! needs you 2  > ready to land 1  ~ blocked 1  + merged 1
-────────────────────────────────────────────────────────────────────────────────
-❯
-────────────────────────────────────────────────────────────────────────────────
-  ⚠ sandcastle: #105 conflict, #111 held - /sandcastle-status
-```
+<p align="center"><img src="docs/img/terminal-logo.svg" alt="The mod's band above the Claude Code prompt: the castle builds from the sand up beside the run's stage, tokens and counts, and a pinned line names the ticket that needs you" width="720"></p>
 
 - 🏰 **A band above the prompt** while a run is alive: the status view's three-row castle, the
   run's stage and tokens beside its walls, the legend's counts beside its base. While a ticket is
