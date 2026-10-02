@@ -19,12 +19,21 @@ import { OperatorError } from "./errors.ts";
 // the repo's hooks still run on agent commits inside the sandbox.
 // ---------------------------------------------------------------------------
 
-export const disableHostGitHooks = () => {
+// One more `GIT_CONFIG_*` pair for this process and every git it starts. Not added twice: each
+// turn of an autonomy run calls this again.
+const hostGitConfig = (key: string, value: string) => {
   const n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
-  process.env[`GIT_CONFIG_KEY_${n}`] = "core.hooksPath";
-  process.env[`GIT_CONFIG_VALUE_${n}`] = "/dev/null";
+  for (let i = 0; i < n; i++) if (process.env[`GIT_CONFIG_KEY_${i}`] === key && process.env[`GIT_CONFIG_VALUE_${i}`] === value) return;
+  process.env[`GIT_CONFIG_KEY_${n}`] = key;
+  process.env[`GIT_CONFIG_VALUE_${n}`] = value;
   process.env.GIT_CONFIG_COUNT = String(n + 1);
 };
+
+export const disableHostGitHooks = () => hostGitConfig("core.hooksPath", "/dev/null");
+
+// A landing merge on the host runs while sandboxes add and remove worktrees, and `git merge` starts
+// `git gc --auto` when the repo has enough loose objects: maintenance that prunes beside them.
+export const disableHostGitGc = () => hostGitConfig("gc.auto", "0");
 
 // ---------------------------------------------------------------------------
 // 2. The shared `.git`. A container can rewrite `.git/config` (a
@@ -37,6 +46,8 @@ export const disableHostGitHooks = () => {
 // ---------------------------------------------------------------------------
 
 // `files` maps each fingerprinted path to its content's hash, so a change can name the file.
+// `base` is the base tip the run expects: the landing worker moves it with its own writes
+// (landing.ts), so anything else that moves the base still stops the run.
 export type Fingerprint = { files: Record<string, string>; base: string };
 
 export const gitFingerprint = (project: Project): Fingerprint => {

@@ -31,9 +31,9 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
-| `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land (merge or squash), verify, report; dependencies and file overlaps, re-runs of carried branches (land-only, narrow review), timings |
-| `src/landing.ts` | `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, merge, generated-files redo in a sandbox, close) and what it returns; also the landing merge, its abort, the close comment and the conflict line |
-| `src/schedule.ts` | `createQueue<T>()`: the pipeline fan-out's work queue (`push`, `close`, `run(workers, fn)`); workers wait while it is open and empty, so a ticket can be pushed mid-run |
+| `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land (merge or squash, on the landing worker as each ticket goes green), verify, report; dependencies and file overlaps, re-runs of carried branches (land-only, narrow review), timings |
+| `src/landing.ts` | `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a merge as it is when the branch holds the base's tip, otherwise a merge gated in a sandbox, close) and what it returns; `createLanding`: the one worker that lands each ticket as it goes green; `createHostGit`: the mutex through which every host git write goes and which moves the run's expected base; also the landing merge, its abort, the close comment and the conflict line |
+| `src/schedule.ts` | `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`, `close`, `run(workers, fn)`); workers wait while it is open and empty, so an item can be pushed mid-run; a higher `rank` goes first, equals in arrival order |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
@@ -46,7 +46,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
-| `src/guard.ts` | Host safety: git hooks off, `.git` fingerprint (config, info, hooks), protected paths and files over 50 MB held for a person, run lock |
+| `src/guard.ts` | Host safety: git hooks and auto-gc off, `.git` fingerprint (config, info, hooks; its base is the one the run expects, which the landing worker moves), protected paths and files over 50 MB held for a person, run lock |
 | `src/pool.ts` | Machine-wide sandbox and gate slots, and the lock-file helper the run lock shares (pid and token, guarded takeover) |
 | `src/run.ts` | Preconditions, run arguments, keep-awake, preflight, prompt rendering, agent logs (with the raw `.jsonl` sidecar), run record and history, typical times and the estimate, recorded heads, log archive, status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates, run without the kit's tokens and with their values redacted from the output |

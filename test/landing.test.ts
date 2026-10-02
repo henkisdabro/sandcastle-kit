@@ -5,7 +5,7 @@
 //   pnpm exec tsx --test test/landing.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,7 +15,8 @@ import { after, test } from "node:test";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { landOne } = await import("../src/landing.ts");
+const { landOne, createHostGit } = await import("../src/landing.ts");
+const { gitFingerprint } = await import("../src/guard.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Project = import("../src/config.ts").Project;
 
@@ -57,7 +58,23 @@ const outcome = (root: string, id: string, extra: Record<string, unknown> = {}) 
   ...extra,
 });
 
-const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boolean; merged?: string[]; startBase?: string; withdrawal?: Ctx["withdrawal"]; failClose?: boolean } = {}) => {
+// The sandbox a merge that is not a fast-forward is made and gated in: a host worktree, no Docker.
+// execGate wraps commands in `timeout -k n n`, which macOS lacks.
+const opener = (root: string): Ctx["opener"] => async (branch) => {
+  const path = join(TMP, `wt${n++}`);
+  git(root, "worktree", "add", "-q", "-b", branch, path, "main");
+  return {
+    worktreePath: path,
+    exec: async (cmd) => {
+      const r = spawnSync("sh", ["-c", cmd.replace(/^timeout -k \d+ \d+ /, "")], { cwd: path, encoding: "utf8" });
+      return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+    },
+    close: async () => git(root, "worktree", "remove", "--force", path),
+  };
+};
+
+// `landed` is shared by the calls of one test, as one run's landing record is.
+const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boolean; landed?: Ctx["landed"]; withdrawal?: Ctx["withdrawal"]; failClose?: boolean } = {}) => {
   const calls: string[] = [];
   const states: Record<string, { state?: string; note?: string }> = {};
   const tracker = {
@@ -68,18 +85,20 @@ const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boole
     },
     hold: (id: string) => void calls.push(`hold ${id}`),
   };
+  const project = { root, name: "fixture", baseBranch: "main", land: over.land ?? "merge", generated: [], gates: [], setup: [] } as unknown as Project;
   const ctx: Ctx = {
-    project: { root, name: "fixture", baseBranch: "main", land: over.land ?? "merge", generated: [], gates: [] } as unknown as Project,
+    project,
     tracker: tracker as unknown as Ctx["tracker"],
     base: "main",
-    startBase: over.startBase ?? git(root, "rev-parse", "main"),
     gateNames: "test",
     reports: new Map(),
     run: { ticket: (id, fields) => void (states[id] = { ...states[id], ...fields }) },
     dryRun: over.dryRun ?? false,
-    opener: () => Promise.reject(new Error("no sandbox in this test")),
+    opener: opener(root),
     withdrawal: over.withdrawal ?? (() => undefined),
-    merged: over.merged ?? [],
+    host: createHostGit(project, gitFingerprint(project)),
+    gate: async () => ({ gates: [], failures: [] }),
+    landed: over.landed ?? new Map(),
   };
   return { ctx, calls, states };
 };
@@ -98,14 +117,13 @@ test("a clean merge lands, closes the ticket and records it", async () => {
 
 test("a conflict names the merged ticket it collides with and leaves a clean tree", async () => {
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" }, 3: { "c.txt": "c\n" } });
-  // Where the branches forked, as burndown reads it once before landing starts.
-  const startBase = git(root, "rev-parse", "main");
-  const first = harness(root, { startBase });
+  const record = new Map();
+  const first = harness(root, { landed: record });
   assert.equal((await landOne(first.ctx, outcome(root, "1"))).kind, "merged");
   // 3 merged too, but touches nothing 2 does: not named.
-  const second = harness(root, { startBase, merged: ["1"] });
+  const second = harness(root, { landed: record });
   assert.equal((await landOne(second.ctx, outcome(root, "3"))).kind, "merged");
-  const third = harness(root, { startBase, merged: ["1", "3"] });
+  const third = harness(root, { landed: record });
   const landed = await landOne(third.ctx, outcome(root, "2"));
   assert.deepEqual(landed, { kind: "conflict", files: ["shared.txt"], with: ["1"] });
   assert.equal(third.states["2"].state, "conflict");
