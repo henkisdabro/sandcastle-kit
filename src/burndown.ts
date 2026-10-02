@@ -1327,7 +1327,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       case "ended":
         return ended(c.id, c.ending);
       case "blocked":
-        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight)) }));
+        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
         console.log(`${ref(c.id)}: could not start the tickets that wait for it (${errorLine(c.error)}); they wait for the next run.`);
         return;
