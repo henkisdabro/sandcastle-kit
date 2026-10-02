@@ -17,6 +17,7 @@ import { after, test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
+const { createStopState } = await import("../src/schedule.ts");
 const { createHostGit, createLanding, landingMade, slotTurn, trackerMade } = await import("../src/landing.ts");
 const { assertGitUnchanged, gitFingerprint, pinHostGitConfig } = await import("../src/guard.ts");
 const { landInSandbox, plainMergeNote } = await import("../src/land.ts");
@@ -159,7 +160,8 @@ test("an unexpected error while landing costs that ticket only, and the others s
     landed: new Map(),
   };
   const settled: { issue: string; landed: Landed }[] = [];
-  const landing = createLanding(ctx, { settled: (o, landed) => void settled.push({ issue: o.issue, landed }), stopped: () => {} });
+  const stop = createStopState(host);
+  const landing = createLanding(ctx, stop, { settled: (o, landed) => void settled.push({ issue: o.issue, landed }), stopped: () => {} });
   for (const id of ["1", "2"]) {
     landing.push({ issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) });
   }
@@ -173,7 +175,7 @@ test("an unexpected error while landing costs that ticket only, and the others s
     ],
   );
   assert.match(JSON.stringify(settled[0].landed), /ENOSPC/);
-  assert.equal(landing.stop, undefined);
+  assert.deepEqual(stop.causes, []);
   assert.equal(states["2"], "merged");
 });
 

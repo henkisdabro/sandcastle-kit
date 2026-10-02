@@ -34,7 +34,8 @@ process.env.PATH = `${SHIM}${delimiter}${process.env.PATH}`;
 const { blockedNote, createDependants, createRelease, dependantsInRun, openBlockers, blockerResolver } = await import("../src/blockers.ts");
 const { createFlow, createHostGit, createLanding } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
-const { createQueue } = await import("../src/schedule.ts");
+const { createQueue, createStopState } = await import("../src/schedule.ts");
+type StopState = import("../src/schedule.ts").StopState;
 type Project = import("../src/config.ts").Project;
 type Ctx = import("../src/landing.ts").LandContext;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -104,9 +105,9 @@ const runWith = async (
   tickets: Ticket[],
   opts: {
     pipeline?: (t: Ticket, root: string, attempt: number) => Promise<"green" | "red">;
-    stopped?: () => unknown;
     badLabel?: Record<string, string>;
-    onStart?: (id: string, run: Run) => void;
+    /** As a ticket starts; `stop` is the run's stop state, to which a test adds a cause. */
+    onStart?: (id: string, run: Run, stop: StopState) => void;
     /** Time a ticket works on after its branch is made, outside the host lock. */
     delay?: Record<string, number>;
     /** Time before a ticket makes its branch, so it forks from a base that has moved. */
@@ -171,12 +172,13 @@ const runWith = async (
   const queue = createQueue<Ticket>();
   // eslint-disable-next-line prefer-const
   let landing!: ReturnType<typeof createLanding>;
+  const stop = createStopState(host);
   const flow = createFlow(ready.length, queue, { close: () => landing.close() });
   const { afterLanding } = createRelease({
     dependants: waits,
     start: (t) => flow.start(t),
     finish: () => flow.finish(),
-    stopped: () => opts.stopped?.() || landing.stop || host.failed,
+    stop,
     dryRun: opts.dryRun ?? false,
     badLabel: (id) => opts.badLabel?.[id],
     record,
@@ -184,12 +186,12 @@ const runWith = async (
     ref: tracker.ref,
     say: (line) => void run.said.push(line),
   });
-  landing = createLanding(ctx, {
+  landing = createLanding(ctx, stop, {
     settled: async (o, landed) => {
       if (landed.kind === "merged" || landed.kind === "close-failed") run.landed.push(o.issue);
       run.events.push(`settled ${o.issue} ${landed.kind}`);
       // As burndown.ts: a first conflict or red goes back to the pipelines, and its last word waits.
-      const again = flow.retry(tickets.find((t) => t.id === o.issue)!, landed, landing.stop !== undefined || host.failed !== undefined);
+      const again = flow.retry(tickets.find((t) => t.id === o.issue)!, landed, stop.startsNothing);
       if (again !== undefined) {
         run.events.push(`requeued ${o.issue}`);
         record.ticket(o.issue, { state: "queued", note: again });
@@ -214,7 +216,7 @@ const runWith = async (
     attempts.set(t.id, attempt);
     run.started.push(t.id);
     run.events.push(`start ${t.id}`);
-    opts.onStart?.(t.id, run);
+    opts.onStart?.(t.id, run, stop);
     record.ticket(t.id, { state: "setup" });
     // Branches are made one at a time: they share one working tree.
     await sleep(opts.lead?.[t.id] ?? 0);
@@ -325,8 +327,9 @@ test("a ticket queued mid-run is not started", async () => {
 });
 
 test("a run that has stopped releases nothing, and still ends", async () => {
-  let stop = false;
-  const run = await runWith([ticket("1"), ticket("2", ["1"])], { stopped: () => stop, onStart: (id) => void (id === "1" && (stop = true)) });
+  const run = await runWith([ticket("1"), ticket("2", ["1"])], {
+    onStart: (id, _run, stop) => void (id === "1" && stop.add({ kind: "usage limit", line: "usage 97% of the 5-hour window" })),
+  });
   assert.deepEqual(run.started, ["1"]);
   assert.equal(run.states["2"].state, "blocked");
 });

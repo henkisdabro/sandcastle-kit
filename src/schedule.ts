@@ -1,6 +1,7 @@
 // A small work queue: the pipeline fan-out's, and the landing worker's. Workers keep pulling while
 // the queue is open or still holds items, so an item can be pushed after the workers have started
 // (a green outcome as its pipeline ends). `run` resolves only after `close()` and an empty queue.
+// Also the file hold, and the run's one stop state (`createStopState`).
 
 export type Queue<T> = {
   /** Add an item; a waiting worker takes it at once. Refused after `close()`. */
@@ -222,4 +223,71 @@ export const startHold = <T extends { id: string }>(
     if (bad) badLabels.set(i.id, bad);
   }
   return { issues, parked, dependants, candidates, order, badLabels };
+};
+
+/**
+ * Why a run stopped. A plan limit names the ticket whose agent hit it; a usage limit carries the
+ * probe's line; `tampered` is a `.git` check that failed (after a pipeline, or the landing
+ * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`).
+ */
+export type StopCause =
+  | { kind: "plan limit"; ticket: string }
+  | { kind: "usage limit"; line: string }
+  | { kind: "tampered"; error: unknown }
+  | { kind: "host failed"; error: unknown };
+
+/**
+ * Each kind, once: whether it is a safety stop (nothing more lands - the repo is in a state no
+ * gate vouched for) and its rank for the headline, lowest first. A kind missing here, or either
+ * field of one, fails the type check, so a new cause cannot be honoured in one path and missed in
+ * another. A limit still lands what is already green.
+ */
+export const STOP_KINDS = {
+  tampered: { safety: true, rank: 0 },
+  "host failed": { safety: true, rank: 1 },
+  "plan limit": { safety: false, rank: 2 },
+  "usage limit": { safety: false, rank: 3 },
+} as const satisfies Record<StopCause["kind"], { safety: boolean; rank: number }>;
+
+/**
+ * The run's one answer to "has it stopped?". Every cause is kept, in arrival order; `startsNothing`
+ * (any cause: no attempt begins, nothing is requeued, no dependant is released) and `landsNothing`
+ * (any safety cause, not only the first) are the only readings, and `headline` is the cause the
+ * closing summary names: the highest-ranked, the earliest within a rank.
+ */
+export type StopState = {
+  add(cause: StopCause): void;
+  readonly causes: readonly StopCause[];
+  readonly startsNothing: boolean;
+  readonly landsNothing: boolean;
+  readonly headline: StopCause | undefined;
+};
+
+/**
+ * `host` is read live: a write the host git refused is a safety stop the moment it is refused,
+ * without anyone recording it, so no path can miss it.
+ */
+export const createStopState = (host?: { readonly failed: unknown }): StopState => {
+  const added: StopCause[] = [];
+  const causes = (): StopCause[] => {
+    const failed = host?.failed;
+    const live = failed !== undefined && !added.some((c) => c.kind === "host failed" && c.error === failed);
+    return live ? [...added, { kind: "host failed", error: failed }] : added;
+  };
+  return {
+    add: (cause) => void added.push(cause),
+    get causes() {
+      return [...causes()];
+    },
+    get startsNothing() {
+      return causes().length > 0;
+    },
+    get landsNothing() {
+      return causes().some((c) => STOP_KINDS[c.kind].safety);
+    },
+    get headline() {
+      // `<` keeps the earliest of equal ranks.
+      return causes().reduce<StopCause | undefined>((best, c) => (!best || STOP_KINDS[c.kind].rank < STOP_KINDS[best.kind].rank ? c : best), undefined);
+    },
+  };
 };

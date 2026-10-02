@@ -52,7 +52,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import { conflictLine, createFlow, createHostGit, createLanding, createSettling, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
-import { createFileHold, createQueue, fileWaitNote, startHold, type TicketFiles } from "./schedule.ts";
+import { createFileHold, createQueue, createStopState, fileWaitNote, startHold, type StopCause, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -504,12 +504,27 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   Object.assign(summary, { due: true, printed: false });
   // The one writer of host git, and the `.git` fingerprint whose base it moves with its own writes.
   const host = createHostGit(project, gitFingerprint(project));
-  // Set when the shared .git changed under us; no further issue starts.
-  let tampered: string | undefined;
-  // Every failed .git check's message: each in-flight pipeline fails its own
-  // once the base moves, and one string was overwritten between a throw and
-  // its handler, so a stopped ticket read as crashed.
-  const stops = new Set<string>();
+  // Every reason the run stopped (schedule.ts), the host's refused write read live: whether a
+  // ticket starts, is requeued, releases a dependant or lands is read from it and nothing else.
+  // Until the scheduler owns it, the burndown adds a cause where it finds one.
+  const stop = createStopState(host);
+  // A pipeline that fails its own `.git` check after the base moved finished its work: it is
+  // stopped, not crashed. Each one's error is kept as a cause, so none reads as a crash.
+  const stoppedBy = (reason: unknown) => stop.causes.some((c) => c.kind === "tampered" && String(c.error) === String(reason));
+  // How a cause reads in the skipped tickets' notes and the closing summary.
+  const stopWords = (c: StopCause): string => {
+    switch (c.kind) {
+      case "plan limit":
+        return `${ref(c.ticket)} hit the plan's usage limit`;
+      case "usage limit":
+        return c.line;
+      case "tampered":
+      case "host failed":
+        return "the shared .git changed";
+    }
+  };
+  // What a stopped run throws: a safety stop's own error, which names what moved.
+  const stopError = (c: StopCause) => ("error" in c ? c.error : new OperatorError(stopWords(c)));
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
@@ -1045,8 +1060,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       try {
         await host.settle(branch, `after ${ref(issue.id)}`);
       } catch (error) {
-        stops.add(String(error));
-        tampered ??= String(error);
+        stop.add({ kind: "tampered", error });
         // A pipeline that crashed on its own keeps its own error; the run
         // stops either way.
         if (failed === undefined) throw error;
@@ -1056,8 +1070,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
 
   // A spent plan allowance fails every issue after it the same way, each one
   // after paying for a sandbox and an install. The first one stops the queue.
-  let limitHit: string | undefined;
-  let usageHit: string | undefined;
   const hitLimit = (issue: string) => {
     const logs = join(project.root, ".sandcastle/logs");
     if (!existsSync(logs)) return false;
@@ -1127,21 +1139,18 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     run,
     flow: { retry: (...a) => flow.retry(...a), earlier: (id) => flow.earlier(id) },
     byId,
-    stopping: () => landing.stop !== undefined || host.failed !== undefined,
+    stop,
     dealt: () => {
       dealt++;
       landingStage();
     },
     afterLanding: (id, closed) => afterLanding(id, closed),
-    onStop: (why) => {
-      tampered ??= String(why);
-    },
     outcomes: (lines) => recordOutcomes(project, runId, lines),
     ref,
     say: (line) => console.log(line),
   });
   const { requeuedAs, keepFirst } = settling;
-  const landing = createLanding(ctx, { settled: settling.settled, stopped: settling.stopped });
+  const landing = createLanding(ctx, stop, { settled: settling.settled, stopped: settling.stopped });
 
   // Bounded fan-out: a sliding pool, not a batch barrier, inside the
   // machine-wide sandbox limit.
@@ -1165,7 +1174,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const begun = new Set<string>();
   const calledOff = new Set<string>();
   const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
-  const stopped = () => limitHit !== undefined || usageHit || tampered || landing.stop || host.failed;
   // A landing that has closed its ticket frees the tickets that waited for it, on the landing
   // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
   const { afterLanding } = createRelease({
@@ -1173,7 +1181,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     hold,
     start: enter,
     finish: () => flow.finish(),
-    stopped,
+    stop,
     dryRun: DRY_RUN,
     badLabel: (id) => badLabels.get(id),
     record: run,
@@ -1210,13 +1218,13 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     // Whether the ticket went on to landing, which says its last word; otherwise this pipeline did.
     let handed = false;
     // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered || landing.stop) {
+    if (stop.startsNothing) {
       keepFirst(issue.id);
       return false;
     }
-    const stop = await usageStop(env);
-    if (stop) {
-      usageHit ??= stop;
+    const line = await usageStop(env);
+    if (line) {
+      stop.add({ kind: "usage limit", line });
       keepFirst(issue.id);
       return false;
     }
@@ -1251,7 +1259,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             run.update({ typical: typicalTimes(project, [...took.values()]) });
             // With nothing left to start, the pane closes: five panes each
             // frozen on a finished agent's summary read as five stuck sandboxes.
-            view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), queue.size === 0 && !waits.waitsForFlight && !hold?.size);
+            // A stopped run starts nothing, whatever is still queued or parked.
+            const last = stop.startsNothing || (queue.size === 0 && !waits.waitsForFlight && !hold?.size);
+            view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), last);
             // Recorded now, not only at the report: a branch waiting for
             // landing had no outcome for this run, and its row read as an
             // earlier run's leftover. Landing overwrites it.
@@ -1268,11 +1278,12 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         (reason) => {
           // The .git check after this ticket's pipeline failed: its work
           // finished, and the whole run stops. Not a crash of the ticket.
-          if (stops.has(String(reason))) {
+          if (stoppedBy(reason)) {
             bookkeep(issue.id, () => {
               run.ticket(issue.id, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
               recordOutcomes(project, runId, { [issue.id]: "stopped: the run stopped before landing" });
-              view.finish(issue.id, "stopped");
+              // The run starts nothing more, so nothing will reuse the pane.
+              view.finish(issue.id, "stopped", true);
             });
             return { status: "rejected", reason } as const;
           }
@@ -1281,7 +1292,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             run.ticket(issue.id, { state: "crashed", note: String(reason).split("\n")[0].slice(0, 160) });
             // Kept open even at the end of the queue: a crash is for a human to read.
             view.finish(issue.id, "crashed");
-            if (hitLimit(issue.id)) limitHit = issue.id;
+            if (hitLimit(issue.id)) stop.add({ kind: "plan limit", ticket: issue.id });
           });
           return { status: "rejected", reason } as const;
         },
@@ -1310,8 +1321,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // pipelines would wait for it for ever.
   const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run().finally(() => queue.close())]);
   clearInterval(heartbeat);
-  const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
-  for (const i of entered) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
+  // The cause the closing summary names: the most severe, a `.git` change before a limit.
+  const headline = stop.headline;
+  const stopLine = headline && stopWords(headline);
+  for (const i of entered) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stopLine ?? "the run stopped"}` });
 
   // The run stops: the summary still prints, headed by why - a stack trace was all a
   // stopped run left, and its report then said "Run finished".
@@ -1321,16 +1334,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     console.log(`\n${await closingReport(project)}\n`);
     throw error;
   };
-  if (landing.stop) await stopLanding(landing.stop);
+  // A safety stop (a `.git` change, after a pipeline or under the landing worker, or a refused
+  // write) landed nothing more: the run stops, headed by the most severe of them.
+  if (stop.landsNothing && headline) await stopLanding(stopError(headline));
   for (const r of [ended, landed]) if (r.status === "rejected") await stopLanding(r.reason);
-  // A pipeline's own check failed and nothing was left to land: the run still stops, as it did before landing.
-  if (tampered) {
-    try {
-      await host.check("before landing");
-    } catch (error) {
-      await stopLanding(error);
-    }
-  }
 
   // An agent that can write to the tracker (GitHub) hands a ticket back
   // itself - hold label on, queue label off - and commits nothing, so its
@@ -1375,7 +1382,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     }
   }
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
-  if (host.failed) await stopLanding(host.failed);
+  if (stop.landsNothing) await stopLanding(stopError(stop.headline!));
   for (const n of merged) view.landed(n, true, closeFailed.includes(n) ? "merged, not closed" : "merged");
   for (const n of closedEarlier) view.landed(n, true, "closed");
   for (const c of conflicted) view.landed(c.issue, false, "merge conflict");
@@ -1427,7 +1434,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const final = run.tickets();
   for (const r of results) {
     if (r.status === "rejected") {
-      console.log(`  ${stops.has(String(r.reason)) ? "STOPPED" : "CRASHED"}  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
+      console.log(`  ${stoppedBy(r.reason) ? "STOPPED" : "CRASHED"}  ${String(r.reason).split("\n")[0].slice(0, 200)}`);
       continue;
     }
     const o = r.value;
@@ -1440,9 +1447,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const total = [...spent.values()].reduce(addTokens, NO_TOKENS);
   if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
-  if (limitHit !== undefined || usageHit) {
-    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${entered.length - begun.size} queued ticket(s) were not started.`);
-  }
+  if (stopLine) console.log(`\nSTOPPED EARLY: ${stopLine}; ${entered.length - begun.size} queued ticket(s) were not started.`);
   let dryRunCheck: string | undefined;
   if (before) {
     const after = tracker.snapshot([...before.keys()].filter((k) => k !== LATEST_ISSUE));
