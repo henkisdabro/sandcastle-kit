@@ -20,7 +20,7 @@ const cli = (file: string, args: string[], cwd: string, config: string) =>
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, XDG_CONFIG_HOME: config, HERDR_CONFIG_PATH: join(config, "herdr.toml"), GIT_CEILING_DIRECTORIES: tmpdir() },
+    env: { ...process.env, HOME: config, XDG_CONFIG_HOME: config, HERDR_CONFIG_PATH: join(config, "herdr.toml"), GIT_CEILING_DIRECTORIES: tmpdir() },
   });
 
 const git = (cwd: string, ...args: string[]) => {
@@ -66,6 +66,23 @@ for (const flag of ["--help", "-h"]) {
     assert.deepEqual(readdirSync(config), [], "nothing written to the user's config");
   });
 }
+
+test("a help flag after other arguments still prints help and runs nothing", () => {
+  const dir = project();
+  const config = mkdtempSync(join(tmpdir(), "sandcastle-cmdhelp-cfg-"));
+  for (const args of [["run", "170", "--help"], ["requeue", "5", "--note", "-h"], ["clean", "--all", "-h"]]) {
+    const r = cli("src/cli.ts", args, dir, config);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stdout, new RegExp(`^ {2}${args[0]} `, "m"));
+  }
+  assert.match(git(dir, "branch", "--list", "agent/issue-1"), /agent\/issue-1/);
+});
+
+test("the help is the header comment alone, not the code's comments", async () => {
+  const { HELP } = await import("../src/help.ts");
+  assert.ok(!HELP.join("\n").includes("A refusal the operator acts on"));
+  assert.match(HELP.join("\n"), /^ {2}setup /m);
+});
 
 test("herdr configure --help, through the plugin's own entry, edits no config", () => {
   const dir = project();

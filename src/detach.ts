@@ -8,7 +8,7 @@
 // run lock, the same file that keeps a second run out.
 
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,7 +85,14 @@ export const startDetached = async (
 ): Promise<Detached> => {
   const log = join(root, OUTPUT_LOG);
   mkdirSync(dirname(log), { recursive: true });
-  // Opened for writing, so each run starts its log afresh; the child's stdout and stderr share it.
+  // Each run starts its log afresh, so the skill's "read every turn's summary" reads this run
+  // alone; the run before is kept in logs/archive/, where it was once overwritten and lost.
+  if (existsSync(log)) {
+    const archive = join(dirname(log), "archive");
+    mkdirSync(archive, { recursive: true });
+    renameSync(log, join(archive, `run-output-${statSync(log).mtime.toISOString().replace(/[:.]/g, "-")}.log`));
+  }
+  // The child's stdout and stderr share it.
   const fd = openSync(log, "w");
   const env = { ...process.env, SANDCASTLE_DETACHED: "1" } as NodeJS.ProcessEnv;
   delete env.SANDCASTLE_DETACH;

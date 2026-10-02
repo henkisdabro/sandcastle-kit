@@ -2,13 +2,11 @@ import { readFileSync } from "node:fs";
 
 // `sandcastle help` is the header comment of src/cli.ts, so the help and the code cannot drift.
 // It is read here, not in cli.ts, because the Herdr plugin's entry needs it without loading the
-// whole CLI.
-export const HELP = readFileSync(new URL("./cli.ts", import.meta.url), "utf8")
-  .split("\n")
-  .filter((l) => l.startsWith("//"))
-  .map((l) => l.slice(3));
+// whole CLI. Only the header: the code's own comments further down are not help.
+const lines = readFileSync(new URL("./cli.ts", import.meta.url), "utf8").split("\n");
+export const HELP = lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.slice(3));
 
-// A trailing --help or -h asks for text: a command that reads it as an argument it does not know
+// A --help or -h anywhere in the arguments asks for text: a command that reads it as an argument it does not know
 // would otherwise run (`clean --help` deleted branches).
 export const wantsHelp = (args: string[]) => args.some((a) => a === "--help" || a === "-h");
 
