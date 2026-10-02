@@ -167,11 +167,21 @@ const fence = (text: string) => {
 
 // The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
 // exercises the change. Same rules as `tags()` in the pipeline - the last tag wins, an empty
-// one or the echoed placeholder "..." does not count - and the text is one line, cut to 200.
+// one or the echoed placeholder "..." does not count - and the text is one line, cut to
+// UNGATED_MAX at a word with a closing "…" (the report then points at the review log).
+export const UNGATED_MAX = 2000;
+export const cutAtWord = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  // Room for the "…"; back up to the last space so no word is left half-written, unless
+  // the head is one unbroken run (a path or URL), which is cut where it stands.
+  const head = text.slice(0, max - 1);
+  const space = head.lastIndexOf(" ");
+  return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
+};
 export const ungatedOf = (text: string): string | undefined => {
   const last = [...text.matchAll(/<ungated>([\s\S]*?)<\/ungated>/g)].at(-1);
-  const said = last?.[1].replace(/\s+/g, " ").trim().slice(0, 200).trim();
-  return said && said !== "..." ? said : undefined;
+  const said = last?.[1].replace(/\s+/g, " ").trim();
+  return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
@@ -1109,7 +1119,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         head,
         carried,
         unreviewed,
-        ungated: ungated.length ? [...new Set(ungated)].join("; ").slice(0, 300) : undefined,
+        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
       };
     } catch (error) {
       failed = error;
