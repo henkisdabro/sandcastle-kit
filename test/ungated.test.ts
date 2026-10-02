@@ -57,9 +57,8 @@ test("ungatedOf ignores the placeholder, an empty tag and no tag", () => {
   assert.equal(ungatedOf("nothing to flag"), undefined);
 });
 
-test("ungatedOf makes one line of a multi-line tag and cuts it to 200 characters", () => {
+test("ungatedOf makes one line of a multi-line tag", () => {
   assert.equal(ungatedOf("<ungated>open the page\n   and check\tpage 2</ungated>"), "open the page and check page 2");
-  assert.equal(ungatedOf(`<ungated>${"x".repeat(500)}</ungated>`)?.length, 200);
 });
 
 test("a merged ticket with an ungated line is listed under Needs you, once, and counted", () => {

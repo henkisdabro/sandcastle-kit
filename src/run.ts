@@ -18,7 +18,12 @@ import { type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-r
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
 // finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
 // only while a sandbox is live: while it listens, leave the teardown to it (a SIGHUP
-// is handed over as a SIGTERM); otherwise exit, so the exit handlers fire.
+// is handed over as a SIGTERM); otherwise run the exit handlers once and die by the signal.
+// Not `process.exit`: on Node 24 it can deadlock joining V8's platform workers (a concurrent
+// Sparkplug or Maglev compile waits for a GC the main thread never runs), after which no signal
+// reaches JS again and only SIGKILL ends the process (nodejs/node#66171, open). A signal the
+// process re-raises on itself, with its default action back, is ended by the kernel with no join,
+// and the shell still sees 129, 130 or 143.
 // A detached run (`--detach`) has no terminal to hang up, and a SIGHUP it still gets (the
 // shell that started it closing, on a system that sends one to the session) must not end it:
 // it stops on `sandcastle stop`, which is a SIGINT.
@@ -30,13 +35,19 @@ export const exitOnSignal = () => {
       process.on(sig, () => {});
       continue;
     }
-    process.on(sig, () => {
+    const onSignal = () => {
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;
       }
-      process.exit(128 + osConstants.signals[sig]);
-    });
+      const code = 128 + osConstants.signals[sig];
+      process.exitCode = code;
+      process.emit("exit", code);
+      // With no listener left Node restores the signal's default action, which ends the process.
+      process.removeAllListeners(sig);
+      process.kill(process.pid, sig);
+    };
+    process.on(sig, onSignal);
   }
 };
 
@@ -514,12 +525,13 @@ const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n
  * A rough estimate for a run about to start: the median tokens and time of
  * this project's tickets in its last three runs (from timings.jsonl, see
  * `recentWindow`) times `tickets`, with
- * the time divided across `slots`. Undefined until an earlier ticket has
+ * the time divided across `slots`, or one ticket's time per ticket
+ * of the longest in-run `Blocked by` chain (`chain`) when that is longer. Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
  * covers the tickets' own pipelines only - not the image check, preflight,
  * base gates, landing or verify. A line that does not parse is skipped.
  */
-export const estimate = (project: Project, tickets: number, slots: number): string | undefined => {
+export const estimate = (project: Project, tickets: number, slots: number, chain = 0): string | undefined => {
   let text: string;
   try {
     text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
@@ -555,9 +567,11 @@ export const estimate = (project: Project, tickets: number, slots: number): stri
   if (!counted.length) return undefined;
   const inAll = median(counted.map((g) => g.inTokens))! * tickets;
   const outAll = median(counted.map((g) => g.out))! * tickets;
-  const m = Math.round((median(counted.map((g) => g.ms))! * Math.ceil(tickets / slots)) / 60_000);
+  // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots.
+  const rounds = Math.max(chain, Math.ceil(tickets / slots));
+  const m = Math.round((median(counted.map((g) => g.ms))! * rounds) / 60_000);
   const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time.`;
+  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (a chain of ${chain} runs in order)` : ""}.`;
 };
 
 // ---------------------------------------------------------------------------

@@ -114,8 +114,6 @@ const resultUsage = (line: string) => {
   }
 };
 
-export const implEffort = () => IMPL_EFFORT;
-
 /** A ticket's own choice of implementer, from its `model:` and `effort:` labels. */
 export type Override = { model?: string; effort?: Effort };
 
@@ -157,6 +155,9 @@ export const ticketOverride = (ref: string, labels: string[]): Override => {
   }
   return out;
 };
+
+// The text after a ticket in the run's start line and in `sandcastle queue`; empty without a label.
+export const implementNote = (o: Override) => (o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? IMPL_EFFORT}]` : "");
 
 export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.effort ?? IMPL_EFFORT);
 

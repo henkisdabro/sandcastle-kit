@@ -147,7 +147,7 @@ test("a long title is cut between characters, and ticket-file ids stay apart", (
 });
 
 test("the run's process is told from a later owner of its pid by the command the kit starts it with", () => {
-  assert.ok(read("bin", "sandcastle").includes(`exec node --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/${RUN_COMMAND}"`), "bin/sandcastle starts src/cli.ts");
+  assert.ok(read("bin", "sandcastle").includes(`exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/${RUN_COMMAND}"`), "bin/sandcastle starts src/cli.ts");
 });
 
 test("the band is the castle's three rows, the run beside its walls, each row cut to its width", () => {

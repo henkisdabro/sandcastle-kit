@@ -14,6 +14,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`sandcastle --version`.** Prints the kit version: the release, and in a clone that is past it
   or has local changes, how far and at which commit (`0.4.2 +1 (1c4f46f)`). Doctor's first line
   now names it too, so a report of a problem says which kit it came from.
+- **`sandcastle queue` shows a ticket's own implementer.** A ticket whose `model:` or `effort:`
+  label sets its implementer reads `[implement <model>/<effort>]` after its title. The README and
+  the skill state the order: the ticket's label, then `IMPL_MODEL` / `IMPL_EFFORT`, then the
+  config, then the kit's default. To override a label for one run, remove the label.
+- **Doctor says when the project is another checkout of the kit** than the one running. It names
+  both paths, and says that `./bin/sandcastle` runs this one.
+- **A drain names the tickets queued after it started.** Its closing lines list each one, for
+  the next `sandcastle run` to take.
 
 ### Changed
 
@@ -32,9 +40,21 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The status view draws light rules at every seam.** The rules above the headings and above the
   legend are no longer double lines, and a column bar that lands within 4 columns of a bar in the
   band above snaps onto it, so the two meet in one joint. The website's demo matches.
+- **The Herdr plugin's Ctrl-click log popup follows the log live** once the log is longer than
+  the popup, and Ctrl-C closes it. A shorter log opens at its top, as before.
+- **The run estimate counts the in-run `Blocked by` chain.** When the chain is longer than the
+  tickets over the slots, it sets the time, and the line says `(a chain of N runs in order)`.
+- **`USAGE_CHECK=1` with a token that cannot read plan usage (HTTP 403)** says at the start that
+  the guard is off for this run, and does not ask again. `sandcastle doctor --verify` warns about
+  it beforehand. A failed reading for any other reason is no longer cached for ten minutes: the
+  next ticket asks again, as the start line says.
 
 ### Fixed
 
+- **The skill states two rules agents kept getting wrong.** A `Blocked by` ref must sit on the
+  same line (a list under a `Blocked by:` heading is not read); a drain's later turns run only what
+  the turn before left conflicted or released. The README's `SANDCASTLE_HERDR_VIEW` row now says it turns off the
+  whole Herdr view, not a per-sandbox tab.
 - **The Claude Code mod follows a run its session started in another directory**, such as a
   second clone or a monorepo package: the band, the needs-you notice and the end prompt work by
   the session id each run records. Every run now registers in the machine-wide live-runs
@@ -48,6 +68,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   land.** The landing worker checks for a safety stop again once its check returns.
 - **`sandcastle status 0` fills the terminal's width** like the live view, instead of drawing 80
   columns in any pane. Without a terminal it still uses `COLUMNS`, or 80.
+- **Ctrl-C, a hangup or `sandcastle stop` can no longer leave a run hanging after it has written
+  its end.** On Node 24, `process.exit` could deadlock with one of V8's background compile jobs
+  (nodejs/node#66171): the exit handlers ran, then the process never ended, and a second Ctrl-C
+  did nothing. A run now ends on a signal by sending that signal to itself once its exit handlers
+  have run. The launcher also turns off Node's concurrent Maglev and Sparkplug compilers until
+  Node ships the fix.
+- **`sandcastle wait` no longer returns at once with exit code 0** when it starts in the moment
+  between a run releasing its lock and writing its exit code. It also follows the live pid
+  recorded in run.json.
+- **A waiting ticket's note stays right once its in-run blocker ends.** For a ticket that also
+  waits outside the run, a blocker that landed drops out of the note, and one that ended any
+  other way reads `(not in this run)`, where the note used to say `(lands this run)` until the
+  run ended.
+- **A requeued ticket's second attempt names its first attempt**, not "an earlier run".
+- **The reviewer's check-by-hand note is kept up to 2,000 characters**, cut at a word with `…` and
+  a pointer to the review log. It used to be cut to 200 characters per note and 300 in all,
+  mid-word.
 
 ## [0.4.2] - 2026-10-02
 

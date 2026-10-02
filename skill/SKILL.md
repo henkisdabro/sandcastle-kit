@@ -45,7 +45,10 @@ and spend the user's plan allowance or API credits. Say so and get a yes before 
 them for a project, set `model` or `effort` under `implement` or `review` in the project's
 `.sandcastle/config.ts` and commit it - for example `review: { effort: "medium" }`. For one run
 only, prefix the command with `IMPL_MODEL`, `IMPL_EFFORT`, `REVIEW_MODEL` or `REVIEW_EFFORT`;
-these win over the config. Repair uses the implementer's model and effort. A run that is already
+these win over the config. For the implementer the order is: the ticket's own `model:` or
+`effort:` label, then `IMPL_MODEL` / `IMPL_EFFORT`, then the config, then the kit's default - so
+`IMPL_MODEL` does not change a ticket that carries a `model:` label; to override a label for one
+run, remove the label. Repair uses the implementer's model and effort. A run that is already
 going keeps its models; the change applies from the next one. It never needs a change to the kit.
 
 ## init - set up a project
@@ -192,7 +195,7 @@ comments, and the gates can prove it.
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
-   | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text: a line inside a code block or backticks is not read either. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
+   | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text, with the ref on the same line (`Blocked by #12, #14`): a list under a `Blocked by:` heading is not read, nor is a line inside a code block or backticks. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
@@ -217,16 +220,17 @@ comments, and the gates can prove it.
 
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
-   same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry
+   same checkout). Show the user the queue (`sandcastle queue`), the models (a ticket whose label sets its own
+   implementer shows `[implement <model>/<effort>]` after its title there), whether it is a dry
    run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
    guess how long it takes: once the project has run before, the run prints a rough estimate at
    the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
-   offer `USAGE_CHECK=1` if the plan is close to its limit. If the config sets `autonomy` (or the
+   offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
    shows `Blocked by` chains and no autonomy is set, recommend `AUTONOMY_LEVEL=drain` (or `autonomy: "drain"`): it
    takes turns until the queue is drained or a stop holds (no progress, the same ticket conflicting twice running,
-   a red base, a usage limit, 20 turns at most), so the chain does not need a `sandcastle run` per link. Say that the run first gates the base commit and stops if a
+   a red base, a usage limit, 20 turns at most), so the chain does not need a `sandcastle run` per link. Each later turn runs only the tickets the turn before left conflicted or released; a ticket queued after the run started is not taken: it waits for the next `sandcastle run`. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run

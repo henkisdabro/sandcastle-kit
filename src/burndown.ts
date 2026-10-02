@@ -26,7 +26,7 @@
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
@@ -53,11 +53,12 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
+  accountLanding, carriedBranch, carriedMergeLine, conflictLine, createHostGit, createRequeueRecord, greenCarriedLine, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
 import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { blockerChain } from "./lint.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
 export { abortLanding, closeComment, mergeBranch } from "./landing.ts";
@@ -167,11 +168,21 @@ const fence = (text: string) => {
 
 // The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
 // exercises the change. Same rules as `tags()` in the pipeline - the last tag wins, an empty
-// one or the echoed placeholder "..." does not count - and the text is one line, cut to 200.
+// one or the echoed placeholder "..." does not count - and the text is one line, cut to
+// UNGATED_MAX at a word with a closing "…" (the report then points at the review log).
+export const UNGATED_MAX = 2000;
+export const cutAtWord = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  // Room for the "…"; back up to the last space so no word is left half-written, unless
+  // the head is one unbroken run (a path or URL), which is cut where it stands.
+  const head = text.slice(0, max - 1);
+  const space = head.lastIndexOf(" ");
+  return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
+};
 export const ungatedOf = (text: string): string | undefined => {
   const last = [...text.matchAll(/<ungated>([\s\S]*?)<\/ungated>/g)].at(-1);
-  const said = last?.[1].replace(/\s+/g, " ").trim().slice(0, 200).trim();
-  return said && said !== "..." ? said : undefined;
+  const said = last?.[1].replace(/\s+/g, " ").trim();
+  return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
@@ -404,14 +415,14 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};
-    const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
+    const own = implementNote(o);
     const later = parked.find((p) => p.ticket.id === i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, candidates.length, slots);
+  const rough = estimate(project, candidates.length, slots, blockerChain(project, tracker, candidates).length);
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
@@ -720,6 +731,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // worktree's gitdir pointer) could by now name an fsmonitor or merge
       // driver that a host git in the worktree would execute.
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
+      // The requeue-once state holds the first attempt's line only on a second attempt in this run.
+      const requeued = requeuedAs.has(issue.id);
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
       // Read before the base merge, which moves the tip. A branch still at the
       // head it was reviewed and gated green on needs no implement or review:
@@ -727,7 +740,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
       let landOnly = greenHead !== undefined;
       if (greenHead !== undefined) {
-        console.log(`${ref(issue.id)}: reviewed and green at ${greenHead.slice(0, 7)} in an earlier run - no implement or review; the gates decide.`);
+        console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
@@ -751,7 +764,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             identity,
           });
           if (r.ok) {
-            console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
+            console.log(carriedMergeLine(ref(issue.id), base, behind, requeued, { files, regen: r.regen }));
           } else {
             // Back to the merge as it stood, for the implementer (or, on a green
             // branch, the resolver) to resolve.
@@ -759,16 +772,16 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             await sandbox.exec(merge);
             mergeConflicted = true;
             console.log(
-              `${ref(issue.id)}: its ${landOnly ? "green branch" : "branch from an earlier run"} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
             );
           }
-        } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
+        } else if (pull.exitCode === 0) console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
         else if (unmerged) {
           mergeConflicted = true;
           console.log(
             landOnly
               ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
-              : `${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
+              : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
           );
         }
         else {
@@ -1109,7 +1122,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         head,
         carried,
         unreviewed,
-        ungated: ungated.length ? [...new Set(ungated)].join("; ").slice(0, 300) : undefined,
+        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
       };
     } catch (error) {
       failed = error;
@@ -1314,7 +1327,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       case "ended":
         return ended(c.id, c.ending);
       case "blocked":
-        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight)) }));
+        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
         console.log(`${ref(c.id)}: could not start the tickets that wait for it (${errorLine(c.error)}); they wait for the next run.`);
         return;
