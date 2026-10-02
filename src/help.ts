@@ -12,12 +12,15 @@ export const HELP = readFileSync(new URL("./cli.ts", import.meta.url), "utf8")
 // would otherwise run (`clean --help` deleted branches).
 export const wantsHelp = (args: string[]) => args.some((a) => a === "--help" || a === "-h");
 
-// One command's entry: its first line and the indented lines that continue it. A command the help
-// does not list (the internal `lean-apply`) gets the whole text.
+// One command's entries: each first line and the indented lines that continue it. Every entry,
+// not the first: `queue` has a second one for `queue --lint`. A command the help does not list
+// (the internal `lean-apply`) gets the whole text.
 export const helpFor = (command: string) => {
-  const start = HELP.findIndex((l) => l === `  ${command}` || l.startsWith(`  ${command} `));
-  if (start < 0) return HELP.join("\n");
-  const entry = [HELP[start]!];
-  for (let i = start + 1; i < HELP.length && /^\s{4,}\S/.test(HELP[i]!); i++) entry.push(HELP[i]!);
-  return entry.join("\n");
+  const entry: string[] = [];
+  HELP.forEach((l, start) => {
+    if (l !== `  ${command}` && !l.startsWith(`  ${command} `)) return;
+    entry.push(l);
+    for (let i = start + 1; i < HELP.length && /^\s{4,}\S/.test(HELP[i]!); i++) entry.push(HELP[i]!);
+  });
+  return entry.length ? entry.join("\n") : HELP.join("\n");
 };
