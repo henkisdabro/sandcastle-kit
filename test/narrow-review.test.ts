@@ -113,6 +113,8 @@ const project = (root: string): Project => ({
   lean: { keep: [], dropHooks: [] },
   gates: [{ name: "unit", command: "echo gate-ok" }],
   hookTests: [],
+  land: "merge",
+  generated: [],
   implement: {},
   review: {},
   repair: {},
