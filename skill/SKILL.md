@@ -245,7 +245,7 @@ comments, and the gates can prove it.
    Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
    ```
 
-   **Confirm that line.** Outside Herdr it says `Status view: run `sandcastle status``. If the
+   **Confirm that line.** Outside Herdr it says ``Status view: run `sandcastle status` ``. If the
    command refuses, or prints `The run ended at once`, or no status view where Herdr is in use,
    say so plainly to the user - do not carry on as if they can watch it. Tell the user the pid,
    and the tab and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output;
