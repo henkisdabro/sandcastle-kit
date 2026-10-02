@@ -125,9 +125,13 @@ test("the status view's word mapping and grouping put every ticket state in the 
 test("every arm of the status view's grouping is a ticket state's word or a derived state", () => {
   const words = new Set<string>(TICKET_STATES.map((s) => WORDS[s] ?? s));
   const derived = new Set<string>(DERIVED_STATES);
+  const seen = new Set<string>();
   for (const { word } of groupArms()) {
     if (word === "*") continue;
     assert.ok(words.has(word) || derived.has(word), `status.sh groups "${word}", which is neither a ticket state's word nor a derived state`);
+    // A case takes its first match, so a word named again in a later arm is dead there.
+    assert.ok(!seen.has(word), `status.sh groups "${word}" in two arms of style_of; the later one never matches`);
+    seen.add(word);
   }
 });
 
