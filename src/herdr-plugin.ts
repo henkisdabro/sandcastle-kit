@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { confirm } from "./autonomy.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, runCounts } from "./herdr.ts";
 import { RUNS_DIR } from "./live-runs.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -455,6 +456,8 @@ const view = async (how: "toggle" | "reapply") => {
 
 export const herdrCommand = async (args: string[]) => {
   const [verb, ...rest] = args;
+  // Before any verb: `configure --help` must not edit Herdr's config.
+  if (wantsHelp(args)) return console.log(helpFor("herdr"));
   switch (verb) {
     case "configure":
       return configure(rest.includes("--remove"), rest.includes("--yes"));

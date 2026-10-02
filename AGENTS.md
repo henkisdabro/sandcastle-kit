@@ -32,6 +32,7 @@ read a module's section there before changing it.
 |---|---|
 | `bin/sandcastle` | Shell entry: runs `src/cli.ts` with the kit's own tsx loader; `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone |
 | `src/cli.ts` | Every command (`sandcastle help` lists them) and the autonomy loop around `burndown()`; the help text is the file's header comment, held by `test/help.test.ts` |
+| `src/help.ts` | The help text (the header comment of `src/cli.ts`), `helpFor(command)` and `wantsHelp`: a trailing `--help` or `-h` prints help before any command runs; the Herdr plugin's entry shares it |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
