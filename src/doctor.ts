@@ -151,6 +151,29 @@ export const staleImageWarning = (created: string, now: Date, tag = "sandcastle-
   return `base image ${tag} was built ${days} days ago - \`sandcastle build --force\` pulls Debian and Node security updates`;
 };
 
+/** Whether a directory is a checkout of the kit: its package name is the kit's, or it has the kit's entry script. */
+export const isKitCheckout = (dir: string) => {
+  try {
+    if (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).name === "sandcastle-kit") return true;
+  } catch {
+    // No package.json, or one that does not parse: fall through to the entry script.
+  }
+  return existsSync(join(dir, "bin/sandcastle"));
+};
+
+/**
+ * An info line when the project is another checkout of the kit than the running one: a bare
+ * `sandcastle` runs the running kit's code, so a change in the project's checkout looks unapplied.
+ * Undefined for any other project.
+ */
+export const otherKitCheckoutNote = (repoRoot: string, kit = KIT) => {
+  if (!isKitCheckout(repoRoot)) return undefined;
+  const here = realpathSync(repoRoot);
+  const running = realpathSync(kit);
+  if (here === running) return undefined;
+  return `info This project is a different checkout of the kit (${here}) than the one running (${running}): \`sandcastle ...\` runs the other one; \`./bin/sandcastle\` runs this checkout.`;
+};
+
 export const doctor = async (repoRoot?: string, verify = false) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
@@ -356,6 +379,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   // The kit's own clone is not a project; checking it would print a false FIX.
   if (repoRoot && realpathSync(repoRoot) !== realpathSync(KIT)) {
     console.log(`\nproject ${repoRoot}`);
+    const otherKit = otherKitCheckoutNote(repoRoot);
+    if (otherKit) console.log(otherKit);
     const hasConfig = existsSync(join(repoRoot, CONFIG_PATH));
     check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
     // A warning, never a FIX: a pulled kit still runs, but a note may ask this project to act.
