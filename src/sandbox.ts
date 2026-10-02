@@ -274,18 +274,27 @@ const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
 export const sandboxEnv = (project: Project): Record<string, string> => ({ ...credentials(project), ...AGENT_COMMITTER });
 
+// Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
+// branch's own `disableAllHooks` cannot switch the git guard off. A read-only *directory* mount
+// cannot be written to, edited or removed from inside; a file mount outside the sandbox home is
+// refused by Sandcastle. No image rebuild: the guard travels with the kit.
+export const MANAGED_SETTINGS = "/etc/claude-code";
+
+export const sandboxMounts = (project: Project) => [
+  ...project.mounts,
+  { hostPath: join(KIT, "container"), sandboxPath: MANAGED_SETTINGS, readonly: true },
+  ...(CROSS_REVIEW
+    ? [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }]
+    : []),
+];
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
   sandbox: docker({
     imageName: image,
     env: sandboxEnv(project),
-    mounts: [
-      ...project.mounts,
-      ...(CROSS_REVIEW
-        ? [{ hostPath: "~/.codex/auth.json", sandboxPath: CODEX_AUTH, readonly: true }]
-        : []),
-    ],
+    mounts: sandboxMounts(project),
   }),
   hooks: {
     host: {
