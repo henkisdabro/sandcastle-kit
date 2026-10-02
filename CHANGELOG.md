@@ -31,6 +31,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   until the queue is drained, and stops with the cause named on no progress, the same ticket
   conflicting in two turns running, a red base or verify, a usage limit, a stopped run, or after
   20 turns. It suits a queue of `Blocked by` chains; levels 1-3 are unchanged.
+- **Everything people and agents read says "ticket", not "issue"**: the status view's column,
+  the summary, the prompts, the skill and the docs. `TICKETS=` names the tickets to run;
+  `ISSUES=` still works (with `TICKETS` winning when both are set). Branch and log names
+  (`agent/issue-N`, `agent-issue-*.log`), run-record fields and `{{ISSUE_NUMBER}}` are unchanged,
+  so scripts that read them keep working.
 - **A ticket that conflicts or goes red at landing is sent back once, in the same run.** Its
   pipeline merges the base in, resolves, gates and gets a narrow review, as a re-run does, so
   the run spends that pass now rather than on the next run. A second conflict or red holds it for
@@ -100,6 +105,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The blocker check now also names a blocker held for a human, one that is open but not queued,
   and a `Blocked by` line written inside code (which a run does not read). The closing summary
   says why each ticket is still blocked.
+- In a run with an autonomy level, a turn the loop continues from no longer tells you to do
+  what the loop is about to do: its Next step names the next turn, and if `drain` then stops,
+  your steps are printed after all. Runnable now says why each ticket can run, and a conflict
+  resolution held for a person reads as `held` with the files it changed, never "nothing to
+  change".
 - A finished ticket whose commit was refused (a hook, a full disk, signing) is now `uncommitted`
   under Needs you, pointing at its kept worktree and `sandcastle requeue`, instead of "nothing
   to change". The implement prompt asks the agent to check its commit landed.
