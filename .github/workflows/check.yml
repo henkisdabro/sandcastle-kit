@@ -33,7 +33,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsc --noEmit
-      - run: bash -n status.sh bin/sandcastle .githooks/pre-commit
+      - run: bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh
       - run: pnpm test
       - if: runner.os == 'macOS'
         run: STATUS_BASH=/bin/bash bash test/status.test.sh

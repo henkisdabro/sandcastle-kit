@@ -103,7 +103,7 @@ A change is ready to commit when all of these pass:
 
 ```bash
 pnpm exec tsc --noEmit
-bash -n status.sh bin/sandcastle .githooks/pre-commit
+bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh
 pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls)
 sandcastle doctor
 # from inside a test project (no model calls):

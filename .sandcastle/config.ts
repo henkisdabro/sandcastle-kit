@@ -20,7 +20,7 @@ export default {
   setup: ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"],
   gates: [
     { name: "typecheck", command: "pnpm run typecheck" },
-    { name: "shell-syntax", command: "bash -n status.sh bin/sandcastle .githooks/pre-commit" },
+    { name: "shell-syntax", command: "bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh" },
     { name: "test", command: "pnpm run test" },
   ],
 
