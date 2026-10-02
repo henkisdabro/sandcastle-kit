@@ -57,6 +57,10 @@ const onPty = () => {
     timeout: 60000,
   });
 };
+// BSD sets PENDIN (0x20000000) in lflag whenever a tty goes back to canonical mode, so a
+// restored state reads one bit apart on macOS though nothing is left changed. Linux never reports it.
+const settled = (stty: string) =>
+  stty.replace(/\blflag=([0-9a-f]+)/, (_, hex: string) => `lflag=${(parseInt(hex, 16) & ~0x20000000).toString(16)}`);
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;
 
 test("live view turns echo and alternate scroll off, and puts both back", { skip: hasScript ? false : "script(1) is not installed" }, () => {
@@ -71,7 +75,7 @@ test("live view turns echo and alternate scroll off, and puts both back", { skip
   const on = out.indexOf("\x1b[?1007h");
   assert.ok(off >= 0 && off < out.indexOf("\x1b[2J"), "alternate scroll not turned off on entry");
   assert.ok(on > off && on < out.lastIndexOf("\x1b[?1049l"), "alternate scroll not put back on exit");
-  assert.equal(readFileSync(AFTER, "utf8"), readFileSync(BEFORE, "utf8"), "tty state not restored on exit");
+  assert.equal(settled(readFileSync(AFTER, "utf8")), settled(readFileSync(BEFORE, "utf8")), "tty state not restored on exit");
 });
 
 test("without a terminal the view still runs and leaves no stty error", () => {
@@ -114,5 +118,5 @@ stty -g </dev/tty >>"${afterF}"
     timeout: 20000,
   });
   assert.equal(r.error, undefined, `the view hung after Ctrl-C: ${r.error}`);
-  assert.equal(readFileSync(afterF, "utf8"), `status=130\n${readFileSync(before, "utf8")}`, "view did not exit 130 with the tty restored");
+  assert.equal(settled(readFileSync(afterF, "utf8")), `status=130\n${settled(readFileSync(before, "utf8"))}`, "view did not exit 130 with the tty restored");
 });
