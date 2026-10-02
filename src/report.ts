@@ -285,7 +285,7 @@ export const render = (f: Facts, plain = false): string => {
       ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green.`
-        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed.`,
+        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log`,
   );
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {

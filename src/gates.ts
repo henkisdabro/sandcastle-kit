@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
 import { withSlot } from "./pool.ts";
@@ -352,6 +352,24 @@ export class BaseRedError extends OperatorError {
 }
 
 /**
+ * Writes each red gate's full output to `log` (base gates, and the gates on the merged base at the
+ * end of a run), or removes it when every gate passed: a log left by an earlier red run would read
+ * as this run's result. Returns whether it wrote one.
+ */
+/** Where a red verify (the gates on the merged base at the end of a run) leaves its output. */
+export const VERIFY_LOG = ".sandcastle/logs/verify-gates.log";
+
+export const writeGateLog = (log: string, header: string, failures: GateRun["failures"], extra = ""): boolean => {
+  if (!failures.length && !extra) {
+    rmSync(log, { force: true });
+    return false;
+  }
+  mkdirSync(dirname(log), { recursive: true });
+  writeFileSync(log, `${header}\n\n` + failures.map((f) => `===== ${f.name}: ${f.command} (exit ${f.exitCode})\n${f.output}\n`).join("\n") + extra);
+  return true;
+};
+
+/**
  * Gates the base branch and throws if any gate is red, with each red gate's
  * output in the log. `cached` skips the check when the same base, image and
  * config were green before.
@@ -375,22 +393,16 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
   noteBaseResult(project.root, key, green);
-  if (green) {
-    // A log left by an earlier red run would read as this run's result.
-    rmSync(log, { force: true });
-    return;
-  }
-  mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
   const commit = sh("git", ["rev-parse", "--short", base]);
-  writeFileSync(
+  writeGateLog(
     log,
     `# base gates on ${base} at ${commit}, ${new Date().toISOString()}: ${gateLine(run.gates)}` +
       (redHooks.length ? ` hook-tests=${redHooks.length}-FAIL` : "") +
-      (gitHook ? ` git-hook=${gitHook.name}-FAIL` : "") + "\n\n" +
-      run.failures.map((f) => `===== ${f.name}: ${f.command} (exit ${f.exitCode})\n${f.output}\n`).join("\n") +
-      redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") +
-      (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
+      (gitHook ? ` git-hook=${gitHook.name}-FAIL` : ""),
+    run.failures,
+    redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
+  if (green) return;
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

@@ -660,6 +660,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log, and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
+| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `.run/` | The rendered prompts, the lean plan and the green-base record a run skips the base check by |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |

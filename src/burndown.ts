@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -1380,7 +1380,16 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
-  if (merged.length > 1 || regenerated.size > 0) verify = (await timed("", "verify", () => gateBase(project, image, planFile, "verify"))).gates;
+  if (merged.length > 1 || regenerated.size > 0) {
+    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify"));
+    verify = gated.gates;
+    // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
+    const at = sh("git", ["rev-parse", "--short", base], project.root);
+    if (writeGateLog(join(project.root, VERIFY_LOG), `# gates on the merged ${base} at ${at}, ${new Date().toISOString()}: ${gateLine(verify)}`, gated.failures)) {
+      for (const f of gated.failures) console.log(`\n--- verify ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
+      console.log(`Full output: ${VERIFY_LOG}`);
+    }
+  }
   run.update({ stage: "report" });
 
   // Each branch's outcome, for the status view's rows (run.ts).
