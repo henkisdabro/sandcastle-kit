@@ -513,7 +513,7 @@ AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its earlier tickets. Tickets that others wait for start first; a ticket
+time from the medians of its tickets in the last three runs. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base

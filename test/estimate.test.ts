@@ -47,7 +47,7 @@ test("medians of earlier tickets, times the tickets, time across the slots", () 
   const p = project(history);
   assert.equal(
     estimate(p, 5, 2),
-    "Estimate (rough, from 3 earlier ticket(s) in this project): about 10.0M tokens in / 100k out and 1h 00m for 5 ticket(s), 2 at a time.",
+    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 10.0M tokens in / 100k out and 1h 00m for 5 ticket(s), 2 at a time.",
   );
   assert.match(estimate(p, 1, 4)!, /about 2\.0M tokens in \/ 20k out and 20m for 1 ticket\(s\), 4 at a time\.$/);
 });

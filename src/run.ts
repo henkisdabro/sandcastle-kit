@@ -465,6 +465,35 @@ export const recordRun = (project: Project, extra: Record<string, unknown> = {},
 
 const median = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : undefined);
 
+/**
+ * The timings lines `typicalTimes` and `estimate` both read: those of this
+ * project's three most recent runs (the `run` field is an ISO timestamp) that
+ * have a ticket line, widened to older runs, newest first, until they hold
+ * `MIN_TICKETS` tickets (a `run|issue` pair) or the history ends. A project's
+ * tickets change size over time, so a batch of small ones from weeks ago must
+ * not set what "usual" means for the large ones now. Lines without a `run`
+ * count as one run older than every run that has one. `lines` are ticket
+ * lines already (an issue, not 0, and a numeric `ms`).
+ */
+const RECENT_RUNS = 3;
+const MIN_TICKETS = 5;
+export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines: T[]): T[] => {
+  const runOf = (l: T) => (typeof l.run === "string" ? l.run : "");
+  const byRun = new Map<string, T[]>();
+  for (const l of lines) byRun.set(runOf(l), [...(byRun.get(runOf(l)) ?? []), l]);
+  const newestFirst = [...byRun.keys()].sort().reverse();
+  const picked: T[] = [];
+  const tickets = new Set<string>();
+  for (const [i, run] of newestFirst.entries()) {
+    if (i >= RECENT_RUNS && tickets.size >= MIN_TICKETS) break;
+    for (const l of byRun.get(run)!) {
+      picked.push(l);
+      tickets.add(`${run}|${l.issue}`);
+    }
+  }
+  return picked;
+};
+
 /** Seconds per step, and `issue` for one whole issue; `extra` adds this run's finished issues (ms). */
 export const typicalTimes = (project: Project, extra: number[] = []) => {
   let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number }[] = [];
@@ -474,7 +503,7 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
     /* no runs yet */
   }
   // Steps before the agents are issue 0 (or "" in older lines).
-  const steps = lines.filter((l) => l.project === project.name && l.issue && String(l.issue) !== "0" && typeof l.ms === "number");
+  const steps = recentWindow(lines.filter((l) => l.project === project.name && l.issue && String(l.issue) !== "0" && typeof l.ms === "number"));
   const byPhase = new Map<string, number[]>();
   const byIssue = new Map<string, number>();
   for (const l of steps) {
@@ -492,7 +521,8 @@ const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n
 
 /**
  * A rough estimate for a run about to start: the median tokens and time of
- * this project's earlier tickets (from timings.jsonl) times `tickets`, with
+ * this project's tickets in its last three runs (from timings.jsonl, see
+ * `recentWindow`) times `tickets`, with
  * the time divided across `slots`. Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
  * covers the tickets' own pipelines only - not the image check, preflight,
@@ -507,6 +537,7 @@ export const estimate = (project: Project, tickets: number, slots: number): stri
   }
   type Line = { project?: string; run?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
   const groups = new Map<string, { ms: number; tokened: boolean; inTokens: number; out: number }>();
+  const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
     let l: Line;
     try {
@@ -516,9 +547,12 @@ export const estimate = (project: Project, tickets: number, slots: number): stri
     }
     if (!l || typeof l !== "object" || l.project !== project.name) continue;
     if (!l.issue || String(l.issue) === "0" || typeof l.ms !== "number") continue;
+    ticketLines.push(l);
+  }
+  for (const l of recentWindow(ticketLines)) {
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0 };
-    g.ms += l.ms;
+    g.ms += l.ms as number;
     if (l.tokens && typeof l.tokens === "object") {
       g.tokened = true;
       g.inTokens += (l.tokens.input ?? 0) + (l.tokens.cacheWrite ?? 0) + (l.tokens.cacheRead ?? 0);
@@ -532,7 +566,7 @@ export const estimate = (project: Project, tickets: number, slots: number): stri
   const outAll = median(counted.map((g) => g.out))! * tickets;
   const m = Math.round((median(counted.map((g) => g.ms))! * Math.ceil(tickets / slots)) / 60_000);
   const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  return `Estimate (rough, from ${counted.length} earlier ticket(s) in this project): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time.`;
+  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time.`;
 };
 
 // ---------------------------------------------------------------------------
