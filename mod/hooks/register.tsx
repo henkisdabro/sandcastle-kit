@@ -12,9 +12,11 @@
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
-import { band, followable, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, RUN_COMMAND, startedBy, summarise } from "./run-state";
+import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, RUN_COMMAND, startedBy, summarise } from "./run-state";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
+/** The castle frame the band draws: an index into CASTLE_FRAMES. */
+const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
 
 const RECORD = ".sandcastle/logs/run.json";
 const LIVE_MS = 3000;
@@ -124,8 +126,30 @@ function pin($: EngineInterface, text: string | undefined) {
   $.ui.status(text);
 }
 
+/** The castle's timer while it builds; undefined while it stands still. */
+let tick: { cancel: () => void } | undefined;
+
+// A timer of its own, apart from the look at the record: a frame writes the one atom and reads
+// nothing, and a look never waits for a frame. One write per frame, about one a second while it
+// builds and none while it holds - far inside the band's redraw rate, so the prompt never flickers.
+function animate($: EngineInterface, on: boolean) {
+  if (on === (tick !== undefined)) return;
+  if (!on) {
+    tick?.cancel();
+    tick = undefined;
+    void update($, castle, () => HELD);
+    return;
+  }
+  const show = (i: number) => {
+    void update($, castle, () => i);
+    tick = $.clock.after(CASTLE_FRAMES[i].ms, () => show((i + 1) % CASTLE_FRAMES.length));
+  };
+  show(0);
+}
+
 async function draw($: EngineInterface, run: Run | undefined) {
   const next = run ? summarise(run) : null;
+  animate($, next !== null && building(next));
   if (JSON.stringify(next) === drawn) return;
   drawn = JSON.stringify(next);
   await update($, view, () => next);
@@ -325,10 +349,11 @@ export const register: Register = (on) => {
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const now = await read($, view);
     if (now === null || e.props.hasSurvey) return next(e);
+    const frame = CASTLE_FRAMES[await read($, castle)] ?? CASTLE_FRAMES[HELD];
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {band(now, e.props.bodyColumns - BAND_MARGIN).map((row) => (
+        {band(now, e.props.bodyColumns - BAND_MARGIN, frame).map((row) => (
           <Box flexDirection="row" columnGap={2}>
             {row.map((seg) => (
               <Box flexDirection="row" columnGap={1}>

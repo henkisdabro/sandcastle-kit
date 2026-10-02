@@ -805,9 +805,10 @@ itself, in the status view's castle, glyphs and colours:
   ⚠ sandcastle: #105 conflict, #111 held - /sandcastle-status
 ```
 
-- 🏰 **A band above the prompt** while a run is alive: the run's stage and tokens beside the
-  castle's top, the legend's counts beside its base. In a narrow terminal the legend keeps its
-  glyphs and drops its words. It is gone when the run ends.
+- 🏰 **A band above the prompt** while a run is alive: the status view's three-row castle, the
+  run's stage and tokens beside its walls, the legend's counts beside its base. While a ticket is
+  in work the castle builds from the sand up and holds; otherwise it stands still. In a narrow
+  terminal the legend keeps its glyphs and drops its words. It is gone when the run ends.
 - 🙋 **A pinned line and a notice** when a ticket comes to need a person - a conflict, a red
   gate, a held branch, a crash - naming the tickets. The line stays until they are dealt with or
   the run ends.

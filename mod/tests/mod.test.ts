@@ -63,9 +63,13 @@ const SKILL = { skill: "sandcastle", text: "the skill" };
 const STATUS = { command: "sandcastle-status", args: "", origin: { kind: "composer" }, presentation: { isFullscreen: false, columns: 120 } } as const;
 const CLOSE = (how: string) => `The sandcastle run in /work ${how}. Close it now: read run.md in the sandcastle skill's directory and follow it.`;
 
+// How long the castle takes to build, from level sand to complete (run-state.ts, CASTLE_FRAMES).
+const BUILD = 2200;
+
 test("a live run draws the castle and the status view's legend, on every surface that draws", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
+  await w.clock.advance(BUILD);
   for (const surface of ["terminal", "desktop"] as const) {
     const ui = await $.ui.mount({ ...band(120), surface });
     expect(await ui.find({ type: "Text", text: "▄ ▄ ▄" })).toBeDefined();
@@ -81,13 +85,62 @@ test("a live run draws the castle and the status view's legend, on every surface
 });
 
 test("a narrow band keeps the castle and the glyphs and drops the words", async ($, on) => {
-  world(on);
+  const w = world(on);
   await $.session.start(START);
+  await w.clock.advance(BUILD);
   const ui = await $.ui.mount({ ...band(24), surface: "terminal" });
   expect(await ui.find({ type: "Text", text: "██▀██" })).toBeDefined();
   expect(await ui.find({ type: "Text", text: "●" })).toBeDefined();
   expect(await ui.find({ type: "Text", text: "● working" })).toBeUndefined();
   expect(await ui.find({ type: "Text", text: "demo" })).toBeUndefined();
+});
+
+test("while a ticket is in work the castle builds from level sand, holds, and builds again", async ($, on) => {
+  const w = world(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  const shows = async (text: string) => (await ui.find({ type: "Text", text })) !== undefined;
+  expect(await shows("▁▁▁▁▁")).toBe(true);
+  expect(await shows("▄ ▄ ▄")).toBe(false);
+  // The text beside the castle is there from the first frame.
+  expect(await shows("demo")).toBe(true);
+  await w.clock.advance(800);
+  expect(await shows("▄▄▄▄▄")).toBe(true);
+  await w.clock.advance(BUILD - 800);
+  expect(await shows("▄ ▄ ▄")).toBe(true);
+  expect(await shows("█████")).toBe(true);
+  await w.clock.advance(15000);
+  expect(await shows("▄ ▄ ▄")).toBe(true);
+  await w.clock.advance(1000);
+  expect(await shows("▁▁▁▁▁")).toBe(true);
+});
+
+test("a frame of the castle reads no record", async ($, on) => {
+  const w = world(on);
+  await $.session.start(START);
+  const reads = w.reads;
+  // Every frame of the build inside one 3-second look.
+  await w.clock.advance(2900);
+  expect(w.reads).toBe(reads);
+});
+
+test("with nothing in work the castle stands still, and stops where it is when the work does", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "red" }, 106: { state: "queued" } });
+  await $.session.start(START);
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  const shows = async (text: string) => (await ui.find({ type: "Text", text })) !== undefined;
+  expect(await shows("▄ ▄ ▄")).toBe(true);
+  // Longer than a cycle, and on a look, so the next look falls 3 seconds on.
+  await w.clock.advance(7 * 3000);
+  expect(await shows("▄ ▄ ▄")).toBe(true);
+  // Work starts: the next look builds; it ends mid-build: the next look shows the castle whole.
+  w.file = record({ 105: { state: "implement" } });
+  await w.clock.advance(3000);
+  expect(await shows("▁▁▁▁▁")).toBe(true);
+  w.file = record({ 105: { state: "merged" } });
+  await w.clock.advance(3000);
+  expect(await shows("▄ ▄ ▄")).toBe(true);
 });
 
 test("with no run alive the band is left to Claude Code", async ($, on) => {

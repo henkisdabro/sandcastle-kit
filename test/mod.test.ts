@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DERIVED_STATES, GROUPS, isTicketState, TICKET_STATES, WORDS } from "../mod/hooks/run-record.ts";
-import { band, CASTLE, LEGEND, line, needing, parse, rows, RUN_COMMAND, SAND, summarise } from "../mod/hooks/run-state.ts";
+import { band, building, CASTLE, CASTLE_FRAMES, HELD, LEGEND, line, needing, parse, rows, RUN_COMMAND, SAND, summarise } from "../mod/hooks/run-state.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
@@ -59,7 +59,7 @@ test("the groups carry the status view's glyphs and colours", () => {
     assert.ok(status.includes(`${g.glyph} ${g.label} `), `the legend says "${g.glyph} ${g.label}"`);
   }
   const sand = (name: string) => hex(status.match(new RegExp(`\\b${name}=\\$\\(sand '([\\d;]+)'`))?.[1] ?? "");
-  assert.deepEqual(SAND, { top: sand("moon"), base: sand("deep"), name: sand("head"), stage: sand("accent"), muted: sand("mute") });
+  assert.deepEqual(SAND, { top: sand("moon"), mid: sand("dusk"), base: sand("deep"), name: sand("head"), stage: sand("accent"), muted: sand("mute") });
 });
 
 const run = parse(
@@ -150,18 +150,44 @@ test("the run's process is told from a later owner of its pid by the command the
   assert.ok(read("bin", "sandcastle").includes(`exec node --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/${RUN_COMMAND}"`), "bin/sandcastle starts src/cli.ts");
 });
 
-test("the band is the castle's top and base, each row cut to its width", () => {
+test("the band is the castle's three rows, the run beside its walls, each row cut to its width", () => {
   const s = summarise(run);
-  const text = (columns: number) =>
-    band(s, columns).map((row) => row.map((seg) => (seg.count === undefined ? seg.text : `${seg.text} ${seg.count}`)).join("  "));
-  const top = "▄ ▄ ▄  sandcastle  demo  landing 2/4  1.7M in / 30k out";
+  const text = (columns: number, castle = CASTLE) =>
+    band(s, columns, castle).map((row) => row.map((seg) => (seg.count === undefined ? seg.text : `${seg.text} ${seg.count}`)).join("  "));
+  const mid = "█████  sandcastle  demo  landing 2/4  1.7M in / 30k out";
   const base = "██▀██  ● working 2  ! needs you 1  > ready to land 1  + merged 2";
-  assert.deepEqual(text(base.length), [top, base]);
-  assert.deepEqual(text(base.length - 1), [top, "██▀██  ● 2  ! 1  > 1  + 2"]);
-  assert.deepEqual(text(top.length - 1), ["▄ ▄ ▄  sandcastle  demo  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
-  assert.deepEqual(text(34), ["▄ ▄ ▄  sandcastle  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
-  // The castle is the first and last rows of the status view's own.
-  assert.ok(status.includes(`\${moon}${CASTLE.top}\${off}`) && status.includes(`\${deep}${CASTLE.base}\${off}`), "status.sh draws the same castle");
+  assert.deepEqual(text(base.length), ["▄ ▄ ▄", mid, base]);
+  assert.deepEqual(text(base.length - 1), ["▄ ▄ ▄", mid, "██▀██  ● 2  ! 1  > 1  + 2"]);
+  assert.deepEqual(text(mid.length - 1), ["▄ ▄ ▄", "█████  sandcastle  demo  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
+  assert.deepEqual(text(34), ["▄ ▄ ▄", "█████  sandcastle  landing 2/4", "██▀██  ● 2  ! 1  > 1  + 2"]);
+  // The castle is the status view's own, row for row and colour for colour.
+  for (const [row, colour] of [["top", "moon"], ["mid", "dusk"], ["base", "deep"]] as const) {
+    assert.ok(status.includes(`\${${colour}}${CASTLE[row]}\${off}`), `status.sh draws the castle's ${row} as ${CASTLE[row]}`);
+    const rgb = status.match(new RegExp(`\\b${colour}=\\$\\(sand '([\\d;]+)'`))?.[1] ?? "";
+    assert.equal(SAND[row], hex(rgb), `the castle's ${row} is ${colour}`);
+  }
+  // A frame of the build moves nothing beside it.
+  for (const frame of CASTLE_FRAMES) assert.deepEqual(text(34, frame).map((r) => r.slice(5)), text(34).map((r) => r.slice(5)));
+});
+
+test("the castle builds through five-cell frames and holds complete for most of the cycle", () => {
+  const cycle = CASTLE_FRAMES.reduce((n, f) => n + f.ms, 0);
+  const held = CASTLE_FRAMES[HELD]!;
+  assert.equal(HELD, CASTLE_FRAMES.length - 1);
+  assert.deepEqual({ top: held.top, mid: held.mid, base: held.base }, CASTLE);
+  assert.ok(held.ms > cycle * 0.75, `held ${held.ms} of ${cycle} ms`);
+  for (const f of CASTLE_FRAMES) {
+    for (const row of [f.top, f.mid, f.base]) {
+      assert.equal(Array.from(row).length, 5, JSON.stringify(row));
+      // Block elements, spaces and the low line only: each draws one cell.
+      assert.ok(/^[ ▀-▟]+$/u.test(row), JSON.stringify(row));
+    }
+    // Built from the base up: no row stands on air.
+    assert.ok(!(f.top.trim() && !f.mid.trim()) && !(f.mid.trim() && !f.base.trim()), JSON.stringify(f));
+  }
+  // A ticket in work builds; waiting, needing a person or merged stands still.
+  assert.equal(building(summarise(run)), true);
+  assert.equal(building(summarise(parse(JSON.stringify({ tickets: { 1: { state: "red" }, 2: { state: "merged" }, 3: { state: "queued" } } }))!)), false);
 });
 
 // What the mod may ask of Claude Code. README.md ("What the mod touches") says the same in words.
