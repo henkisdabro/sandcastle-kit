@@ -38,7 +38,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
-import { strayChanges } from "./resolution.ts";
+import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
@@ -61,7 +61,9 @@ type Outcome = {
   branch: string;
   // "green", never "shipped": the pane titles said shipped while nothing had
   // landed, and the status table said queued - a run read as going in circles.
-  status: "green" | "gate-failed" | "nochange" | "merged-earlier";
+  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held";
+  /** Why the kit held a finished branch for a person (`held`): nothing was handed back by an agent. */
+  heldNote?: string;
   commits: number;
   /** The branch tip the gates passed on; landing refuses a branch that moved since. */
   head?: string;
@@ -80,12 +82,25 @@ type Outcome = {
 
 // A branch's outcome as the status view's row shows it, before landing.
 const outcomeText = (o: Outcome) =>
-  o.status === "gate-failed" ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}` : o.status === "green" ? "green - waiting to land" : o.status;
+  o.status === "gate-failed"
+    ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}`
+    : o.status === "green"
+      ? "green - waiting to land"
+      : o.status === "held"
+        ? `needs a human: ${o.heldNote ?? "held"}`
+        : o.status;
+
+// The ticket's state for a pipeline that ended without a green branch or a red gate. A ticket the
+// kit held says so from the first write; "handed back" is only for an agent that handed it back.
+export const settledUnlanded = (o: Pick<Outcome, "status" | "heldNote">, handedBack: boolean): TicketRecord =>
+  o.status === "held"
+    ? { state: "held", note: o.heldNote ?? "held for a human" }
+    : { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
 
 // What an issue's pane and sidebar entry say when its pipeline ends - the
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
-  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land" })[o.status];
+  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
 
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.
@@ -182,7 +197,7 @@ export const fileOverlaps = (root: string, base: string, ids: string[]): { id: s
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
-export const burndown = async (project: Project): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: { level: number; turn: number }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
@@ -516,7 +531,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // ticket to a human; the orchestrator posts them, one at a time, after
   // landing, on the landing worker (concurrent commits to the base branch would race on its index).
   const reports = new Map<string, string>();
-  const notes: { issue: string; kind: "comment" | "hold"; text: string }[] = [];
+  // `held`: a ticket the kit held (not one an agent handed back) says why in its run note.
+  const notes: { issue: string; kind: "comment" | "hold"; text: string; held?: string }[] = [];
   const addReport = (id: string, heading: string, text: string) =>
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
   // The last tag wins, an example or a placeholder ("...") does not count, and
@@ -690,14 +706,12 @@ export const burndown = async (project: Project): Promise<boolean> => {
         // path can drop another ticket's landed lines with every gate green.
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
         if (stray?.length) {
-          console.log(`${ref(issue.id)}: the conflict resolution also changed ${stray.join(", ")}, which merged cleanly - held for a human.`);
+          const why = strayNote(stray);
+          console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
           run.ticket(issue.id, { files: stray });
-          notes.push({
-            issue: issue.id,
-            kind: "hold",
-            text: `Sandcastle held this: the conflict resolution also changed ${stray.join(", ")}, which merged cleanly - check that no other ticket's lines were lost.`,
-          });
-          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+          notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.`, held: why });
+          // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
+          return { issue: issue.id, branch, status: "held", heldNote: why, commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
         }
       }
       // Review passes run on the same warm sandbox and branch. Their commits
@@ -1197,7 +1211,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
     if (o.status === "merged-earlier") return { state: "ready", note: `merged earlier (${o.head}) - to close` };
     if (o.status === "gate-failed") return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
-    return { state: "nochange", note: notes.some((n) => n.issue === o.issue && n.kind === "hold") ? "handed back - for a human" : "nothing to change" };
+    return settledUnlanded(o, notes.some((n) => n.issue === o.issue && n.kind === "hold"));
   };
   // What the view and the records say about a finished pipeline. A throw here
   // (a git call, a full disk) would escape the settle handlers and reject the
@@ -1370,7 +1384,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     }
     if (n.kind === "hold") {
       view.landed(n.issue, false, "needs a human");
-      land(n.issue, "held", "handed back - for a human");
+      land(n.issue, "held", n.held ?? "handed back - for a human");
     }
   }
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
@@ -1450,7 +1464,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({ verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify) } : null, keptWorktrees, dryRunCheck });
-  console.log(`\n${await closingReport(project)}\n`);
+  console.log(`\n${await closingReport(project, turn)}\n`);
   view.close(
     `merged ${merged.length}` +
       (conflicted.length + redMerged.length + failedToLand.length + skipped.length ? `, not landed ${conflicted.length + redMerged.length + failedToLand.length + skipped.length}` : "") +

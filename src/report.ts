@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterTurn, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, type TicketRecord, type Tokens, tokenLine } from "./run.ts";
@@ -60,6 +61,8 @@ export type Facts = {
   exitCode?: number | null;
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
+  /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
+  next?: { level: number; turn: number; tickets: string[] };
 };
 
 /** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
@@ -370,9 +373,24 @@ export const render = (f: Facts, plain = false): string => {
     return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f.tickets[id!]) ? "red together" : "gate red") : s})` : "";
   };
   const skipped = ids(["skipped"]);
-  const anyLeft = f.runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
+  // Why each one can run, from the record: a ticket held for an overlap says which ticket it waited
+  // for (and whether that one landed); one that waited on blockers, which; a conflicted one resumes its branch.
+  const runnableWhy = (id: string) => {
+    const t = f.tickets[id] ?? {};
+    if (t.state === "conflict") return "conflicted - its branch resumes";
+    const overlap = /^waits for (\S+) \(this run\) - next run$/.exec(t.note ?? "");
+    if (overlap) {
+      const partner = Object.keys(f.tickets).find((k) => refOf(k) === overlap[1] || k === overlap[1]);
+      const state = partner ? f.tickets[partner].state : undefined;
+      return `held for overlap with ${overlap[1]}${state === "merged" ? ", now landed" : state ? ` (${state})` : ""}`;
+    }
+    const on = /^waits for (.*)$/.exec(t.note ?? "")?.[1]?.replace(/\s*\([^)]*\)/g, "").split(",").map((l) => l.trim()).filter(Boolean) ?? [];
+    return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
+  };
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable])];
+  const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
-    `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
+    `▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`,
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
     ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].note ? ` - ${f.tickets[id].note}` : ""} - still queued for the next run`),
@@ -436,18 +454,28 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   // A red base is red for whoever pulls it too.
-  if (f.ahead) next.push(baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`);
+  const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
+  if (push) next.push(push);
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
-  section(h("## 👉 Next step", "## Next step"), next.map((n, i) => `${i + 1}. ${n}`));
+  // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
+  const steps = f.next
+    ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; nothing to do yet.`, ...(push ? [push] : [])]
+    : next;
+  section(h("## 👉 Next step", "## Next step"), steps.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");
 };
 
 /** The summary for the project's last recorded run. */
-export const closingReport = async (project: Project) => {
+export const closingReport = async (project: Project, turn?: { level: number; turn: number }) => {
   if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
   const facts = await gather(project);
   summary.printed = true;
   if (!Object.keys(facts.tickets).length) return "The last run predates the per-ticket record; its report is in the run pane's output.";
   // NO_COLOR counts as set only when non-empty (no-color.org).
+  // The same verdict the loop reaches after this turn (cli.ts): its next step is the loop's, not the operator's.
+  if (turn) {
+    const after = afterTurn(facts, turn.level, turn.turn, stillOpen(makeTracker(project)));
+    if (after?.verdict === "run") facts.next = { level: turn.level, turn: turn.turn + 1, tickets: after.ids };
+  }
   return render(facts, !!process.env.NO_COLOR);
 };

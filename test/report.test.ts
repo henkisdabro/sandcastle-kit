@@ -76,7 +76,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
   // A conflict and a failing test in one file are a place to look, not one cause.
   assert.match(body(out, "## ❌ Needs fixing"), /Same file: tests\/test_totals.py - #201 #203 fail or conflict there/);
   assert.doesNotMatch(out, /Same failing test|Likely one cause/);
-  assert.match(body(out, "## ▶️ Runnable now"), /Runnable now \(their blockers closed\): #209/);
+  assert.match(body(out, "## ▶️ Runnable now"), /Runnable now: #203 \(conflicted - its branch resumes\), #209 \(blockers closed\)/);
   assert.match(body(out, "## ▶️ Runnable now"), /#210 waits for #206 \(held\)/);
   assert.match(body(out, "## 📤 Local state"), /main is 51 commit\(s\) ahead of origin\/main/);
   assert.match(body(out, "## 📤 Local state"), /Nothing is pushed by Sandcastle/);

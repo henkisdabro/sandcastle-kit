@@ -50,7 +50,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { autonomyLevel, capLine, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
+import { afterTurn, autonomyLevel, capLine, confirm, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -130,24 +130,13 @@ try {
       const project = await loadProject(root);
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
       checkUsageSettings();
-      for (let turn = 1; await burndown(project); turn++) {
+      for (let turn = 1; await burndown(project, { level, turn }); turn++) {
         if (level === 0) break;
-        const again = rerunnable(await gather(project));
-        if (!again) break;
-        // A ticket closed by hand since the turn would make the ISSUES path throw.
         const tracker = makeTracker(project);
-        const open = (id: string) => {
-          try {
-            return tracker.get(id).open;
-          } catch {
-            return false;
-          }
-        };
-        const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open) };
-        const ids = [...left.conflicted, ...left.unblocked];
+        const after = afterTurn(await gather(project), level, turn, stillOpen(tracker));
+        if (!after || after.verdict === "stop") break;
+        const { left, ids, verdict } = after;
         const list = rerunList(left, tracker.ref);
-        const verdict = nextTurn(level, turn, left);
-        if (verdict === "stop") break;
         const many = `${ids.length} ticket(s) can`;
         const manual = `\`sandcastle run ${ids.join(" ")}\``;
         if (verdict === "cap") {

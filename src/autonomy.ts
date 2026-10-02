@@ -3,6 +3,7 @@
 import { createInterface } from "node:readline/promises";
 import { OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
+import type { Tracker } from "./tracker.ts";
 
 const parse = (value: string): number | undefined => (/^[0-3]$/.test(value) ? Number(value) : undefined);
 
@@ -56,6 +57,28 @@ export const rerunList = (again: Rerun, ref: (id: string) => string): string => 
     again.unblocked.length ? `unblocked: ${again.unblocked.map(ref).join(", ")}` : "",
   ].filter(Boolean);
   return `${all} (${parts.join("; ")})`;
+};
+
+/** Whether the tracker still has the ticket open; unreadable counts as closed, so a re-run never names it. */
+export const stillOpen = (tracker: Tracker) => (id: string): boolean => {
+  try {
+    return tracker.get(id).open;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * What the loop does after a turn, from that turn's facts: the tickets a further turn would take
+ * (`open` drops one closed by hand, which would make the ISSUES path throw) and the verdict. The
+ * loop in cli.ts and the turn's own closing summary both ask, so the summary never says the
+ * operator's next step is something the loop is about to do.
+ */
+export const afterTurn = (facts: Facts, level: number, turn: number, open: (id: string) => boolean) => {
+  const again = rerunnable(facts);
+  if (!again) return undefined;
+  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open) };
+  return { left, ids: [...left.conflicted, ...left.unblocked], verdict: nextTurn(level, turn, left) };
 };
 
 /** undefined without reading when the input is not a terminal: a pipe, CI or `nohup` never blocks. Default No. */
