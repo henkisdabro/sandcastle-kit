@@ -81,7 +81,7 @@ export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1
 // A run's tickets counted in the status view's own groups (status.sh `style_of`), so the
 // sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
 const WORKING = new Set(["setup", "implement", "review", "cross-review", "gates", "repair", "landing"]);
-const NEEDS_YOU = new Set(["stopped", "red", "conflict", "held", "crashed", "not landed"]);
+const NEEDS_YOU = new Set(["stopped", "red", "conflict", "held", "uncommitted", "crashed", "not landed"]);
 export type RunCounts = { working: number; needsYou: number; merged: number; total: number };
 export const runCounts = (tickets: Record<string, TicketRecord>): RunCounts => {
   const states = Object.values(tickets).map((t) => t.state ?? "queued");
