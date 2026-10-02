@@ -9,6 +9,7 @@
 
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OperatorError } from "./errors.ts";
@@ -83,7 +84,9 @@ export const startDetached = async (
   const child = spawn(process.execPath, [...entry, "run", ...args], { cwd: root, detached: true, stdio: ["ignore", fd, fd], env });
   closeSync(fd);
   child.on("error", (error) => (failed = error));
-  child.on("exit", (code, signal) => (ended = code ?? (signal ? 128 : 1)));
+  // A run ends on SIGINT or SIGTERM by re-raising it (src/run.ts `exitOnSignal`): report what the
+  // shell would, 130 or 143, not a bare 128.
+  child.on("exit", (code, signal) => (ended = code ?? (signal ? 128 + (osConstants.signals[signal] ?? 0) : 1)));
   child.unref();
 
   const pid = child.pid;
