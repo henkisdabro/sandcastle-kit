@@ -21,7 +21,8 @@ import { fileURLToPath } from "node:url";
 import { confirm } from "./autonomy.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { herdr, lineText, runCounts, RUNS_DIR } from "./herdr.ts";
+import { herdr, lineText, runCounts } from "./herdr.ts";
+import { RUNS_DIR } from "./live-runs.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { KIT } from "./sandbox.ts";
 

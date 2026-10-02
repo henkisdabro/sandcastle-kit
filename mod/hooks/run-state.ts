@@ -3,13 +3,13 @@
 // view's vocabulary (status.sh, `style_of`). The record's types, the ticket states and the
 // tables from state to group and word live in run-record.ts.
 
-import { GROUPS, type Group, isTicketState, type RunRecord, WORDS } from "./run-record";
+import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } from "./run-record";
 
 /** A ticket as read from a file that may be a stranger's: its state is any short text until `isTicketState` says otherwise. */
 export type Ticket = { state?: string; note?: string; title?: string; order?: number };
 
 /** The run record as the mod reads it: the fields it shows, and tickets whose state is not yet trusted. */
-export type Run = Pick<RunRecord, "orchestrator" | "pid" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & { tickets?: Record<string, Ticket> };
+export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & { tickets?: Record<string, Ticket> };
 
 // The status view's sand palette, as hex: a mod's Text takes no 256-colour index. Dry sand at
 // the castle's top, wet sand at its base.
@@ -70,6 +70,7 @@ export const parse = (raw: string): Run | undefined => {
     orchestrator: text(r.orchestrator, 40),
     // 0 is no process.
     pid: whole(r.pid) || undefined,
+    session: sessionId(r.session),
     startedAt: text(r.startedAt, 40),
     finishedAt: text(r.finishedAt, 40),
     exitCode: whole(r.exitCode),
@@ -142,3 +143,38 @@ export const rows = (run: Run): string[] => {
     .sort(([, a], [, b]) => rank(a) - rank(b) || (a.order ?? 0) - (b.order ?? 0))
     .map(([id, t]) => `${LEGEND[place(t)]?.glyph ?? "·"} ${ref(id)} ${word(t.state)}${t.note ? ` (${t.note})` : ""}${t.title ? ` - ${t.title}` : ""}`);
 };
+
+/**
+ * Lists the machine-wide live-runs registry (src/live-runs.ts): its directory is
+ * `$XDG_CACHE_HOME`, or `~/.cache` when that is unset or empty, on Linux and macOS alike. Prints
+ * the session root's resolved path (`pwd -P`: `/tmp` is `/private/tmp` on macOS, and one project
+ * must not read as two), then one resolved root per registered run, a line each. POSIX sh, and
+ * `cat`, `cd` and `pwd -P` only: BSD and GNU alike. A root that is gone prints nothing.
+ * `$1` is the session's root.
+ */
+export const REGISTRY_SCRIPT = [
+  'dir="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/runs"',
+  '(cd -- "$1" 2>/dev/null && pwd -P) || echo',
+  'for f in "$dir"/*; do',
+  '  [ -f "$f" ] || continue',
+  '  r=$(cat -- "$f" 2>/dev/null)',
+  '  [ -n "$r" ] && (cd -- "$r" 2>/dev/null && pwd -P)',
+  "done",
+  "exit 0",
+].join("\n");
+
+/** The script's output: the session's own root (empty when it could not be resolved) and the registered ones, as resolved strings compared as they are (no case folding). */
+export const parseRegistry = (stdout: string): { own: string; roots: string[] } => {
+  const [own = "", ...rest] = stdout.split("\n");
+  return { own, roots: [...new Set(rest.filter(Boolean))] };
+};
+
+/**
+ * The registered roots this session may follow: every one but its own, which the watch of the
+ * session's root already covers. With no resolved root of its own it follows none - failing closed
+ * (a shell that cannot resolve it, BusyBox `ps` and the like) beats watching one run twice.
+ */
+export const followable = ({ own, roots }: { own: string; roots: string[] }): string[] => (own ? roots.filter((r) => r !== own) : []);
+
+/** Whether `run` is the run of the session with this id. A run with no recorded id (a plain terminal, Codex, OpenCode) has no owner. */
+export const startedBy = (run: Run | undefined, session: string): boolean => !!run?.session && run.session === session;

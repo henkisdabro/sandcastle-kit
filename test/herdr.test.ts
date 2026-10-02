@@ -37,10 +37,10 @@ process.env.HERDR_ENV = "1";
 process.env.HERDR_PANE_ID = "p1";
 // A run adopts a lone tab only from a terminal (src/herdr.ts), and the test runner's stdout is a pipe.
 (process.stdout as { isTTY?: boolean }).isTTY = true;
-// A run registers itself for the tab bar under the cache directory: never the real one.
+// Nothing in the view writes under the cache directory now (the run does, live-runs.ts); the run-file test sets its own.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-herdr-cache-"));
 // IN_HERDR is read when the module loads, so the environment comes first.
-const { askingInPane, defaultTabLabel, elapsed, lineText, openSandboxView, runCounts, runFile, sandboxTokens, spaceText, tokenArgs } = await import(
+const { askingInPane, defaultTabLabel, elapsed, lineText, openSandboxView, runCounts, sandboxTokens, spaceText, tokenArgs } = await import(
   "../src/herdr.ts"
 );
 
@@ -107,7 +107,6 @@ test("tokens: a step has a clock, an outcome clears it", () => {
 test("a sandbox's row is named after its ticket and carries its step; the workspace carries the run", () => {
   const tickets: Record<string, TicketRecord> = { "12": { state: "queued" }, "13": { state: "queued" } };
   const run = adopt("3", () => tickets);
-  assert.equal(readFileSync(runFile(run.root), "utf8"), run.root, "registered for the tab bar");
   tickets["12"] = { state: "review" };
   run.view.claim("12", "Add CSV export");
   run.view.phase("12", "review");
@@ -131,7 +130,6 @@ test("a sandbox's row is named after its ticket and carries its step; the worksp
   run.view.landed("12", false, "merge conflict");
   assert.ok(run.calls().some((c) => c.startsWith("pane report-agent p2") && c.includes("--state blocked --message merge conflict")));
   run.view.close("merged 0 of 2");
-  assert.ok(existsSync(runFile(run.root)), "the run file goes at exit, not at close: an autonomy run's next turn is the same run");
 });
 
 test("a sandbox pane closed by hand is forgotten, and the view keeps reporting", () => {
