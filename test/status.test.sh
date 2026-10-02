@@ -145,11 +145,13 @@ has 'implement +live-model/high'
 hasnt 'on its earlier branch'
 
 SCENARIO="live run, agents working"
-# Before landing: an estimate of when it starts, once a typical issue is known.
+# An estimate of when the run ends, once a typical issue is known. Tickets land as
+# they go green, so the header never says when a landing phase "lands".
 sed -i.bak 's/"stage": "landing 2\/4"/"stage": "running"/' "$L/run.json"
 render "101 102 103 104 105 106 107 108 109 110 120"
 has 'state +running · [0-9]+m +│'
-has 'lands +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+has 'ends +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+hasnt 'lands +~'
 has 'tokens +1.2M in / 30k out +│'
 
 SCENARIO="live run, sandboxes to spare"
@@ -186,7 +188,7 @@ SCENARIO="live run, in-run landing"
 # holds a sandbox: of three slots, two are working, so both queued tickets start at once.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m",
-  "stage": "running", "concurrency": 3, "landing": "in-run",
+  "stage": "running", "concurrency": 3,
   "typical": { "implement": 600, "gates": 60, "issue": 900 },
   "issues": ["101","102","103","104","105","106","107","110"],
   "tickets": {
@@ -213,13 +215,6 @@ hasnt 'ahead of it'
 # No landing phase to wait for: the estimate is when the run ends.
 has 'ends +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
 hasnt 'lands +~'
-# The same record without the field is a run with a landing phase after the pipelines:
-# the ticket in landing holds no slot there either, and the estimate is when landing starts.
-sed -i.bak 's/"landing": "in-run",//' "$L/run.json"
-render "101 102 103 104 105 106 107 110"
-row '#107' queued 'next to start'
-has 'lands +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
-hasnt 'ends +~'
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, older orchestrator"
