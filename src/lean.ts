@@ -339,7 +339,7 @@ export const report = (project: Project, p: Plan) => {
   }
   const gitHooks = gitHooksDir(project.root);
   if (gitHooks) {
-    console.log(`  Git hooks (${gitHooks}) run on every agent commit in the sandbox; the kit's merge uses --no-verify.`);
+    console.log(`  Git hooks (${gitHooks}) run on every agent commit in the sandbox; \`sandcastle gates\` checks they can.`);
   }
 };
 

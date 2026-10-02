@@ -815,7 +815,10 @@ compressor, a preview server, a notification), never a guard. Before any sandbox
 kept hook is checked in the image: executable on PATH, scripts present, Python compiles, top-level
 imports resolve. A failing hook stops the run; fix it in the project's Dockerfile. Hooks in the
 untracked `.claude/settings.local.json` never reach a sandbox, and the check warns about them. Git
-hooks run on agent commits inside the sandbox as usual. The Codex review does not run Claude Code
+hooks run on agent commits inside the sandbox as usual, so `sandcastle gates` and every run's base
+check also run the repo's `pre-commit` and `commit-msg` hooks there (`git hook run`, nothing committed,
+git 2.36 or newer): a hook the image cannot satisfy stops the run before any agent starts, and the
+fix is in the project's Dockerfile. The Codex review does not run Claude Code
 hooks.
 
 ### Hook tests

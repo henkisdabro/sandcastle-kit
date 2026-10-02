@@ -163,6 +163,48 @@ row '#106' queued 'next to start'
 sed -i.bak 's/"concurrency": 3/"concurrency": 2/' "$L/run.json"
 
 # ---------------------------------------------------------------------------
+SCENARIO="live run, in-run landing"
+# Tickets land while others still run: #103 is landing, #104 went red together with
+# #110 (landed a minute ago), #105 was put back in the queue. None of the three
+# holds a sandbox: of three slots, two are working, so both queued tickets start at once.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m",
+  "stage": "running", "concurrency": 3, "landing": "in-run",
+  "typical": { "implement": 600, "gates": 60, "issue": 900 },
+  "issues": ["101","102","103","104","105","106","107","110"],
+  "tickets": {
+    "101": { "state": "implement", "since": $((now - 30)), "started": $((now - 60)) },
+    "102": { "state": "gates", "since": $((now - 600)), "started": $((now - 700)), "note": "2/3 pytest" },
+    "103": { "state": "landing", "since": $((now - 20)), "note": "merging into main" },
+    "104": { "state": "red", "since": $((now - 40)), "note": "red with #110" },
+    "105": { "state": "requeued", "since": $((now - 50)), "note": "red together with #110 - next run" },
+    "106": { "state": "queued", "order": 6, "since": $now },
+    "107": { "state": "queued", "order": 7, "since": $now },
+    "110": { "state": "merged", "since": $((now - 60)), "note": "merged and closed" }
+  } }
+EOF
+render "101 102 103 104 105 106 107 110"
+row '#101' impl
+row '#102' gates
+row '#103' landing 'merging into main'
+row '#104' 'gate red' 'red with #110'
+row '#105' requeued 'red together with #110'
+row '#106' queued 'next to start'
+row '#107' queued 'next to start'
+row '#110' merged
+hasnt 'ahead of it'
+# No landing phase to wait for: the estimate is when the run ends.
+has 'ends +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+hasnt 'lands +~'
+# The same record without the field is a run with a landing phase after the pipelines:
+# the ticket in landing holds no slot there either, and the estimate is when landing starts.
+sed -i.bak 's/"landing": "in-run",//' "$L/run.json"
+render "101 102 103 104 105 106 107 110"
+row '#107' queued 'next to start'
+has 'lands +~[0-9]{2}:[0-9]{2} · since [0-9:]+ +│'
+hasnt 'ends +~'
+
+# ---------------------------------------------------------------------------
 SCENARIO="live run, older orchestrator"
 # A run.json with no tickets, from a run started before the record existed:
 # its finished branch has no outcome until landing, and must not read as
