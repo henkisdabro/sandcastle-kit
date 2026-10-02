@@ -78,8 +78,8 @@ function cellsLine(ow, cells, al) {
 // note is one the real view shows. A note starting with @ is an agent's log
 // line, which carries its own time: "[10:44:31 pm] Editing src/api/x.ts".
 // Each branch lands as it goes green, on one landing worker, its row moving
-// down into the merged group while the others work; then a second turn takes
-// the ticket whose blocker has landed.
+// down into the merged group while the others work; a ticket whose blocker
+// lands starts at once, in the same run.
 
 const START = 22 * 3600 + 41 * 60 + 7; // 22:41:07
 const SETUP = 'setting up its sandbox';
@@ -91,7 +91,7 @@ const EVENTS = [
   [0, '#45', 'queued', '4 ahead of it'], [0, '#46', 'queued', '5 ahead of it'],
   [0, '#48', 'queued', '6 ahead of it'], [0, '#49', 'queued', '7 ahead of it'],
   [0, '#52', 'queued', '8 ahead of it'], [0, '#53', 'queued', '9 ahead of it'],
-  [0, '#47', 'blocked', 'waits for #41 (this run) - next turn'],
+  [0, '#47', 'blocked', 'waits for #41 (lands this run)'],
   [0, '#50', 'blocked', 'waits for #44 to close'], [0, '#51', 'blocked', 'waits for #46 to close'],
   // Six sandboxes, the machine's whole pool.
   [2, '#41', 'setup', SETUP], [2, '#42', 'setup', SETUP], [2, '#43', 'setup', SETUP],
@@ -136,21 +136,21 @@ const EVENTS = [
   [14, '#46', 'held', 'needs a human merge: .github/workflows/ci.yml changed'],
   [16.5, '#42', 'landing', LAND], [17.5, '#42', 'merged', 'merged'],
   [17.5, '#45', 'landing', LAND], [18.5, '#45', 'merged', 'merged'],
-  [20.5, '#41', 'landing', LAND], [21.5, '#41', 'merged', 'merged'], [21.5, '#47', 'queued', 'blocker landed - next turn'],
+  [20.5, '#41', 'landing', LAND], [21.5, '#41', 'merged', 'merged'], [21.5, '#47', 'queued', 'blocker landed - starts now'],
   [21.5, '#48', 'landing', LAND], [22.5, '#48', 'merged', 'merged'],
   [23.5, '#49', 'landing', LAND], [24.5, '#49', 'merged', 'merged'],
   [25.5, '#52', 'landing', LAND], [26.5, '#52', 'merged', 'merged'],
   [26.5, '#53', 'landing', LAND], [27.5, '#53', 'merged', 'merged'],
-  // A second turn: the ticket whose blocker has landed, worked down to merged.
-  [29, '#47', 'setup', SETUP], [30, '#47', 'impl', '@Reading src/api/orders.ts'],
-  [32, '#47', 'impl', '@Committing: feat: paginate the orders endpoint', 1],
-  [33, '#47', 'review', REVIEW, 1], [34, '#47', 'gates', '3/4 test', 2],
-  [35, '#47', 'ready', 'gates green', 2], [35.5, '#47', 'landing', LAND], [36.5, '#47', 'merged', 'merged'],
+  // Its blocker has landed: the waiting ticket starts in a free sandbox, in the same run.
+  [22, '#47', 'setup', SETUP], [23, '#47', 'impl', '@Reading src/api/orders.ts'],
+  [25, '#47', 'impl', '@Committing: feat: paginate the orders endpoint', 1],
+  [26, '#47', 'review', REVIEW, 1], [27, '#47', 'gates', '3/4 test', 2],
+  [28, '#47', 'ready', 'gates green', 2], [28.5, '#47', 'landing', LAND], [29.5, '#47', 'merged', 'merged'],
 ];
 // In time order: snapshot() stops at the first event still to come. Equal times keep their order.
 EVENTS.sort((a, b) => a[0] - b[0]);
-const END = 38; // minutes; the run is finished from here
-const RUN_STAGES = [[0, 'base gates'], [2, 'agents'], [28, 'verify'], [29, 'turn 2 agents'], [37, 'verify'], [END, 'finished']];
+const END = 31; // minutes; the run is finished from here
+const RUN_STAGES = [[0, 'base gates'], [2, 'agents'], [30, 'verify'], [END, 'finished']];
 
 const WORKING = ['setup', 'impl', 'review', 'codex', 'gates', 'repair', 'landing'];
 const NEEDS = ['gate red', 'held', 'conflict', 'crashed'];

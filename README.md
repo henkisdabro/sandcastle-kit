@@ -748,7 +748,7 @@ nothing asks. What you get:
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
 | Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup. |
-| Sidebar rows | Each sandbox shows its step and time (`review · 12m`); the run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you. |
+| Sidebar rows | The run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
 
 The prefix is Herdr's, `ctrl+b` unless you changed it. The keys work on the project of the focused
