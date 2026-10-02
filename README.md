@@ -346,8 +346,9 @@ gathers the facts, asks you the open decisions in batches, writes each decision 
 labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
-A run skips it while #12 is open - even when #12 is in the same run, because the dependent
-would branch before #12 lands - and the next run picks it up. A blocker can also live outside
+A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
+soon as #12 has landed and closed (a chain of tickets drains in one run); a blocker outside the run
+holds it for a later one. A blocker can also live outside
 GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue
 and what holds each ticket back.
 
@@ -513,8 +514,9 @@ another run of the same project is live, or while any check fails. It prints the
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
 time from the medians of its earlier tickets. Tickets that others wait for start first; a ticket
-whose blocker is open, or whose existing branch changes a file another ready ticket's branch also
-changes, waits for the next run. Then come the image check, preflight, the hook check and the base
+whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
+in the run waits for a later run, and so does one whose existing branch changes a file another ready
+ticket's branch also changes. Then come the image check, preflight, the hook check and the base
 gates; a red one stops the run before any agent starts.
 
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
@@ -541,7 +543,7 @@ with the run:
 
 **Landing.** Green branches land when every sandbox has finished, not as each passes: landing moves
 the base branch, which the run guards against sandboxes changing, and a ticket-file tracker commits
-there. So a dependant of a ticket in this run always waits for the next run. Branches from earlier
+there. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged

@@ -508,12 +508,13 @@ export type Waiting = Landable & { carried?: boolean };
  * one at a time, in arrival order except that a carried branch goes before a new one when both
  * wait (in finish order it came last - it had a merge to resolve - and lost a conflict to a new
  * branch on the same lines, run after run). `close()` says the pipelines are done: `run` resolves
- * once the queue is empty. A `.git` check that fails stops landing - what is queued and what
+ * once the queue is empty. `settled` is awaited before the next landing, so a ticket it releases
+ * (burndown.ts) starts before that one lands. A `.git` check that fails stops landing - what is queued and what
  * arrives later is handed to `stopped`, not landed - and the cause is `stop`.
  */
 export const createLanding = (
   ctx: LandContext,
-  on: { settled(o: Waiting, landed: Landed): void; stopped(o: Waiting, why: unknown): void },
+  on: { settled(o: Waiting, landed: Landed): void | Promise<void>; stopped(o: Waiting, why: unknown): void | Promise<void> },
 ) => {
   const queue = createQueue<Waiting>((o) => (o.carried ? 1 : 0));
   let stop: unknown;
@@ -549,7 +550,7 @@ export const createLanding = (
           }
           landed = { kind: "not-landed", reason };
         }
-        on.settled(o, landed);
+        await on.settled(o, landed);
         // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.
         stop ??= ctx.host.failed;
       }),

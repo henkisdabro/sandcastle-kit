@@ -58,3 +58,29 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
     },
   };
 };
+
+/**
+ * Keeps a queue open for as long as something can still add to it. A ticket that waits for a
+ * blocker in the same run is pushed only once the blocker has landed, which happens after the
+ * pipelines that were queued at the start have ended: closing the queue at the start would end
+ * the run before it. `start` pushes an item; `finish` says one item is done with the run (its
+ * pipeline ended with nothing to land, or its landing settled). A release goes through `start`
+ * before the landed ticket's own `finish`, so the count never touches zero between them; at zero
+ * nothing is left to release anything, and the queue closes.
+ */
+export const createFlow = <T>(queue: Queue<T>) => {
+  let active = 0;
+  return {
+    start(item: T) {
+      active++;
+      queue.push(item);
+    },
+    finish() {
+      if (--active <= 0) queue.close();
+    },
+    /** Items started and not yet finished. */
+    get active() {
+      return active;
+    },
+  };
+};

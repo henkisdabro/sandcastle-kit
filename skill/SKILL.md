@@ -281,7 +281,8 @@ working, ready to land, need you, queued, blocked, merged. The states:
   works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed, unqueued or
   marked `needs-human` during the run) is greyed with the leftovers.
 - **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
-  `(this run)` when the blocker is in this run - then the next run can start it), **`merged`**,
+  `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
+  lands - or `(not in this run)`), **`merged`**,
   **`no change`**, **`skipped`** (not started because the run stopped early).
 
 After a run, or for a ticket outside it, the state is inferred from branches and logs: `left

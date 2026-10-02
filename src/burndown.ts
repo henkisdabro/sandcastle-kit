@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
-import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
+import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, openBlockers, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView } from "./herdr.ts";
@@ -50,7 +50,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import { conflictLine, createHostGit, createLanding, type LandContext, pipelineWorkers, slotTurn, trackerMade } from "./landing.ts";
-import { createQueue } from "./schedule.ts";
+import { createFlow, createQueue } from "./schedule.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
 export { abortLanding, closeComment, mergeBranch } from "./landing.ts";
@@ -201,18 +201,14 @@ export const burndown = async (project: Project): Promise<boolean> => {
 
   // An issue whose blocker is still open waits - including a blocker in this
   // same run, which cannot be on base before landing, so the dependent would
-  // branch without it. The next run picks it up. Blockers are GitHub issues
+  // branch without it. It starts in this run once its last blocker has landed
+  // and closed (`dependants`, below). Blockers are GitHub issues
   // and, if the project configures them, Linear issues and task files
   // (blockers.ts); one that cannot be read counts as open.
   const resolve = blockerResolver(project, tracker, new Set(queued.map((i) => i.id)));
-  const waiting = (
-    await Promise.all(
-      queued.map(async (i) => {
-        const on = await openBlockers(project, tracker, resolve, i);
-        return on.length ? [{ issue: i.id, on: on.map(refLabel) }] : [];
-      }),
-    )
-  ).flat();
+  const open = await Promise.all(queued.map((i) => openBlockers(project, tracker, resolve, i)));
+  const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i, at) => (open[at].length ? [[i.id, { ticket: i, on: open[at] }] as const] : [])));
+  const waiting = queued.flatMap((i) => (held.has(i.id) ? [{ issue: i.id, on: held.get(i.id)!.on.map(refLabel) }] : []));
   for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   // A comment is not read as a blocker; say so where the run would start the issue.
   for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
@@ -221,7 +217,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // A ticket others wait for starts first; otherwise the tracker's order
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.
-  // (Their dependants still wait for the next run, though the blocker now lands as it goes green.)
+  // (Their dependants start in this run, as the blocker lands.)
   const unblocks = (i: Issue) => waiting.filter((w) => w.on.includes(ref(i.id))).length;
   const ready = queued.filter((i) => !waiting.some((w) => w.issue === i.id)).sort((a, b) => unblocks(b) - unblocks(a));
   // Two tickets whose existing branches change one file would both fork from
@@ -238,28 +234,43 @@ export const burndown = async (project: Project): Promise<boolean> => {
     return false;
   }
 
-  // Only the tickets this run starts; a waiting ticket's labels are checked when it starts.
-  // Before the run is recorded, the image checked or any sandbox started: a bad label costs nothing.
+  // The run's candidate set: what starts now, then what waits for a blocker in this run and starts
+  // once it has landed. A ticket queued mid-run is in neither: it waits for the next run. A ticket
+  // held for its file overlap is in neither either.
+  const dependants = [...held.values()].map((h) => h.ticket);
+  const candidates = [...issues, ...dependants];
+  // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
+  // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
+  // holds that ticket, never the run), but its model is still read now, for the preflight.
   const overrides = new Map(issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])]));
+  const badLabels = new Map<string, string>();
+  for (const i of dependants) {
+    try {
+      overrides.set(i.id, ticketOverride(ref(i.id), i.labels ?? []));
+    } catch (error) {
+      if (!(error instanceof OperatorError)) throw error;
+      badLabels.set(i.id, error.message);
+    }
+  }
   // Resolved once here: the image, the start lines and run.json all name the same versions.
   const versions = await resolveVersions(project);
 
   // A dry run lands nothing, so it needs no sandbox slot for it.
-  const workers = pipelineWorkers(CONCURRENCY, issues.length, limit("sandboxes"), !DRY_RUN);
-  const capped = workers < Math.min(CONCURRENCY, issues.length);
+  const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
+  const capped = workers < Math.min(CONCURRENCY, candidates.length);
   console.log(
-    `${issues.length} issue(s), ${capped ? workers : CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
+    `${candidates.length} issue(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}, ${capped ? workers : CONCURRENCY} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
       (capped ? ` (CONCURRENCY=${CONCURRENCY}, but one of the ${limit("sandboxes")} machine-wide sandbox slots is kept for landing)` : ""),
   );
-  for (const i of issues) {
-    const o = overrides.get(i.id)!;
+  for (const i of candidates) {
+    const o = overrides.get(i.id) ?? {};
     const own = o.model || o.effort ? ` [implement ${o.model ?? IMPL_MODEL}/${o.effort ?? implEffort()}]` : "";
-    console.log(`  ${ref(i.id)} ${i.title}${own}`);
+    console.log(`  ${ref(i.id)} ${i.title}${own}${held.has(i.id) ? " - waits for a blocker in this run" : ""}`);
   }
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, issues.length, slots);
+  const rough = estimate(project, candidates.length, slots);
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
@@ -275,14 +286,11 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // view at all, and the chosen issues looked like the rest of the queue.
   // `tickets` is where the status view reads each ticket's state from; a
   // held-back one says whether this run can reach it.
-  const inRun = new Set(issues.map((i) => ref(i.id)));
   // Notes are short: the view's activity column is about 30 characters in an 80-column pane.
-  const blockedNote = (on: string[]) => {
-    const here = on.filter((b) => inRun.has(b));
-    return `waits for ${on.join(", ")}` + (here.length === on.length ? " (this run) - next run" : here.length ? ` (${here.join(", ")} this run)` : "");
-  };
+  const waits = createDependants(project, tracker, candidates, held, queued.map((i) => i.id));
+  const heldNote = new Map(waits.notes().map((n) => [n.id, n.note]));
   const run = recordRun(project, {
-    issues: issues.map((i) => i.id),
+    issues: candidates.map((i) => i.id),
     dryRun: DRY_RUN,
     versions: { claude: versions.claude, codex: versions.codex },
     waiting,
@@ -291,7 +299,10 @@ export const burndown = async (project: Project): Promise<boolean> => {
     typical: typicalTimes(project),
     tickets: Object.fromEntries([
       ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
-      ...waiting.map((w) => [w.issue, { state: "blocked", note: blockedNote(w.on), title: queued.find((q) => q.id === w.issue)?.title }]),
+      // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
+      ...dependants.map((i, at) => [i.id, { state: "blocked", order: issues.length + at, note: heldNote.get(i.id), title: i.title }]),
+      // Held for its file overlap: the next run.
+      ...overlaps.map((o) => [o.id, { state: "blocked", note: `waits for ${ref(o.with)} (this run) - next run`, title: queued.find((q) => q.id === o.id)?.title }]),
     ]),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
@@ -364,7 +375,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   const prompts = renderPrompts(project, tracker, DRY_RUN);
   // One entry per distinct override model, naming every ticket that asks for it.
   const extraModels = [...new Set([...overrides.values()].flatMap((o) => (o.model ? [o.model] : [])))].map((model) => {
-    const labelled = issues.filter((i) => overrides.get(i.id)?.model === model).map((i) => ref(i.id));
+    const labelled = candidates.filter((i) => overrides.get(i.id)?.model === model).map((i) => ref(i.id));
     return { model, from: `label model:${model} on ${labelled.join(", ")}` };
   });
   await timed("", "preflight", () => preflight(project, image, extraModels));
@@ -463,7 +474,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // is not checked.
   const withdrawal = (id: string): { held: boolean; reason: string } | undefined => {
     const now = tracker.get(id);
-    const startedAs = issues.find((i) => i.id === id)?.status;
+    const startedAs = candidates.find((i) => i.id === id)?.status;
     if (now.held) return { held: true, reason: "marked needs-human during the run" };
     if (!now.open) return { held: false, reason: "ticket closed during the run" };
     if (startedAs === undefined || now.status === startedAs) return undefined;
@@ -1007,12 +1018,13 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // How many of the greens have been dealt with, for the run line's "landing 6/25" once the pipelines are done.
   let pushed = 0;
   let dealt = 0;
-  let pipelinesDone = false;
+  // Pipelines running or waiting for a worker: a release can start more, so "done" is only "none now".
+  let inPipelines = 0;
   const landingStage = () => {
-    if (pipelinesDone && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
+    if (inPipelines === 0 && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
   };
   const landing = createLanding(ctx, {
-    settled: (o, landed) => {
+    settled: async (o, landed) => {
       dealt++;
       landingStage();
       switch (landed.kind) {
@@ -1049,10 +1061,11 @@ export const burndown = async (project: Project): Promise<boolean> => {
         case "dry-run":
           break;
       }
+      await afterLanding(o.issue, landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier");
     },
     // Green before the base moved: finished, and landing on a later run like
     // the ones whose own check failed - not "ready", which says this run lands it.
-    stopped: (o, why) => {
+    stopped: async (o, why) => {
       tampered ??= String(why);
       dealt++;
       landingStage();
@@ -1060,6 +1073,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
         run.ticket(o.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
         recordOutcomes(project, runId, { [o.issue]: "stopped: the run stopped before landing" });
       });
+      await afterLanding(o.issue, false);
     },
   });
 
@@ -1067,12 +1081,36 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // machine-wide sandbox limit.
   const results: PromiseSettledResult<Outcome>[] = [];
   const crashed = new Map<string, string>();
-  // Every ticket up front, closed at once: the same fixed set of tickets a sliding pool drained before.
+  // The tickets that start now go in up front. A ticket that waits for a blocker in this run is
+  // pushed when that blocker has landed and closed; the flow keeps the queue open until nothing
+  // is left that could release one, and closes it then.
   const queue = createQueue<Issue>();
-  for (const i of issues) queue.push(i);
-  queue.close();
+  const flow = createFlow(queue);
+  // The tickets that went into the queue, for what is said of the ones that never began.
+  const entered: Issue[] = [];
+  const enter = (i: Issue) => {
+    entered.push(i);
+    inPipelines++;
+    flow.start(i);
+  };
+  for (const i of issues) enter(i);
   const begun = new Set<string>();
   const calledOff = new Set<string>();
+  const stopped = () => limitHit !== undefined || usageHit || tampered || landing.stop || host.failed;
+  // A landing that has closed its ticket frees the tickets that waited for it, on the landing
+  // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
+  const { afterLanding } = createRelease({
+    dependants: waits,
+    start: enter,
+    finish: () => flow.finish(),
+    stopped,
+    dryRun: DRY_RUN,
+    badLabel: (id) => badLabels.get(id),
+    record: run,
+    waiting,
+    ref,
+    say: (line) => console.log(line),
+  });
   // The ticket's state once its pipeline ends. A green branch that changes
   // hooks, CI or install scripts says so now: before, a human merge was news
   // only at the end of the run.
@@ -1097,13 +1135,16 @@ export const burndown = async (project: Project): Promise<boolean> => {
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
-  const pipelines = queue.run(workers, async (issue) => {
+  // True when the ticket's green outcome went to the landing worker, which finishes it; any other
+  // end is finished here.
+  const startPipeline = async (issue: Issue): Promise<boolean> => {
+    let toLanding = false;
     // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered || landing.stop) return;
+    if (limitHit !== undefined || usageHit || tampered || landing.stop) return false;
     const stop = await usageStop(env);
     if (stop) {
       usageHit ??= stop;
-      return;
+      return false;
     }
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
     const called = (() => {
@@ -1116,7 +1157,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     if (called) {
       calledOff.add(issue.id);
       run.ticket(issue.id, { state: "withdrawn", note: `${called.reason.replace(" during the run", "")} - not started` });
-      return;
+      return false;
     }
     begun.add(issue.id);
     results.push(
@@ -1135,7 +1176,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
             run.update({ typical: typicalTimes(project, [...took.values()]) });
             // With nothing left to start, the pane closes: five panes each
             // frozen on a finished agent's summary read as five stuck sandboxes.
-            view.finish(issue.id, finishWord(value), queue.size === 0);
+            view.finish(issue.id, finishWord(value), queue.size === 0 && !waits.waitsForFlight);
             // Recorded now, not only at the report: a branch waiting for
             // landing had no outcome for this run, and its row read as an
             // earlier run's leftover. Landing overwrites it.
@@ -1144,6 +1185,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
           // To the landing worker as it ends, not when the slowest pipeline does.
           if (value.status === "green" || value.status === "merged-earlier") {
             pushed++;
+            toLanding = true;
             landing.push(value);
           }
           return { status: "fulfilled", value } as const;
@@ -1170,18 +1212,26 @@ export const burndown = async (project: Project): Promise<boolean> => {
         },
       ),
     );
+    return toLanding;
+  };
+  const pipelines = queue.run(workers, async (issue) => {
+    let toLanding = false;
+    try {
+      toLanding = await startPipeline(issue);
+    } finally {
+      inPipelines--;
+      landingStage();
+      if (!toLanding) await afterLanding(issue.id, false);
+    }
   });
-  // Landing ends when the pipelines are done and its queue is empty.
-  const pipelinesEnded = pipelines.finally(() => {
-    pipelinesDone = true;
-    landingStage();
-    landing.close();
-  });
+  // Landing ends when the pipelines are done and its queue is empty. The queue closes itself
+  // once no ticket is left that could start another (`flow`).
+  const pipelinesEnded = pipelines.finally(() => landing.close());
   // Settled, not all: a landing that throws must not end the run while pipelines still work.
   const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run()]);
   clearInterval(heartbeat);
   const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
-  for (const i of issues) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
+  for (const i of entered) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
 
   // The run stops: the summary still prints, headed by why - a stack trace was all a
   // stopped run left, and its report then said "Run finished".
@@ -1309,7 +1359,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   if (spent.size) console.log(`  all agents: tokens ${tokenLine(total)} (per phase in .sandcastle/logs/timings.jsonl)`);
   console.log("  logs: .sandcastle/logs/agent-issue-<id>-*.log (a merged branch's logs move to logs/archive/ at the next run or `sandcastle clean`)");
   if (limitHit !== undefined || usageHit) {
-    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${issues.length - begun.size} queued issue(s) were not started.`);
+    console.log(`\nSTOPPED EARLY: ${stoppedBy}; ${entered.length - begun.size} queued issue(s) were not started.`);
   }
   let dryRunCheck: string | undefined;
   if (before) {
@@ -1326,7 +1376,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
       (conflicted.length + redMerged.length + failedToLand.length + skipped.length ? `, not landed ${conflicted.length + redMerged.length + failedToLand.length + skipped.length}` : "") +
       (heldBack.length + handedBack.length + takenBack.length ? `, needs a human ${heldBack.length + handedBack.length + takenBack.length}` : "") +
       (withdrawn.length ? `, withdrawn ${withdrawn.length}` : "") +
-      ` of ${issues.length}`,
+      ` of ${entered.length}`,
   );
   return true;
 };
