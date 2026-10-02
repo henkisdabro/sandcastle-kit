@@ -591,9 +591,12 @@ A queued ticket with a branch from an earlier run builds on that branch:
   re-run whose only change since its last review is the base merge gets a review of the merge
   alone. The record behind both is `.sandcastle/logs/heads.json`; `sandcastle requeue` clears a
   ticket's entry.
-- Tickets whose existing branches change the same file do not start in the same run: the first in
-  queue order runs, the others show as blocked, "waits for #N (this run) - next run". Two new tickets
-  have no branch to compare, so they can still conflict; the second lands on its next run.
+- A file git cannot merge (a lockfile, a [`generated`](#-a-gate-for-generated-files) path, a minified
+  blob) conflicts at landing whatever the order, so one ticket at a time has it in flight. Each
+  ticket's files are its branch's changed files plus its `Touches:` line; a ticket that shares such a
+  file with one in flight shows as blocked, "waits for #N: both change <file> (git cannot merge it)",
+  and starts when that ticket lands or leaves the run. Tickets that share only mergeable files start
+  together, the start naming them, and landing (with one requeue) resolves the overlap.
 - A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
   merging and closing is finished by the next one.
 
