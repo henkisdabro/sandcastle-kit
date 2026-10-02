@@ -530,7 +530,7 @@ cpu_cols() {
 
 # The run's state, its times and its tokens, as the run cell's three rows (RUNC).
 run_cell() {
-  local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta eta_word
+  local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta
   RUNC=("" "" "")
   [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
