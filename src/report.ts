@@ -62,11 +62,17 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
 };
 
+/** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
+export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${paths.join(", ")}`;
+
 export const NEEDS_FIXING = ["red", "conflict", "crashed", "not landed"];
 const LEFT = ["blocked", "skipped"];
+// A ticket the landing worker found green alone and red once merged says so in its note (src/landing.ts);
+// a red gate in its own pipeline names the failing gates instead. The difference is the pair, not the gate.
+const redTogether = (t: TicketRecord) => t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "");
 // Where a ticket's part in a run ends. Any other state at the end - a phase, or
 // "ready" outside a dry run - is a ticket the run stopped mid-work.
-const SETTLED = ["merged", "nochange", "withdrawn", "stopped", "held", "shipped", "queued", ...NEEDS_FIXING, ...LEFT];
+const SETTLED = ["merged", "nochange", "withdrawn", "stopped", "held", "shipped", "queued", "requeued", ...NEEDS_FIXING, ...LEFT];
 
 // A run that started agents owes a summary (due); an exit before it is printed
 // (Ctrl-C, a crash) says where to find one instead of ending silently.
@@ -227,6 +233,9 @@ export const render = (f: Facts, plain = false): string => {
   const takenBack = held.filter((id) => !handedBack.includes(id) && f.tickets[id].note?.startsWith("marked needs-human"));
   const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id));
   const fixing = ids(NEEDS_FIXING);
+  // Put back in the queue while the run was going (landing found it red together with another ticket, say):
+  // it runs again next time, and nothing here asks a person to act on it.
+  const requeued = ids(["requeued"]);
   // The gates on the base were red before any agent ran: nothing was attempted,
   // and the queue is untouched. Said first, as nothing below it is news.
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
@@ -292,6 +301,8 @@ export const render = (f: Facts, plain = false): string => {
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
     done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
   }
+  // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
+  for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} ${overrunLine(f.tickets[id].overrun!)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {
@@ -325,7 +336,12 @@ export const render = (f: Facts, plain = false): string => {
   // Needs fixing, with what several branches have in common
   const fixLines = fixing.map((id) => {
     const t = f.tickets[id];
-    const what = t.state === "conflict" ? `merge conflict: ${t.note ?? ""}` : t.state === "red" ? `gate ${t.note ?? "red"}` : `${t.state}: ${t.note ?? ""}`;
+    const what = t.state === "conflict"
+      ? `merge conflict: ${t.note ?? ""}`
+      : redTogether(t)
+        // Its gates passed on its own branch: the fix is in how it meets the tickets named, not in its own tests.
+        ? `${t.note!.replace(/^red /, "red together ")} (green on its own branch)`
+        : t.state === "red" ? `gate ${t.note ?? "red"}` : `${t.state}: ${t.note ?? ""}`;
     const tests = t.failing?.length ? ` - failing: ${t.failing.join(", ")}` : "";
     return `- ${name(id)} - ${what}${tests} (branch agent/issue-${id})`;
   });
@@ -351,14 +367,15 @@ export const render = (f: Facts, plain = false): string => {
   const ticketState = (label: string) => {
     const id = Object.keys(f.tickets).find((k) => refOf(k) === label || k === label);
     const s = id ? f.tickets[id].state : undefined;
-    return s && s !== "merged" ? ` (${s === "red" ? "gate red" : s})` : "";
+    return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f.tickets[id!]) ? "red together" : "gate red") : s})` : "";
   };
   const skipped = ids(["skipped"]);
-  const anyLeft = f.runnable.length + f.blocked.length + skipped.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
+  const anyLeft = f.runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     `▶️ Runnable now (their blockers closed): ${list(f.runnable)}`,
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
+    ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].note ? ` - ${f.tickets[id].note}` : ""} - still queued for the next run`),
     ...(cut.length ? [`Cut short when the run ended: ${cut.map((id) => `${refOf(id)} (${f.tickets[id].state})`).join(", ")} - still queued`] : []),
     ...(unstarted.length ? [`Not started (the run ended early): ${list(unstarted)}`] : []),
     ...(f.blockCheck ? [`Could not re-read blockers: ${f.blockCheck}`] : []),
@@ -410,6 +427,7 @@ export const render = (f: Facts, plain = false): string => {
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} issue(s) this run unblocked: \`sandcastle run\`.`);
   if (skipped.length) next.push(`Run again for the ${skipped.length} issue(s) that never started.`);
+  if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (cut.length + unstarted.length) {
     next.push(

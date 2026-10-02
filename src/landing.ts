@@ -5,6 +5,9 @@
 // what happened and writes the ticket's state to the run record; the caller keeps the lists the
 // closing report is built from.
 //
+// A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
+// (`createFlow`); a second one holds it for the next run.
+//
 // Landing runs on one worker beside the pipelines (`createLanding`), and every write to the
 // host's git goes through `HostGit.write`: the merge, the tracker's commits on the base, the
 // branch delete. The worker moves the run's expected base with each write, so the `.git` check
@@ -18,18 +21,35 @@ import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
-import { createQueue } from "./schedule.ts";
+import { overrunLine } from "./report.ts";
+import { createQueue, type Queue } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
+import { expandTouches, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
 export const conflictLine = (c: { files: string[]; with: string[] }) =>
   (c.with.length ? `with ${c.with.map(refOf).join(", ")}: ` : "") +
   `${c.files.slice(0, 3).join(", ")}${c.files.length > 3 ? ` and ${c.files.length - 3} more` : ""}`;
 
+/**
+ * The paths the branch changed that its ticket's `Touches:` line did not declare; `[]` for a ticket
+ * with no line. The line is agent-written, so this only ever warns. A glob names the files a ref
+ * has, so it is read against the branch head (a new file the glob covers) as well as the base (a
+ * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
+ */
+export const touchesOverrun = (root: string, base: string, head: string, body: string): string[] => {
+  const patterns = parseTouches(body);
+  if (!patterns.length) return [];
+  const declared = new Set([...expandTouches(root, base, patterns), ...expandTouches(root, head, patterns)]);
+  return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${head}`], root)
+    .split("\0")
+    .filter((f) => f && !declared.has(f));
+};
+
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
 export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] } },
+  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
   report?: string,
 ): string =>
@@ -39,6 +59,7 @@ export const closeComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
+  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
@@ -315,6 +336,15 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     land(o.issue, "not landed", reason);
     return { kind: "skipped", reason };
   }
+  // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
+  // costs the warning only.
+  let overrun: string[] = [];
+  try {
+    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "");
+    if (overrun.length) run.ticket(o.issue, { overrun });
+  } catch {
+    overrun = [];
+  }
   const touched = protectedChanges(project, o.branch);
   if (touched.length) {
     const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`;
@@ -483,7 +513,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // landed" sent a human to merge work already on the base branch.
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }) };
   try {
-    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated }, gateNames, reports.get(o.issue))), trackerMade(root));
+    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated, overrun }, gateNames, reports.get(o.issue))), trackerMade(root));
     land(o.issue, "merged", regenerated ? "merged and closed (generated files regenerated)" : "merged and closed");
     return { kind: "merged", ...merged };
   } catch (error) {
@@ -554,5 +584,89 @@ export const createLanding = (
         // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.
         stop ??= ctx.host.failed;
       }),
+  };
+};
+
+/** "conflicted again with #1, #3 after a requeue": what a second conflict or red at landing is held as. */
+export const againLine = (kind: "conflict" | "red", tickets: string[]) =>
+  `${kind === "conflict" ? "conflicted" : "red"} again${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} after a requeue`;
+
+/** "requeued after conflict with #1": the second attempt, as the status view and run.json say it. */
+export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
+  `requeued after ${kind === "conflict" ? "conflict" : "red"}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`;
+
+/**
+ * One ticket's way through a run when landing may send it back: the pipeline queue stays open
+ * until every ticket has had its last word, because a landing that conflicts or goes red can push
+ * its ticket onto it after every other pipeline has ended. A ticket ends once - a pipeline that
+ * is not green, or a landing that is not requeued - and `finish` then counts it; the last one
+ * closes the pipeline queue and the landing queue. A ticket that conflicts or goes red at
+ * landing is requeued once: its pipeline takes the land-only path (merge the base in, resolver,
+ * gates, repair, narrow review) when its `heads` record matches, the full path otherwise. A
+ * second conflict or red is final, and `earlier` names the tickets of the first.
+ */
+export const createFlow = <I extends { id: string }>(tickets: number, pipelines: Queue<I>, landing: { close(): void }) => {
+  let open = tickets;
+  const first = new Map<string, { kind: "conflict" | "red"; with: string[] }>();
+  const close = () => {
+    pipelines.close();
+    landing.close();
+  };
+  if (open <= 0) close();
+  const finish = () => {
+    if (--open <= 0) close();
+  };
+  let working = 0;
+  return {
+    /** Pipelines running now. */
+    get working() {
+      return working;
+    },
+    /**
+     * The pipeline workers' function for `Queue.run`: `fn` says with `true` that it handed the
+     * ticket to landing, which then says its last word; any other end is the pipeline's own,
+     * a throw included (`ended`, when given, is called for it instead of `finish` and must call it).
+     */
+    work: (fn: (issue: I) => Promise<boolean | void>, ended?: (issue: I) => void | Promise<void>) => async (issue: I) => {
+      let handed = false;
+      working++;
+      try {
+        handed = (await fn(issue)) === true;
+      } finally {
+        working--;
+        // `ended` says the last word itself and must reach `finish`; without it the pipeline's end is the last word.
+        if (!handed) await (ended ? ended(issue) : finish());
+      }
+    },
+    /**
+     * Puts a ticket on the pipeline queue that was not counted at the start: one that waited for a
+     * blocker in this run. Before the landed blocker's own `finish`, so the count never touches zero between them.
+     */
+    start(issue: I) {
+      open++;
+      pipelines.push(issue);
+    },
+    /** The ticket's last word is said: nothing of it is queued or running any more. */
+    finish,
+    /**
+     * After a landing: pushes `issue` back on the pipeline queue and returns the line the second
+     * attempt carries, when this was its first conflict or red; otherwise undefined and the
+     * landing stands as it is. Not for a run that is stopping: the caller says `stopping`.
+     */
+    retry(issue: I, landed: Landed, stopping = false): string | undefined {
+      if (stopping || (landed.kind !== "conflict" && landed.kind !== "red") || first.has(issue.id)) return undefined;
+      const note = { kind: landed.kind, with: landed.with };
+      try {
+        pipelines.push(issue);
+      } catch {
+        return undefined; // the queue is already closed: the run is ending
+      }
+      first.set(issue.id, note);
+      return requeuedLine(note.kind, note.with);
+    },
+    /** The tickets the first attempt collided with, when this ticket was requeued; otherwise undefined. */
+    earlier(id: string) {
+      return first.get(id);
+    },
   };
 };

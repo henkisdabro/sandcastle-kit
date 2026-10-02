@@ -50,7 +50,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { autonomyLevel, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
+import { autonomyLevel, capLine, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -151,7 +151,7 @@ try {
         const many = `${ids.length} ticket(s) can`;
         const manual = `\`sandcastle run ${ids.join(" ")}\``;
         if (verdict === "cap") {
-          console.log(`Autonomy level ${level}: ${level} turn(s) done, the cap; ${many} still run again - ${list}. ${manual} runs them.`);
+          console.log(capLine(level, ids, list));
           break;
         }
         if (verdict === "ask") {
