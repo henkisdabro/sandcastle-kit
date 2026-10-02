@@ -607,10 +607,15 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
 
     const started = Date.now();
     releaseBranchWorktree(branch);
+    // From here the agent commits to the branch; the `.git` check lets it move.
+    host.begin(branch);
     const sandbox = await timed(issue.id, "setup", () =>
       createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
       requeuedAs.get(issue.id),
-    );
+    ).catch(async (error) => {
+      await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
+      throw error;
+    });
 
     let failed: unknown;
     try {
@@ -1031,7 +1036,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       const closed = await sandbox.close();
       if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
       try {
-        await host.check(`after ${ref(issue.id)}`);
+        await host.settle(branch, `after ${ref(issue.id)}`);
       } catch (error) {
         stops.add(String(error));
         tampered ??= String(error);

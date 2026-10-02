@@ -1071,6 +1071,14 @@ and the kit narrows what can cross it:
   checkout or commit. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run.
+- 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
+  holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
+  `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare
+  repo at `.sandcastle/backup.git`, which no sandbox mounts. A branch that vanishes is restored from
+  that copy with a warning line; a tip that moves for a ticket that is not running stops the run. A
+  base that was deleted or moved stops it with the exact `git update-ref` that puts it back, and a
+  sandbox's worktree record rewritten to a container path (`git worktree repair`) is named. A branch
+  the kit deletes itself, a squash landing's, is never restored.
 - 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or
   labelled `ready-for-human` during the run means no merge - and the merge takes the exact commit
   the gates passed on. A run that dies between merging and closing is finished by the next one.

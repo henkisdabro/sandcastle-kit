@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
@@ -115,7 +115,8 @@ export const landInSandbox = async (
   // sandbox slot is not merged over, and taken as expected, by the fresh fingerprint below.
   if (expected) assertGitUnchanged(project, expected, `before landing ${t.branch} in a sandbox`);
   // Before any container starts: it runs with the shared .git mounted.
-  const before = gitFingerprint(project);
+  // The run's branches and in-flight tickets are shared: pipelines run on while this lands.
+  const before = gitFingerprint(project, expected);
   const baseTip = sh("git", ["rev-parse", project.baseBranch], project.root);
   // The `sandcastle/` prefix is what `sandcastle clean` already treats as scratch.
   const scratch = `sandcastle/land-${t.branch.replace(/\W+/g, "-")}-${Date.now()}`;
@@ -267,6 +268,7 @@ export const landTicket = async (
       const { files, regen } = result;
       const squash = project.land === "squash";
       const how = squash ? "squashed" : "merged";
+      dropBackup(project, branch);
       // A squashed branch's commits never reach the base, so it is deleted as a run deletes it.
       let kept = "";
       if (squash) {
