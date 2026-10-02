@@ -98,7 +98,7 @@ type FlowOptions = {
 /**
  * Wires what burndown.ts wires: the start of the run through `startHold` (the function burndown()
  * calls), the real hold with the same `refreshFiles`, `createFlow` over the pipeline queue,
- * `createRelease` with the hold after each ticket's last word. A fake pipeline works `delay` ms,
+ * `createRelease` with the hold after each ticket's ending. A fake pipeline works `delay` ms,
  * then "lands" (or, for a ticket in `leave`, ends without landing).
  */
 const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = {}): Promise<Flow> => {

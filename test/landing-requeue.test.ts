@@ -22,11 +22,11 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { againLine, createFlow, createHostGit, createLanding, createSettling, requeuedLine } = await import("../src/landing.ts");
+const { againLine, createFlow, createHostGit, createSettling, landingWork, requeuedLine } = await import("../src/landing.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { landOnlyHead, recordHead, recordRun } = await import("../src/run.ts");
-const { createQueue, createStopState } = await import("../src/schedule.ts");
+const { createLanding, createQueue, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -34,6 +34,8 @@ type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 type Landings = import("../src/landing.ts").Landings;
 type StopState = import("../src/schedule.ts").StopState;
+type StopWriter = import("../src/schedule.ts").StopWriter;
+type StopCause = import("../src/schedule.ts").StopCause;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-landing-requeue-"));
 // recordRun finishes its record in an exit handler, so the temp directory goes after it: registered once the
@@ -100,7 +102,7 @@ const RED: GateRun = { gates: [{ name: "test", pass: false }], failure, failures
 
 type Issue = { id: string };
 // `stop` is the run's stop state: a pipeline adds a cause where burndown.ts finds one.
-type Pipeline = (issue: Issue, attempt: number, stop: StopState) => Promise<Waiting | undefined>;
+type Pipeline = (issue: Issue, attempt: number, stop: StopWriter) => Promise<Waiting | undefined>;
 
 // The lists burndown() keeps, and a run record in a directory of its own (never the repo under test).
 const newLists = (): Landings => ({
@@ -151,7 +153,7 @@ const settlingOver = (ids: string[], record: ReturnType<typeof recordRun>, opts:
 
 // The wiring burndown.ts makes, with `pipeline` standing in for a ticket's sandbox pipeline: a green
 // outcome goes to the landing worker, a landing's conflict or red may send the ticket back to the
-// pipeline queue, and the queues close once every ticket has had its last word.
+// pipeline queue, and the queues close once every ticket has its ending.
 const run = async (root: string, ids: string[], pipeline: Pipeline, gate: Ctx["gate"] = async () => GREEN, workers = 2) => {
   const project = { root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [] } as unknown as Project;
   const host = createHostGit(project, gitFingerprint(project));
@@ -198,7 +200,7 @@ const run = async (root: string, ids: string[], pipeline: Pipeline, gate: Ctx["g
     ref: (id) => `#${id}`,
     say: (line) => void (/; its pipeline runs again in this run\.$/.test(line) && sentBack.push(line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: "))),
   });
-  const landing = createLanding(ctx, stop, {
+  const landing = createLanding(landingWork(ctx), stop, {
     settled: async (o, landed) => {
       const before = sentBack.length;
       await settling.settled(o, landed);
@@ -345,7 +347,7 @@ test("a merged tree that is red is requeued once too, and a second red holds it"
 // landing, and 3, which changes a file of its own, reaches landing after 2. Ordered by events:
 // 2's pipeline ends once 1 has merged, and 3's once 2's has handed it on (the host's writer settles
 // 2 first, so 2 is on the landing queue before 3).
-const stopMidRun = async (cause: Parameters<StopState["add"]>[0]) => {
+const stopMidRun = async (cause: StopCause) => {
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" }, 3: { "c.txt": "three\n" } });
   let twoDone!: () => void;
   const two = new Promise<void>((resolve) => (twoDone = resolve));
@@ -572,7 +574,7 @@ test("a push to a closed queue: the normal conflict outcome, nothing left queued
   assert.deepEqual(lists.conflicted.map((c) => [c.issue, c.with]), [["2", ["1"]]]);
   assert.equal(settling.lines().get("2"), "merge conflict: with #1: shared.txt");
   assert.deepEqual([written()["2"].state, written()["2"].note, written()["2"].requeued], ["conflict", "with #1: shared.txt", null]);
-  assert.equal(closed.n, 1, "its last word was said: the queues close");
+  assert.equal(closed.n, 1, "it has its ending: the queues close");
 });
 
 test("a ticket is on the queue only after its requeue is recorded", async () => {

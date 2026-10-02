@@ -32,10 +32,10 @@ chmodSync(join(SHIM, "gh"), 0o755);
 process.env.PATH = `${SHIM}${delimiter}${process.env.PATH}`;
 
 const { blockedNote, createDependants, createRelease, dependantsInRun, openBlockers, blockerResolver } = await import("../src/blockers.ts");
-const { createFlow, createHostGit, createLanding } = await import("../src/landing.ts");
+const { createFlow, createHostGit, landingWork } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
-const { createQueue, createStopState } = await import("../src/schedule.ts");
-type StopState = import("../src/schedule.ts").StopState;
+const { createLanding, createQueue, createStopState } = await import("../src/schedule.ts");
+type StopWriter = import("../src/schedule.ts").StopWriter;
 type Project = import("../src/config.ts").Project;
 type Ctx = import("../src/landing.ts").LandContext;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -107,7 +107,7 @@ const runWith = async (
     pipeline?: (t: Ticket, root: string, attempt: number) => Promise<"green" | "red">;
     badLabel?: Record<string, string>;
     /** As a ticket starts; `stop` is the run's stop state, to which a test adds a cause. */
-    onStart?: (id: string, run: Run, stop: StopState) => void;
+    onStart?: (id: string, run: Run, stop: StopWriter) => void;
     /** Time a ticket works on after its branch is made, outside the host lock. */
     delay?: Record<string, number>;
     /** Time before a ticket makes its branch, so it forks from a base that has moved. */
@@ -171,7 +171,7 @@ const runWith = async (
 
   const queue = createQueue<Ticket>();
   // eslint-disable-next-line prefer-const
-  let landing!: ReturnType<typeof createLanding>;
+  let landing!: ReturnType<typeof createLanding<Waiting>>;
   const stop = createStopState(host);
   const flow = createFlow(ready.length, queue, { close: () => landing.close() });
   const { afterLanding } = createRelease({
@@ -186,11 +186,11 @@ const runWith = async (
     ref: tracker.ref,
     say: (line) => void run.said.push(line),
   });
-  landing = createLanding(ctx, stop, {
+  landing = createLanding(landingWork(ctx), stop, {
     settled: async (o, landed) => {
       if (landed.kind === "merged" || landed.kind === "close-failed") run.landed.push(o.issue);
       run.events.push(`settled ${o.issue} ${landed.kind}`);
-      // As burndown.ts: a first conflict or red goes back to the pipelines, and its last word waits.
+      // As the scheduler: a first conflict or red goes back to the pipelines, and its ending waits.
       const again = flow.retry(tickets.find((t) => t.id === o.issue)!, landed, stop.startsNothing);
       if (again !== undefined) {
         run.events.push(`requeued ${o.issue}`);

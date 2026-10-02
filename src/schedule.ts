@@ -1,7 +1,12 @@
-// A small work queue: the pipeline fan-out's, and the landing worker's. Workers keep pulling while
-// the queue is open or still holds items, so an item can be pushed after the workers have started
-// (a green outcome as its pipeline ends). `run` resolves only after `close()` and an empty queue.
-// Also the file hold, and the run's one stop state (`createStopState`).
+// The run's scheduler (`createSchedule`): every attempt and every landing of a run goes through it,
+// and it returns each ticket's ending and the run's one stop state (`createStopState`). Its parts:
+// a small work queue, the pipeline fan-out's and the landing worker's (workers keep pulling while
+// the queue is open or still holds items, so an item can be pushed after the workers have started -
+// a green outcome as its pipeline ends; `run` resolves only after `close()` and an empty queue), the
+// landing worker (`createLanding`), and the file hold.
+
+import { OperatorError } from "./errors.ts";
+import { createFlow, type Landed } from "./landing.ts";
 
 export type Queue<T> = {
   /** Add an item; a waiting worker takes it at once. Refused after `close()`. */
@@ -10,6 +15,8 @@ export type Queue<T> = {
   close(): void;
   /** Items pushed and not yet taken by a worker. */
   readonly size: number;
+  /** `close()` was called: a push now throws. */
+  readonly closed: boolean;
   /** `workers` loops, each awaiting `fn` for one item at a time. Rejects as soon as one `fn` does. */
   run(workers: number, fn: (item: T) => Promise<void>): Promise<void>;
 };
@@ -49,6 +56,9 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
     },
     get size() {
       return items.length;
+    },
+    get closed() {
+      return closed;
     },
     async run(workers, fn) {
       await Promise.all(
@@ -253,21 +263,40 @@ export const STOP_KINDS = {
  * The run's one answer to "has it stopped?". Every cause is kept, in arrival order; `startsNothing`
  * (any cause: no attempt begins, nothing is requeued, no dependant is released) and `landsNothing`
  * (any safety cause, not only the first) are the only readings, and `headline` is the cause the
- * closing summary names: the highest-ranked, the earliest within a rank.
+ * closing summary names: the highest-ranked, the earliest within a rank. Read-only: a cause reaches
+ * a run only through the scheduler, from a port's result or the host's failure read live.
  */
 export type StopState = {
-  add(cause: StopCause): void;
   readonly causes: readonly StopCause[];
   readonly startsNothing: boolean;
   readonly landsNothing: boolean;
   readonly headline: StopCause | undefined;
 };
 
+/** The stop state with its `add`, which only the scheduler holds. */
+export type StopWriter = StopState & { add(cause: StopCause): void };
+
+/** The readings of `stop`, without its `add`: what the scheduler hands out. */
+const readings = (stop: StopState): StopState => ({
+  get causes() {
+    return stop.causes;
+  },
+  get startsNothing() {
+    return stop.startsNothing;
+  },
+  get landsNothing() {
+    return stop.landsNothing;
+  },
+  get headline() {
+    return stop.headline;
+  },
+});
+
 /**
  * `host` is read live: a write the host git refused is a safety stop the moment it is refused,
  * without anyone recording it, so no path can miss it.
  */
-export const createStopState = (host?: { readonly failed: unknown }): StopState => {
+export const createStopState = (host?: { readonly failed: unknown }): StopWriter => {
   const added: StopCause[] = [];
   const causes = (): StopCause[] => {
     const failed = host?.failed;
@@ -288,6 +317,306 @@ export const createStopState = (host?: { readonly failed: unknown }): StopState 
     get headline() {
       // `<` keeps the earliest of equal ranks.
       return causes().reduce<StopCause | undefined>((best, c) => (!best || STOP_KINDS[c.kind].rank < STOP_KINDS[best.kind].rank ? c : best), undefined);
+    },
+  };
+};
+
+/** A green branch waiting to land; a carried branch (one with work from an earlier run) goes first. */
+export type Green = { issue: string; carried?: boolean };
+
+/** The host's git, as the landing worker sees it. */
+export type HostPort = {
+  /** The `.git` check before landing `ticket`; a failure throws an `OperatorError`. */
+  check(ticket: string): Promise<void>;
+  /** The write the host git refused, if any: read live, it is a safety stop without anyone adding it. */
+  readonly failed: unknown;
+};
+
+/** What the landing worker needs of a run: the landing itself (`landOne`), and the check before it. */
+export type LandPorts<G extends Green> = {
+  /** Lands one green branch. A refused write or a failed `.git` check throws an `OperatorError`; anything else is the port's own to turn into a `Landed`. */
+  land(green: G): Promise<Landed>;
+  host: HostPort;
+};
+
+/**
+ * The landing worker. A green outcome is `push`ed as its pipeline ends; one worker lands them one
+ * at a time, in arrival order except that a carried branch goes before a new one when both wait (in
+ * finish order it came last - it had a merge to resolve - and lost a conflict to a new branch on the
+ * same lines, run after run). `close()` says no more will come: `run` resolves once the queue is
+ * empty. `settled` is awaited before the next landing, so a ticket it releases starts before that one
+ * lands. Once the stop state `landsNothing` - a `.git` check that failed here or after a pipeline, a
+ * host git write refused - what is queued and what arrives later is handed to `stopped`, not landed.
+ * A usage or plan limit still lands what is green. The scheduler's own; exported for the tests that
+ * still wire it by hand.
+ */
+export const createLanding = <G extends Green>(
+  ports: LandPorts<G>,
+  stop: StopWriter,
+  on: {
+    settled(green: G, landed: Landed): void | Promise<void>;
+    stopped(green: G): void | Promise<void>;
+    /** The land port threw something that is not a stop. Without it, the worker rejects. */
+    crashed?(green: G, error: unknown): void | Promise<void>;
+  },
+) => {
+  const queue = createQueue<G>((g) => (g.carried ? 1 : 0));
+  return {
+    push: (g: G) => queue.push(g),
+    close: () => queue.close(),
+    get size() {
+      return queue.size;
+    },
+    run: () =>
+      queue.run(1, async (g) => {
+        if (stop.landsNothing) return on.stopped(g);
+        let landed: Landed;
+        try {
+          await ports.host.check(g.issue);
+          landed = await ports.land(g);
+        } catch (error) {
+          if (error instanceof OperatorError) {
+            // A refused write is the host's failure, which the stop state reads live; any other is a `.git` check.
+            if (error !== ports.host.failed) stop.add({ kind: "tampered", error });
+            return on.stopped(g);
+          }
+          if (!on.crashed) throw error;
+          return on.crashed(g, error);
+        }
+        // A write refused after its merge (the close, the branch delete): this one landed, and the
+        // stop state reads the host's failure live, so nothing after it does.
+        await on.settled(g, landed);
+      }),
+  };
+};
+
+/** What a ticket's first attempt collided with at landing: its second attempt carries it. */
+export type Again = { kind: "conflict" | "red"; with: string[] };
+
+/** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
+export type Withdrawn = { kind: "withdrawn"; reason: string };
+
+/** What one attempt reports: how its pipeline ended, and any cause it found to stop the run. */
+export type Attempted<G, O> =
+  /** Gated green: on to the landing worker. */
+  | { kind: "green"; green: G }
+  /** Ended in its pipeline: a red gate, nothing to change, held by the kit, work left uncommitted. */
+  | { kind: "pipeline"; outcome: O }
+  /** `causes`: a plan limit its agent hit, a `.git` check that failed after it. */
+  | { kind: "crashed"; error: unknown; causes?: StopCause[] }
+  /** Its pipeline ran, then the `.git` check after it failed: the run stops. */
+  | { kind: "stopped"; cause: StopCause }
+  /** The check before it found a usage limit, or the tracker withdrew the ticket: nothing ran. */
+  | { kind: "not begun"; why: StopCause | Withdrawn };
+
+/**
+ * How one ticket's part in a run ends: exactly one per ticket the run took in. `attempts` counts the
+ * attempts that began; a requeued ticket whose second attempt never began ends with its first
+ * landing (`withdrawn` when the tracker took it back meanwhile). `again` is what the first attempt
+ * collided with, on a second attempt's landing; its `landed.with` then names the tickets of both.
+ */
+export type Ending<G, O> =
+  | { kind: "landing"; green: G; landed: Landed; attempts: 1 | 2; again?: Again }
+  | { kind: "pipeline"; outcome: O; attempts: 1 | 2 }
+  /** `green` when the land port threw, rather than the pipeline. */
+  | { kind: "crashed"; error: unknown; attempts: 1 | 2; green?: G }
+  /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
+  | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
+  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string } }
+  /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
+  | { kind: "waiting"; on: "file" | "blockers" };
+
+/** What the scheduler tells as the run goes, for the run record and the views. */
+export type Change<G, O> =
+  /** Told before the ticket is queued again, so no view shows a queued ticket the record does not know. */
+  | { kind: "requeued"; id: string; again: Again }
+  /** The ticket's ending, as it happens: before the tickets it frees start. */
+  | { kind: "ended"; id: string; ending: Ending<G, O> }
+  /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
+  | { kind: "landing"; at: number; of: number };
+
+/** The release of dependants and the file hold, as the run's start set them up; the scheduler calls them. */
+export type Release = {
+  /** The ticket is done with: `landed` when it landed and closed. Starts what it frees, then calls `finish` once. */
+  afterLanding(id: string, landed: boolean): void | Promise<void>;
+  /** A ticket parked or held may still start in this run. */
+  readonly more: boolean;
+};
+
+export type Plan<T extends { id: string }> = {
+  /** The tickets that start now, in start order. */
+  tickets: T[];
+  /** The candidates that start later in this run, if at all: behind a file git cannot merge, or a blocker in this run. */
+  later?: { ticket: T; on: "file" | "blockers" }[];
+  /**
+   * The release of dependants and the file hold, given the scheduler's own `start` (a ticket freed
+   * mid-run), `finish` (a ticket is done), `refuse` (a freed ticket's label holds it) and stop state.
+   * Without it, a ticket's end frees nothing.
+   */
+  release?(s: { start(ticket: T): void; finish(): void; refuse(id: string, reason: string): void; stop: StopState }): Release;
+};
+
+export type Work<T, G extends Green, O> = LandPorts<G> & {
+  /** Pipelines at once. */
+  workers: number;
+  /**
+   * One attempt of a ticket: `n` is 2 for a requeued ticket, which carries `again`. `last()` says
+   * nothing more will start after it - none queued, none that may be freed, or a stopped run - so a
+   * sandbox's pane can close.
+   */
+  attempt(ticket: T, at: { n: 1 | 2; again?: Again; last(): boolean }): Promise<Attempted<G, O>>;
+  /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
+  tell(change: Change<G, O>): void;
+};
+
+/**
+ * The run's one path for attempts and landings. `start` is the candidates in start order. `run`
+ * fans the attempts out over `workers`, hands each green one to the landing worker, sends a first
+ * conflict or red back for a second attempt (`createFlow`) unless the run starts nothing, and calls
+ * the plan's release as each ticket ends. A cause reaches the stop state only from an attempt's
+ * result, a landing's `.git` check or refused write, or the host's failure read live. It resolves
+ * once every ticket has its ending, with the endings and the stop state; it writes no run record and
+ * no wording - `tell` and the endings carry what the burndown records.
+ */
+export const createSchedule = <T extends { id: string }, G extends Green, O = unknown>(plan: Plan<T>) => {
+  const later = plan.later ?? [];
+  return {
+    start: [...plan.tickets.map((ticket) => ({ ticket })), ...later.map((l) => ({ ticket: l.ticket, wait: l.on }))],
+    async run(work: Work<T, G, O>): Promise<{ endings: Map<string, Ending<G, O>>; stop: StopState }> {
+      const stop = createStopState(work.host);
+      const endings = new Map<string, Ending<G, O>>();
+      const tell = (change: Change<G, O>) => {
+        try {
+          work.tell(change);
+        } catch {
+          /* progress only: the ending stands */
+        }
+      };
+      const byId = new Map(plan.tickets.map((t) => [t.id, t] as const));
+      // Attempts that began, by ticket.
+      const attempts = new Map<string, 1 | 2>();
+      // A ticket landing sent back, until its second attempt begins: if that never begins, this landing is its ending.
+      const sentBack = new Map<string, { green: G; landed: Landed }>();
+      let working = 0;
+      let pushed = 0;
+      let dealt = 0;
+      const pipelines = createQueue<T>();
+      const stage = () => {
+        if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
+      };
+      // Said before the tickets it frees start, and before `finish` drops the open count.
+      const end = async (id: string, ending: Ending<G, O>, landed = false) => {
+        endings.set(id, ending);
+        tell({ kind: "ended", id, ending });
+        await release.afterLanding(id, landed);
+      };
+
+      const landing = createLanding(work, stop, {
+        settled: async (g, got) => {
+          dealt++;
+          stage();
+          const id = g.issue;
+          const t = byId.get(id);
+          // A first conflict or red goes back to the pipelines once, in this run: told, then queued.
+          if (t && !pipelines.closed && (got.kind === "conflict" || got.kind === "red")) {
+            const again: Again = { kind: got.kind, with: got.with };
+            if (flow.retry(t, got, stop.startsNothing, () => tell({ kind: "requeued", id, again })) !== undefined) {
+              sentBack.set(id, { green: g, landed: got });
+              return;
+            }
+          }
+          const first = flow.earlier(id);
+          // A second collision names the tickets of both attempts.
+          const landed = first && (got.kind === "conflict" || got.kind === "red") ? { ...got, with: [...new Set([...first.with, ...got.with])] } : got;
+          const closed = landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier";
+          await end(id, { kind: "landing", green: g, landed, attempts: attempts.get(id) ?? 1, ...(first && { again: first }) }, closed);
+        },
+        stopped: (g) => {
+          dealt++;
+          stage();
+          return end(g.issue, { kind: "stopped", cause: stop.headline, finished: true, green: g });
+        },
+        crashed: (g, error) => {
+          dealt++;
+          stage();
+          return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
+        },
+      });
+      // Keeps the pipeline queue open until every ticket has its ending: a landing can send one back.
+      const flow = createFlow(plan.tickets.length, pipelines, landing);
+      const release: Release = plan.release?.({
+        start: (t) => {
+          byId.set(t.id, t);
+          flow.start(t);
+        },
+        finish: () => flow.finish(),
+        refuse: (id, reason) => {
+          const ending: Ending<G, O> = { kind: "not begun", why: { kind: "refused label", reason } };
+          endings.set(id, ending);
+          tell({ kind: "ended", id, ending });
+        },
+        stop: readings(stop),
+      }) ?? { afterLanding: () => flow.finish(), more: false };
+      const last = () => stop.startsNothing || (pipelines.size === 0 && !release.more);
+
+      // An attempt that does not begin: the ticket's first landing stands, if it had one.
+      const notBegun = (t: T, why: StopCause | Withdrawn) => {
+        const first = sentBack.get(t.id);
+        sentBack.delete(t.id);
+        if (!first) return end(t.id, { kind: "not begun", why });
+        const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : first.landed;
+        return end(t.id, { kind: "landing", green: first.green, landed, attempts: 1 });
+      };
+      const attempt = async (t: T) => {
+        working++;
+        try {
+          if (stop.startsNothing) return await notBegun(t, stop.headline!);
+          const n = attempts.has(t.id) ? 2 : 1;
+          let r: Attempted<G, O>;
+          try {
+            r = await work.attempt(t, { n, again: flow.earlier(t.id), last });
+          } catch (error) {
+            r = { kind: "crashed", error };
+          }
+          if (r.kind === "not begun") {
+            if (r.why.kind !== "withdrawn") stop.add(r.why);
+            return await notBegun(t, r.why);
+          }
+          sentBack.delete(t.id);
+          attempts.set(t.id, n);
+          switch (r.kind) {
+            case "green":
+              pushed++;
+              landing.push(r.green);
+              return;
+            case "pipeline":
+              return await end(t.id, { kind: "pipeline", outcome: r.outcome, attempts: n });
+            case "crashed":
+              for (const c of r.causes ?? []) stop.add(c);
+              return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
+            case "stopped":
+              stop.add(r.cause);
+              return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });
+          }
+        } finally {
+          working--;
+          stage();
+        }
+      };
+
+      for (const t of plan.tickets) pipelines.push(t);
+      // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
+      // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
+      const fanOut = pipelines.run(work.workers, attempt).finally(() => {
+        pipelines.close();
+        landing.close();
+        stage();
+      });
+      const lands = landing.run().finally(() => pipelines.close());
+      const [a, b] = await Promise.allSettled([fanOut, lands]);
+      for (const l of later) if (!endings.has(l.ticket.id)) endings.set(l.ticket.id, { kind: "waiting", on: l.on });
+      for (const r of [a, b]) if (r.status === "rejected") throw r.reason;
+      return { endings, stop: readings(stop) };
     },
   };
 };
