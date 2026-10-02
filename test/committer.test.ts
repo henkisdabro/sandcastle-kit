@@ -17,6 +17,7 @@ mkdirSync(join(xdg, "sandcastle-kit"), { recursive: true });
 writeFileSync(join(xdg, "sandcastle-kit", ".env"), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\nGH_TOKEN=github_pat_fake\n");
 const { AGENT_COMMITTER, sandboxEnv } = await import("../src/sandbox.ts");
 const { mergeBranch } = await import("../src/burndown.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 // CI has no global identity, and the developer running this may export a committer of their own.
@@ -67,7 +68,7 @@ test("the landing merge is committed by the agent, authored by the operator, and
 
 test("the sandbox env names the committer, keeps the credentials and sets no author", () => {
   const root = makeRepo();
-  const project = { root, tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as unknown as Project;
+  const project = { root, tracker: fakeTracker() } as unknown as Project;
   const env = sandboxEnv(project);
   assert.equal(env.GIT_COMMITTER_NAME, "Sandcastle agent");
   assert.equal(env.GIT_COMMITTER_EMAIL, "agent@sandcastle.invalid");

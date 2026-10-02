@@ -55,8 +55,9 @@ const { configureModels, implAgent, ticketOverride } = await import("../src/agen
 const { OperatorError } = await import("../src/errors.ts");
 const { preflight } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 configureModels();
-const project = { root: tmp, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
+const project = { root: tmp, label: "ready-for-agent", tracker: fakeTracker() } as any;
 
 test("model: and effort: labels make the override; other labels are ignored", () => {
   assert.deepEqual(ticketOverride("#12", ["bug", "model:claude-opus-5-5", "effort:xhigh"]), { model: "claude-opus-5-5", effort: "xhigh" });

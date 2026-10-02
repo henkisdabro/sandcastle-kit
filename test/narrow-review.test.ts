@@ -17,6 +17,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { narrowReviewBase, recordHead, renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
@@ -118,7 +119,7 @@ const project = (root: string): Project => ({
   implement: {},
   review: {},
   repair: {},
-  tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage", dir: "", done: [], source: "default" },
+  tracker: fakeTracker(),
 });
 
 test("a conflict resolved inside the merge is still merge-only, and the narrow prompt's log shows the resolution", (t) => {

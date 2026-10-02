@@ -18,6 +18,7 @@ process.env.CROSS_REVIEW = "1";
 delete process.env.SKIP_PREFLIGHT;
 const { preflight, preflightFailure } = await import("../src/run.ts");
 const { credentialSource, USER_CONFIG } = await import("../src/sandbox.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const credential = { key: "CLAUDE_CODE_OAUTH_TOKEN", file: join("project", ".sandcastle", ".env") };
 const noBody = "API Error: 400 (no body)";
@@ -99,7 +100,7 @@ test("a Codex-only rejection does not blame the Claude credential", async () => 
   const root = mkdtempSync(join(tmpdir(), "sandcastle-test-project-"));
   mkdirSync(join(root, ".sandcastle"));
   writeFileSync(join(root, ".sandcastle/.env"), "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
-  const project = { root, tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage" } } as Parameters<typeof preflight>[0];
+  const project = { root, tracker: fakeTracker({ kind: "files" }) } as Parameters<typeof preflight>[0];
 
   const path = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${path}`;

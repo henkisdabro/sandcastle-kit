@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
 const log = join(dir, "calls.log");
@@ -33,7 +34,7 @@ exit 0
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
+const project = { root: dir, label: "ready-for-agent", tracker: fakeTracker() } as any;
 
 const calls = () => {
   try {

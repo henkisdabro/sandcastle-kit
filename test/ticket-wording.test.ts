@@ -25,6 +25,7 @@ const { namedTickets } = await import("../src/burndown.ts");
 const { render } = await import("../src/report.ts");
 const { namedTicketsFromEnv } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Facts = import("../src/report.ts").Facts;
 type Project = import("../src/config.ts").Project;
 
@@ -154,7 +155,7 @@ test("either variable's list picks the same tickets from the tracker", () => {
     baseBranch: "main",
     label: "ready-for-agent",
     gates: [],
-    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: fakeTracker({ kind: "files" }),
   } as unknown as Project;
   const tracker = makeTracker(project);
   const pick = (env: NodeJS.ProcessEnv) => namedTickets(tracker, namedTicketsFromEnv(env).list!).map((t) => t.id);

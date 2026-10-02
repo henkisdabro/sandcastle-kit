@@ -17,6 +17,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 delete process.env.LINEAR_API_KEY;
 const { blockerProblems, commentOnlyBlocks, commentBlockLine } = await import("../src/blockers.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 const repo = (tickets: Record<string, string>, extra: object = {}) => {
@@ -26,7 +27,7 @@ const repo = (tickets: Record<string, string>, extra: object = {}) => {
   for (const [name, text] of Object.entries(tickets)) writeFileSync(join(root, ".scratch/shop/issues", name), text);
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "add", "-A"], { cwd: root });
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "t"], { cwd: root });
-  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" }, ...extra } as unknown as Project;
+  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker({ kind: "files" }), ...extra } as unknown as Project;
   const tracker = makeTracker(project);
   return { project, tracker };
 };

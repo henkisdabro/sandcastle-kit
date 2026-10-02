@@ -19,6 +19,7 @@ const { settledUnlanded } = await import("../src/burndown.ts");
 const { closingReport, operatorSteps, render } = await import("../src/report.ts");
 const { recordRun } = await import("../src/run.ts");
 const { strayChanges, strayNote } = await import("../src/resolution.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Facts = Parameters<typeof render>[0];
 type Project = import("../src/config.ts").Project;
 
@@ -206,7 +207,7 @@ test("closingReport marks a turn the loop continues from, and only that one", as
     baseBranch: "main",
     label: "ready-for-agent",
     gates: [],
-    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: fakeTracker({ kind: "files" }),
   } as unknown as Project;
   recordRun(project, {
     issues: ["shop-01"],

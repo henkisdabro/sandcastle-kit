@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
 // A plain sh script prints the JSON file beside it: the same on macOS and Linux.
@@ -20,7 +21,7 @@ writeFileSync(gh, `#!/bin/sh\ncat "${join(dir, "issues.json")}"\n`);
 chmodSync(gh, 0o755);
 process.env.PATH = `${dir}${delimiter}${process.env.PATH}`;
 
-const project = { root: dir, label: "ready-for-agent", tracker: { kind: "github", held: "ready-for-human", triage: "needs-triage" } } as any;
+const project = { root: dir, label: "ready-for-agent", tracker: fakeTracker() } as any;
 
 const issues = (n: number) =>
   JSON.stringify(Array.from({ length: n }, (_, i) => ({ number: i + 1, title: `t${i + 1}`, body: "", labels: [], updatedAt: "2026-01-01T00:00:00Z" })));

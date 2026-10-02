@@ -20,6 +20,7 @@ process.env.XDG_CONFIG_HOME = XDG;
 delete process.env.LINEAR_API_KEY;
 const { lintQueue } = await import("../src/lint.ts");
 const { makeTracker } = await import("../src/tracker.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 const GIT = ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
@@ -34,7 +35,7 @@ const repo = (tickets: Record<string, string>) => {
   writeFileSync(join(root, "app.ts"), "export {};\n");
   execFileSync("git", [...GIT, "add", "-A"], { cwd: root });
   execFileSync("git", [...GIT, "commit", "-qm", "t"], { cwd: root });
-  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" } } as unknown as Project;
+  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
   const tracker = makeTracker(project);
   return { root, project, tracker };
 };

@@ -51,6 +51,7 @@ test("the sidebar's run line reads each ticket's state through the guard", () =>
 test("the report, gathered from a record on disk, puts a state outside the set in no section", async () => {
   process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
   const { gather } = await import("../src/report.ts");
+  const { fakeTracker } = await import("./fixtures.ts");
   const root = mkdtempSync(join(tmpdir(), "sandcastle-run-record-report-"));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "t"], { cwd: root });
@@ -75,7 +76,7 @@ test("the report, gathered from a record on disk, puts a state outside the set i
   );
   const project = {
     name: "demo", root, baseBranch: "main", label: "ready-for-agent", gates: [],
-    tracker: { kind: "files", held: "ready-for-human", triage: "needs-triage", dir: ".scratch", done: ["done"], source: "config" },
+    tracker: fakeTracker({ kind: "files" }),
   } as unknown as Project;
   const facts = await gather(project);
   assert.equal(facts.tickets["2"].state, undefined);
