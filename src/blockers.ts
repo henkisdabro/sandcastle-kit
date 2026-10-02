@@ -13,9 +13,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
-import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { errorLine, sh, USER_CONFIG } from "./sandbox.ts";
-import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, type StopState, stoppedWaitNote } from "./schedule.ts";
+import type { StopState } from "./schedule.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
@@ -411,16 +411,16 @@ export type Dependants<T extends Blocked> = ReturnType<typeof createDependants<T
 
 /**
  * What a run does as each ticket is done with it. `afterLanding(id, true)`: the ticket landed and
- * its close has been written, so every held ticket that has no open blocker now starts (`start`),
- * and a bad label on one holds that ticket, never the run. `afterLanding(id, false)`: it will not
- * land; nothing is released. Either way `finish` comes last, after `start`, so a flow that closes
- * its queue at zero never reads empty between a landing and the tickets it frees. A run whose stop
- * state `startsNothing`, and a dry run, release nothing.
+ * its close has been written, so every held ticket that has no open blocker now goes to `start`
+ * (the scheduler's: it starts the ticket, or parks it behind a file git cannot merge, and tells
+ * which), and a bad label on one holds that ticket, never the run. `afterLanding(id, false)`: it
+ * will not land; nothing is released. Either way `finish` comes last, after `start`, so a flow that
+ * closes its queue at zero never reads empty between a landing and the tickets it frees. A run whose
+ * stop state `startsNothing`, and a dry run, release nothing. The scheduler has freed the ticket's
+ * files before it calls this.
  */
 export const createRelease = <T extends Blocked>(o: {
   dependants: Dependants<T>;
-  /** Tickets that share a file git cannot merge start one at a time (schedule.ts); absent for a dry run, which lands nothing. */
-  hold?: FileHold<T>;
   start(ticket: T): void;
   finish(): void;
   /** The run's stop state (schedule.ts): any cause stops releasing. */
@@ -428,104 +428,32 @@ export const createRelease = <T extends Blocked>(o: {
   dryRun: boolean;
   /** The refusal for a ticket's label, found when it is released rather than at the start. */
   badLabel(id: string): string | undefined;
-  record: { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
-  /** The run record's start-of-run `waiting` list, minus what has started. */
-  waiting: { issue: string; on: string[] }[];
+  record: { ticket(id: string, fields: TicketRecord): void };
   ref(id: string): string;
   say(line: string): void;
 }) => {
-  // Every ticket started so far: `waiting` is the start-of-run list, so each release filters against all of them.
-  const released = new Set<string>();
-  const skip = (t: T, bad: string) => {
+  const skip = (id: string, bad: string) => {
     o.say(`  ${bad}`);
-    o.record.ticket(t.id, { state: "skipped", note: bad.replace(/^NOT STARTED: /, "not started: ") });
-    o.dependants.ended(t.id);
-  };
-  // Started before it is recorded queued: a push to a closed queue throws, and must not leave it marked queued.
-  const begin = (t: T, why: string, shares: FileShare[]) => {
-    o.start(t);
-    released.add(t.id);
-    o.say(`  ${o.ref(t.id)} starts: ${why}`);
-    for (const s of shares) o.say(`  ${fileShareLine(o.ref, t.id, s)}`);
-    o.record.ticket(t.id, { state: "queued", note: null });
-  };
-  // What the ticket waits for on the run record's `waiting` list: the ticket that holds its file now,
-  // not the one it was parked behind first. A ticket with no holder left (a stopped run) is dropped from it.
-  const waitsFor = (id: string, was: string | undefined, holder?: string) => {
-    const at = o.waiting.findIndex((w) => w.issue === id);
-    const on = holder ? [o.ref(holder)] : at >= 0 ? o.waiting[at].on.filter((b) => b !== (was && o.ref(was))) : [];
-    if (at >= 0) {
-      if (on.length) o.waiting[at].on = on;
-      else o.waiting.splice(at, 1);
-    } else if (on.length) o.waiting.push({ issue: id, on });
-    o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)) });
-  };
-  const park = (id: string, wait: FileWait) => {
-    o.record.ticket(id, { state: "blocked", note: fileWaitNote(o.ref, wait) });
-    waitsFor(id, undefined, wait.with);
-  };
-  // The run is stopping, so nothing starts: the ticket's files are free, and what each parked
-  // ticket waits for is said as it is now, so none keeps naming a ticket that has landed.
-  const settle = (id: string) => {
-    if (!o.hold) return;
-    for (const w of o.hold.stop(id)) {
-      o.record.ticket(w.id, { note: stoppedWaitNote(o.ref, w.wait) });
-      waitsFor(w.id, id, w.wait?.with);
-    }
+    o.record.ticket(id, { state: "skipped", note: bad.replace(/^NOT STARTED: /, "not started: ") });
+    o.dependants.ended(id);
   };
   const release = async (landed: string) => {
     const { free, held } = await o.dependants.release(landed);
     for (const h of held) o.record.ticket(h.id, { note: h.note });
-    let started = false;
     for (const t of free) {
       const bad = o.badLabel(t.id);
-      if (bad) {
-        skip(t, bad);
-        continue;
-      }
-      const at = o.hold?.admit(t);
-      if (at && "wait" in at) {
-        park(t.id, at.wait);
-        o.say(`  ${o.ref(t.id)} ${fileWaitNote(o.ref, at.wait)}`);
-        continue;
-      }
-      begin(t, "its last blocker has landed", at?.shares ?? []);
-      started = true;
+      if (bad) skip(t.id, bad);
+      else o.start(t);
     }
-    if (started) o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)), stage: "running" });
-  };
-  // The ticket's files are free: the tickets parked for them start, or wait for the next in flight.
-  // Either way, not only after a landing - a ticket that left the run holds nothing either.
-  const unpark = (id: string) => {
-    if (!o.hold) return;
-    const work = [o.hold.end(id)];
-    let started = false;
-    for (let step = work.shift(); step; step = work.shift()) {
-      for (const w of step.waits) park(w.id, w.wait);
-      for (const f of step.freed) {
-        // Admitted, so its files are claimed: a ticket not started gives them back.
-        const bad = o.badLabel(f.ticket.id);
-        if (bad) {
-          skip(f.ticket, bad);
-          work.push(o.hold.end(f.ticket.id));
-          continue;
-        }
-        begin(f.ticket, `${o.ref(id)} is done with the file they both change`, f.shares);
-        started = true;
-      }
-    }
-    if (started) o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)), stage: "running" });
   };
   return {
+    /** A ticket the file hold freed whose label refuses it: it never begins, and what waits for it is told. */
+    skipped: skip,
     async afterLanding(id: string, landed: boolean) {
       try {
         if (landed) o.dependants.landed(id);
         else o.dependants.ended(id);
-        const going = !o.dryRun && !o.stop.startsNothing;
-        // Before the blockers: a dependant that shares a file with this ticket must not find it still in flight.
-        if (going) unpark(id);
-        else if (!o.dryRun) settle(id);
-        if (landed && going) await release(id);
+        if (landed && !o.dryRun && !o.stop.startsNothing) await release(id);
         else for (const n of o.dependants.notes()) o.record.ticket(n.id, { note: n.note });
       } catch (error) {
         o.say(`${o.ref(id)}: could not start the tickets that wait for it (${errorLine(error)}); they wait for the next run.`);

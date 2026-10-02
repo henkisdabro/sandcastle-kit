@@ -3,7 +3,7 @@
 // a small work queue, the pipeline fan-out's and the landing worker's (workers keep pulling while
 // the queue is open or still holds items, so an item can be pushed after the workers have started -
 // a green outcome as its pipeline ends; `run` resolves only after `close()` and an empty queue), the
-// landing worker (`createLanding`), the requeue-once rule (inside `createSchedule`), and the file hold.
+// landing worker (`createLanding`), and inside `createSchedule` the requeue-once rule and the file hold.
 
 import { OperatorError } from "./errors.ts";
 import type { Landed } from "./landing.ts";
@@ -88,6 +88,10 @@ export const fileWaitNote = (ref: (id: string) => string, w: FileWait) => `waits
 /** One line per pair that starts together and changes the same mergeable files. */
 export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) => `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - landing resolves it`;
 
+/** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
+export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
+  w ? `waits for ${ref(w.with)} (git cannot merge ${w.file}) - next run` : "stopped before it could start - next run";
+
 /**
  * Which tickets may start. A file git cannot merge (a lockfile, a generated file, a minified
  * blob) conflicts at landing whatever the order, so one ticket at a time has it in flight; a ticket
@@ -97,9 +101,9 @@ export const fileShareLine = (ref: (id: string) => string, id: string, s: FileSh
  *
  * A ticket's files are read once, when it is first admitted; a ticket in flight changes files
  * after that (its branch gains a lockfile change), so `refresh` re-reads them before each
- * comparison. A ticket that has not started keeps what it was read as.
+ * comparison. A ticket that has not started keeps what it was read as. The scheduler's own.
  */
-export const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => TicketFiles, refresh?: (ticket: T, files: TicketFiles) => TicketFiles) => {
+const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => TicketFiles, refresh?: (ticket: T, files: TicketFiles) => TicketFiles) => {
   const flying = new Map<string, { ticket: T; files: TicketFiles }>();
   // In arrival order; the first to be admitted again is the one that waited longest.
   const parked: T[] = [];
@@ -180,59 +184,6 @@ export const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) =>
       return parked.length;
     },
   };
-};
-
-export type FileHold<T extends { id: string }> = ReturnType<typeof createFileHold<T>>;
-
-/** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
-export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
-  w ? `waits for ${ref(w.with)} (git cannot merge ${w.file}) - next run` : "stopped before it could start - next run";
-
-/**
- * The start of a run, for what `burndown()` hands over as ready to start: each ticket is admitted
- * to the hold or parked behind the one that has its file. A parked ticket still starts in this
- * run, once that one is done, so it joins the candidates, goes on `waiting`, gets its `order` in
- * run.json after the others, and has its label checked now (a bad one holds that ticket, never
- * the run) next to the dependants. `dependants` is asked once the tickets that start now are
- * known, as a parked ticket counts for the ones that wait for it. No hold (a dry run) parks nothing.
- */
-export const startHold = <T extends { id: string }>(
-  hold: FileHold<T> | undefined,
-  ready: T[],
-  o: {
-    ref(id: string): string;
-    /** The run record's `waiting` list; a parked ticket is added to it. */
-    waiting: { issue: string; on: string[] }[];
-    /** The tickets that wait for a blocker in this run, given every ticket that starts now or once a file is free. */
-    dependants(starting: T[]): T[];
-    /** The refusal for a ticket's label, if it has one. */
-    checkLabel(ticket: T): string | undefined;
-    say(line: string): void;
-  },
-) => {
-  const parked: { ticket: T; wait: FileWait }[] = [];
-  const issues: T[] = [];
-  for (const i of ready) {
-    const at = hold?.admit(i);
-    if (at && "wait" in at) {
-      parked.push({ ticket: i, wait: at.wait });
-      o.waiting.push({ issue: i.id, on: [o.ref(at.wait.with)] });
-      o.say(`  ${o.ref(i.id)} ${fileWaitNote(o.ref, at.wait)}`);
-    } else {
-      issues.push(i);
-      for (const share of at?.shares ?? []) o.say(`  ${fileShareLine(o.ref, i.id, share)}`);
-    }
-  }
-  const dependants = issues.length ? o.dependants([...issues, ...parked.map((p) => p.ticket)]) : [];
-  const candidates = [...issues, ...dependants, ...parked.map((p) => p.ticket)];
-  // A released ticket queues behind the ones already waiting for a sandbox: issues, then dependants, then parked.
-  const order = new Map(candidates.map((t, at) => [t.id, at] as const));
-  const badLabels = new Map<string, string>();
-  for (const i of [...dependants, ...parked.map((p) => p.ticket)]) {
-    const bad = o.checkLabel(i);
-    if (bad) badLabels.set(i.id, bad);
-  }
-  return { issues, parked, dependants, candidates, order, badLabels };
 };
 
 /**
@@ -426,6 +377,20 @@ export type Ending<G, O> =
   /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
   | { kind: "waiting"; on: "file" | "blockers" };
 
+/**
+ * What the scheduler tells of the file hold as the run goes; the start's waits and shares are on
+ * `start` instead. `started`: a ticket that waited starts, as its last blocker in this run landed or
+ * as `freed` is done with the file it waited for, sharing `shares` (mergeable files) with tickets in
+ * flight; told before it is queued. `waits`: a ticket waits for `wait.with` - `parked` when its
+ * blockers freed it just now, otherwise it was parked already and may wait for another ticket than
+ * before. `next run`: the run starts nothing more, so a parked ticket waits for the next run, behind
+ * `wait.with` if that one is still in flight (`freed` ended just now).
+ */
+export type HoldChange =
+  | { kind: "started"; id: string; after: { kind: "blockers" } | { kind: "file"; freed: string }; shares: FileShare[] }
+  | { kind: "waits"; id: string; wait: FileWait; parked: boolean }
+  | { kind: "next run"; id: string; freed: string; wait?: FileWait };
+
 /** What the scheduler tells as the run goes, for the run record and the views. */
 export type Change<G, O> =
   /** Told before the ticket is queued again, so no view shows a queued ticket the record does not know. */
@@ -433,27 +398,40 @@ export type Change<G, O> =
   /** The ticket's ending, as it happens: before the tickets it frees start. */
   | { kind: "ended"; id: string; ending: Ending<G, O> }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
-  | { kind: "landing"; at: number; of: number };
+  | { kind: "landing"; at: number; of: number }
+  | HoldChange;
 
-/** The release of dependants and the file hold, as the run's start set them up; the scheduler calls them. */
+/** The release of dependants, as the run's start set it up; the scheduler calls it as each ticket ends, after the file hold. */
 export type Release = {
   /** The ticket is done with: `landed` when it landed and closed. Starts what it frees, then calls `finish` once. */
   afterLanding(id: string, landed: boolean): void | Promise<void>;
-  /** A ticket parked or held may still start in this run. */
+  /** A ticket the file hold freed never begins: its label refuses it. Said, recorded, and what waits for it told. */
+  skipped?(id: string, reason: string): void;
+  /** A ticket held for a blocker may still start in this run. */
   readonly more: boolean;
 };
 
+/** One candidate at the start, in start order: `wait` when it starts later, and `file` when that is behind a file git cannot merge. */
+export type Start<T> = { ticket: T; wait?: "file" | "blockers"; file?: FileWait; shares?: FileShare[] };
+
 export type Plan<T extends { id: string }> = {
-  /** The tickets that start now, in start order. */
+  /** The tickets ready to start, in start order; the file hold parks the ones that wait for a file. */
   tickets: T[];
-  /** The candidates that start later in this run, if at all: behind a file git cannot merge, or a blocker in this run. */
+  /** The files of each ticket (`of`), and of a ticket in flight read again (`refresh`). Without them (a dry run, which lands nothing) nothing is held. */
+  files?: { of(ticket: T): TicketFiles; refresh?(ticket: T, files: TicketFiles): TicketFiles };
+  /** The tickets held for a blocker in this run, given every ticket that starts now or once a file is free. Asked once, at the start. */
+  dependants?(starting: T[]): T[];
+  /** Candidates decided elsewhere that start later in this run, if at all. */
   later?: { ticket: T; on: "file" | "blockers" }[];
+  /** The refusal for a ticket's label, read at the start for each ticket that starts later: a bad one holds that ticket, never the run. */
+  checkLabel?(ticket: T): string | undefined;
   /**
-   * The release of dependants and the file hold, given the scheduler's own `start` (a ticket freed
-   * mid-run), `finish` (a ticket is done), `refuse` (a freed ticket's label holds it) and stop state.
-   * Without it, a ticket's end frees nothing.
+   * The release of dependants, given the scheduler's own `start` (a ticket its blockers freed: it
+   * starts or is parked behind a file), `finish` (a ticket is done), `badLabel` (a freed ticket's
+   * refusal, read at the start; one that has it is not begun, and that is its ending) and stop
+   * state. Without it, a ticket's end frees only what waited for its files.
    */
-  release?(s: { start(ticket: T): void; finish(): void; refuse(id: string, reason: string): void; stop: StopState }): Release;
+  release?(s: { start(ticket: T): void; finish(): void; badLabel(id: string): string | undefined; stop: StopState }): Release;
 };
 
 export type Work<T, G extends Green, O> = LandPorts<G> & {
@@ -470,18 +448,47 @@ export type Work<T, G extends Green, O> = LandPorts<G> & {
 };
 
 /**
- * The run's one path for attempts and landings. `start` is the candidates in start order. `run`
- * fans the attempts out over `workers`, hands each green one to the landing worker, sends a first
- * conflict or red back for a second attempt (the requeue-once rule, `requeue` below) unless the run
- * starts nothing, and calls the plan's release as each ticket ends. A cause reaches the stop state
+ * The run's one path for attempts and landings. `start` is the candidates in start order, decided
+ * as the schedule is made, before the run record exists: the file hold admits each ready ticket or
+ * parks it behind the one that has its file, and the dependants and labels are read. `run` fans the
+ * attempts out over `workers`, hands each green one to the landing worker, sends a first conflict or
+ * red back for a second attempt (the requeue-once rule, `requeue` below) unless the run starts
+ * nothing, and as each ticket ends frees its files (`free` below), then calls the plan's release.
+ * A cause reaches the stop state
  * only from an attempt's result, a landing's `.git` check or refused write, or the host's failure
  * read live. It resolves once every ticket has its ending, with the endings and the stop state; it
  * writes no run record and no wording - `tell` and the endings carry what the burndown records.
  */
 export const createSchedule = <T extends { id: string }, G extends Green, O = unknown>(plan: Plan<T>) => {
-  const later = plan.later ?? [];
+  // A file git cannot merge (a lockfile, a generated file, a minified blob) conflicts at landing
+  // whatever the order, so one ticket at a time has it in flight. No files, no hold: a dry run lands
+  // nothing, so it holds nothing.
+  const hold = plan.files && createFileHold<T>(plan.files.of, plan.files.refresh);
+  const now: Start<T>[] = [];
+  const parked: Start<T>[] = [];
+  for (const ticket of plan.tickets) {
+    const at = hold?.admit(ticket);
+    if (at && "wait" in at) parked.push({ ticket, wait: "file", file: at.wait });
+    else now.push({ ticket, ...(at?.shares.length ? { shares: at.shares } : {}) });
+  }
+  // Asked once the tickets that start now are known: a parked ticket starts in this run, so a
+  // ticket that waits for it as a blocker does too.
+  const dependants = now.length && plan.dependants ? plan.dependants([...now, ...parked].map((c) => c.ticket)) : [];
+  // A ticket the release frees queues behind the ones already waiting for a sandbox: the ones that
+  // start now, then dependants, then parked.
+  const later: Start<T>[] = [
+    ...(plan.later ?? []).map((l) => ({ ticket: l.ticket, wait: l.on })),
+    ...dependants.map((ticket) => ({ ticket, wait: "blockers" as const })),
+    ...parked,
+  ];
+  // Read now, before any sandbox starts; a bad label holds that ticket when it would start, never the run.
+  const labels = new Map<string, string>();
+  for (const { ticket } of later) {
+    const bad = plan.checkLabel?.(ticket);
+    if (bad) labels.set(ticket.id, bad);
+  }
   return {
-    start: [...plan.tickets.map((ticket) => ({ ticket })), ...later.map((l) => ({ ticket: l.ticket, wait: l.on }))],
+    start: [...now, ...later] as readonly Start<T>[],
     async run(work: Work<T, G, O>): Promise<{ endings: Map<string, Ending<G, O>>; stop: StopState }> {
       const stop = createStopState(work.host);
       const endings = new Map<string, Ending<G, O>>();
@@ -492,7 +499,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           /* progress only: the ending stands */
         }
       };
-      const byId = new Map(plan.tickets.map((t) => [t.id, t] as const));
+      const byId = new Map(now.map((c) => [c.ticket.id, c.ticket] as const));
+      // Parked behind a file now: at the end, such a ticket waits for a file, whatever held it first.
+      const behind = new Set(later.flatMap((c) => (c.wait === "file" ? [c.ticket.id] : [])));
       // Attempts that began, by ticket.
       const attempts = new Map<string, 1 | 2>();
       // What a requeued ticket's first attempt collided with: its second carries it, and a second collision is final.
@@ -506,11 +515,57 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const stage = () => {
         if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
-      // Said before the tickets it frees start, and before `finish` drops the open count.
+      // Said before the tickets it frees start, and before `finish` drops the open count. Its files
+      // are freed before the blockers: a dependant that shares a file with it must not find it in flight.
       const end = async (id: string, ending: Ending<G, O>, landed = false) => {
         endings.set(id, ending);
         tell({ kind: "ended", id, ending });
+        free(id);
         await release.afterLanding(id, landed);
+      };
+      const refuse = (id: string, reason: string) => {
+        const ending: Ending<G, O> = { kind: "not begun", why: { kind: "refused label", reason } };
+        endings.set(id, ending);
+        tell({ kind: "ended", id, ending });
+      };
+      // A ticket that waited starts. Not into closed pipelines (a worker failed: nothing would take
+      // it), checked before anything is told; told before the push, as a requeue is.
+      const begin = (t: T, after: Extract<HoldChange, { kind: "started" }>["after"], shares: FileShare[]) => {
+        if (pipelines.closed) return;
+        tell({ kind: "started", id: t.id, after, shares });
+        behind.delete(t.id);
+        byId.set(t.id, t);
+        open++;
+        pipelines.push(t);
+      };
+      /**
+       * The ticket landed or left the run: its files are free. Each parked ticket that no longer
+       * collides starts, in the order they waited, and the ones still parked are told what they wait
+       * for now. Once the run starts nothing, none starts: each is told it waits for the next run,
+       * behind the ticket in flight it still collides with, if any, so none keeps naming one that is
+       * gone. A requeued ticket has no ending yet, so it keeps its files through its second attempt.
+       */
+      const free = (id: string) => {
+        if (!hold) return;
+        if (stop.startsNothing) {
+          for (const w of hold.stop(id)) tell({ kind: "next run", id: w.id, freed: id, ...(w.wait && { wait: w.wait }) });
+          return;
+        }
+        const steps = [hold.end(id)];
+        for (let step = steps.shift(); step; step = steps.shift()) {
+          for (const w of step.waits) tell({ kind: "waits", id: w.id, wait: w.wait, parked: false });
+          for (const f of step.freed) {
+            const bad = labels.get(f.ticket.id);
+            if (bad) {
+              refuse(f.ticket.id, bad);
+              release.skipped?.(f.ticket.id, bad);
+              // Admitted, so its files are claimed: a ticket that never begins gives them back.
+              steps.push(hold.end(f.ticket.id));
+              continue;
+            }
+            begin(f.ticket, { kind: "file", freed: id }, f.shares);
+          }
+        }
       };
 
       /**
@@ -559,7 +614,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Tickets without their ending. The queues stay open until none is left: a landing can send
       // one back after every other pipeline has ended. A ticket the release starts counts before the
       // ending that freed it drops the count, so it never touches zero between them.
-      let open = plan.tickets.length;
+      let open = now.length;
       const closeAll = () => {
         pipelines.close();
         landing.close();
@@ -568,20 +623,24 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (--open <= 0) closeAll();
       };
       const release: Release = plan.release?.({
+        // Its blockers freed it: it starts, or is parked behind the ticket in flight that has its file.
         start: (t) => {
-          byId.set(t.id, t);
-          open++;
-          pipelines.push(t);
+          if (pipelines.closed) return;
+          const at = hold?.admit(t);
+          if (at && "wait" in at) {
+            behind.add(t.id);
+            tell({ kind: "waits", id: t.id, wait: at.wait, parked: true });
+          } else begin(t, { kind: "blockers" }, at?.shares ?? []);
         },
         finish,
-        refuse: (id, reason) => {
-          const ending: Ending<G, O> = { kind: "not begun", why: { kind: "refused label", reason } };
-          endings.set(id, ending);
-          tell({ kind: "ended", id, ending });
+        badLabel: (id) => {
+          const bad = labels.get(id);
+          if (bad) refuse(id, bad);
+          return bad;
         },
         stop: readings(stop),
       }) ?? { afterLanding: finish, more: false };
-      const last = () => stop.startsNothing || (pipelines.size === 0 && !release.more);
+      const last = () => stop.startsNothing || (pipelines.size === 0 && !release.more && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
       const notBegun = (t: T, why: StopCause | Withdrawn) => {
@@ -629,7 +688,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       };
 
       if (open <= 0) closeAll();
-      for (const t of plan.tickets) pipelines.push(t);
+      for (const c of now) pipelines.push(c.ticket);
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
       const fanOut = pipelines.run(work.workers, attempt).finally(() => {
@@ -638,7 +697,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       });
       const lands = landing.run().finally(() => pipelines.close());
       const [a, b] = await Promise.allSettled([fanOut, lands]);
-      for (const l of later) if (!endings.has(l.ticket.id)) endings.set(l.ticket.id, { kind: "waiting", on: l.on });
+      for (const { ticket } of later) if (!endings.has(ticket.id)) endings.set(ticket.id, { kind: "waiting", on: behind.has(ticket.id) ? "file" : "blockers" });
       for (const r of [a, b]) if (r.status === "rejected") throw r.reason;
       return { endings, stop: readings(stop) };
     },
