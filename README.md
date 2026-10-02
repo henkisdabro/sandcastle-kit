@@ -749,7 +749,7 @@ nothing asks. What you get:
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
 | Sidebar rows | The run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
 
