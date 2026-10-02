@@ -16,6 +16,10 @@ import type { TicketRecord } from "../src/run.ts";
 // Plain bash 3.2: no associative arrays, no mapfile.
 const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
+# A pane the operator closed by hand: Herdr's error, on stderr, for any call about it.
+if [ -n "\${FAKE_GONE:-}" ] && [ "$3" = "$FAKE_GONE" ]; then
+  echo '{"error":{"code":"pane_not_found","message":"pane not found"}}' >&2; exit 1
+fi
 case "$1 $2" in
   "pane get") printf '%s\\n' '{"result":{"pane":{"tab_id":"t1","workspace_id":"w1"}}}' ;;
   "tab get") printf '{"result":{"tab":{"pane_count":1,"label":"%s"}}}\\n' "$FAKE_LABEL" ;;
@@ -34,7 +38,9 @@ process.env.HERDR_PANE_ID = "p1";
 // A run registers itself for the tab bar under the cache directory: never the real one.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-herdr-cache-"));
 // IN_HERDR is read when the module loads, so the environment comes first.
-const { defaultTabLabel, elapsed, lineText, openSandboxView, runCounts, runFile, sandboxTokens, spaceText, tokenArgs } = await import("../src/herdr.ts");
+const { askingInPane, defaultTabLabel, elapsed, lineText, openSandboxView, runCounts, runFile, sandboxTokens, spaceText, tokenArgs } = await import(
+  "../src/herdr.ts"
+);
 
 const adopt = (label: string, tickets: () => Record<string, TicketRecord> = () => ({})) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-herdr-"));
@@ -107,17 +113,54 @@ test("a sandbox's row is named after its ticket and carries its step; the worksp
   const meta = calls.filter((c) => c.startsWith("pane report-metadata p2"));
   assert.ok(meta.at(-1)?.includes("--display-agent #12 Add CSV export"), meta.join("\n"));
   assert.ok(meta.at(-1)?.includes("--token sc_run=shop --token sc_phase=review --token sc_elapsed=0m"), meta.join("\n"));
-  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 working"), calls.join("\n"));
+  // The step stands in for "working" wherever Herdr shows a state's text, and it all expires
+  // unless re-sent, so a killed run leaves nothing behind for long.
+  assert.ok(meta.at(-1)?.includes("--state-label working=review · 0m"), meta.join("\n"));
+  assert.ok(meta.at(-1)?.endsWith("--ttl-ms 150000"), meta.join("\n"));
+  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 working --ttl-ms 150000"), calls.join("\n"));
   // A red branch is a finished result: idle, its outcome in place of the step, no clock.
   tickets["12"] = { state: "red" };
   run.view.finish("12", "red");
   calls = run.calls();
   assert.ok(calls.some((c) => c.startsWith("pane report-agent p2") && c.includes("--state idle --message red")), calls.join("\n"));
   assert.ok(calls.filter((c) => c.startsWith("pane report-metadata p2")).at(-1)?.includes("--token sc_phase=red --clear-token sc_elapsed"));
-  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 needs you"), calls.join("\n"));
+  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 needs you --ttl-ms 150000"), calls.join("\n"));
   // Landing that needs a human turns the same pane blocked.
   run.view.landed("12", false, "merge conflict");
   assert.ok(run.calls().some((c) => c.startsWith("pane report-agent p2") && c.includes("--state blocked --message merge conflict")));
   run.view.close("merged 0 of 2");
   assert.ok(existsSync(runFile(run.root)), "the run file goes at exit, not at close: an autonomy run's next turn is the same run");
+});
+
+test("a sandbox pane closed by hand is forgotten, and the view keeps reporting", () => {
+  const tickets: Record<string, TicketRecord> = { "12": { state: "implement" } };
+  const run = adopt("3", () => tickets);
+  run.view.claim("12", "Add CSV export");
+  process.env.FAKE_GONE = "p2";
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void said.push(a.join(" "));
+  try {
+    run.view.phase("12", "review");
+  } finally {
+    console.log = log;
+    delete process.env.FAKE_GONE;
+  }
+  assert.deepEqual(said, [], "no 'view off' warning for one closed pane");
+  // The view is still on: the workspace goes on hearing about the run.
+  run.view.landed("12", true, "merged");
+  assert.ok(run.calls().filter((c) => c.startsWith("workspace report-metadata")).length >= 2, run.calls().join("\n"));
+});
+
+test("askingInPane: the run's pane reads as blocked while it waits for an answer, then is released", async () => {
+  const log = mkdtempSync(join(tmpdir(), "sandcastle-herdr-ask-"));
+  process.env.FAKE_LOG = join(log, "calls.log");
+  writeFileSync(process.env.FAKE_LOG, "");
+  const answer = await askingInPane("asks whether to run 2 ticket(s) again", async () => {
+    const during = readFileSync(process.env.FAKE_LOG!, "utf8");
+    assert.match(during, /^pane report-agent p1 --source sandcastle-kit --agent sandcastle --state blocked --message asks whether/m);
+    return true;
+  });
+  assert.equal(answer, true);
+  assert.match(readFileSync(process.env.FAKE_LOG, "utf8"), /^pane release-agent p1 --source sandcastle-kit --agent sandcastle$/m);
 });

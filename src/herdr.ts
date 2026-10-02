@@ -114,6 +114,30 @@ export const sandboxTokens = (run: string, phase: string, since: number | undefi
 export const tokenArgs = (tokens: Record<string, string | null>) =>
   Object.entries(tokens).flatMap(([k, v]) => (v === null ? ["--clear-token", k] : ["--token", `${k}=${v}`]));
 
+/**
+ * While the run's own pane waits for an answer (autonomy level 1), Herdr is told: the pane
+ * reads as a blocked agent - sidebar, notification, `agent wait --until blocked` - like any
+ * agent with a question, instead of a run quietly waiting in a tab nobody is looking at.
+ * Released after, as a reported state outlives what it was about.
+ */
+export const askingInPane = async <T>(about: string, ask: () => Promise<T>): Promise<T> => {
+  const pane = process.env.HERDR_PANE_ID;
+  if (!IN_HERDR || !pane) return ask();
+  const tell = (args: string[]) => {
+    try {
+      herdr(args);
+    } catch {
+      /* the question works without Herdr knowing */
+    }
+  };
+  tell(["pane", "report-agent", pane, "--source", "sandcastle-kit", "--agent", "sandcastle", "--state", "blocked", "--message", about.slice(0, 80)]);
+  try {
+    return await ask();
+  } finally {
+    tell(["pane", "release-agent", pane, "--source", "sandcastle-kit", "--agent", "sandcastle"]);
+  }
+};
+
 // Live runs, one file per project holding its root, so the tab bar can show every run on
 // the machine whichever pane has focus. A run that dies without its exit handler leaves
 // its file; readers check the run's pid and drop it.
@@ -139,6 +163,8 @@ export type SandboxView = {
 
 const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, close() {} };
 const SOURCE = "sandcastle-kit";
+// Two and a half of the minute's re-sends: no flicker between them, gone soon after a kill.
+const TTL = "150000";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
 // Gates have one too: the orchestrator writes their output as it arrives
@@ -276,28 +302,52 @@ export const openSandboxView = (
   // progress only). A landing result may only update a pane no later issue has taken over.
   type Shown = { issue: string; title: string; state: "working" | "blocked" | "idle"; phase: string; since?: number };
   const shown = new Map<string, Shown>();
-  const report = (pane: string) => {
+  // A pane the operator closed by hand is forgotten. Left to `safe`, its pane_not_found on
+  // the next minute's report switched every other pane's reporting off too.
+  const gone = (pane: string, error: unknown) => {
+    if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return false;
+    shown.delete(pane);
+    const slot = slots.find((s) => s.pane === pane);
+    if (slot) Object.assign(slot, { closed: true, issue: undefined });
+    save();
+    return true;
+  };
+  // `state` only when it changed: the minute's re-send is the metadata alone, as a repeated
+  // idle report could mark a finished sandbox unseen again. Metadata expires (TTL) unless
+  // re-sent, so a run killed without its exit handler leaves nothing behind for long.
+  const report = (pane: string, state = false) => {
     const s = shown.get(pane);
     if (!s) return;
-    herdr(["pane", "report-agent", pane, "--source", SOURCE, "--agent", "sandcastle", "--state", s.state, "--message", s.phase, "--seq", seq()]);
-    herdr([
-      "pane", "report-metadata", pane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${ref(s.issue)} ${s.phase}`,
-      // The ticket, not "sandbox": the agent row names it even with Herdr's default sidebar.
-      "--display-agent", `${ref(s.issue)} ${s.title}`.slice(0, 80),
-      ...tokenArgs(sandboxTokens(project.name, s.phase, s.since, Date.now())),
-    ]);
+    const now = Date.now();
+    const label = s.since === undefined ? s.phase : `${s.phase} · ${elapsed(now - s.since)}`;
+    try {
+      if (state) herdr(["pane", "report-agent", pane, "--source", SOURCE, "--agent", "sandcastle", "--state", s.state, "--message", s.phase, "--seq", seq()]);
+      herdr([
+        "pane", "report-metadata", pane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${ref(s.issue)} ${s.phase}`,
+        // The ticket, not "sandbox": the agent row names it even with Herdr's default sidebar.
+        "--display-agent", `${ref(s.issue)} ${s.title}`.slice(0, 80),
+        // Wherever Herdr shows a state's text (Go To, `state_text` rows), the step instead.
+        ...["working", "blocked", "idle", "done"].flatMap((k) => ["--state-label", `${k}=${label}`]),
+        ...tokenArgs(sandboxTokens(project.name, s.phase, s.since, now)),
+        "--ttl-ms", TTL,
+      ]);
+    } catch (error) {
+      if (!gone(pane, error)) throw error;
+    }
   };
   const show = (pane: string, s: Shown) => {
     shown.set(pane, s);
-    report(pane);
+    report(pane, true);
     reportSpace();
   };
   const reportSpace = () => {
-    if (workspace) herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets()))}`]);
+    if (workspace) {
+      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets()))}`, "--ttl-ms", TTL]);
+    }
   };
   const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
-  // Herdr keeps no reported state across a server restart, and tokens are not restored
-  // even when the panes are. Re-sent once a minute, which also moves each `$sc_elapsed`.
+  // Herdr keeps no tokens across a restart, even when it keeps the panes. Re-sent once a
+  // minute, which also moves each `$sc_elapsed`.
   const tick = setInterval(() => safe(() => {
     for (const pane of shown.keys()) report(pane);
     reportSpace();

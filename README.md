@@ -674,14 +674,16 @@ sandcastle herdr configure --remove   # takes all of it out again
 
 It links the plugin from the kit's own checkout (no build step: a `git pull` of the kit updates
 it), appends one marked block to Herdr's `config.toml`, and reloads Herdr's config. Nothing
-restarts and no pane is touched. `sandcastle setup` offers it when run inside Herdr, and
-`sandcastle doctor` says whether it is in place. What you get:
+restarts and no pane is touched. `sandcastle setup` and `/sandcastle update` offer it inside
+Herdr, with yes as the default answer, and `sandcastle doctor` says whether it is in place. Nothing
+installs it without asking: it edits your own Herdr config. Outside Herdr none of this exists, and
+nothing asks. What you get:
 
 | | |
 |---|---|
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
-| `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back. Herdr remembers it across restarts. |
+| `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
 | Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup. |
 | Sidebar rows | Each sandbox shows its step and time (`review · 12m`); the run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you. |
 | Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
@@ -692,14 +694,22 @@ workspace, else Herdr asks you to focus the one you mean). They open only when y
 run never opens one. The log a Ctrl-click opens must be a file in some project's
 `.sandcastle/logs`, and is paged with no shell escape, as an agent's log can print links too.
 
+With or without the plugin, a run at autonomy level 1 that asks whether to run tickets again
+marks its own pane as waiting for you, so Herdr's sidebar and notifications say so like for any
+agent with a question.
+
 If your `config.toml` already sets sidebar rows (`ui.sidebar.agents` or `ui.sidebar.spaces`), tab
 bar entries or one of the three keys, `configure` changes nothing and prints the block for you to
-merge by hand. After writing, it asks Herdr to reload the config and puts the file back as it was if
-Herdr reports a problem. The previous file is kept as `config.toml.sandcastle-kit.bak`.
+merge by hand; comment lines do not count, so a config saved from `herdr --default-config` is fine.
+After writing, it asks Herdr to reload the config and puts the file and the plugin link back as
+they were if Herdr says anything new about it. The previous file is kept as
+`config.toml.sandcastle-kit.bak`.
 
 Herdr cannot dock a plugin in its sidebar (plugins get terminal panes and popups, not native
 panels), so the sidebar carries the run through the values it reports, and the full view stays a
-pane or a popup.
+pane. Sidebar rows belong to the Herdr you look through: if you watch a remote machine's Herdr from
+your own, run `configure` on both - the plugin and the tab bar on the machine running the kit, the
+rows on yours.
 
 ```
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"

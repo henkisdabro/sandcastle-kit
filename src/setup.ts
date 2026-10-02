@@ -228,15 +228,15 @@ export const setup = async (repoRoot?: string) => {
     if (Object.keys(set).length) console.log(`done credentials saved to ${envFile}`);
   }
 
-  // 3. Inside Herdr, the kit's plugin. Optional, and it edits Herdr's own config, so
-  // `configure` shows what it adds and asks; a config that already sets the same things
-  // is reported, not touched, and setup goes on.
+  // 3. Inside Herdr, the kit's plugin: recommended, so Enter says yes. It edits Herdr's own
+  // config, so `configure` shows what it adds before asking; a config that already sets the
+  // same things is reported, not touched, and setup goes on.
   if (process.env.HERDR_ENV === "1") {
     const plugin = pluginState();
     if (!plugin.linkedHere || !plugin.block) {
-      console.log("\nInside Herdr, the kit's plugin adds status and report popups, Ctrl-click on a ticket for its log, and run progress in the sidebar.");
+      console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its log, and run progress in the sidebar.");
       try {
-        await configure(false, false);
+        await configure(false, false, true);
       } catch (error) {
         if (!(error instanceof OperatorError)) throw error;
         console.log(`     ${error.message}`);

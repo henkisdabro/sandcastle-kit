@@ -41,9 +41,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   sandboxes add worktrees.
 - Inside Herdr, a run reports each sandbox's step and time in that step, and its workspace's
   progress (`🏰 4/9 · 1 needs you`), to the sidebar. Herdr keeps none of it across a restart, so it
-  is sent again every minute and the sidebar recovers by itself.
+  is sent again every minute, and it expires a few minutes after a run that was killed.
 - Inside Herdr, the status view links each ticket to its latest log (OSC 8), for the plugin's
   Ctrl-click; `SANDCASTLE_LINKS=0` turns the links off.
+- Inside Herdr, a run at autonomy level 1 marks its own pane as blocked while it asks whether to
+  run tickets again, so Herdr's sidebar and notifications say it is waiting for you.
 
 ### Security
 

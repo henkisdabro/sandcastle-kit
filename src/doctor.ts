@@ -299,7 +299,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     const plugin = pluginState();
     check(
       plugin.linkedHere && plugin.block,
-      "Herdr plugin and sidebar rows (optional: status and report popups, Ctrl-click logs, run progress in the sidebar)",
+      "Herdr plugin and sidebar rows (optional: the status view and report over any tab, Ctrl-click logs, run progress in the sidebar)",
       plugin.linkedFrom && !plugin.linkedHere
         ? `Linked from another checkout (${plugin.linkedFrom}): \`sandcastle herdr configure\` here links this one.`
         : "`sandcastle herdr configure` (shows what it adds and asks first).",

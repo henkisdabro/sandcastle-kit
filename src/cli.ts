@@ -72,6 +72,7 @@ import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
+import { askingInPane } from "./herdr.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
@@ -165,7 +166,9 @@ try {
           break;
         }
         if (verdict === "ask") {
-          const yes = await confirm(`Autonomy level 1: ${many} run again - ${list}. Run again now? [y/N] `);
+          const yes = await askingInPane(`asks whether to run ${ids.length} ticket(s) again`, () =>
+            confirm(`Autonomy level 1: ${many} run again - ${list}. Run again now? [y/N] `),
+          );
           if (yes === undefined) {
             console.log(`Autonomy level 1: ${many} run again - ${list}. Not a terminal, so nothing re-runs: ${manual} runs them.`);
             break;

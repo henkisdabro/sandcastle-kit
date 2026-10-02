@@ -28,9 +28,12 @@ import { KIT } from "./sandbox.ts";
 export const PLUGIN_ID = "sandcastle-kit";
 export const PLUGIN_DIR = join(KIT, "herdr");
 
-// Where Herdr reads its config: HERDR_CONFIG_PATH, else under XDG_CONFIG_HOME, else ~/.config.
+// Where Herdr reads its config. Herdr's help names it (`Config: <path>`), following
+// HERDR_CONFIG_PATH and, undocumented, XDG_CONFIG_HOME; so the help is the authority and
+// this order only the fallback for a Herdr whose help does not say.
 export const herdrConfigPath = (env: NodeJS.ProcessEnv = process.env) =>
   env.HERDR_CONFIG_PATH ?? join(env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "herdr", "config.toml");
+const herdrConfigFile = () => /^Config:\s+(.+?)\s*$/m.exec(spawnSync("herdr", ["--help"], { encoding: "utf8" }).stdout ?? "")?.[1] ?? herdrConfigPath();
 
 // The tab bar runs its command through `sh -lc`, and the kit's path may hold a space.
 const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
@@ -60,10 +63,11 @@ rows = [
   [{ token = "$sandcastle", rules = [{ contains = "needs you", fg = "#e8796a", bold = true }] }],
 ]
 
-# Every live run on this machine, at the right of the tab row.
+# Every live run on this machine, at the right of the tab row. With no run registered the
+# check fails before node starts, and Herdr hides a failed entry.
 [[ui.tab_bar_right]]
 type = "command"
-command = ${JSON.stringify(`${shellQuote(join(kit, "bin/sandcastle"))} herdr line`)}
+command = ${JSON.stringify(`[ -n "$(ls -A "\${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/runs" 2>/dev/null)" ] && ${shellQuote(join(kit, "bin/sandcastle"))} herdr line`)}
 interval_seconds = 10
 timeout_seconds = 5
 
@@ -106,31 +110,52 @@ export const withBlock = (text: string, kit = KIT) => {
 // `[ui.sidebar.agents]` is a TOML error, and a second `tab_bar_right` or key would quietly
 // fight theirs. Each is theirs to merge by hand.
 export const configConflicts = (text: string): string[] => {
-  const own = withoutBlock(text);
   const found: string[] = [];
+  // One marker line without the other: withoutBlock would find no block, and the next
+  // configure would append a second copy.
+  if (text.includes(BEGIN) !== text.includes(END)) found.push("a sandcastle-kit block with one of its two marker lines missing");
+  // Comment lines set nothing: `herdr --default-config` writes every key commented out.
+  const own = withoutBlock(text)
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .join("\n");
+  // The kit's own entries without their markers, as left by a tool that rewrote the file.
+  if (own.includes(`"${PLUGIN_ID}.`) || own.includes("herdr line")) found.push("sandcastle-kit's own entries outside its marker lines (delete them, then run configure again)");
   // An inline `ui = {...}` or `keys = {...}` cannot be extended by a table header at all.
   if (/^\s*(ui|keys)\s*=/m.test(own)) found.push("an inline `ui` or `keys` table");
   // An inline `command = [...]` of key bindings cannot take `[[keys.command]]` entries.
   if (/^\s*(keys\s*\.\s*)?command\s*=\s*\[/m.test(own)) found.push("key bindings written as an inline array (keys.command = [...])");
   if (/^\s*\[\s*ui\.sidebar(\.agents|\.spaces)?\s*\]/m.test(own) || /^\s*(ui\s*\.\s*)?sidebar\s*[.=]/m.test(own)) found.push("sidebar rows (ui.sidebar.agents or ui.sidebar.spaces)");
   if (/tab_bar_right/.test(own)) found.push("tab bar entries (ui.tab_bar_right)");
+  const lower = own.toLowerCase();
   for (const key of ["prefix+shift+s", "prefix+shift+e", "prefix+shift+a"]) {
-    if (own.toLowerCase().includes(`"${key}"`)) found.push(`the key ${key}`);
+    if (lower.includes(`"${key}"`) || lower.includes(`'${key}'`)) found.push(`the key ${key}`);
   }
   return found;
 };
 
-type Reload = { ok: true; diagnostics: unknown[] } | { ok: false; reason: string };
+type Reload = { ok: true; status: string; diagnostics: unknown[] } | { ok: false; reason: string };
 const reloadConfig = (): Reload => {
   const r = spawnSync("herdr", ["server", "reload-config"], { encoding: "utf8" });
   const text = (r.stdout || r.stderr).trim();
   try {
     const json = JSON.parse(text);
     if (json.error) return { ok: false, reason: json.error.code === "server_not_running" ? "not running" : json.error.message };
-    return { ok: true, diagnostics: json.result?.diagnostics ?? [] };
+    return { ok: true, status: json.result?.status ?? "", diagnostics: json.result?.diagnostics ?? [] };
   } catch {
     return { ok: false, reason: text || `exit ${r.status}` };
   }
+};
+
+/**
+ * Whether a reload after the write took the block: Herdr applied the file whole, and said
+ * nothing it had not already said about the config before it (a user's own old warning is
+ * not the block's doing). Herdr not running is fine: it reads the file when it starts.
+ */
+export const reloadTook = (after: Reload, before: Reload) => {
+  if (!after.ok) return after.reason === "not running";
+  const known = new Set(before.ok ? before.diagnostics.map((d) => JSON.stringify(d)) : []);
+  return after.status === "applied" && after.diagnostics.every((d) => known.has(JSON.stringify(d)));
 };
 
 const linked = () => {
@@ -154,7 +179,7 @@ const real = (path: string) => {
 /** For doctor: whether the plugin is linked from this checkout, and the block is in the config. */
 export const pluginState = () => {
   const plugin = linked();
-  const path = herdrConfigPath();
+  const path = herdrConfigFile();
   return {
     linkedHere: !!plugin?.plugin_root && real(plugin.plugin_root) === real(PLUGIN_DIR),
     linkedFrom: plugin?.plugin_root,
@@ -162,18 +187,26 @@ export const pluginState = () => {
   };
 };
 
-export const configure = async (remove: boolean, yes: boolean) => {
+/** `byDefault`: the answer when the user just presses Enter (setup offers the plugin as a yes). */
+export const configure = async (remove: boolean, yes: boolean, byDefault = false) => {
   if (spawnSync("herdr", ["--version"]).status !== 0) throw new OperatorError("Herdr is not installed (https://herdr.dev) - there is nothing to configure.");
-  const path = herdrConfigPath();
+  const path = herdrConfigFile();
   const before = existsSync(path) ? readFileSync(path, "utf8") : "";
   const plugin = pluginState();
 
   if (remove) {
     const after = withoutBlock(before);
     if (after !== before) writeFileSync(path, after);
-    // Only this checkout's link: the one in use may be another clone's or worktree's.
-    if (plugin.linkedHere) herdr(["plugin", "unlink", PLUGIN_ID]);
-    else if (plugin.linkedFrom) console.log(`The plugin is linked from another checkout (${plugin.linkedFrom}), so it stays linked: \`sandcastle herdr configure --remove\` there unlinks it.`);
+    // Only this checkout's link: the one in use may be another clone's or worktree's. Herdr
+    // drops the plugin's Agents view with the link, so its "on" flag goes too: left behind,
+    // a later link's startup hook put the view back, and the next key turned it off.
+    if (plugin.linkedHere) {
+      herdr(["plugin", "unlink", PLUGIN_ID]);
+      rmSync(viewFlag(), { force: true });
+    } else if (plugin.linkedFrom) console.log(`The plugin is linked from another checkout (${plugin.linkedFrom}), so it stays linked: \`sandcastle herdr configure --remove\` there unlinks it.`);
+    if (after === before && (before.includes(`"${PLUGIN_ID}.`) || before.includes("herdr line"))) {
+      console.log(`${path} has sandcastle-kit entries outside its marker lines (a tool may have rewritten the file): delete them by hand.`);
+    }
     const done = [...(after !== before ? [`the sandcastle-kit block from ${path}`] : []), ...(plugin.linkedHere ? ["the plugin"] : [])];
     if (!done.length) {
       console.log(`Nothing to remove from this checkout: no sandcastle-kit block in ${path}, and the plugin is not linked from here.`);
@@ -199,23 +232,25 @@ export const configure = async (remove: boolean, yes: boolean) => {
       `\`sandcastle herdr configure --remove\` undoes all three.\n\n${configBlock()}\n`,
   );
   if (!yes) {
-    const answer = await confirm("Go ahead? [y/N] ");
+    const answer = await confirm(`Go ahead? ${byDefault ? "[Y/n]" : "[y/N]"} `, undefined, undefined, byDefault);
     if (answer === undefined) throw new OperatorError("Not a terminal: run it in one to answer, or pass --yes.");
     if (!answer) {
       console.log("Nothing changed.");
       return;
     }
   }
+  // What Herdr already says about the config as it is, so its old warnings are not blamed on the block.
+  const baseline = reloadConfig();
   if (elsewhere) herdr(["plugin", "unlink", PLUGIN_ID]);
   herdr(["plugin", "link", PLUGIN_DIR]);
   mkdirSync(dirname(path), { recursive: true });
   if (before) writeFileSync(`${path}.sandcastle-kit.bak`, before);
   writeFileSync(path, withBlock(before));
   const reload = reloadConfig();
-  // Herdr is the only full check of the result, so anything short of a clean reload - its
-  // diagnostics, an error, an answer that would not parse - puts everything back. Only a
-  // Herdr that is not running keeps the block: it reads the file when it starts.
-  if (!(reload.ok ? !reload.diagnostics.length : reload.reason === "not running")) {
+  // Herdr is the only full check of the result, so anything short of a clean reload - new
+  // diagnostics, a partial apply, an error, an answer that would not parse - puts everything
+  // back. Only a Herdr that is not running keeps the block: it reads the file when it starts.
+  if (!reloadTook(reload, baseline)) {
     if (before) writeFileSync(path, before);
     else rmSync(path, { force: true });
     reloadConfig();
@@ -268,8 +303,10 @@ export const liveRuns = (dir = RUNS_DIR): Run[] => {
   return runs.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 };
 
-export const runsLine = (dir = RUNS_DIR) => {
-  const runs = liveRuns(dir);
+/** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
+export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD) => {
+  const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
+  const runs = liveRuns(dir).sort((a, b) => Number(here(b)) - Number(here(a)));
   return runs.length ? `🏰 ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}))).join("  |  ")}` : "";
 };
 
@@ -344,11 +381,12 @@ export const logOf = (url: string | undefined) => {
 const VIEW = {
   source: `plugin:${PLUGIN_ID}`,
   label: "sandboxes first",
-  // A token's missing values sort after present ones: sandboxes (they report `sc_run`)
-  // first, then whatever needs attention. Nothing is hidden.
+  // What needs attention first, as Herdr's own order has it - a blocked agent of any kind
+  // above an idle sandbox - and within that, sandboxes (a token's missing values sort after
+  // present ones, and only sandboxes report `sc_run`). Nothing is hidden.
   sort: [
-    { field: { token: "sc_run" }, order: "asc" },
     { field: "attention", order: "desc" },
+    { field: { token: "sc_run" }, order: "asc" },
     { field: "state_change_seq", order: "desc" },
   ],
 };
@@ -391,7 +429,10 @@ const request = (method: string, params: object, timeoutMs = 5000) =>
     });
   });
 
-const viewFlag = () => join(process.env.HERDR_PLUGIN_STATE_DIR ?? join(homedir(), ".cache", "sandcastle-kit"), "sandboxes-first");
+// In the plugin's state directory, which Herdr keeps under its state home; `configure
+// --remove` finds it there without Herdr's environment.
+const viewFlag = () =>
+  join(process.env.HERDR_PLUGIN_STATE_DIR ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local/state"), "herdr/plugins", PLUGIN_ID), "sandboxes-first");
 
 const view = async (how: "toggle" | "reapply") => {
   const flag = viewFlag();

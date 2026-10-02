@@ -14,13 +14,16 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // A fake `herdr` for `configure`: logs every call, lists the plugin as linked from
-// $FAKE_ROOT (none when empty), and answers a reload with $FAKE_RELOAD.
+// $FAKE_ROOT (none when empty), and answers a reload with $FAKE_RELOAD once the config holds
+// the kit's block, $FAKE_BASE (clean by default) before.
 const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$1 $2" in
   "--version ") echo "herdr 0.9.3" ;;
   "plugin list") if [ -n "$FAKE_ROOT" ]; then printf '{"result":{"plugins":[{"plugin_id":"sandcastle-kit","plugin_root":"%s"}]}}\\n' "$FAKE_ROOT"; else echo '{"result":{"plugins":[]}}'; fi ;;
-  "server reload-config") printf '%s\\n' "$FAKE_RELOAD" ;;
+  "server reload-config")
+    base="$FAKE_BASE"; [ -n "$base" ] || base='{"result":{"status":"applied","diagnostics":[]}}'
+    if grep -q '>>> sandcastle-kit' "$HERDR_CONFIG_PATH" 2>/dev/null; then printf '%s\\n' "$FAKE_RELOAD"; else printf '%s\\n' "$base"; fi ;;
   *) echo '{}' ;;
 esac
 `;
@@ -33,7 +36,8 @@ const { configBlock, configConflicts, configure, contextProject, herdrConfigPath
   await import("../src/herdr-plugin.ts");
 
 const APPLIED = '{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}';
-const fakeHerdr = (root: string, reload = APPLIED) => {
+const fakeHerdr = (root: string, reload = APPLIED, base = "") => {
+  process.env.FAKE_BASE = base;
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-plugin-config-"));
   const log = join(dir, "calls.log");
   writeFileSync(log, "");
@@ -75,8 +79,19 @@ test("the block extends [ui] from anywhere: no bare `tab_bar_right =`, which wou
   const block = configBlock("/opt/kit with space");
   assert.match(block, /^\[\[ui\.tab_bar_right\]\]$/m);
   assert.doesNotMatch(block, /^tab_bar_right\s*=/m);
-  // The tab bar runs it through `sh -lc`: the kit's path is quoted.
-  assert.ok(block.includes(`command = "'/opt/kit with space/bin/sandcastle' herdr line"`), block);
+  // The tab bar runs it through `sh -lc`: the kit's path is quoted, and node starts only
+  // when a run is registered.
+  assert.ok(block.includes(`&& '/opt/kit with space/bin/sandcastle' herdr line"`), block);
+  assert.match(block, /command = "\[ -n \\"\$\(ls -A \\"\$\{XDG_CACHE_HOME:-\$HOME\/\.cache\}\/sandcastle-kit\/runs\\" 2>\/dev\/null\)\\" \] && /);
+});
+
+test("the tab bar command runs nothing heavy with no run, and the line with one", () => {
+  const cache = mkdtempSync(join(tmpdir(), "sandcastle-plugin-tabcache-"));
+  const command = JSON.parse(/^command = (".*herdr line")$/m.exec(configBlock("/nonexistent/kit"))![1]) as string;
+  // With no runs directory the check fails: Herdr hides the entry, and node never starts.
+  const none = spawnSync("sh", ["-c", command], { env: { ...process.env, XDG_CACHE_HOME: cache }, encoding: "utf8" });
+  assert.notEqual(none.status, 0);
+  assert.doesNotMatch(none.stderr, /nonexistent/, "the kit was not called");
 });
 
 test("configConflicts: what the user already sets is theirs to merge, the kit's own block is not", () => {
@@ -191,6 +206,31 @@ test("configure puts the config and the old link back unless Herdr reloads it cl
   const fresh = fakeHerdr("", '{"error":{"code":"internal","message":"boom"}}');
   await assert.rejects(quietly(() => configure(false, true)));
   assert.equal(existsSync(fresh.config), false);
+});
+
+test("configure blames the block only for what Herdr says after it, and wants the file applied whole", async () => {
+  const old = '{"result":{"status":"applied","diagnostics":[{"message":"legacy [keys.indexed]"}]}}';
+  // The user's own old warning, said before and after: the block is fine.
+  const fine = fakeHerdr("", old, old);
+  writeFileSync(fine.config, "[ui]\nx = 1\n");
+  await quietly(() => configure(false, true));
+  assert.equal(readFileSync(fine.config, "utf8"), withBlock("[ui]\nx = 1\n"));
+  // Applied only in part: back it goes.
+  const partial = fakeHerdr("", '{"result":{"status":"partial","diagnostics":[]}}');
+  writeFileSync(partial.config, "[ui]\nx = 1\n");
+  await assert.rejects(quietly(() => configure(false, true)), /back as they were/);
+  assert.equal(readFileSync(partial.config, "utf8"), "[ui]\nx = 1\n");
+});
+
+test("configConflicts: comments set nothing, single quotes count, a half block is refused", () => {
+  // `herdr --default-config` writes every key commented out, tab_bar_right included.
+  assert.deepEqual(configConflicts("[ui]\n# tab_bar_right = []\n# [ui.sidebar.agents]\n"), []);
+  assert.equal(configConflicts("[keys]\nsettings = 'prefix+shift+s'\n").length, 1);
+  const block = withBlock("");
+  assert.equal(configConflicts(block.replace(/^# <<< sandcastle-kit$/m, "")).length > 0, true, "an END marker deleted by hand");
+  // The kit's entries with their markers gone (a tool rewrote the file): named, not duplicated.
+  const unmarked = block.replace(/^# >>> .*$/m, "").replace(/^# <<< .*$/m, "");
+  assert.ok(configConflicts(unmarked).some((c) => c.includes("outside its marker lines")));
 });
 
 test("configure keeps the block when Herdr is not running: it reads it at start", async () => {

@@ -1100,7 +1100,14 @@ while true; do
   # In the Herdr plugin's popup, which only closes when this exits: q or Esc does it.
   if [ -n "${SANDCASTLE_STATUS_KEYS:-}" ] && [ -t 0 ]; then
     key=""; IFS= read -rsn1 -t "$INTERVAL" key || true
-    case "$key" in q|Q|"$ESC") exit 0;; esac
+    case "$key" in q|Q) exit 0;; esac
+    # An arrow key is Esc and more, sent at once, and closed the view; Esc alone has nothing
+    # after it. One more character settles it: bash 3.2 drops what a read had when it times
+    # out, so waiting for the whole sequence lost it. 3.2 also takes only whole seconds.
+    if [ "$key" = "$ESC" ]; then
+      rest=""; IFS= read -rsn1 -t "$( [ "${BASH_VERSINFO[0]}" -ge 4 ] && echo 0.05 || echo 1 )" rest || true
+      [ -z "$rest" ] && exit 0
+    fi
     continue
   fi
   sleep "$INTERVAL" & SLEEP_PID=$!
