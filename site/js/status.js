@@ -55,8 +55,39 @@ const bars = (ow) => {
   return out;
 };
 
+// status.sh's snap_w: each inner bar of ow within 4 columns of a bar above (ref) moves onto it,
+// so the two meet in one ┼ rather than a near-miss like ┴┬. A cell is never cut below min (one
+// already narrower keeps its width): that bar stays, and the last cell takes the remainder.
+function snapW(win, ow, ref, min) {
+  const n = ow.length;
+  const mn = ow.map((w, i) => Math.min(min[i] ?? 0, w));
+  const suf = Array(n + 1).fill(0);
+  for (let i = n - 1; i >= 0; i--) suf[i] = suf[i + 1] + mn[i] + 1;
+  const pos = [];
+  let prev = 0;
+  let acc = 0;
+  for (let i = 0; i < n - 1; i++) {
+    acc += ow[i] + 1;
+    let best = acc;
+    let bd = 5;
+    for (const r of ref) {
+      const d = Math.abs(r - acc);
+      if (d < bd) {
+        bd = d;
+        best = r;
+      }
+    }
+    if (best !== acc && (best - prev - 1 < mn[i] || win - 1 - best < suf[i + 1])) best = acc;
+    // An earlier move right may have squeezed this cell.
+    best = Math.max(best, prev + 1 + mn[i]);
+    pos.push(best);
+    prev = best;
+  }
+  return [...pos, win - 1].map((p, i) => p - (i ? pos[i - 1] : 0) - 1);
+}
+
 function junction(win, l, r, fill, up = [], dn = []) {
-  const [x, y, z] = fill === '═' ? ['╪', '╧', '╤'] : ['┼', '┴', '┬'];
+  const [x, y, z] = ['┼', '┴', '┬'];
   let s = l;
   for (let i = 1; i < win - 1; i++) {
     const a = up.includes(i);
@@ -301,7 +332,7 @@ function frame(t, cols, changed = new Set()) {
   const tal = [...tw.map((_, i) => (i === 1 ? 'l' : 'c')).slice(0, -1), 'l'];
   const tbars = bars(tw);
   const heads = ['ISSUE', 'STATE', 'AGE', 'COMMITS', 'CPU', 'MEM'].slice(0, tw.length - 1);
-  put(junction(win, '╞', '╡', '═', prevBars, tbars));
+  put(junction(win, '├', '┤', '─', prevBars, tbars));
   put(cellsLine(tw, [...heads, 'ACTIVITY'].map((h) => [[h, 'head b']]), tal));
   put(junction(win, '├', '┤', '─', tbars, tbars));
 
@@ -353,9 +384,9 @@ function frame(t, cols, changed = new Set()) {
     if (per <= 2 || lwt.reduce((a, b) => a + b, 0) + per + 1 <= win) break;
     per /= 2;
   }
-  ow = splitW(win - per - 1, lwt);
+  ow = snapW(win, splitW(win - per - 1, lwt), tbars, lwt);
   const lbars = bars(ow);
-  put(junction(win, '╞', '╡', '═', tbars, lbars));
+  put(junction(win, '├', '┤', '─', tbars, lbars));
   for (let r = 0; r < 8; r += per) put(cellsLine(ow, legend.slice(r, r + per), Array(per).fill('c')));
   put(junction(win, '├', '┤', '─', lbars, []));
   // The notes joined by " · " into as few lines as they fit, as wrap_items does.
