@@ -9,6 +9,42 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A run now lands each ticket as soon as it goes green**, on one landing worker beside the
+  pipelines, instead of landing everything at the end. A branch that does not already hold the
+  current base is merged and gated in a sandbox before the base moves. If that merged tree is red,
+  the ticket is not landed, and the summary names the tickets it is red with. While landing runs,
+  pipelines leave one machine-wide sandbox slot free for it, so a run may start one sandbox fewer
+  than `CONCURRENCY`.
+- **A blocker closed as not planned now holds its dependants.** Before, it counted as done and the
+  dependant started without the work it waited for. Reopen the blocker, or remove its
+  `Blocked by` line.
+
+### Changed
+
+- Landing and the pipeline queue moved out of `burndown()` into `src/landing.ts` and
+  `src/schedule.ts`.
+- The host git of a run now has `gc.auto=0`, so a landing merge never starts maintenance while
+  sandboxes add worktrees.
+
+### Fixed
+
+- The blocker check now also names a blocker held for a human, one that is open but not queued,
+  and a `Blocked by` line written inside code (which a run does not read). The closing summary
+  says why each ticket is still blocked.
+- A conflict resolution on a re-run that changes files the merge had joined cleanly is refused,
+  and the ticket is held for a person.
+
+### Added
+
+- `sandcastle queue --lint` shows a queue's shape before the first run: chain depth, overlapping
+  `Touches:` lines, and blockers that are not queued or missing. It is read-only and always exits 0.
+- A ticket body's `Touches:` line (format in the audit action) is parsed, with a check for files
+  git cannot merge. Nothing schedules on it yet.
+- The audit action clusters findings that touch the same files before filing, and separates real
+  dependencies from order-only ones.
+
 ## [0.3.0] - 2026-10-01
 
 ### Upgrading
