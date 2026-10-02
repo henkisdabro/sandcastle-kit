@@ -209,7 +209,10 @@ const run = async (root: string, ids: string[], pipeline: Pipeline, gate: Ctx["g
       const attempt = (attempts.get(issue.id) ?? 0) + 1;
       attempts.set(issue.id, attempt);
       settling.began(issue.id);
+      // As burndown.ts brackets a pipeline: its agent may commit to the branch, and the `.git` check then takes the tip.
+      host.begin(`agent/issue-${issue.id}`);
       const o = await pipeline(issue, attempt);
+      await host.settle(`agent/issue-${issue.id}`, `after #${issue.id}`);
       if (!o) return false;
       landing.push(o);
       return true;

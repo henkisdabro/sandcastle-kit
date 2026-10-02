@@ -16,7 +16,7 @@
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { type GateRun, failingTests } from "./gates.ts";
-import { assertGitUnchanged, type Fingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, largeFilesNote, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
@@ -132,6 +132,15 @@ export type HostGit = {
   write<T>(fn: () => T, made?: (prev: string, tip: string) => string | undefined): Promise<T>;
   /** The check a pipeline makes once its sandbox is closed, and the worker before each landing. */
   check(when: string): Promise<void>;
+  /** A ticket's pipeline starts: its branch may now move (the agent commits), and has only to exist. */
+  begin(branch: string): void;
+  /**
+   * A ticket's pipeline ended and its sandbox is closed: the `.git` check, then the branch's tip is
+   * the one the run expects and, if it holds commits, is copied to the backup repo (guard.ts).
+   */
+  settle(branch: string, when: string): Promise<void>;
+  /** The branch has landed (or the kit deleted it): the run stops expecting it and drops its copy. */
+  forget(branch: string): void;
   /**
    * The `LandingStop` a refused `write` threw, kept: a caller that reads a failed write as a
    * failed close or branch delete still must not land, or run git on the host, after it.
@@ -185,6 +194,31 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
     expected,
     exclusive,
     check: (when) => exclusive(() => check(when)),
+    begin: (branch) => void expected.flying.add(branch),
+    settle: (branch, when) =>
+      exclusive(() => {
+        // Checked while the ticket still counts as in flight: its own commits are not a moved tip.
+        check(when);
+        expected.flying.delete(branch);
+        const tip = tipOf(project.root, `refs/heads/${branch}`);
+        if (!tip) {
+          delete expected.branches[branch];
+          return;
+        }
+        expected.branches[branch] = tip;
+        // Only commits the base lacks: a branch with none has nothing to lose.
+        if (!sh("git", ["rev-list", "-n", "1", `refs/heads/${base}..${tip}`], project.root)) return;
+        try {
+          backupBranch(project, branch);
+        } catch (error) {
+          console.log(`${branch}: could not copy it to .sandcastle/backup.git (${errorLine(error)}); a deleted branch could not be restored.`);
+        }
+      }),
+    forget: (branch) => {
+      delete expected.branches[branch];
+      expected.flying.delete(branch);
+      dropBackup(project, branch);
+    },
     get failed() {
       return failed;
     },
@@ -499,6 +533,9 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       return { kind: "conflict", files, with: other };
     }
   }
+  // Landed: the run stops expecting the branch, so a squash's delete below is not a branch to
+  // restore, and a person deleting a merged branch is no alarm.
+  host.forget(o.branch);
   // A squash's commits are not ancestors of the base, so a kept branch would read as unmerged
   // work in `sandcastle clean`, the closing summary and the status view. Nothing needs the branch
   // now: a conflict is attributed to the landing record, not to branches.
