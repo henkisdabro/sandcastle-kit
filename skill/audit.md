@@ -43,8 +43,8 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
    file you may write), as a JSON array.
    ```
 
-   The files sit under the gitignored `triage/` directory that `sandcastle init` already ignores,
-   so no project change is needed, and the results survive the chat being compacted.
+   The files sit under `.sandcastle/triage/`, which `sandcastle init` ignores (an older project
+   gets the line from the update action), so the results survive the chat being compacted.
 5. **Merge and de-duplicate** from those files. Findings with the same root cause or the same
    file:line become one. A finding that matches an existing ticket is dropped, noting the ticket.
    Two findings that contradict each other, or one that contradicts a decision record, become a
@@ -66,8 +66,8 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
    - Where findings must stay separate (too big together, or different gates prove them), say
      which edges are real dependencies - one cannot be done without the other - and which only
      order overlapping work. Only a real dependency becomes a blocker line. Write no
-     order-only blocker line: a run lands overlapping branches in turn, and holding a ticket back
-     for a file it shares is a run each time.
+     order-only blocker line: a run lands overlapping branches in turn, and a blocker line makes
+     the second wait until the first has landed.
    - Where the findings cannot share a ticket, keep their `touches` accurate: the kit reads them
      to warn of tickets that will meet at landing.
 9. **Show the filing list** - title, lens, severity, touches, what it waits for, queued or not,
@@ -92,8 +92,8 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
       except the queue label (`gh label create`, as the queue action does).
     - A ready or decided finding gets the queue label. Human-only, parked and declined findings
       are not filed unless the user asks.
-    - Files tracker: write `.scratch/audit-<YYYYMMDD>/issues/<NN>-<slug>.md` (take the date from
-      your own context, not from a shell command) with a `# ` title, a `Status: <label>` line for
+    - Files tracker: write `<dir>/audit-<YYYYMMDD>/issues/<NN>-<slug>.md` (`<dir>` is the
+      tracker's, default `.scratch`; take the date from your own context, not from a shell command) with a `# ` title, a `Status: <label>` line for
       queued ones, and a `Blocked by: NN` header line for a blocker in the same feature. Then
       commit them in one commit by the repo's rules.
     - Record each filed number or path in its finding's file (`filed`).

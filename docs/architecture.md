@@ -10,7 +10,7 @@ Shell entry; resolves symlinks, checks the temp directory can be written, runs `
 
 ## `src/cli.ts`
 
-Commands: help, `--version`, setup, doctor, init, updated, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, report, status, clean, herdr; also the autonomy loop around `burndown()`
+Commands: help, `--version`, setup, doctor, init, updated, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, report, status, clean, herdr; also the autonomy loop around `burndown()`. The help text and each command's `--help` come from `src/help.ts`
 
 ## `src/burndown.ts`
 
@@ -104,7 +104,7 @@ Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `sr
 
 ## `test/*.test.ts`
 
-One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and this table's `skill/` row
+One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
 
 ## `mod/`
 

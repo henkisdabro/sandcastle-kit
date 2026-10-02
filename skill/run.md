@@ -9,8 +9,10 @@ This continues the run steps 1-3 in SKILL.md.
    project root and take the summary from its own stdout, not from a pane scrape. With `autonomy` set, one
    `sandcastle run` can hold several turns, each printing its own closing summary; `sandcastle
    report` shows only the last turn, so read the earlier turns' `Autonomy level` lines and
-   summaries from the run's output before writing the hand-back. At level `drain` the last lines are
-   `Drain: <N> turns, <landed> landed, stopped because <cause>`: quote the cause in the hand-back. Then write your
+   summaries from the run's output (`.sandcastle/logs/run-output.log` for a detached run;
+   `sandcastle wait` prints only the last turn's summary) before writing the hand-back. At level
+   `drain`, near its end is `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line
+   for each ticket queued after the run started: quote the cause and name those tickets in the hand-back. Then write your
    closing message with **all seven sections, in this order, with these headings**, each one
    present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
    report` printed, emoji included** - retyping a heading is how the emoji get lost; the
@@ -66,12 +68,15 @@ This continues the run steps 1-3 in SKILL.md.
    In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
    `ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
 
-   Reading the summary: `held` branches were green but change hooks, CI or install scripts, or a
+   Reading the summary: `held` branches were green but not landed automatically - the line says
+   why: they change hooks, CI, install scripts or a `protectedPaths` path, add a file over 50 MB,
+   carry repair commits no review passed or a conflict resolution that dropped merged lines - or a
    person marked the ticket `ready-for-human` during the run; `held` with "no commits" is a ticket an
    agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
    unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
    after its gates or the merge failed for a reason other than a conflict. A run headed **Run
-   STOPPED** merged nothing: it names what moved - for a moved base branch, show the user the
+   STOPPED** landed nothing after the stop (the heading says how many merged before it): it names
+   what moved - for a moved base branch, show the user the
    commits it lists and ask whether they are theirs before offering a re-run; for a changed
    `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
    no commit usually means the repair agent judged the failure outside the branch - read the repair

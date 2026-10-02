@@ -17,7 +17,7 @@ the same by hand.
 | 🐳 | **A Docker-compatible container runtime** | The kit calls the `docker` command, so any runtime that provides it works - see the table below. |
 | 🟩 | **Node.js 22+** | 24 LTS recommended. |
 | 📦 | **pnpm** | Installs the kit's dependencies. |
-| 🌿 | **git 2.31+** | Worktrees are the backbone of every run. |
+| 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.38 or newer is recommended: older git lands with a weaker check of each landing merge. |
 | 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |
 | 🐙 | **GitHub CLI**, signed in | `gh auth login`. Only needed when tickets are GitHub Issues; a project that keeps them as files in the repo can skip it. |
 | 🧠 | **A Claude subscription or Anthropic API key** | For the implement and review agents. A subscription token comes from `claude setup-token`, so Claude Code must be installed somewhere. |
@@ -35,8 +35,8 @@ the same by hand.
 > Whichever runtime you choose, `docker info` must succeed in the same shell you run `sandcastle`
 > from. `sandcastle doctor` checks this for you.
 
-**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (status pane and a pane per
-sandbox, opened automatically; `sandcastle herdr configure` adds the kit's plugin - see the README's
+**Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (a tab with the status view,
+opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see the README's
 [The Herdr plugin](../README.md#the-herdr-plugin)), [gitleaks](https://github.com/gitleaks/gitleaks) (only to contribute to the kit).
 
 ## 🧙 What `sandcastle setup` does
@@ -56,7 +56,9 @@ install ends with it; to run it again later: `sandcastle setup`.
    the token you paste is fine-grained and that GitHub accepts it.
 5. **Writes** `~/.config/sandcastle-kit/.env` with owner-only permissions (600), keeping anything
    already in it.
-6. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`) and prints the fix
+6. **Inside Herdr, offers the kit's plugin** (`sandcastle herdr configure`): it shows what it adds
+   to Herdr's config and asks first, with yes as the default.
+7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`) and prints the fix
    for anything missing.
 
 It installs no software. Re-run it any time: finished steps show `ok`; for a credential it also asks whether to replace it (default no) - the way to put in a new token.
@@ -73,7 +75,7 @@ cd sandcastle-kit && pnpm install
 mkdir -p ~/.local/bin
 ln -sf "$PWD/bin/sandcastle" ~/.local/bin/sandcastle
 
-# The sandcastle skill (optional, recommended) - one file for every agent
+# The sandcastle skill (optional, recommended) - one skill directory for every agent
 mkdir -p ~/.claude/skills && ln -sfn "$PWD/skill" ~/.claude/skills/sandcastle   # Claude Code, OpenCode
 mkdir -p ~/.agents/skills && ln -sfn "$PWD/skill" ~/.agents/skills/sandcastle   # Codex only
 

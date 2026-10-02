@@ -51,6 +51,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`sandcastle <command> --help` (or `-h`) prints that command's help and runs nothing.**
+  `clean --help` used to run the clean and delete the agent branches. A help flag counts anywhere
+  in the arguments, `queue --help` shows the `queue --lint` entry too, `sandcastle herdr ... --help`
+  works the same way, and `sandcastle help` no longer ends with four lines of the code's comments.
+- **A detached run keeps the run before's output.** `.sandcastle/logs/run-output.log` is moved to
+  `logs/archive/` when the next detached run starts, where it used to be overwritten.
+- **The run's first line says how many tickets run at a time**: `1 ticket(s), 1 at a time`, where
+  it said `5 at a time` for one ticket.
 - **The Herdr log and report popups' bottom line is readable on any theme.** `less` drew its prompt
   ("Waiting for data..." while following a log) with the standout colours of the user's own
   `LESS_TERMCAP_so`, which could come out as yellow on light blue; the popups now use the
@@ -58,10 +66,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A test file a ticket adds no longer reads as a change beyond its Touches line**, in the report
   or the close comment. Its name cannot be known when the ticket is written. A modified test file,
   or a file added outside the conventional test paths, still counts.
+- **The skill, README and install guide match what the kit does now.** A `Blocked by` chain of
+  queued tickets drains in one run, so `drain` is recommended for tickets that conflict across
+  turns rather than for chains; a detached run's estimate and drain lines are in
+  `.sandcastle/logs/run-output.log`; the held, withdrawn, `uncommitted`, `stalled` and `left over`
+  states, the 50 MB hold, `queue --lint`, jq as a requirement and the three-row mod band are
+  described as they are; the update action checks every path `.sandcastle/.gitignore` needs.
 - **The skill states two rules agents kept getting wrong.** A `Blocked by` ref must sit on the
   same line (a list under a `Blocked by:` heading is not read); a drain's later turns run only what
-  the turn before left conflicted or released. The README's `SANDCASTLE_HERDR_VIEW` row now says it turns off the
-  whole Herdr view, not a per-sandbox tab.
+  the turn before left conflicted or released. The README's `SANDCASTLE_HERDR_VIEW` row now says
+  it turns off the whole Herdr view, not a per-sandbox tab.
 - **The Claude Code mod follows a run its session started in another directory**, such as a
   second clone or a monorepo package: the band, the needs-you notice and the end prompt work by
   the session id each run records. Every run now registers in the machine-wide live-runs
@@ -80,7 +94,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   (nodejs/node#66171): the exit handlers ran, then the process never ended, and a second Ctrl-C
   did nothing. A run now ends on a signal by sending that signal to itself once its exit handlers
   have run. The launcher also turns off Node's concurrent Maglev and Sparkplug compilers until
-  Node ships the fix.
+  Node ships the fix. A detached run stopped by a signal before it was going reports 130 or 143,
+  as the shell would, not a bare 128.
 - **`sandcastle wait` no longer returns at once with exit code 0** when it starts in the moment
   between a run releasing its lock and writing its exit code. It also follows the live pid
   recorded in run.json.

@@ -17,8 +17,9 @@ bug no gate would fail"), never as an incident from a named project.
 - Personal things live in `~/.config/sandcastle-kit/` (`.env`, `config.json`, `denylist`);
   project things live in each project's `.sandcastle/`. A user's preference ("always keep skill
   X") belongs in their memory or project config, not in `skill/` or the README.
-- At runtime the kit writes only to the project's `.sandcastle/` (gitignored there) or a temp
-  directory - its own directory stays read-only.
+- At runtime the kit writes only to the project's `.sandcastle/` (gitignored there), a temp
+  directory, or its machine-wide live-runs directory (`src/live-runs.ts`) - its own directory
+  stays read-only.
 - The pre-commit hook (`git config core.hooksPath .githooks`) runs gitleaks and the user's
   denylist. Every commit goes through it; a finding is fixed, not bypassed with `--no-verify`.
 
@@ -31,8 +32,8 @@ read a module's section there before changing it.
 | Path | What |
 |---|---|
 | `bin/sandcastle` | Shell entry: runs `src/cli.ts` with the kit's own tsx loader; `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone |
-| `src/cli.ts` | Every command (`sandcastle help` lists them) and the autonomy loop around `burndown()`; the help text is the file's header comment, held by `test/help.test.ts` |
-| `src/help.ts` | The help text (the header comment of `src/cli.ts`), `helpFor(command)` and `wantsHelp`: a trailing `--help` or `-h` prints help before any command runs; the Herdr plugin's entry shares it |
+| `src/cli.ts` | Every command (`sandcastle help` lists them) and the autonomy loop around `burndown()`; the help text is the file's header comment (read by `src/help.ts`), held by `test/help.test.ts` and `test/command-help*.test.ts` |
+| `src/help.ts` | The help text (the header comment of `src/cli.ts`), `helpFor(command)` and `wantsHelp`: a `--help` or `-h` anywhere in a command's arguments prints its help before anything runs; the Herdr plugin's entry shares it |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |

@@ -21,7 +21,7 @@ was set up with.
    in the kit's `CHANGELOG.md` that this project has not had since its last update (or says it has
    no record, if it was never updated this way: then read the notes of every release since it was
    set up). Read those notes in full: they name what an existing project may act on.
-3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise stop after 2):
+3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise skip to 5):
    1. `sandcastle build` - or `sandcastle build --force` when doctor warns that the base image is
       more than 30 days old (it pulls Debian and Node updates) - then `sandcastle lean`: new
       images, and the hook check against them.
@@ -46,9 +46,10 @@ was set up with.
       config covers them. Apply after the user agrees.
    5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
       `hookTests`, propose tests as in SKILL.md's init step 4, then `sandcastle gates`.
-   6. **Triage directory.** If `.sandcastle/.gitignore` has no `triage/` line, append it (commit
-      it with the other project changes in step 4). Without it, triage files show as untracked and
-      a run's clean-tree check refuses to start.
+   6. **Ignored paths.** If `.sandcastle/.gitignore` lacks any of `.env`, `logs/`, `worktrees/`,
+      `.run/`, `triage/`, append the missing ones (commit it with the other project changes in
+      step 4). Without them, files the kit writes show as untracked and a run's clean-tree check
+      refuses to start.
    7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).
@@ -62,14 +63,15 @@ was set up with.
       giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
       needs), and run `sandcastle gates` after the user agrees.
    10. **Chains, overlaps and hooks.** Run `sandcastle queue --lint` (read-only, no model calls).
-       - If it reports a `Blocked by` chain deeper than the project's autonomy level allows in
-         one run (`autonomy` in the config; off when unset), suggest `autonomy: "drain"`, which
-         takes turns until the queue is drained and names why it stops. It spends more per
+       - A `Blocked by` chain of queued tickets drains in one run whatever the autonomy level. If
+         the lint shows tickets that share an unmergeable file or are likely to conflict, and
+         `autonomy` is unset, suggest `autonomy: "drain"`: it re-runs conflicted tickets, and those
+         they release, in further turns and names why it stops. It spends more per
          `sandcastle run`, so set it only after the user agrees.
        - If queued tickets have no `Touches:` line, say that a run now holds a ticket back only for
          a file git cannot merge that another ticket in flight changes, read from its branch and
-         its `Touches:` line, so a new ticket without the line is held only once its branch has
-         such a file. Offer to add the lines (format in audit.md) to the queued tickets the user
+         its `Touches:` line, so a new ticket without the line is never held back at the start,
+         and holds another back only once its own branch has such a file. Offer to add the lines (format in audit.md) to the queued tickets the user
          picks, as an edit to each ticket body.
        - Step 3.1's `sandcastle gates` now also runs the repo's `pre-commit` and `commit-msg` hooks in
          the sandbox. If it reports a refused hook, the tool the hook needs is missing from the

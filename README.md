@@ -67,8 +67,8 @@ merged into your local base branch (nothing is ever pushed), which are red and w
 need you. You review and push what you like, land a branch you fixed or requeue a ticket with a
 note, and repeat.
 
-**Do I need anyone else's tools?** No, but one is recommended. The kit needs only Docker, Node, git
-and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
+**Do I need anyone else's tools?** No, but one is recommended. The kit needs only Docker, Node, pnpm,
+git, jq and, for GitHub tickets, the `gh` CLI. It also supports the workflow from
 **[Matt Pocock's skills](https://github.com/mattpocock/skills)** - the same author as Sandcastle,
 which this kit is built on - and we recommend installing them: `/grill-with-docs`, `/to-spec`
 and `/to-tickets` are a good way to turn an idea into tickets an unattended agent can finish, and
@@ -98,7 +98,7 @@ New to GitHub or to agents? These are the only terms you need.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (`gh auth login`;
+**You need:** macOS or Linux, Node 22+, pnpm, git, jq, the GitHub CLI signed in (`gh auth login`;
 skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
 macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
 [Full requirements](docs/INSTALL.md#-requirements).
@@ -193,7 +193,7 @@ flowchart LR
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
 | 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements, Claude Opus 5.5 reviews, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
-| 🪶 | **Lean sandboxes** | The project's skills, subagents, commands, MCP servers and plugins are hidden from sandbox agents unless you keep them, because each one costs context on every turn. |
+| 🪶 | **Lean sandboxes** | The project's skills, subagents, commands and MCP servers are hidden from sandbox agents unless you keep them, and its plugins always, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
 | 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile or the Claude Code or Codex version changes - see [The image's agent versions](#-the-images-agent-versions). |
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
@@ -517,7 +517,7 @@ AUTONOMY_LEVEL=drain sandcastle run   # keep taking turns until the queue is dra
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its tickets in the last three runs. Tickets that others wait for start first; a ticket
+time from the medians of its tickets in the last three runs (when a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(a chain of N runs in order)`). Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -539,15 +539,16 @@ with the run:
 | `setup` `impl` `review` `codex` `gates` `repair` | Working. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project |
 | `ready` | Implemented, reviewed, gates green: waits for the landing worker, which lands each ticket as it goes green. `human merge: .github/` means it will be held for a person instead |
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
-| `gate red` `conflict` `held` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person |
-| `stopped` `orphaned` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it |
+| `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person; `uncommitted`: the agent's work is in its kept worktree, not committed |
+| `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker |
+| `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
+| `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
 
-**Landing.** Green branches land when every sandbox has finished, not as each passes: landing moves
-the base branch, which the run guards against sandboxes changing, and a ticket-file tracker commits
-there. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
+**Landing.** Each green branch lands as soon as its gates pass, while the others still run, on one
+landing worker: landing moves the base branch, which the run guards against sandboxes changing, and
+the kit's own writes are the only moves it accepts. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
@@ -622,9 +623,10 @@ after a turn it re-runs only the tickets that ended in a merge conflict or whose
 landed - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
 A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
 
-`autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until the queue is drained, for a
-queue that needs more turns than `3` gives - `Blocked by` chains, a ticket that conflicts across
-turns, a long tail. After every turn it checks four stops and prints the one that holds as a line
+`autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until no ticket is left to run
+again, for a queue that needs more turns than `3` gives - a ticket that conflicts across turns, and
+the tickets waiting on it. A `Blocked by` chain whose links are all queued needs no extra turn: each
+ticket starts in the same run once its last blocker lands. A red ticket is not run again. After every turn it checks four stops and prints the one that holds as a line
 naming the cause: **no progress** (the turn landed nothing and released nothing), **the same ticket
 conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.json`), **a red
 merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is the backstop. After
@@ -668,7 +670,9 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
-| `.run/` | The rendered prompts, the lean plan and the green-base record a run skips the base check by |
+| `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts |
+| `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)) |
+| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by, and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
 
@@ -802,7 +806,8 @@ Most runs start from a Claude Code session, with `/sandcastle run`. With the kit
 itself, in the status view's castle, glyphs and colours:
 
 ```
-▄ ▄ ▄  sandcastle  my-app  landing 2/4  1.7M in / 30k out
+▄ ▄ ▄
+█████  sandcastle  my-app  landing 2/4  1.7M in / 30k out
 ██▀██  ● working 1  ! needs you 2  > ready to land 1  ~ blocked 1  + merged 1
 ────────────────────────────────────────────────────────────────────────────────
 ❯
@@ -899,10 +904,11 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes superseded tags. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
-| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket and a branch that changes hooks, CI or install scripts; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
+| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket, a branch that changes hooks, CI or install scripts, and one that adds a file over 50 MB; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
+| `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, blocker problems and a rough turn count. Advice only | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
@@ -1111,7 +1117,9 @@ and the kit narrows what can cross it:
 - 🛡️ **Protected paths.** A green branch that changes hooks (git, Claude Code, pre-commit tools), CI,
   agent settings (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`,
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
-  `ready-for-human` and left for you to merge; `sandcastle land` refuses it too.
+  `ready-for-human` and left for you to merge; `sandcastle land` refuses it too. A branch that adds
+  a file over 50 MB is held the same way: GitHub refuses a push with one over 100 MB, and a file
+  that size stays in the history for good.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.
@@ -1138,20 +1146,20 @@ starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
-| `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry` and `--concurrency N` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
+| `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N` and `--detach` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
 | `"notify" ... must be a list of strings` | `notify` in `~/.config/sandcastle-kit/config.json` is a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`. |
 | `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token with `sandcastle setup` (or as in [docs/INSTALL.md](docs/INSTALL.md#-installing-by-hand)). A project's `.sandcastle/.env` overrides the shared one - check both. |
 | `Preflight failed` naming a model | Plan limit reached, token expired (`sandcastle doctor --verify` checks), or the image's Claude Code is older than the model needs: a model newer than the `stable` channel needs `claudeCode: "latest"` (or a version) in `.sandcastle/config.ts`, and offline the image used a cached or default version - with the network back, `sandcastle build` picks up the channel's current release. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |
 | `A kept hook cannot run in the image` | Install what the hook calls in the project's Dockerfile, or - only for host-only conveniences - add it to `lean.dropHooks`. |
 | `placeholders Sandcastle cannot fill` | `rules.md` contains `{{SOMETHING}}`; reword it. |
-| `Another sandcastle run of this project is live` | One run per project. Wait; if that process is gone, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |
+| `Another sandcastle run of this project is live` | One run per project. `sandcastle wait` blocks until it ends; `sandcastle stop` stops it. If that process is gone, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |
 | `STOPPED ... <path under .git> changed while sandboxes ran` | Inspect `git config --local --list` and `.git/info/` before any other git command in that repo. |
 | `STOPPED ... <base> moved while sandboxes ran` | A commit landed on the base branch mid-run - often your own (a ticket-file edit). It names the commits. If they are yours, run again: finished branches land then. |
 | A ticket `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
-| `waits for #N to close` / `waiting, not started` | The ticket body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to tickets named in `TICKETS=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
+| `waits for #N to close` | The ticket body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to tickets named in `TICKETS=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
-| `gated green but not merged` | The ticket was closed, unqueued or labelled `ready-for-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
+| `withdrawn`, `held`, or `not landed: ... moved after its gates passed` | The ticket was closed, unqueued or labelled `ready-for-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
 | A branch conflicts at landing | The run sends it back once, in the same run: its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued: its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |

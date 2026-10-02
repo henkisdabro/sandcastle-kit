@@ -21,8 +21,8 @@ Requested action: `$action`
 With no action (blank, or the literal `$action` in a harness that does not fill it in), take it
 from the user's request; if that names none either, run `sandcastle status 0` and suggest the
 action that fits what it shows. When it shows no runs and `sandcastle queue` is empty, say so and
-name the next step (file tickets - GitHub issues or ticket files - for the work, then the `queue` action) rather than
-stopping.
+name the next step (the `audit` action to find work, or file tickets - GitHub issues or ticket
+files - then the `queue` action) rather than stopping.
 
 ## Before every action
 
@@ -141,7 +141,7 @@ spec is **closed**: an unattended agent with no chat context can finish it from 
 comments, and the gates can prove it.
 
 0. **Which tracker?** `sandcastle queue` names it and why. `github`: use `gh` as below. `files`:
-   tickets are `.scratch/<feature>/issues/<NN>-<slug>.md`; list them, write each decision under
+   tickets are `<dir>/<feature>/issues/<NN>-<slug>.md` (`dir` is the tracker's, default `.scratch`); list them, write each decision under
    `## Comments`, and queue by setting `Status: <label>` (commit it). If the repo has
    `docs/agents/issue-tracker.md`, its conventions win. The kit reads that file (Matt Pocock's setup
    skill writes it) but does not need it.
@@ -195,7 +195,7 @@ comments, and the gates can prove it.
    | Ready - spec closed, provable by the gates | label now; add a short triage note if the ticket is stale or half-fixed |
    | Needs a decision | ask (step 3) |
    | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
-   | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. A comment is not read. Write it as plain text, with the ref on the same line (`Blocked by #12, #14`): a list under a `Blocked by:` heading is not read, nor is a line inside a code block or backticks. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
+   | Blocked by another ticket | label it, with a `Blocked by #N` line in the ticket *body* (`gh issue edit`): a run skips it until #N is closed. Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`, naming tickets in the same feature by number. A comment is not read. Write it as plain text, with the ref on the same line (`Blocked by #12, #14`): a list under a `Blocked by:` heading is not read, nor is a line inside a code block or backticks. If the blocker is a Linear issue or an in-repo task file, name it (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has `blockers` for it (README -> Blockers); otherwise the line is ignored |
    | Already fixed or false | comment the evidence; ask before closing |
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
@@ -224,13 +224,18 @@ comments, and the gates can prove it.
    implementer shows `[implement <model>/<effort>]` after its title there), whether it is a dry
    run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
    guess how long it takes: once the project has run before, the run prints a rough estimate at
-   the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
+   its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
    offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
-   shows `Blocked by` chains and no autonomy is set, recommend `AUTONOMY_LEVEL=drain` (or `autonomy: "drain"`): it
-   takes turns until the queue is drained or a stop holds (no progress, the same ticket conflicting twice running,
-   a red base, a usage limit, 20 turns at most), so the chain does not need a `sandcastle run` per link. Each later turn runs only the tickets the turn before left conflicted or released; a ticket queued after the run started is not taken: it waits for the next `sandcastle run`. Say that the run first gates the base commit and stops if a
+   shows tickets waiting for others (`[waits for ...]`), say that a chain whose links are all queued
+   drains in one run: each ticket starts once its last blocker lands and closes. With no autonomy
+   set, recommend `AUTONOMY_LEVEL=drain` (or `autonomy: "drain"`) when the queue may need further
+   turns - a ticket that conflicts twice in one run, and the tickets waiting on it. A drain stops when
+   no ticket is left to run again or a stop holds (no progress, the same ticket conflicting in two
+   turns running, a red merged base, a usage limit or a stopped run, 20 turns at most); a red ticket
+   is not run again. Each later turn runs only the tickets the turn before left conflicted or
+   released; a ticket queued after the run started is not taken: it waits for the next `sandcastle run`. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run
@@ -242,8 +247,8 @@ comments, and the gates can prove it.
    starts the run as a process of its own that outlives this session, and returns once the run is
    going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
    `drain`, or run it attached (below). Inside Herdr the run opens a tab of its own holding only
-   the status view - never open a status view of your own, and expect no pane per sandbox (the
-   sidebar carries the run). It prints:
+   the status view - never open a status view of your own, and expect no pane per sandbox unless
+   the config sets `herdr.panes: "all"` (the sidebar carries the run). It prints:
 
    ```
    Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
@@ -268,8 +273,8 @@ comments, and the gates can prove it.
    finished. Right after starting it, run `sandcastle wait` as a background
    command your harness reports back on when it exits (`run_in_background` in Claude Code): it
    blocks while the run is live, then prints the closing summary and exits with the run's exit
-   code. A harness caps a background command (Claude Code: 2 hours), so give it a timeout under
-   the cap, `sandcastle wait 6600`: at the timeout it exits 124 with the run untouched, which
+   code. A harness caps a background command (Claude Code: 30 minutes by default, 2 hours at most -
+   pass `timeout: 7200000`), so give `sandcastle wait` a timeout under that cap, `sandcastle wait 6600`: at the timeout it exits 124 with the run untouched, which
    is no result - start the same `sandcastle wait` again. `sandcastle stop` stops the run as
    Ctrl-C does; use it only when the user asks, and `sandcastle wait` then shows how it ended.
 4. **Close the run - required, even mid-way through another request.** When the run ends, read
@@ -290,10 +295,11 @@ working, ready to land, need you, queued, blocked, merged. The states:
 - **`ready`** - gates green, waiting for the landing worker, which lands each ticket as it goes
   green while the others still run. Once every sandbox has finished, the `run` line counts what is
   left down (`landing 6/25`). `human merge: <paths>` means it will be held for a person instead.
-- **Needs you** - `gate red`, `conflict`, `held`, `crashed`, `not landed`, `stopped` (finished,
+- **Needs you** - `gate red`, `conflict`, `held`, `uncommitted` (the work is in its kept worktree,
+  not committed), `crashed`, `stalled` (no container, log quiet 30 minutes), `not landed`, `stopped` (finished,
   but the run stopped before landing), `orphaned` (its run was killed and its container still
-  works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed, unqueued or
-  marked `ready-for-human` during the run) is greyed with the leftovers.
+  works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed or unqueued
+  during the run, or marked `ready-for-human` before it started) is greyed with the leftovers.
 - **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**,
@@ -301,7 +307,8 @@ working, ready to land, need you, queued, blocked, merged. The states:
 
 After a run, or for a ticket outside it, the state is inferred from branches and logs: `left
 over` is a branch from an earlier run, for `sandcastle clean`. Each ticket's agent and gate logs
-are `.sandcastle/logs/agent-issue-<n>-*.log` (the `-gates-` one is the orchestrator's gate
+are `.sandcastle/logs/agent-issue-<n>-*.log` (a merged ticket's move to `.sandcastle/logs/archive/`
+at the next run or `sandcastle clean`; the `-gates-` one is the orchestrator's gate
 output; each pass's raw stream - every tool call and result - is the `.jsonl` beside its `.log`, so read that to check a reviewer's claim); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
 a "trust dialog" error). The live view fits its pane and summarises the rows that do not fit on
 one line (`sandcastle status 10 all` shows them all). How long each step took, and each agent
