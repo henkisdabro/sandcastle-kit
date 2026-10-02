@@ -9,6 +9,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
+  terminal draws it - in place of the plain heading.
+
 ## [0.5.0] - 2026-10-02
 
 ### Upgrading

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="150" viewBox="0 0 720 150" role="img" aria-labelledby="t">
+  <title id="t">The sandcastle-kit castle as a terminal draws it: three rows of block characters beside a live run</title>
+  <rect x="0.5" y="0.5" width="719" height="149" rx="12" fill="#0e1116" stroke="#2a2f38"/>
+  <circle cx="22" cy="20" r="5.5" fill="#ff5f57"/><circle cx="40" cy="20" r="5.5" fill="#febc2e"/><circle cx="58" cy="20" r="5.5" fill="#28c840"/>
+  <!-- One character cell is 14 x 28: ▄ is its lower half, ▀ its upper half, █ all of it. -->
+  <g transform="translate(28 46)" shape-rendering="crispEdges">
+    <path fill="#e8d6b4" d="M0 14h14v14H0zM28 14h14v14H28zM56 14h14v14H56z"/>
+    <path fill="#cdb894" d="M0 28h70v28H0z"/>
+    <path fill="#705c42" d="M0 56h70v14H0zM0 70h28v14H0zM42 70h28v14H42z"/>
+  </g>
+  <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="17">
+    <text x="126" y="94"><tspan fill="#e8d6b4" font-weight="700">sandcastle</tspan><tspan fill="#cdb894" dx="18">my-app</tspan><tspan fill="#c0a478" dx="18">landing 2/4</tspan><tspan fill="#927c5e" dx="18">1.7M in / 30k out</tspan></text>
+    <text x="126" y="122"><tspan fill="#ffd75f">● working 1</tspan><tspan fill="#ff5f5f" dx="18">! needs you 1</tspan><tspan fill="#5fd7d7" dx="18">&gt; ready 1</tspan><tspan fill="#5fd75f" dx="18">+ merged 4</tspan></text>
+  </g>
+</svg>

@@ -1,8 +1,9 @@
 <div align="center">
 
-# 🏰 sandcastle-kit
+<a href="https://henkisdabro.github.io/sandcastle-kit/"><img src="docs/img/logo.svg" alt="sandcastle-kit - turn your ticket backlog into a software factory" width="720"></a>
 
-**Turn your ticket backlog into a software factory.**<br>
+<img src="docs/img/terminal-logo.svg" alt="The castle as a terminal draws it, three rows of block characters beside a live run: working, needs you, ready and merged counts" width="720">
+
 Unattended coding agents burn down your queue of GitHub issues or ticket files in Docker sandboxes - implemented, reviewed,
 gated and merged while you are away from the keyboard.
 

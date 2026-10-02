@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="200" viewBox="0 0 720 200" role="img" aria-labelledby="t">
+  <title id="t">sandcastle-kit</title>
+  <rect width="720" height="200" rx="18" fill="#0e1116"/>
+  <!-- The castle the status view, the mod and the website draw: dry sand on top, wet sand at the base. -->
+  <g transform="translate(64 28) scale(24)" shape-rendering="crispEdges">
+    <path fill="#e8d6b4" d="M0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4z"/>
+    <path fill="#cdb894" d="M0 2h5v2H0z"/>
+    <path fill="#705c42" d="M0 4h5v1H0zM0 5h2v1H0zM3 5h2v1H3z"/>
+  </g>
+  <text x="232" y="108" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="40" font-weight="700" letter-spacing="5"><tspan fill="#e8d6b4">sandcastle</tspan><tspan fill="#a08662" font-weight="500">-kit</tspan></text>
+  <text x="234" y="146" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="16" fill="#927c5e">turn your ticket backlog into a software factory</text>
+</svg>
