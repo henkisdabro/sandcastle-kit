@@ -53,7 +53,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  accountLanding, conflictLine, createHostGit, createRequeueRecord, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
+  accountLanding, carriedBranch, carriedMergeLine, conflictLine, createHostGit, createRequeueRecord, greenCarriedLine, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
 import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -730,6 +730,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // worktree's gitdir pointer) could by now name an fsmonitor or merge
       // driver that a host git in the worktree would execute.
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
+      // The requeue-once state holds the first attempt's line only on a second attempt in this run.
+      const requeued = requeuedAs.has(issue.id);
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
       // Read before the base merge, which moves the tip. A branch still at the
       // head it was reviewed and gated green on needs no implement or review:
@@ -737,7 +739,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
       let landOnly = greenHead !== undefined;
       if (greenHead !== undefined) {
-        console.log(`${ref(issue.id)}: reviewed and green at ${greenHead.slice(0, 7)} in an earlier run - no implement or review; the gates decide.`);
+        console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
@@ -761,7 +763,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             identity,
           });
           if (r.ok) {
-            console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run; regenerated ${files.join(", ")} with ${r.regen.map((c) => `\`${c}\``).join(", ")}.`);
+            console.log(carriedMergeLine(ref(issue.id), base, behind, requeued, { files, regen: r.regen }));
           } else {
             // Back to the merge as it stood, for the implementer (or, on a green
             // branch, the resolver) to resolve.
@@ -769,16 +771,16 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             await sandbox.exec(merge);
             mergeConflicted = true;
             console.log(
-              `${ref(issue.id)}: its ${landOnly ? "green branch" : "branch from an earlier run"} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
             );
           }
-        } else if (pull.exitCode === 0) console.log(`${ref(issue.id)}: merged ${base} (${behind} commit(s)) into its branch from an earlier run.`);
+        } else if (pull.exitCode === 0) console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
         else if (unmerged) {
           mergeConflicted = true;
           console.log(
             landOnly
               ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
-              : `${ref(issue.id)}: its branch from an earlier run conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
+              : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
           );
         }
         else {

@@ -608,6 +608,26 @@ export const againLine = (kind: "conflict" | "red", tickets: string[]) =>
 export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
   `requeued after ${kind === "conflict" ? "conflict" : "red"}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`;
 
+/**
+ * Where a carried branch's work came from: the ticket's first attempt when this run requeued it
+ * (the scheduler's requeue-once rule, which `requeuedAs` records), otherwise a branch kept from an
+ * earlier `sandcastle run`. Saying "earlier run" of this run's own first attempt sent operators
+ * looking for a run that never existed.
+ */
+export const carriedFrom = (requeued: boolean) => (requeued ? "its first attempt" : "an earlier run");
+
+/** `who` is the tracker's own ref for the ticket. The line for a branch that is still at the head it was reviewed and gated green on. */
+export const greenCarriedLine = (who: string, head: string, requeued: boolean) =>
+  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - no implement or review; the gates decide.`;
+
+/** The line for the base merged into a carried branch, cleanly or with its generated files regenerated. */
+export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
+  `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
+  (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
+
+/** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
+export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);
+
 /** What the closing report is built from: where each landing ending put its ticket. `burndown()` builds the lists from the endings. */
 export type Landings = {
   merged: string[];
