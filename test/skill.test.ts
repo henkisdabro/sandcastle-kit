@@ -34,7 +34,7 @@ test("the queue section holds a triage brief in a fenced block", () => {
   assert.ok(lines >= 12 && lines <= 18, `brief is ${lines} lines`);
 });
 
-test("the brief has an Tickets: line", () => {
+test("the brief has a Tickets: line", () => {
   assert.match(brief, /^\s*Tickets: /m);
 });
 
