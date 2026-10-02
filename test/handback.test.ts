@@ -22,6 +22,8 @@ const project: Project = {
   lean: { keep: [], dropHooks: [] },
   gates: [{ name: "noop", command: "true" }],
   hookTests: [],
+  land: "merge",
+  generated: [],
   implement: {},
   review: {},
   repair: {},

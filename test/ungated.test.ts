@@ -116,6 +116,8 @@ test("the review prompt asks for the <ungated> line and gains no placeholder", (
     lean: { keep: [], dropHooks: [] },
     gates: [{ name: "unit", command: "echo gate-ok" }],
     hookTests: [],
+    land: "merge",
+    generated: [],
     implement: {},
     review: {},
     repair: {},

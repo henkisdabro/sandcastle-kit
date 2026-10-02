@@ -89,7 +89,7 @@ type Over = { land?: "merge" | "squash"; dryRun?: boolean; gate?: Ctx["gate"] };
 const harness = (root: string, over: Over = {}) => {
   const calls: string[] = [];
   const history: Record<string, string[]> = {};
-  const states: Record<string, { state?: string; note?: string }> = {};
+  const states: Record<string, { state?: string; note?: string | null }> = {};
   const tracker = {
     ref: (id: string) => `#${id}`,
     close: (id: string) => void calls.push(`close ${id}`),
