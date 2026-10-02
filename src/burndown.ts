@@ -1020,8 +1020,14 @@ export const burndown = async (project: Project): Promise<boolean> => {
   let dealt = 0;
   // Pipelines running or waiting for a worker: a release can start more, so "done" is only "none now".
   let inPipelines = 0;
+  // Only the run line: a failed write must not skip the `afterLanding` after it, whose `finish`
+  // is what closes the pipeline queue - the run would wait for it for ever.
   const landingStage = () => {
-    if (inPipelines === 0 && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
+    try {
+      if (inPipelines === 0 && dealt < pushed) run.update({ stage: `landing ${dealt + 1}/${pushed}` });
+    } catch {
+      /* the next landing writes it again */
+    }
   };
   const landing = createLanding(ctx, {
     settled: async (o, landed) => {
@@ -1228,7 +1234,11 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // once no ticket is left that could start another (`flow`).
   const pipelinesEnded = pipelines.finally(() => landing.close());
   // Settled, not all: a landing that throws must not end the run while pipelines still work.
-  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landing.run()]);
+  // Nor keep it open: a landing worker that has died finishes and releases nothing more, so the
+  // pipeline queue is closed for it, or the pipelines would wait for it for ever.
+  const landingRun = landing.run();
+  landingRun.catch(() => queue.close());
+  const [ended, landed] = await Promise.allSettled([pipelinesEnded, landingRun]);
   clearInterval(heartbeat);
   const stoppedBy = limitHit !== undefined ? `${ref(limitHit)} hit the plan's usage limit` : (usageHit ?? (tampered ? "the shared .git changed" : undefined));
   for (const i of entered) if (!begun.has(i.id) && !calledOff.has(i.id)) run.ticket(i.id, { state: "skipped", note: `not started: ${stoppedBy ?? "the run stopped"}` });
