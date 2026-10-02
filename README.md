@@ -630,6 +630,11 @@ conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.
 merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is the backstop. After
 the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
 
+A drain takes only what its own turns lead to: every turn after the first takes exactly the previous
+turn's re-runnable tickets, never the whole queue. So a ticket queued after the run started waits for
+the next `sandcastle run`, and the closing lines name each one
+(`#151 was queued after this run started: \`sandcastle run\` takes it`).
+
 ### 🔁 Re-runs
 
 A queued ticket with a branch from an earlier run builds on that branch:
