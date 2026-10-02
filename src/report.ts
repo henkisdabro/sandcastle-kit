@@ -370,7 +370,12 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
-      ...ungated.map((id) => `- ${name(id)} - merged - check by hand: ${f.tickets[id].ungated}`),
+      // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
+      ...ungated.map((id) => {
+        const note = f.tickets[id].ungated ?? "";
+        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+        return `- ${name(id)} - merged - check by hand: ${note}${more}`;
+      }),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - filed by an agent during this run: triage it, then queue or close it`),
     ],
   );
