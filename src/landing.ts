@@ -5,6 +5,9 @@
 // what happened and writes the ticket's state to the run record; the caller keeps the lists the
 // closing report is built from.
 //
+// A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
+// (`createFlow`); a second one holds it for the next run.
+//
 // Landing runs on one worker beside the pipelines (`createLanding`), and every write to the
 // host's git goes through `HostGit.write`: the merge, the tracker's commits on the base, the
 // branch delete. The worker moves the run's expected base with each write, so the `.git` check
@@ -18,7 +21,7 @@ import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
-import { createQueue } from "./schedule.ts";
+import { createQueue, type Queue } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
@@ -553,5 +556,80 @@ export const createLanding = (
         // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.
         stop ??= ctx.host.failed;
       }),
+  };
+};
+
+/** "conflicted again with #1, #3 after a requeue": what a second conflict or red at landing is held as. */
+export const againLine = (kind: "conflict" | "red", tickets: string[]) =>
+  `${kind === "conflict" ? "conflicted" : "red"} again${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} after a requeue`;
+
+/** "requeued after conflict with #1": the second attempt, as the status view and run.json say it. */
+export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
+  `requeued after ${kind === "conflict" ? "conflict" : "red"}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`;
+
+/**
+ * One ticket's way through a run when landing may send it back: the pipeline queue stays open
+ * until every ticket has had its last word, because a landing that conflicts or goes red can push
+ * its ticket onto it after every other pipeline has ended. A ticket ends once - a pipeline that
+ * is not green, or a landing that is not requeued - and `finish` then counts it; the last one
+ * closes the pipeline queue and the landing queue. A ticket that conflicts or goes red at
+ * landing is requeued once: its pipeline takes the land-only path (merge the base in, resolver,
+ * gates, repair, narrow review) when its `heads` record matches, the full path otherwise. A
+ * second conflict or red is final, and `earlier` names the tickets of the first.
+ */
+export const createFlow = <I extends { id: string }>(tickets: number, pipelines: Queue<I>, landing: { close(): void }) => {
+  let open = tickets;
+  const first = new Map<string, { kind: "conflict" | "red"; with: string[] }>();
+  const close = () => {
+    pipelines.close();
+    landing.close();
+  };
+  if (open <= 0) close();
+  const finish = () => {
+    if (--open <= 0) close();
+  };
+  let working = 0;
+  return {
+    /** Pipelines running now. */
+    get working() {
+      return working;
+    },
+    /**
+     * The pipeline workers' function for `Queue.run`: `fn` says with `true` that it handed the
+     * ticket to landing, which then says its last word; any other end is the pipeline's own,
+     * a throw included.
+     */
+    work: (fn: (issue: I) => Promise<boolean | void>) => async (issue: I) => {
+      let handed = false;
+      working++;
+      try {
+        handed = (await fn(issue)) === true;
+      } finally {
+        working--;
+        if (!handed) finish();
+      }
+    },
+    /** The ticket's last word is said: nothing of it is queued or running any more. */
+    finish,
+    /**
+     * After a landing: pushes `issue` back on the pipeline queue and returns the line the second
+     * attempt carries, when this was its first conflict or red; otherwise undefined and the
+     * landing stands as it is. Not for a run that is stopping: the caller says `stopping`.
+     */
+    retry(issue: I, landed: Landed, stopping = false): string | undefined {
+      if (stopping || (landed.kind !== "conflict" && landed.kind !== "red") || first.has(issue.id)) return undefined;
+      const note = { kind: landed.kind, with: landed.with };
+      try {
+        pipelines.push(issue);
+      } catch {
+        return undefined; // the queue is already closed: the run is ending
+      }
+      first.set(issue.id, note);
+      return requeuedLine(note.kind, note.with);
+    },
+    /** The tickets the first attempt collided with, when this ticket was requeued; otherwise undefined. */
+    earlier(id: string) {
+      return first.get(id);
+    },
   };
 };

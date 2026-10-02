@@ -338,7 +338,7 @@ load_pool() {
 # from branches, logs and label times, and a green branch waiting to land read
 # as `queued` for over an hour. Inference is left for tickets outside the run,
 # and for all of them once it ends - people merge and clean up after a run.
-#   TICKETS  "id US state US since US started US order US note" lines
+#   TICKETS  "id US state US since US started US order US note US requeued" lines
 #   RECORD   1 while the live run keeps TICKETS (an older orchestrator does not)
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
@@ -361,7 +361,7 @@ load_run() {
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
   TICKETS=$(jq -r '(.tickets // {}) | to_entries[] | [.key, (.value.state // ""), (.value.since // "" | tostring),
-      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // "")] | join("\u001f")' "$f" 2>/dev/null)
+      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // "")] | join("\u001f")' "$f" 2>/dev/null)
   if [ -n "$TICKETS" ]; then
     RECORD=1
     TICKET_IDS=$(printf '%s\n' "$TICKETS" | cut -d"$US" -f1 | sort -V)
@@ -630,7 +630,7 @@ render() {
 
   # 1. The live run's tickets, as its record has them.
   for n in $TICKET_IDS; do
-    IFS="$US" read -r _ tstate since started order note <<<"$(ticket_of "$n")"
+    IFS="$US" read -r _ tstate since started order note requeued <<<"$(ticket_of "$n")"
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
     age=$(ago $(( now_s - since ))); age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
@@ -670,6 +670,10 @@ render() {
           age_col="$hot"; activity="usually $(ago "$typ") - $activity"
         fi;;
     esac
+    # A ticket landing sent back keeps saying so through its second attempt.
+    if [ -n "$requeued" ]; then
+      case "$activity" in *"$requeued"*) ;; *) activity="$requeued${activity:+ - $activity}";; esac
+    fi
     style_of "$state"
     # A spent plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
