@@ -1326,7 +1326,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   for (const n of merged) outcome.set(n, "merged");
   for (const n of closeFailed) outcome.set(n, "merged (ticket not closed)");
   for (const c of conflicted) outcome.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
-  for (const r of redMerged) outcome.set(r.issue, `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
+  for (const r of redMerged) outcome.set(r.issue, `red when merged${againNote.has(r.issue) ? `: ${againNote.get(r.issue)}` : r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
   for (const f of failedToLand) outcome.set(f.issue, "failed to land");
   for (const k of skipped) outcome.set(k.issue, `not merged: ${k.reason}`);
   for (const w of withdrawn) outcome.set(w.issue, `withdrawn: ${w.reason}`);
