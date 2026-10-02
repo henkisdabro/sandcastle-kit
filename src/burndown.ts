@@ -25,8 +25,9 @@
 
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implEffort, reviewWithFallback, ticketOverride } from "./agents.ts";
+import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, createDependants, createRelease, dependantsInRun, openBlockers, refLabel, type Blocker } from "./blockers.ts";
@@ -49,7 +50,7 @@ import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
-import { againLine, conflictLine, createFlow, createHostGit, createLanding, type Landed, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
+import { conflictLine, createFlow, createHostGit, createLanding, createSettling, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
 import { createQueue } from "./schedule.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
@@ -78,6 +79,26 @@ type Outcome = {
   unreviewed?: boolean;
   /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
   ungated?: string;
+};
+
+/**
+ * The kept worktree of a pipeline that ended with no commits: the agent finished and its commit
+ * was refused (a git hook, a full disk, a signing failure), so Sandcastle kept the worktree for
+ * its uncommitted files. That is not "nothing to change" - the work exists.
+ */
+export const keptFor = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[]) =>
+  o.status === "nochange" && o.commits === 0 ? kept.find((k) => k.issue === o.issue) : undefined;
+
+/** The record of a pipeline that added no commits: uncommitted work first, then a hand-back, then nothing to change. */
+export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[], root: string, handedBack: boolean): TicketRecord => {
+  const k = keptFor(o, kept);
+  if (k) {
+    // Shown relative to the project, as the worktrees live in .sandcastle/worktrees/<name>.
+    const inside = relative(root, k.path);
+    const where = inside && !inside.startsWith("..") && !isAbsolute(inside) ? inside.split(sep).join("/") : k.path;
+    return { state: "uncommitted", note: `work left uncommitted in ${where}` };
+  }
+  return { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
 };
 
 // A branch's outcome as the status view's row shows it, before landing.
@@ -197,7 +218,7 @@ export const fileOverlaps = (root: string, base: string, ids: string[]): { id: s
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
-export const burndown = async (project: Project, turn?: { level: number; turn: number }): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: { level: Level; turn: number }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
@@ -559,9 +580,6 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
     }
   };
-
-  // The second attempt's line for a ticket landing sent back (see createFlow); the setup of its pipeline carries it.
-  const requeuedAs = new Map<string, string>();
 
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
@@ -1073,92 +1091,33 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
       /* the next landing writes it again */
     }
   };
-  // What the closing report is built from: where a landing's last word puts the ticket.
-  const account = (o: Waiting, landed: Landed) => {
-    switch (landed.kind) {
-      case "merged":
-      case "close-failed":
-        merged.push(o.issue);
-        if (landed.regenerated) regenerated.set(o.issue, landed.regenerated);
-        if (landed.kind === "close-failed") closeFailed.push(o.issue);
-        break;
-      case "conflict":
-        conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
-        break;
-      case "red":
-        redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
-        break;
-      case "held":
-        heldBack.push({ issue: o.issue, paths: landed.paths });
-        break;
-      case "withdrawn":
-        withdrawn.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "taken-back":
-        takenBack.push(o.issue);
-        break;
-      case "closed-earlier":
-        closedEarlier.push(o.issue);
-        break;
-      case "skipped":
-        skipped.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "not-landed":
-        failedToLand.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "dry-run":
-        break;
-    }
+  const byId = new Map(candidates.map((i) => [i.id, i]));
+  // A requeued ticket's second pipeline replaces its first in the per-issue lines.
+  const dropFirstResult = (id: string) => {
+    const earlier = results.findIndex((r) => r.status === "fulfilled" && r.value.issue === id);
+    if (earlier >= 0) results.splice(earlier, 1);
   };
-  // A ticket landing sent back, until its second pipeline has started: if that never starts (the run
-  // stops), the landing it had stands as its outcome.
-  const sentBack = new Map<string, { o: Waiting; landed: Landed; was: TicketRecord | undefined }>();
-  const keepFirst = (id: string) => {
-    const back = sentBack.get(id);
-    if (!back) return;
-    sentBack.delete(id);
-    account(back.o, back.landed);
-    bookkeep(id, () => run.ticket(id, { ...(back.was?.state ? { state: back.was.state } : {}), note: back.was?.note ?? null }));
-  };
-  const landing = createLanding(ctx, {
-    settled: async (o, landed) => {
+  // The landing worker's word on each ticket, and the bookkeeping of one it sent back (landing.ts).
+  const settling = createSettling<Issue>({
+    lists: { merged, regenerated, conflicted, redMerged, heldBack, failedToLand, skipped, withdrawn, takenBack, closedEarlier, closeFailed },
+    run,
+    flow: { retry: (...a) => flow.retry(...a), earlier: (id) => flow.earlier(id) },
+    byId,
+    stopping: () => landing.stop !== undefined || host.failed !== undefined,
+    dealt: () => {
       dealt++;
       landingStage();
-      // A conflict or a red merge sends the ticket back to the pipelines once, in this run.
-      const again = flow.retry(byId.get(o.issue)!, landed, landing.stop !== undefined || host.failed !== undefined);
-      if (again !== undefined) {
-        requeuedAs.set(o.issue, again);
-        sentBack.set(o.issue, { o, landed, was: run.tickets()[o.issue] });
-        bookkeep(o.issue, () => {
-          console.log(`${ref(o.issue)}: ${again}; its pipeline runs again in this run.`);
-          run.ticket(o.issue, { state: "queued", note: again, requeued: again });
-        });
-        return;
-      }
-      const earlier = flow.earlier(o.issue);
-      if (earlier && (landed.kind === "conflict" || landed.kind === "red")) {
-        // Held for the next run, with the tickets of both attempts named.
-        const named = [...new Set([...earlier.with, ...landed.with])];
-        const line = againLine(landed.kind, named);
-        againNote.set(o.issue, line);
-        bookkeep(o.issue, () => run.ticket(o.issue, { note: landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line }));
-      }
-      account(o, landed);
-      await afterLanding(o.issue, landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier");
     },
-    // Green before the base moved: finished, and landing on a later run like
-    // the ones whose own check failed - not "ready", which says this run lands it.
-    stopped: async (o, why) => {
+    afterLanding: (id, closed) => afterLanding(id, closed),
+    onStop: (why) => {
       tampered ??= String(why);
-      dealt++;
-      landingStage();
-      bookkeep(o.issue, () => {
-        run.ticket(o.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
-        recordOutcomes(project, runId, { [o.issue]: "stopped: the run stopped before landing" });
-      });
-      await afterLanding(o.issue, false);
     },
+    outcomes: (lines) => recordOutcomes(project, runId, lines),
+    ref,
+    say: (line) => console.log(line),
   });
+  const { requeuedAs, keepFirst } = settling;
+  const landing = createLanding(ctx, { settled: settling.settled, stopped: settling.stopped });
 
   // Bounded fan-out: a sliding pool, not a batch barrier, inside the
   // machine-wide sandbox limit.
@@ -1174,16 +1133,14 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
     entered.push(i);
     queue.push(i);
   }
-  const byId = new Map(candidates.map((i) => [i.id, i]));
   const flow = createFlow(issues.length, queue, landing);
   const enter = (i: Issue) => {
     entered.push(i);
     flow.start(i);
   };
-  // What a second conflict or red was held as, for the outcome the status view reads.
-  const againNote = new Map<string, string>();
   const begun = new Set<string>();
   const calledOff = new Set<string>();
+  const uncommittedWork = (o: Outcome) => keptFor(o, keptWorktrees);
   const stopped = () => limitHit !== undefined || usageHit || tampered || landing.stop || host.failed;
   // A landing that has closed its ticket frees the tickets that waited for it, on the landing
   // worker: a lookup is the worker's wait, never a pipeline's. Any other end of a ticket frees none.
@@ -1211,7 +1168,8 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
     }
     if (o.status === "merged-earlier") return { state: "ready", note: `merged earlier (${o.head}) - to close` };
     if (o.status === "gate-failed") return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
-    return settledUnlanded(o, notes.some((n) => n.issue === o.issue && n.kind === "hold"));
+    const handedBack = notes.some((n) => n.issue === o.issue && n.kind === "hold");
+    return o.status === "held" ? settledUnlanded(o, handedBack) : noCommitRecord(o, keptWorktrees, project.root, handedBack);
   };
   // What the view and the records say about a finished pipeline. A throw here
   // (a git call, a full disk) would escape the settle handlers and reject the
@@ -1227,11 +1185,15 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
     // Whether the ticket went on to landing, which says its last word; otherwise this pipeline did.
     let handed = false;
     // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered || landing.stop) return keepFirst(issue.id);
+    if (limitHit !== undefined || usageHit || tampered || landing.stop) {
+      keepFirst(issue.id);
+      return false;
+    }
     const stop = await usageStop(env);
     if (stop) {
       usageHit ??= stop;
-      return keepFirst(issue.id);
+      keepFirst(issue.id);
+      return false;
     }
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
     const called = (() => {
@@ -1243,11 +1205,11 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
     })();
     if (called) {
       calledOff.add(issue.id);
-      run.ticket(issue.id, { state: "withdrawn", note: `${called.reason.replace(" during the run", "")} - not started` });
+      settling.withdraw(issue.id, called, () => dropFirstResult(issue.id));
       return false;
     }
     begun.add(issue.id);
-    sentBack.delete(issue.id);
+    settling.began(issue.id);
     const result =
       await slotTurn(slotWanted).then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue))).then(
         (value) => {
@@ -1264,11 +1226,11 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
             run.update({ typical: typicalTimes(project, [...took.values()]) });
             // With nothing left to start, the pane closes: five panes each
             // frozen on a finished agent's summary read as five stuck sandboxes.
-            view.finish(issue.id, finishWord(value), queue.size === 0 && !waits.waitsForFlight);
+            view.finish(issue.id, uncommittedWork(value) ? "uncommitted" : finishWord(value), queue.size === 0 && !waits.waitsForFlight);
             // Recorded now, not only at the report: a branch waiting for
             // landing had no outcome for this run, and its row read as an
             // earlier run's leftover. Landing overwrites it.
-            recordOutcomes(project, runId, { [issue.id]: outcomeText(value) });
+            recordOutcomes(project, runId, { [issue.id]: uncommittedWork(value) ? "uncommitted" : outcomeText(value) });
           });
           // To the landing worker as it ends, not when the slowest pipeline does.
           if (value.status === "green" || value.status === "merged-earlier") {
@@ -1300,8 +1262,7 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
         },
       );
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
-    const earlier = results.findIndex((r) => r.status === "fulfilled" && r.value.issue === issue.id);
-    if (earlier >= 0) results.splice(earlier, 1);
+    dropFirstResult(issue.id);
     results.push(result);
     return handed;
   }, (issue) => afterLanding(issue.id, false));
@@ -1353,7 +1314,7 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
   const handedBack: string[] = [];
   if (tracker.agentsWrite && !DRY_RUN) {
     for (const r of results) {
-      if (r.status !== "fulfilled" || r.value.status !== "nochange") continue;
+      if (r.status !== "fulfilled" || r.value.status !== "nochange" || uncommittedWork(r.value)) continue;
       try {
         if (tracker.get(r.value.issue).held) handedBack.push(r.value.issue);
       } catch {
@@ -1382,7 +1343,8 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
         console.log(`Could not update ${ref(n.issue)}: ${errorLine(error)}`);
       }
     }
-    if (n.kind === "hold") {
+    // A hold on a ticket whose finished work sits uncommitted keeps its own state: the work exists.
+    if (n.kind === "hold" && !keptFor({ issue: n.issue, status: "nochange", commits: 0 }, keptWorktrees)) {
       view.landed(n.issue, false, "needs a human");
       land(n.issue, "held", n.held ?? "handed back - for a human");
     }
@@ -1412,18 +1374,10 @@ export const burndown = async (project: Project, turn?: { level: number; turn: n
   const outcome = new Map<string, string>();
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
-    outcome.set(r.value.issue, outcomeText(r.value));
+    outcome.set(r.value.issue, uncommittedWork(r.value) ? "uncommitted" : outcomeText(r.value));
   }
-  for (const n of merged) outcome.set(n, "merged");
-  for (const n of closeFailed) outcome.set(n, "merged (ticket not closed)");
-  for (const c of conflicted) outcome.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
-  for (const r of redMerged) outcome.set(r.issue, `red when merged${againNote.has(r.issue) ? `: ${againNote.get(r.issue)}` : r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
-  for (const f of failedToLand) outcome.set(f.issue, "failed to land");
-  for (const k of skipped) outcome.set(k.issue, `not merged: ${k.reason}`);
-  for (const w of withdrawn) outcome.set(w.issue, `withdrawn: ${w.reason}`);
-  for (const h of heldBack) outcome.set(h.issue, "needs a human merge");
+  for (const [id, line] of settling.lines()) outcome.set(id, line);
   for (const id of handedBack) outcome.set(id, "needs a human: handed back");
-  for (const id of takenBack) outcome.set(id, "needs a human: marked needs-human during the run");
   if (DRY_RUN) for (const r of results) if (r.status === "fulfilled" && r.value.status === "green") outcome.set(r.value.issue, "dry run: gated green, would merge");
   for (const [n] of crashed) outcome.set(n, "crashed");
   recordOutcomes(project, runId, Object.fromEntries(outcome));

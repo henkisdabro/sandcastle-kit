@@ -507,13 +507,14 @@ CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
 sandcastle run --concurrency 2        # the same, as an argument
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
 AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked tickets (see autonomy)
+AUTONOMY_LEVEL=drain sandcastle run   # keep taking turns until the queue is drained or a stop condition holds
 ```
 
 **Before anything is spent.** A run refuses to start on a dirty tree, off the base branch, while
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its earlier tickets. Tickets that others wait for start first; a ticket
+time from the medians of its tickets in the last three runs. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -579,6 +580,14 @@ are now. Then:
 after a turn it re-runs only the tickets that ended in a merge conflict or whose blockers have now
 landed - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
 A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
+
+`autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until the queue is drained, for a
+queue that needs more turns than `3` gives - `Blocked by` chains, a ticket that conflicts across
+turns, a long tail. After every turn it checks four stops and prints the one that holds as a line
+naming the cause: **no progress** (the turn landed nothing and released nothing), **the same ticket
+conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.json`), **a red
+merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is the backstop. After
+the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
 
 ### 🔁 Re-runs
 
@@ -714,7 +723,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
-| `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have now landed; a re-run takes only those, never the rest of the queue. See [After a run](#-after-a-run) |
+| `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, and tickets whose blockers have now landed; a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
@@ -741,7 +750,7 @@ Examples: [`examples/`](examples/).
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
 | `ISSUES`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; the same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
-| `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off) |
+| `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off, `drain` runs until the queue is drained) |
 | `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |

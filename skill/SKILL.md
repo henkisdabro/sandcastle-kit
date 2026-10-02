@@ -221,7 +221,10 @@ comments, and the gates can prove it.
    the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
    offer `USAGE_CHECK=1` if the plan is close to its limit. If the config sets `autonomy` (or the
-   user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. Say that the run first gates the base commit and stops if a
+   user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
+   shows `Blocked by` chains and no autonomy is set, recommend `AUTONOMY_LEVEL=drain` (or `autonomy: "drain"`): it
+   takes turns until the queue is drained or a stop holds (no progress, the same ticket conflicting twice running,
+   a red base, a usage limit, 20 turns at most), so the chain does not need a `sandcastle run` per link. Say that the run first gates the base commit and stops if a
    gate is red there; if the project has never had a green `sandcastle gates`, run that first (no
    model calls) rather than finding out after the image build. Confirm before starting - a run
    comments on and closes tickets in the tracker (GitHub, or commits to ticket files) and merges into the base branch locally. A dry run

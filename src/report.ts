@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterTurn, stillOpen } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type Level, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, type TicketRecord, type Tokens, tokenLine } from "./run.ts";
@@ -62,7 +62,7 @@ export type Facts = {
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
-  next?: { level: number; turn: number; tickets: string[] };
+  next?: { level: Level; turn: number; tickets: string[] };
 };
 
 /** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
@@ -75,7 +75,7 @@ const LEFT = ["blocked", "skipped"];
 const redTogether = (t: TicketRecord) => t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "");
 // Where a ticket's part in a run ends. Any other state at the end - a phase, or
 // "ready" outside a dry run - is a ticket the run stopped mid-work.
-const SETTLED = ["merged", "nochange", "withdrawn", "stopped", "held", "shipped", "queued", "requeued", ...NEEDS_FIXING, ...LEFT];
+const SETTLED = ["merged", "nochange", "uncommitted", "withdrawn", "stopped", "held", "shipped", "queued", "requeued", ...NEEDS_FIXING, ...LEFT];
 
 // A run that started agents owes a summary (due); an exit before it is printed
 // (Ctrl-C, a crash) says where to find one instead of ending silently.
@@ -251,6 +251,9 @@ export const render = (f: Facts, plain = false): string => {
   const unstarted = early ? ids(["queued"]) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
+  // Finished, but the commit was refused: the work sits in a kept worktree.
+  const uncommitted = ids(["uncommitted"]);
+  const keptAt = (id: string) => f.keptWorktrees.find((k) => k.issue === id)?.path ?? f.tickets[id].note?.replace(/^work left uncommitted in /, "") ?? "its kept worktree";
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
   // A dry run's green branches end as "ready": they would have merged.
@@ -272,7 +275,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -318,6 +321,10 @@ export const render = (f: Facts, plain = false): string => {
   section(
     h("## 🙋 Needs you", "## Needs you"),
     [
+      ...uncommitted.map(
+        (id) =>
+          `- ${name(id)} - finished but not committed - the work is in ${keptAt(id)}. Fix what refused the commit (the agent's comment says), then \`sandcastle requeue <ticket>\`: the next run reuses that worktree. Or commit it there yourself.`,
+      ),
       ...heldWork.flatMap((id) => {
         const t = f.tickets[id];
         const size = f.changed[id] !== undefined ? ` - ${f.changed[id]} file(s)` : "";
@@ -411,6 +418,8 @@ export const render = (f: Facts, plain = false): string => {
 
   // Next step: the first thing that unblocks the most, then the rest in order.
   const next: string[] = [];
+  // First: the work is done, and a further turn or a redo would only repeat the refusal.
+  if (uncommitted.length) next.push(`Commit the finished work of ${list(uncommitted)}: fix what refused the commit (a hook, a full disk, signing), then \`sandcastle requeue <ticket>\` - the next run reuses the kept worktree - or commit it there yourself (paths under Needs you).`);
   if (baseRed) {
     next.push(
       `Fix the base: read .sandcastle/logs/base-gates.log, then \`sandcastle gates\` to check; the queue is untouched, so \`sandcastle run\` afterwards starts the same tickets.`,
@@ -459,14 +468,14 @@ export const render = (f: Facts, plain = false): string => {
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
   const steps = f.next
-    ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; nothing to do yet.`, ...(push ? [push] : [])]
+    ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level === "drain" ? `at most ${DRAIN_CAP}` : f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; nothing to do yet.`, ...(push ? [push] : [])]
     : next;
   section(h("## 👉 Next step", "## Next step"), steps.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");
 };
 
 /** The summary for the project's last recorded run. */
-export const closingReport = async (project: Project, turn?: { level: number; turn: number }) => {
+export const closingReport = async (project: Project, turn?: { level: Level; turn: number }) => {
   if (!existsSync(join(project.root, ".sandcastle/logs/run.json"))) return "No run recorded yet.";
   const facts = await gather(project);
   summary.printed = true;
