@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import { errorLine, sh, USER_CONFIG } from "./sandbox.ts";
-import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote } from "./schedule.ts";
+import { type FileHold, type FileShare, type FileWait, fileShareLine, fileWaitNote, stoppedWaitNote } from "./schedule.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
@@ -447,7 +447,30 @@ export const createRelease = <T extends Blocked>(o: {
     for (const s of shares) o.say(`  ${fileShareLine(o.ref, t.id, s)}`);
     o.record.ticket(t.id, { state: "queued", note: null });
   };
-  const park = (id: string, wait: FileWait) => o.record.ticket(id, { state: "blocked", note: fileWaitNote(o.ref, wait) });
+  // What the ticket waits for on the run record's `waiting` list: the ticket that holds its file now,
+  // not the one it was parked behind first. A ticket with no holder left (a stopped run) is dropped from it.
+  const waitsFor = (id: string, was: string | undefined, holder?: string) => {
+    const at = o.waiting.findIndex((w) => w.issue === id);
+    const on = holder ? [o.ref(holder)] : at >= 0 ? o.waiting[at].on.filter((b) => b !== (was && o.ref(was))) : [];
+    if (at >= 0) {
+      if (on.length) o.waiting[at].on = on;
+      else o.waiting.splice(at, 1);
+    } else if (on.length) o.waiting.push({ issue: id, on });
+    o.record.update({ waiting: o.waiting.filter((w) => !released.has(w.issue)) });
+  };
+  const park = (id: string, wait: FileWait) => {
+    o.record.ticket(id, { state: "blocked", note: fileWaitNote(o.ref, wait) });
+    waitsFor(id, undefined, wait.with);
+  };
+  // The run is stopping, so nothing starts: the ticket's files are free, and what each parked
+  // ticket waits for is said as it is now, so none keeps naming a ticket that has landed.
+  const settle = (id: string) => {
+    if (!o.hold) return;
+    for (const w of o.hold.stop(id)) {
+      o.record.ticket(w.id, { note: stoppedWaitNote(o.ref, w.wait) });
+      waitsFor(w.id, id, w.wait?.with);
+    }
+  };
   const release = async (landed: string) => {
     const { free, held } = await o.dependants.release(landed);
     for (const h of held) o.record.ticket(h.id, { note: h.note });
@@ -499,6 +522,7 @@ export const createRelease = <T extends Blocked>(o: {
         const going = !o.dryRun && !o.stopped();
         // Before the blockers: a dependant that shares a file with this ticket must not find it still in flight.
         if (going) unpark(id);
+        else if (!o.dryRun) settle(id);
         if (landed && going) await release(id);
         else for (const n of o.dependants.notes()) o.record.ticket(n.id, { note: n.note });
       } catch (error) {

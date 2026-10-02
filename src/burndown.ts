@@ -51,8 +51,8 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import { conflictLine, createFlow, createHostGit, createLanding, createSettling, type LandContext, pipelineWorkers, slotTurn, trackerMade, type Waiting } from "./landing.ts";
-import { createFileHold, createQueue, fileShareLine, fileWaitNote, type FileWait, type TicketFiles } from "./schedule.ts";
-import { expandTouches, parseTouches, unmergeable } from "./touches.ts";
+import { createFileHold, createQueue, fileWaitNote, startHold, type TicketFiles } from "./schedule.ts";
+import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 
 // Where they lived before landing.ts; callers and tests still import them from here.
 export { abortLanding, closeComment, mergeBranch } from "./landing.ts";
@@ -210,7 +210,17 @@ export const branchFiles = (root: string, base: string, id: string): string[] =>
 export const ticketFiles = (project: Project, ticket: Issue): TicketFiles => {
   const base = project.baseBranch;
   const all = [...new Set([...branchFiles(project.root, base, ticket.id), ...expandTouches(project.root, base, parseTouches(ticket.body ?? ""))])];
-  return { all, unmergeable: all.filter((f) => unmergeable(project.root, base, f, project.generated ?? [])) };
+  return { all, unmergeable: unmergeableFiles(project.root, base, all, project.generated ?? []) };
+};
+
+/**
+ * A ticket in flight changes files its first reading did not see: its branch gains a lockfile
+ * change after the start. Adds the branch's files now to what was read, and recomputes which of
+ * them git cannot merge. One `git diff` and, for the sizes, one cached tree read.
+ */
+export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles): TicketFiles => {
+  const all = [...new Set([...files.all, ...branchFiles(project.root, project.baseBranch, ticket.id)])];
+  return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
 };
 
 let unlockOnExit = false;
@@ -279,46 +289,37 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // whatever the order, so one ticket at a time has it in flight; the others wait for that one to
   // land or leave the run. Files git can merge never hold a ticket: landing and the requeue resolve
   // them, and the start says which tickets will meet. A dry run lands nothing, so it holds nothing.
-  const hold = DRY_RUN ? undefined : createFileHold<Issue>((t) => ticketFiles(project, t));
-  const parked: { ticket: Issue; wait: FileWait }[] = [];
-  const issues: Issue[] = [];
-  for (const i of ready) {
-    const at = hold?.admit(i);
-    if (at && "wait" in at) {
-      parked.push({ ticket: i, wait: at.wait });
-      waiting.push({ issue: i.id, on: [ref(at.wait.with)] });
-      console.log(`  ${ref(i.id)} ${fileWaitNote(ref, at.wait)}`);
-    } else {
-      issues.push(i);
-      for (const share of at?.shares ?? []) console.log(`  ${fileShareLine(ref, i.id, share)}`);
-    }
-  }
+  const laterOverrides = new Map<string, ReturnType<typeof ticketOverride>>();
+  const hold = DRY_RUN ? undefined : createFileHold<Issue>((t) => ticketFiles(project, t), (t, files) => refreshFiles(project, t, files));
+  const start = startHold(hold, ready, {
+    ref,
+    waiting,
+    // A parked ticket starts in this run, so a ticket that waits for it as a blocker does too.
+    // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
+    dependants: (starting) => {
+      const startable = dependantsInRun(starting.map((i) => i.id), held);
+      for (const id of [...held.keys()]) if (!startable.has(id)) held.delete(id);
+      return [...held.values()].map((h) => h.ticket);
+    },
+    // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
+    // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
+    // holds that ticket, never the run), but its model is still read now, for the preflight.
+    checkLabel: (i) => {
+      try {
+        laterOverrides.set(i.id, ticketOverride(ref(i.id), i.labels ?? []));
+      } catch (error) {
+        if (!(error instanceof OperatorError)) throw error;
+        return error.message;
+      }
+    },
+    say: (line) => console.log(line),
+  });
+  const { issues, parked, dependants, candidates, order, badLabels } = start;
   if (issues.length === 0) {
     console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
   }
-
-  // The run's candidate set: what starts now, then what waits for a blocker in this run or for a
-  // file and starts once that is done. A ticket queued mid-run is in neither: it waits for the next run.
-  // A held ticket that also waits on something outside this run is the next run's (dependantsInRun).
-  // A parked ticket starts in this run, so a ticket that waits for it as a blocker does too.
-  const startable = dependantsInRun([...issues, ...parked.map((p) => p.ticket)].map((i) => i.id), held);
-  for (const id of [...held.keys()]) if (!startable.has(id)) held.delete(id);
-  const dependants = [...held.values()].map((h) => h.ticket);
-  const candidates = [...issues, ...dependants, ...parked.map((p) => p.ticket)];
-  // Before the run is recorded, the image checked or any sandbox started: a bad label on a ticket
-  // that starts now costs nothing. A waiting ticket's label is checked when it is released (it
-  // holds that ticket, never the run), but its model is still read now, for the preflight.
-  const overrides = new Map(issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])]));
-  const badLabels = new Map<string, string>();
-  for (const i of [...dependants, ...parked.map((p) => p.ticket)]) {
-    try {
-      overrides.set(i.id, ticketOverride(ref(i.id), i.labels ?? []));
-    } catch (error) {
-      if (!(error instanceof OperatorError)) throw error;
-      badLabels.set(i.id, error.message);
-    }
-  }
+  const overrides = new Map([...issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])] as const), ...laterOverrides]);
   // Resolved once here: the image, the start lines and run.json all name the same versions.
   const versions = await resolveVersions(project);
 
@@ -366,11 +367,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     concurrency: slots,
     typical: typicalTimes(project),
     tickets: Object.fromEntries([
-      ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
+      ...issues.map((i) => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
       // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
-      ...dependants.map((i, at) => [i.id, { state: "blocked", order: issues.length + at, note: heldNote.get(i.id), title: i.title }]),
+      ...dependants.map((i) => [i.id, { state: "blocked", order: order.get(i.id), note: heldNote.get(i.id), title: i.title }]),
       // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
-      ...parked.map((p, at) => [p.ticket.id, { state: "blocked", order: issues.length + dependants.length + at, note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
+      ...parked.map((p) => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
       // Waiting, but not this turn's to run (a later turn's tickets): on record all the same.
       ...[...wholeOpen]
         .filter(([id]) => !candidates.some((c) => c.id === id))
