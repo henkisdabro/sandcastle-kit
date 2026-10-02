@@ -21,6 +21,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   blocker has landed and been closed, instead of waiting for the next run. A chain of `Blocked by`
   tickets can drain in one run, so a run may take longer and spend more than before. A ticket
   that also waits on anything outside the run still waits for a later one.
+- **Tickets whose files overlap now start together**, and landing resolves the overlap (with
+  the requeue above), instead of one waiting for the next run. A ticket is held back only for a
+  file git cannot merge (a lockfile, a `generated` path, a minified file) that a ticket in flight
+  also changes, read from its branch and its `Touches:` line, and it starts when that ticket
+  lands or leaves the run. The start lists each mergeable overlap. Give tickets a `Touches:`
+  line (format in the audit action) so the hold sees files a new ticket will change.
+- **Autonomy level `drain`** (`autonomy: "drain"` or `AUTONOMY_LEVEL=drain`) keeps taking turns
+  until the queue is drained, and stops with the cause named on no progress, the same ticket
+  conflicting in two turns running, a red base or verify, a usage limit, a stopped run, or after
+  20 turns. It suits a queue of `Blocked by` chains; levels 1-3 are unchanged.
 - **A ticket that conflicts or goes red at landing is sent back once, in the same run.** Its
   pipeline merges the base in, resolves, gates and gets a narrow review, as a re-run does, so
   the run spends that pass now rather than on the next run. A second conflict or red holds it for
@@ -45,6 +55,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `src/schedule.ts`.
 - The host git of a run now has `gc.auto=0`, so a landing merge never starts maintenance while
   sandboxes add worktrees.
+- The start-of-run estimate and the status view's `usually` times come from the last three
+  runs (widened until they hold five tickets), not the project's whole history.
 
 ### Security
 
@@ -74,6 +86,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The blocker check now also names a blocker held for a human, one that is open but not queued,
   and a `Blocked by` line written inside code (which a run does not read). The closing summary
   says why each ticket is still blocked.
+- A finished ticket whose commit was refused (a hook, a full disk, signing) is now `uncommitted`
+  under Needs you, pointing at its kept worktree and `sandcastle requeue`, instead of "nothing
+  to change". The implement prompt asks the agent to check its commit landed.
+- A requeued ticket withdrawn before its second attempt is recorded as withdrawn, not green; a
+  second conflict keeps its files in the summary and names both attempts' tickets.
 - The live status view no longer echoes typed keys or the mouse wheel's escapes onto its frame,
   or leaves them queued for the shell. Ctrl-C ends it at once.
 - Later autonomy turns keep every waiting ticket, so a ticket freed by a landing in that turn is
