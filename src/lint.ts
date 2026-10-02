@@ -6,7 +6,7 @@
 
 import type { Project } from "./config.ts";
 import { blockerProblems, refsOf } from "./blockers.ts";
-import { expandTouches, parseTouches, unmergeable } from "./touches.ts";
+import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
 /** A ticket declaring more files than this is likely to meet others at landing. */
@@ -67,7 +67,9 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
 
   const wide = queued.filter((t) => (files.get(t.id)?.length ?? 0) > WIDE_FILES);
   const hot = [...declaredBy].filter(([, by]) => by.length >= HOT_TICKETS);
-  const shared = [...declaredBy].filter(([f, by]) => by.length >= 2 && unmergeable(project.root, project.baseBranch, f, project.generated ?? []));
+  const twice = [...declaredBy].filter(([, by]) => by.length >= 2);
+  const hard = new Set(unmergeableFiles(project.root, project.baseBranch, twice.map(([f]) => f), project.generated ?? []));
+  const shared = twice.filter(([f]) => hard.has(f));
   const problems = await blockerProblems(project, tracker, queued);
 
   const out = [`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}": ${queued.length} ticket(s)`];

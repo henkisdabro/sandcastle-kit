@@ -88,18 +88,54 @@ export const expandTouches = (root: string, ref: string, patterns: string[]): st
   return out;
 };
 
-/**
- * True when git cannot merge this file usefully: a lockfile, a file a `generated` entry
- * rewrites, or a minified blob. Size and lines come from the blob at `ref`, never the working
- * tree; a path with no blob there (a new file) is not minified.
- */
-export const unmergeable = (root: string, ref: string, path: string, generated: Generated[]): boolean => {
-  const file = normalise(path);
-  if (isLockfile(file) || generated.some((g) => g.paths.some((p) => covers(p, file)))) return true;
-  const size = git(root, ["cat-file", "-s", `${ref}:${file}`]);
-  if (size.status !== 0 || Number(size.stdout.toString("utf8").trim()) < MINIFIED_BYTES) return false;
-  const blob = git(root, ["cat-file", "blob", `${ref}:${file}`]);
-  if (blob.status !== 0) return false;
-  const text = blob.stdout.toString("utf8").replace(/\r?\n$/, "");
-  return text.split("\n").length <= MINIFIED_LINES;
+// Sizes of every blob at a commit, from one `git ls-tree -r -l`. Keyed by the commit, not the ref
+// name: the base branch moves as tickets land, and a ref name would keep serving the old tree. A
+// few are kept, as a run reads the base's tip and a ticket's head at most.
+const sizeCache = new Map<string, Map<string, number>>();
+const KEPT_TREES = 4;
+
+const sizesAt = (root: string, ref: string): Map<string, number> | undefined => {
+  const sha = /^[0-9a-f]{40}$/.test(ref) ? { status: 0, stdout: Buffer.from(ref) } : git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  if (sha.status !== 0) return undefined;
+  const key = `${root}\0${sha.stdout.toString("utf8").trim()}`;
+  const hit = sizeCache.get(key);
+  if (hit) return hit;
+  const tree = git(root, ["ls-tree", "-r", "-l", "-z", key.slice(root.length + 1)]);
+  if (tree.status !== 0) return undefined;
+  const sizes = new Map<string, number>();
+  // "<mode> <type> <object> <size, padded>\t<path>"; a submodule's size is "-".
+  for (const entry of tree.stdout.toString("utf8").split("\0")) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const size = Number(entry.slice(0, tab).trim().split(/\s+/)[3]);
+    if (Number.isFinite(size)) sizes.set(entry.slice(tab + 1), size);
+  }
+  sizeCache.set(key, sizes);
+  for (const old of [...sizeCache.keys()].slice(0, Math.max(0, sizeCache.size - KEPT_TREES))) sizeCache.delete(old);
+  return sizes;
 };
+
+/**
+ * The paths among `paths` git cannot merge usefully: a lockfile, a file a `generated` entry
+ * rewrites, or a minified blob. Size and lines come from the blob at `ref`, never the working
+ * tree; a path with no blob there (a new file) is not minified. The sizes come from one tree read
+ * (cached per commit), and a blob is read only when it is at least `MINIFIED_BYTES` long: a broad
+ * `Touches:` line over a large repo would otherwise be one git call per file.
+ */
+export const unmergeableFiles = (root: string, ref: string, paths: string[], generated: Generated[]): string[] => {
+  let sizes: Map<string, number> | undefined;
+  return paths.filter((path) => {
+    const file = normalise(path);
+    if (isLockfile(file) || generated.some((g) => g.paths.some((p) => covers(p, file)))) return true;
+    sizes ??= sizesAt(root, ref) ?? new Map();
+    if ((sizes.get(file) ?? 0) < MINIFIED_BYTES) return false;
+    const blob = git(root, ["cat-file", "blob", `${ref}:${file}`]);
+    if (blob.status !== 0) return false;
+    const text = blob.stdout.toString("utf8").replace(/\r?\n$/, "");
+    return text.split("\n").length <= MINIFIED_LINES;
+  });
+};
+
+/** `unmergeableFiles` for one path; prefer the list form, which reads the tree once. */
+export const unmergeable = (root: string, ref: string, path: string, generated: Generated[]): boolean =>
+  unmergeableFiles(root, ref, [path], generated).length > 0;
