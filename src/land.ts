@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
@@ -77,14 +77,20 @@ export const squashBody = (root: string, base: string, head: string) =>
  * a `note`, and nothing is fast-forwarded. With `squash`, the checked merge's tree is committed
  * on the base tip with that one parent instead, as a run's squash landing would. With `gate`, the merge is gated in the
  * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
- * throws `OperatorError`, as after any sandbox.
+ * throws `OperatorError`, as after any sandbox. With `expected` (a run's fingerprint), its base
+ * moves to the new tip in the same synchronous step as the fast-forward, so a check made by
+ * another pipeline never sees the base moved and the expectation not.
  */
 export const landInSandbox = async (
   project: Project,
   t: { branch: string; head: string; message: string; squash?: boolean },
   open: Opener,
   gate?: (box: Box) => Promise<GateRun>,
+  expected?: Fingerprint,
 ): Promise<LandResult> => {
+  // A run's base must still be the one it expects: a person's commit made while this waited for a
+  // sandbox slot is not merged over, and taken as expected, by the fresh fingerprint below.
+  if (expected) assertGitUnchanged(project, expected, `before landing ${t.branch} in a sandbox`);
   // Before any container starts: it runs with the shared .git mounted.
   const before = gitFingerprint(project);
   const baseTip = sh("git", ["rev-parse", project.baseBranch], project.root);
@@ -150,6 +156,7 @@ export const landInSandbox = async (
         })()
       : commit;
     sh("git", ["merge", "--ff-only", landed], project.root);
+    if (expected) expected.base = sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root);
     return { ...result, commit: landed };
   } finally {
     try {

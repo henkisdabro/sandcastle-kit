@@ -273,9 +273,9 @@ working, ready to land, need you, queued, blocked, merged. The states:
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
   has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
-- **`ready`** - gates green, lands when the run ends. Landing starts only once every sandbox has
-  finished; the `run` line then counts it down (`landing 6/25`), and before that estimates when it
-  starts (`lands ~16:20`). `human merge: <paths>` means it will be held for a person instead.
+- **`ready`** - gates green, waiting for the landing worker, which lands each ticket as it goes
+  green while the others still run. Once every sandbox has finished, the `run` line counts what is
+  left down (`landing 6/25`). `human merge: <paths>` means it will be held for a person instead.
 - **Needs you** - `gate red`, `conflict`, `held`, `crashed`, `not landed`, `stopped` (finished,
   but the run stopped before landing), `orphaned` (its run was killed and its container still
   works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed, unqueued or

@@ -856,7 +856,7 @@ render() {
     "${gry}- left over ${bold}${c_left}${off}" "${gry}· idle ${bold}${c_idle}${off}")
   NOTE=()
   [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
-  NOTE[${#NOTE[@]}]="${gry}ready = gates green, lands when the run ends${off}"
+  NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
   # Below 80 columns there is no CPU column to explain.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
