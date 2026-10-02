@@ -148,9 +148,87 @@ export const runHookTests = async (tests: HookTest[], hooks: Hook[], sandbox: Ex
   return results;
 };
 
+// ---------------------------------------------------------------------------
+// Git hook probe. A repo's commit hooks run on every agent commit in the
+// sandbox, and a hook that needs a tool the image lacks refuses all of them
+// after the whole implementation has been paid for. So the base check runs the
+// hooks the way a commit would, without committing: `git hook run` resolves
+// core.hooksPath and .git/hooks itself, the index is clean so the hook sees an
+// empty change, and nothing in the repo is written (the message file is a temp
+// file). A hook that is absent or not executable counts as none, as for git.
+// POSIX sh only: it runs in the image and, in the test, on the host.
+// ---------------------------------------------------------------------------
+
+export const GIT_HOOK_PROBE = String.raw`
+v=$(git --version 2>/dev/null)
+set -- $(printf '%s\n' "$v" | sed -n 's/^git version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')
+if [ -n "$1" ] && { [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 36 ]; }; }; then
+  echo "@@unsupported $v"
+  exit 0
+fi
+msg=$(mktemp) || exit 0
+trap 'rm -f "$msg"' EXIT
+echo "chore: sandcastle git hook probe" > "$msg"
+for name in pre-commit commit-msg; do
+  file=$(git rev-parse --git-path "hooks/$name")
+  if [ ! -x "$file" ]; then
+    echo "@@hook $name none"
+    continue
+  fi
+  if [ "$name" = commit-msg ]; then
+    out=$(git hook run --ignore-missing "$name" -- "$msg" 2>&1)
+  else
+    out=$(git hook run --ignore-missing "$name" 2>&1)
+  fi
+  if [ $? -eq 0 ]; then
+    echo "@@hook $name pass"
+  else
+    echo "@@hook $name fail"
+    printf '%s\n' "$out"
+    exit 0
+  fi
+done
+exit 0
+`;
+
+export type GitHooks = {
+  hooks: { name: string; status: "pass" | "none" | "fail" }[];
+  /** The refused hook's output, when one was. */
+  failure?: { name: string; output: string };
+  /** Why the hooks were not checked: the image's git has no `git hook run`, or the probe could not run. */
+  unchecked?: string;
+};
+
+export const parseGitHookProbe = (stdout: string): GitHooks => {
+  const lines = stdout.split("\n");
+  const unsupported = lines.find((l) => l.startsWith("@@unsupported "));
+  if (unsupported) return { hooks: [], unchecked: `git ${unsupported.slice("@@unsupported git version ".length).trim()} in the image has no \`git hook run\`` };
+  const hooks: GitHooks["hooks"] = [];
+  let failure: GitHooks["failure"];
+  for (const [i, line] of lines.entries()) {
+    const m = /^@@hook (\S+) (pass|none|fail)$/.exec(line);
+    if (!m) continue;
+    const status = m[2] as "pass" | "none" | "fail";
+    hooks.push({ name: m[1], status });
+    if (status === "fail") failure = { name: m[1], output: lines.slice(i + 1).join("\n").trim() };
+  }
+  return { hooks, ...(failure ? { failure } : {}) };
+};
+
+export const runGitHookProbe = async (sandbox: Parameters<typeof execGate>[0]): Promise<GitHooks> => {
+  const r = await execGate(sandbox, GIT_HOOK_PROBE);
+  // A probe that could not run at all (the sandbox died) is not a refused hook.
+  if (r.exitCode !== 0) return { hooks: [], unchecked: `the probe exited ${r.exitCode}` };
+  return parseGitHookProbe(r.stdout);
+};
+
+export const gitHooksLine = (g: GitHooks) =>
+  g.unchecked !== undefined ? `git hooks: not checked (${g.unchecked})` : `git hooks: ${g.hooks.map((h) => `${h.name}=${h.status}`).join(" ")}`;
+
 // Every gate on the tip of the base branch, in a throwaway sandbox set up
 // exactly as an agent's is (image, setup, lean plan). `hookTests` also runs
-// the project's hook tests there, against the plan's kept hooks.
+// the project's hook tests there, against the plan's kept hooks, and probes
+// the repo's git commit hooks.
 export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false) =>
   withSlot("sandboxes", `${project.name} ${label}`, async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
@@ -158,7 +236,11 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     try {
       const run = await runGates(project, sandbox, `${project.name} ${label}`, true);
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
-      return { ...run, hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [] };
+      return {
+        ...run,
+        hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
+        gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
+      };
     } finally {
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
@@ -288,8 +370,10 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
   console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
+  if (run.gitHooks) console.log(`  ${gitHooksLine(run.gitHooks)}`);
   const redHooks = run.hookTests.filter((t) => !t.pass);
-  const green = !run.failures.length && !redHooks.length;
+  const gitHook = run.gitHooks?.failure;
+  const green = !run.failures.length && !redHooks.length && !gitHook;
   noteBaseResult(project.root, key, green);
   if (green) {
     // A log left by an earlier red run would read as this run's result.
@@ -301,19 +385,25 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   writeFileSync(
     log,
     `# base gates on ${base} at ${commit}, ${new Date().toISOString()}: ${gateLine(run.gates)}` +
-      (redHooks.length ? ` hook-tests=${redHooks.length}-FAIL` : "") + "\n\n" +
+      (redHooks.length ? ` hook-tests=${redHooks.length}-FAIL` : "") +
+      (gitHook ? ` git-hook=${gitHook.name}-FAIL` : "") + "\n\n" +
       run.failures.map((f) => `===== ${f.name}: ${f.command} (exit ${f.exitCode})\n${f.output}\n`).join("\n") +
-      redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n"),
+      redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") +
+      (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
-  const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`)];
+  if (gitHook) {
+    console.log(`\nGit hook ${gitHook.name} fails in the sandbox - every agent commit would be refused:\n${gitHook.output.split("\n").slice(-15).join("\n")}`);
+    console.log("Add what it needs to the project's Dockerfile (README: Dockerfile), then `sandcastle gates` again.");
+  }
+  const red = [...run.failures.map((f) => f.name), ...redHooks.map((t) => `hook test "${t.name}"`), ...(gitHook ? [`git hook ${gitHook.name}`] : [])];
   throw new BaseRedError(
     `Red on ${base} before any agent ran: ${red.join(", ")}. Every branch would fail the same way, ` +
       `so no sandbox started. The cause is on ${base} itself - its code, or the image, setup, lean plan or a hook - not in a ticket: full output in ` +
       `.sandcastle/logs/base-gates.log. Fix it, then \`sandcastle gates\` to check (SKIP_BASE_GATES=1 runs anyway).`,
-    [...run.gates.map((g) => ({ gate: g.name, ok: g.pass })), ...redHooks.map((t) => ({ gate: `hook test "${t.name}"`, ok: false }))],
+    [...run.gates.map((g) => ({ gate: g.name, ok: g.pass })), ...redHooks.map((t) => ({ gate: `hook test "${t.name}"`, ok: false })), ...(gitHook ? [{ gate: `git hook ${gitHook.name}`, ok: false }] : [])],
   );
 };
 
