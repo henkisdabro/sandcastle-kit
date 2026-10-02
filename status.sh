@@ -375,10 +375,10 @@ load_pool() {
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
 WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; INRUN=0
+TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; INRUN=0
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|outcome" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover.
@@ -397,22 +397,18 @@ load_run() {
     RECORD=1
     TICKET_IDS=$(printf '%s\n' "$TICKETS" | cut -d"$US" -f1 | sort -V)
   fi
-  # `landing: "in-run"`: tickets land one by one as they go green, while others
-  # still run, so there is no separate landing phase after the last of them.
-  [ "$(jq -r '.landing // empty' "$f" 2>/dev/null)" = in-run ] && INRUN=1
   # Sandboxes the run has yet to fill: queued tickets that fit in them start
   # at once, so none of them is "behind" another. A ticket that is landing holds
   # no slot: its merge runs on the host, or in the landing worker's own box.
   FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
   [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
   TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
-  # When landing should start: the queued tickets at a typical issue's length
+  # When the run ends: the queued tickets at a typical issue's length
   # each, the working ones at what is left of theirs (a minute at least), over
   # the sandboxes the run uses at once. Only once there is a typical issue -
   # from earlier runs, or this run's first finished one. A ticket that is
-  # landing is neither queued nor working here, so with in-run landing the
-  # figure is when the last pipeline ends: the run's end, not the start of a
-  # landing phase (see run_cell).
+  # landing is neither queued nor working here, so the figure is when the last
+  # pipeline ends. Tickets land as they go green: no landing phase follows.
   RUN_ETA=$(jq -r --argjson now "$(date +%s)" '
     (.typical.issue // null) as $t
     | if $t == null or (.stage // "") != "running" then empty else
@@ -555,8 +551,7 @@ run_cell() {
     # image, preflight, base gates - and after its last: "landing 6/25".
     kvl state "${ylw}running${off}${dry:+ ${accent}${dry}${off}} ${mute}· $(dur $(( $(date +%s) - t0 )))${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}"; RUNC[0]="$REPLY"
     if [ -n "$RUN_ETA" ]; then
-      eta_word=lands; [ "$INRUN" = 1 ] && eta_word=ends
-      kvl "$eta_word" "${accent}~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off} ${mute}· since ${started}${off}"
+      kvl ends "${accent}~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off} ${mute}· since ${started}${off}"
     else kvl since "${mute}${started}${off}"; fi
     RUNC[1]="$REPLY"
   else
