@@ -17,6 +17,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the ticket is not landed, and the summary names the tickets it is red with. While landing runs,
   pipelines leave one machine-wide sandbox slot free for it, so a run may start one sandbox fewer
   than `CONCURRENCY`.
+- **A ticket that conflicts or goes red at landing is sent back once, in the same run.** Its
+  pipeline merges the base in, resolves, gates and gets a narrow review, as a re-run does, so
+  the run spends that pass now rather than on the next run. A second conflict or red holds it for
+  the next run, naming the tickets of both attempts.
+- **The base check now runs the repo's `pre-commit` and `commit-msg` hooks** (with `git hook
+  run`, nothing committed) in the base-gate sandbox, and stops like a red gate when one refuses.
+  A project whose hook needs a tool the image lacks now stops before any agent starts, instead
+  of every agent's commit being refused. Add the tool to `.sandcastle/Dockerfile`, then run
+  `sandcastle gates`. Git older than 2.36 skips the probe with a note.
 - **A blocker closed as not planned now holds its dependants.** Before, it counted as done and the
   dependant started without the work it waited for. Reopen the blocker, or remove its
   `Blocked by` line.
@@ -61,6 +70,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The blocker check now also names a blocker held for a human, one that is open but not queued,
   and a `Blocked by` line written inside code (which a run does not read). The closing summary
   says why each ticket is still blocked.
+- The live status view no longer echoes typed keys or the mouse wheel's escapes onto its frame,
+  or leaves them queued for the shell. Ctrl-C ends it at once.
+- Later autonomy turns keep every waiting ticket, so a ticket freed by a landing in that turn is
+  listed under Runnable now, and the cap line prints when the turns run out.
 - A conflict resolution on a re-run that changes files the merge had joined cleanly is refused,
   and the ticket is held for a person.
 
@@ -70,6 +83,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `Touches:` lines, and blockers that are not queued or missing. It is read-only and always exits 0.
 - A ticket body's `Touches:` line (format in the audit action) is parsed, with a check for files
   git cannot merge. Nothing schedules on it yet.
+- A landing compares the diff with the ticket's `Touches:` line. Files outside it are named in
+  the close comment and under Done in the closing summary - a warning, never a hold.
+- The status view and closing summary follow in-run landing: a landing does not count as a
+  sandbox slot, the estimate reads `ends ~HH:MM`, a requeued ticket shows as such, and a merged
+  tree that is red names the tickets it is red together with.
 - The audit action clusters findings that touch the same files before filing, and separates real
   dependencies from order-only ones.
 
