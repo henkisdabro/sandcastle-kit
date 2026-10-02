@@ -26,8 +26,8 @@ bug no gate would fail"), never as an incident from a named project.
 
 | Path | What |
 |---|---|
-| `bin/sandcastle` | Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one node process with the kit's own tsx loader (not the tsx binary, whose child is SIGKILLed on a slow answer to SIGTERM) |
-| `src/cli.ts` | Commands: help, setup, doctor, init, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean; also the autonomy loop around `burndown()` |
+| `bin/sandcastle` | Shell entry; resolves symlinks, checks the temp directory can be written, runs `src/cli.ts` in one node process with the kit's own tsx loader (not the tsx binary, whose child is SIGKILLed on a slow answer to SIGTERM); `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone, as Herdr's tab bar calls it every 10 seconds |
+| `src/cli.ts` | Commands: help, setup, doctor, init, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run, report, status, clean, herdr; also the autonomy loop around `burndown()` |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
@@ -39,7 +39,9 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
-| `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
+| `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports, sidebar tokens, the workspace's run summary, the live-runs directory the tab bar reads) |
+| `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, Ctrl-click logs, the Agents view |
+| `herdr/` | The Herdr plugin: `herdr-plugin.toml` (its `version` follows each release; a test checks) and `entry.sh`, through which every action, pane and hook runs |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore |
 | `src/touches.ts` | The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeable` (lockfiles, `generated` paths, minified blobs). A scheduling hint and warning source, never a guard |
@@ -60,7 +62,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/versions.ts` | Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode` or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), Codex's npm `latest` tag (or `CODEX_VERSION`), resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag |
 | `prompts/` | Implement, review, repair and resolve (a re-run's conflicted base merge) templates. The kit fills `{{KIT_*}}`; Sandcastle fills `{{ISSUE_NUMBER}}`, `{{TICKET}}`, `{{SOURCE_BRANCH}}`, `{{TARGET_BRANCH}}` and `` !`cmd` `` |
 | `docker/base.Dockerfile` | The shared base image; its Claude Code and Codex `ARG` versions are offline defaults, the kit passes the resolved ones |
-| `status.sh` | Status view; bash 3.2-safe, macOS and Linux. A live run's tickets come from `run.json`'s `tickets`, never inferred |
+| `status.sh` | Status view; bash 3.2-safe, macOS and Linux, and no extglob in a per-cell helper (3.2 makes it slow). A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and this table's `skill/` row |
 | `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action) |

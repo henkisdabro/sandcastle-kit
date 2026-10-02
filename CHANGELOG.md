@@ -25,6 +25,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   ticket-file commits. Your own commits are unaffected. A repo that requires signed commits on its
   base branch needs them signed before pushing (for example `git rebase --exec 'git commit
   --amend --no-edit -S'`), or landing by hand.
+- **Inside Herdr, a sandbox's sidebar entry is now named after its ticket** (`#12 Add CSV
+  export`), not `sandbox`. A script that matched the display name `sandbox` should match the agent
+  label `sandcastle` instead.
+- **The kit has an opt-in Herdr plugin.** `sandcastle herdr configure` links it and adds its
+  sidebar rows, tab bar entry and three keys to Herdr's `config.toml`, after showing the block and
+  asking; `--remove` takes all of it out. `/sandcastle update` offers it when doctor says it is
+  missing. Herdr 0.9.3 or later.
 
 ### Changed
 
@@ -32,6 +39,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `src/schedule.ts`.
 - The host git of a run now has `gc.auto=0`, so a landing merge never starts maintenance while
   sandboxes add worktrees.
+- Inside Herdr, a run reports each sandbox's step and time in that step, and its workspace's
+  progress (`🏰 4/9 · 1 needs you`), to the sidebar. Herdr keeps none of it across a restart, so it
+  is sent again every minute and the sidebar recovers by itself.
+- Inside Herdr, the status view links each ticket to its latest log (OSC 8), for the plugin's
+  Ctrl-click; `SANDCASTLE_LINKS=0` turns the links off.
 
 ### Security
 
@@ -63,6 +75,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   says why each ticket is still blocked.
 - A conflict resolution on a re-run that changes files the merge had joined cleanly is refused,
   and the ticket is held for a person.
+- The status view draws a wide pane over ten times faster under macOS's bash 3.2 - one frame of a
+  191-column pane took 12 seconds, now about one - and four times faster under bash 5. Measuring a
+  cell's width no longer uses extglob patterns, which bash 3.2 matches very slowly.
 
 ### Added
 
@@ -79,6 +94,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The pre-commit hook reads an **allowlist** beside your denylist
   (`~/.config/sandcastle-kit/allowlist`): a staged line matching it passes, so an author credit
   you mean to publish can carry a name the denylist blocks everywhere else.
+- **The Herdr plugin** (`herdr/`, set up by `sandcastle herdr configure`): the status view and the
+  last run's report as popups over any tab (`prefix+shift+s`, `prefix+shift+e`), Ctrl-click a
+  ticket in the status view to read its log in a popup, "sandboxes first" in the Agents panel
+  (`prefix+shift+a`, restored after a Herdr restart), each sandbox's step and time and the run's
+  progress in the sidebar, and every live run on the machine in the tab bar. `sandcastle setup`
+  offers it inside Herdr, and `sandcastle doctor` says whether it is in place.
 
 ## [0.3.0] - 2026-10-01
 

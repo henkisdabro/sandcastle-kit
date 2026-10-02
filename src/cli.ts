@@ -41,6 +41,10 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
 //                    and list unmerged ones; --all deletes those too, without asking
+//   herdr configure [--remove]
+//                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
+//                    and keys to Herdr's config (shows them and asks first); --remove
+//                    takes all of it out. Works from anywhere
 //
 // Models, effort, ISSUES, CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
 // environment variables, see README.md.
@@ -68,6 +72,7 @@ import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
+import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
@@ -96,6 +101,11 @@ try {
   if (command === "doctor") {
     await doctor(repoRoot, args.includes("--verify"));
     process.exit(0);
+  }
+  // bin/sandcastle sends `herdr` straight to its module; this is for src/cli.ts run directly.
+  if (command === "herdr") {
+    await herdrCommand(args);
+    process.exit(process.exitCode ?? 0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP.join("\n"));

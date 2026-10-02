@@ -7,6 +7,10 @@ was set up with.
    local changes, stop and tell the user - never discard them. Otherwise
    `git -C <kit> pull --ff-only && pnpm -C <kit> install`, then `sandcastle doctor`. This skill is
    a link into the kit, so the pull may have changed it: re-read SKILL.md and this file before going on.
+   If doctor lists `opt  Herdr plugin and sidebar rows`, offer the kit's Herdr plugin: run
+   `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
+   the user that block, and only after they agree run it again with `--yes`. It edits Herdr's own
+   config, not the project, so it is theirs to decline.
 2. **What changed.** Read the kit's `CHANGELOG.md` - `[Unreleased]` and the releases since the
    last update, if the user knows when that was. Its **Upgrading** notes name what an existing
    project may act on.

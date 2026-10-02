@@ -71,6 +71,11 @@ moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '16
 # terminal. Top level on purpose: the live loop calls render inside $(...),
 # where stdout is always a pipe, so the check there would always strip colour.
 if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; wht=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; moon=''; dusk=''; night=''; deep=''; star=''; fi
+# Inside Herdr each ticket links to its latest log (OSC 8). With the kit's Herdr plugin
+# linked, Ctrl-click opens that log in a popup; without it, Herdr does nothing with the
+# click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
+LINKS="${SANDCASTLE_LINKS:-}"
+if [ -z "$LINKS" ]; then if [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ]; then LINKS=1; else LINKS=0; fi; fi
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -78,17 +83,43 @@ if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute='';
 # neither macOS awk nor mawk counts multi-byte characters.
 shopt -s extglob
 ESC=$'\e'
-vis() { local p="${1//${ESC}\[*([0-9;])m/}"; printf '%s' "${#p}"; }
+# A hyperlink's opener or closer (OSC 8, ended by ESC \) has no width of its own.
+ST=$'\e\\'
+# $1 without its colour codes and link markers, into VS. Plain prefix and suffix cuts,
+# no extglob: macOS's bash 3.2 matched `*([0-9;])`-style patterns so slowly that one
+# frame of a 191-column pane took 12 seconds, and the plugin's popup gets that bash
+# whenever Herdr's PATH puts /usr/bin first.
+vstrip() {
+  local s="$1" r p; VS=""
+  while [[ $s == *"$ESC"* ]]; do
+    VS="$VS${s%%"$ESC"*}"; s="${s#*"$ESC"}"
+    if [[ $s == "]8;"* ]]; then
+      s="${s#*"$ST"}"
+    elif [[ $s == "["* ]]; then
+      r="${s:1}"; p="${r%%[!0-9;]*}"
+      if [ "${r:${#p}:1}" = m ]; then s="${r:$(( ${#p} + 1 ))}"; else VS="$VS$ESC"; fi
+    else
+      VS="$VS$ESC"
+    fi
+  done
+  VS="$VS$s"
+}
+vis() { vstrip "$1"; printf '%s' "${#VS}"; }
 fit() {
   local s="$1" w="$2" out="" n=0 esc
   if [ "$(vis "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
   while [ -n "$s" ] && [ "$n" -lt $(( w - 1 )) ]; do
-    if [ "${s:0:1}" = "$ESC" ]; then
+    if [ "${s:0:2}" = "${ESC}]" ]; then
+      # A link's URL can hold an "m"; it ends at ESC \, not at the first m.
+      esc="${s%%"$ST"*}$ST"; out="${out}${esc}"; s="${s:${#esc}}"
+    elif [ "${s:0:1}" = "$ESC" ]; then
       esc="${s%%m*}m"; out="${out}${esc}"; s="${s:${#esc}}"
     else
       out="${out}${s:0:1}"; s="${s:1}"; n=$((n+1))
     fi
   done
+  # A cut through a link's text would leave it open over the rest of the line.
+  case "$out" in *"${ESC}]8"*) out="${out}${ESC}]8;;${ST}";; esac
   printf '%s…%s' "$out" "$off"
 }
 
@@ -99,7 +130,7 @@ fit() {
 # cells costs no subshell per cell.
 
 # Visible width into VN, as vis gives it, without a subshell.
-vlen() { local p="${1//${ESC}\[*([0-9;])m/}"; VN=${#p}; }
+vlen() { vstrip "$1"; VN=${#VS}; }
 # A coloured string aligned in $2 columns (l, c or r), cut with … when longer.
 align() {
   local s="$1" w="$2" l
@@ -555,7 +586,15 @@ emit() {
   [ "$age" = "-" ] && age_c="$gry"
   [ "$commits" = "-" ] && cmt_c="$gry"
   [ "$mem" = "-" ] && mem_c="$gry"
-  CELL=("${bold}${wht}$(disp "$n")${off}" "${colour}${glyph} ${state}${off}" "${age_c}${age}${off}" "${cmt_c}${commits}${off}")
+  local id_cell="${bold}${wht}$(disp "$n")${off}" lf url
+  if [ "$LINKS" = 1 ]; then
+    lf=$(ls -t logs/agent-issue-"$n"-*-"$n".log 2>/dev/null | head -1)
+    if [ -n "$lf" ]; then
+      url="$PWD/$lf"; url="${url//\%/%25}"; url="${url// /%20}"; url="${url//\#/%23}"
+      id_cell="${ESC}]8;;file://${url}${ST}${id_cell}${ESC}]8;;${ST}"
+    fi
+  fi
+  CELL=("$id_cell" "${colour}${glyph} ${state}${off}" "${age_c}${age}${off}" "${cmt_c}${commits}${off}")
   [ "$wide" -ge 1 ] && CELL[4]="${cpu_col}${cpu}${off}"
   [ "$wide" = 2 ] && CELL[5]="${mem_c}${mem}${off}"
   CELL[${#TW[@]}-1]="${act_col}${activity}${off}"
@@ -1058,6 +1097,12 @@ while true; do
   # One frame and out, for the tests: what the loop writes is what they check.
   [ -n "${STATUS_FRAMES:-}" ] && { STATUS_FRAMES=$(( STATUS_FRAMES - 1 )); [ "$STATUS_FRAMES" -le 0 ] && exit 0; }
   [ "$RESIZED" = 1 ] && continue
+  # In the Herdr plugin's popup, which only closes when this exits: q or Esc does it.
+  if [ -n "${SANDCASTLE_STATUS_KEYS:-}" ] && [ -t 0 ]; then
+    key=""; IFS= read -rsn1 -t "$INTERVAL" key || true
+    case "$key" in q|Q|"$ESC") exit 0;; esac
+    continue
+  fi
   sleep "$INTERVAL" & SLEEP_PID=$!
   wait "$SLEEP_PID" 2>/dev/null
 done
