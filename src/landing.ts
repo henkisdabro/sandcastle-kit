@@ -25,7 +25,7 @@ import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
 import type { Again, Ending, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
-import { expandTouches, parseTouches } from "./touches.ts";
+import { expandTouches, isTestPath, parseTouches } from "./touches.ts";
 
 // "with #12" names the branches merged before it that changed the same files.
 export const conflictLine = (c: { files: string[]; with: string[] }) =>
@@ -37,14 +37,21 @@ export const conflictLine = (c: { files: string[]; with: string[] }) =>
  * with no line. The line is agent-written, so this only ever warns. A glob names the files a ref
  * has, so it is read against the branch head (a new file the glob covers) as well as the base (a
  * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
+ * A file the branch adds under a conventional test path is never an overrun (`isTestPath`): its name
+ * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is.
  */
 export const touchesOverrun = (root: string, base: string, head: string, body: string): string[] => {
   const patterns = parseTouches(body);
   if (!patterns.length) return [];
   const declared = new Set([...expandTouches(root, base, patterns), ...expandTouches(root, head, patterns)]);
-  return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${head}`], root)
-    .split("\0")
-    .filter((f) => f && !declared.has(f));
+  // `-z --name-status` alternates a status letter and a path; "A" is a file absent at the merge base.
+  const fields = sh("git", ["diff", "--no-renames", "--name-status", "-z", `${base}...${head}`], root).split("\0");
+  const over: string[] = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const [status, file] = [fields[i].trim(), fields[i + 1]];
+    if (file && !declared.has(file) && !(status === "A" && isTestPath(file))) over.push(file);
+  }
+  return over;
 };
 
 // The ticket closes on the local merge, so the comment says the work is not on

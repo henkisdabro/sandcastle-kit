@@ -38,6 +38,24 @@ export const parseTouches = (body: string): string[] => {
   return out;
 };
 
+/**
+ * Whether a path is conventionally a test: under a `test/`, `tests/` or `__tests__/` directory, or
+ * named `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py` or `*_test.py`. An agent adds each test in
+ * a new file named after the behaviour, a name no ticket can know, so landing does not count an
+ * added one as an overrun of the `Touches:` line.
+ */
+export const isTestPath = (path: string): boolean => {
+  const parts = normalise(path).split("/");
+  const name = parts.pop() ?? "";
+  return (
+    parts.some((d) => d === "test" || d === "tests" || d === "__tests__") ||
+    /^.+\.(?:test|spec)\..+$/.test(name) ||
+    /_test\.go$/.test(name) ||
+    /^test_.+\.py$/.test(name) ||
+    /_test\.py$/.test(name)
+  );
+};
+
 const isGlob = (p: string) => /[*?]/.test(p);
 
 // `**` crosses directories, `*` and `?` stay inside one path segment.
