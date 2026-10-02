@@ -17,9 +17,10 @@ was set up with.
    when the run ends. It is code that runs inside Claude Code with the user's permissions (the
    README's "The Claude Code mod" says what it reads), so show them doctor's command and run it
    only after they agree. Without Claude Code doctor does not list it: say nothing about it.
-2. **What changed.** Read the kit's `CHANGELOG.md` - `[Unreleased]` and the releases since the
-   last update, if the user knows when that was. Its **Upgrading** notes name what an existing
-   project may act on.
+2. **What changed.** From the project's root, `sandcastle doctor` lists the **Upgrading** notes
+   in the kit's `CHANGELOG.md` that this project has not had since its last update (or says it has
+   no record, if it was never updated this way: then read the notes of every release since it was
+   set up). Read those notes in full: they name what an existing project may act on.
 3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise stop after 2):
    1. `sandcastle build` - or `sandcastle build --force` when doctor warns that the base image is
       more than 30 days old (it pulls Debian and Node updates) - then `sandcastle lean`: new
@@ -82,7 +83,9 @@ was set up with.
        offer either to move them across (`gh issue edit <n> --add-label ready-for-human
        --remove-label needs-human`, or the `Status:` line), or to keep `needs-human` by mapping
        `ready-for-human` to it in `triage-labels.md`. Apply after the user agrees.
-4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
+4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
+   listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
+   that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every
    harness, but a session that was already open keeps the skill it loaded at its start (and a mod

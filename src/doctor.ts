@@ -12,6 +12,7 @@ import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
+import { upgradeLines } from "./upgrading.ts";
 import { probeOAuth } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
@@ -357,6 +358,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     console.log(`\nproject ${repoRoot}`);
     const hasConfig = existsSync(join(repoRoot, CONFIG_PATH));
     check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
+    // A warning, never a FIX: a pulled kit still runs, but a note may ask this project to act.
+    if (hasConfig) for (const line of upgradeLines(repoRoot)) console.log(line);
     if (project) {
       const t = project.tracker;
       check(!t.note, `tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);

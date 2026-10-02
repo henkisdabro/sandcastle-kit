@@ -120,7 +120,12 @@ cd ~/sandcastle-kit && git pull --ff-only && pnpm install && sandcastle doctor
 cd ~/code/your-project && sandcastle build && sandcastle lean && sandcastle gates
 ```
 
-Then read the Upgrading notes in `CHANGELOG.md`. Existing `.sandcastle/config.ts` files keep
+Then read the Upgrading notes in `CHANGELOG.md`, act on them, and run `sandcastle updated` in the
+project to record that it is up to date. You do not have to remember which notes are new: after a
+pull, `sandcastle doctor` in a project lists the Upgrading notes that project has not had since its
+last update, and `sandcastle run` warns about them in one line, until `/sandcastle update` (or
+`sandcastle updated`) records the kit's commit. The record is per project and per machine
+(`.sandcastle/.run/kit-updated`, gitignored); a project with none is told to update once. Existing `.sandcastle/config.ts` files keep
 working - a new field is always optional, with a default - but a new default can change what a
 run does or spends, and a key the kit does not know (a typo an older version ignored) is now
 refused with the nearest real one: fix the key it names. The skill updates with the pull, since it

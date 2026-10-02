@@ -11,11 +11,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **Run `/sandcastle update` once in each project.** It ends with the new `sandcastle updated`,
+  which records the kit's commit for that project; from then on doctor and runs say when a pull
+  brings Upgrading notes the project has not had, so a kit update is never missed. Until a project
+  has been updated this way, doctor and runs say it has no record.
 - **The hold label is now `ready-for-human`**, Matt Pocock's name for the role, instead of
   `needs-human`. A run that holds a ticket for a person (a risky path, an agent's hand-back) adds
   `ready-for-human`, creating it if missing. A ticket still carrying `needs-human` stays held, and
   `sandcastle requeue` takes either off. To keep `needs-human`, map `ready-for-human` to it in
   `docs/agents/triage-labels.md`; otherwise `/sandcastle update` offers to move open tickets across.
+
+### Added
+
+- **A pulled kit says what a project has not acted on yet.** `sandcastle doctor` in a project lists
+  the changelog's **Upgrading** notes that project has not had since its last update, and
+  `sandcastle run` warns about them in one line, until `/sandcastle update` records the kit's commit
+  with the new `sandcastle updated` (per project and machine, in `.sandcastle/.run/`). A project with
+  no record yet is told to update once; `sandcastle init` records a new project as up to date.
 
 ### Changed
 

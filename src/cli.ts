@@ -46,6 +46,8 @@
 //                    they can run in the image; --measure runs one real turn
 //                    with and without the extras
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
+//   updated          record that this project has acted on the kit's upgrading notes (the
+//                    update action's last step); doctor and run then stop listing them
 //   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
 //                    and list unmerged ones; --all deletes those too, without asking
 //   herdr configure [--remove]
@@ -76,6 +78,7 @@ import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
+import { markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
@@ -174,6 +177,8 @@ try {
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
       sandboxPanes(project);
       checkUsageSettings();
+      // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
+      for (const line of upgradeLines(root, KIT, false)) console.log(line);
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
       const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, unblocked: [] as string[], cause: undefined as string | undefined };
@@ -440,10 +445,17 @@ try {
     }
     case "init": {
       init(root);
+      // A project set up with this kit has no older notes to act on.
+      markUpdated(root);
       // The lean check belongs to setup: what the repo would load into every
       // sandbox agent, all hidden until lean.keep names it.
       const project = await loadProject(root);
       leanReport(project, leanPlan(project));
+      break;
+    }
+    case "updated": {
+      const head = markUpdated(root);
+      console.log(head ? `Recorded: this project is up to date with the kit at ${head.slice(0, 12)}.` : `The kit at ${KIT} is not a git checkout, so there is nothing to record.`);
       break;
     }
     case "clean": {
