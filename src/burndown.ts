@@ -34,10 +34,11 @@ import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commen
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
+import { isTicketState, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -89,6 +90,9 @@ type Outcome = {
  */
 export const keptFor = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[]) =>
   o.status === "nochange" && o.commits === 0 ? kept.find((k) => k.issue === o.issue) : undefined;
+
+/** The run's own steps, timed beside a ticket's states: they are the run line's `stage`, never a ticket's state. */
+type Stage = "image" | "preflight" | "hook check" | "base gates" | "verify";
 
 /** The record of a pipeline that added no commits: uncommitted work first, then a hand-back, then nothing to change. */
 export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[], root: string, handedBack: boolean): TicketRecord => {
@@ -358,6 +362,18 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // Notes are short: the view's activity column is about 30 characters in an 80-column pane.
   const waits = createDependants(project, tracker, candidates, held, queued.map((i) => i.id));
   const heldNote = new Map(waits.notes().map((n) => [n.id, n.note]));
+  // Typed as entries, so `Object.fromEntries` cannot widen a misspelt state to `any`.
+  const startTickets: [string, TicketRecord][] = [
+    ...issues.map((i): [string, TicketRecord] => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
+    // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
+    ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: heldNote.get(i.id), title: i.title }]),
+    // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
+    ...parked.map((p): [string, TicketRecord] => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
+    // Waiting, but not this turn's to run (a later turn's tickets): on record all the same.
+    ...[...wholeOpen]
+      .filter(([id]) => !candidates.some((c) => c.id === id))
+      .map(([id, on]): [string, TicketRecord] => [id, { state: "blocked", note: blockedNote(on, new Set(candidates.map((c) => c.id))), title: whole.find((q) => q.id === id)?.title }]),
+  ];
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
     dryRun: DRY_RUN,
@@ -366,17 +382,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     stage: "starting",
     concurrency: slots,
     typical: typicalTimes(project),
-    tickets: Object.fromEntries([
-      ...issues.map((i) => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
-      // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
-      ...dependants.map((i) => [i.id, { state: "blocked", order: order.get(i.id), note: heldNote.get(i.id), title: i.title }]),
-      // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
-      ...parked.map((p) => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
-      // Waiting, but not this turn's to run (a later turn's tickets): on record all the same.
-      ...[...wholeOpen]
-        .filter(([id]) => !candidates.some((c) => c.id === id))
-        .map(([id, on]) => [id, { state: "blocked", note: blockedNote(on, new Set(candidates.map((c) => c.id))), title: whole.find((q) => q.id === id)?.title }]),
-    ]),
+    tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
@@ -407,10 +413,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // status view cannot tell a gate run from the review before it by the logs
   // alone, and a log's age is how long since its last line, not how long the
   // issue has been at this step.
-  const timed = async <T>(issue: string, phase: string, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined): Promise<T> => {
+  const timed = async <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
     if (issue) {
+      if (!isTicketState(phase)) throw new Error(`"${phase}" is a step of the run, not a state of ticket ${issue}`);
       // The record first: the view's workspace count reads it.
       run.ticket(issue, { state: phase, ...(phase === "setup" ? { started: Math.floor(since / 1000) } : {}), ...(note ? { note } : {}) });
       view.phase(issue, phase);
@@ -1072,7 +1079,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const closedEarlier: string[] = [];
   const closeFailed: string[] = [];
   // The ticket's state as landing decides it, for the notes below.
-  const land = (id: string, state: string, note: string) => run.ticket(id, { state, note });
+  const land = (id: string, state: TicketState, note: string) => run.ticket(id, { state, note });
 
   const slotWanted = { n: 0 };
   const ctx: LandContext = {

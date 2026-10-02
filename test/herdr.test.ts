@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import type { TicketRecord } from "../src/run.ts";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Answers only what openSandboxView asks of an adopted, lone tab; logs every call.
 // Plain bash 3.2: no associative arrays, no mapfile.
@@ -82,7 +82,7 @@ test("the status view splits off at its ratio, and focus stays where the operato
 });
 
 test("runCounts: the status view's groups, so the sidebar and the grid never disagree", () => {
-  const t = (state: string): TicketRecord => ({ state });
+  const t = (state: TicketRecord["state"]): TicketRecord => ({ state });
   const counts = runCounts({ a: t("implement"), b: t("gates"), c: t("conflict"), d: t("crashed"), e: t("merged"), f: t("queued"), g: t("red"), h: t("nochange") });
   assert.deepEqual(counts, { working: 2, needsYou: 3, merged: 1, total: 8 });
 });

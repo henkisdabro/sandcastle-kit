@@ -22,7 +22,7 @@ import { confirm } from "./autonomy.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { herdr, lineText, runCounts, RUNS_DIR } from "./herdr.ts";
-import type { TicketRecord } from "./run.ts";
+import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { KIT } from "./sandbox.ts";
 
 export const PLUGIN_ID = "sandcastle-kit";
@@ -290,7 +290,8 @@ export const liveRuns = (dir = RUNS_DIR): Run[] => {
     const file = join(dir, f);
     try {
       const root = readFileSync(file, "utf8").trim();
-      const run = { root, ...JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")) } as Run;
+      const record = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
+      const run = { root, ...record, tickets: readTickets(record) } as Run;
       if (!run.finishedAt && run.pid && alive(run.pid)) {
         runs.push(run);
         continue;

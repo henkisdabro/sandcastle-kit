@@ -38,6 +38,22 @@ export type TicketState = (typeof TICKET_STATES)[number];
 export const isTicketState = (s: unknown): s is TicketState => typeof s === "string" && (TICKET_STATES as readonly string[]).includes(s);
 
 /**
+ * A run record's tickets as read from a file, each one's state passed through the guard. A state
+ * outside the set (a record from an older kit, or edited by hand) is dropped, so the ticket
+ * falls to the "other" group and into no report section, never into one that asks for a person.
+ */
+export const readTickets = (record: unknown): Record<string, TicketRecord> => {
+  const tickets = (record as { tickets?: unknown } | null | undefined)?.tickets;
+  if (!tickets || typeof tickets !== "object" || Array.isArray(tickets)) return {};
+  return Object.fromEntries(
+    Object.entries(tickets as Record<string, unknown>).map(([id, t]) => {
+      const { state, ...rest } = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
+      return [id, (isTicketState(state) ? { ...rest, state } : rest) as TicketRecord];
+    }),
+  );
+};
+
+/**
  * The states the status view works out for itself and no run record holds: a run that died
  * (`stalled`, `orphaned`), a branch of an earlier run (`left over`), a branch of this run that
  * waits for landing to decide it (`finished`), and `requeued`, the word it gives an older run's
