@@ -17,12 +17,13 @@ import { after, test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
-const { createLanding, createStopState } = await import("../src/schedule.ts");
+const { createSchedule } = await import("../src/schedule.ts");
 const { createHostGit, landingMade, landingWork, slotTurn, trackerMade } = await import("../src/landing.ts");
 const { assertGitUnchanged, gitFingerprint, pinHostGitConfig } = await import("../src/guard.ts");
 const { landInSandbox, plainMergeNote } = await import("../src/land.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
+type Waiting = import("../src/landing.ts").Waiting;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
 
@@ -160,13 +161,22 @@ test("an unexpected error while landing costs that ticket only, and the others s
     landed: new Map(),
   };
   const settled: { issue: string; landed: Landed }[] = [];
-  const stop = createStopState(host);
-  const landing = createLanding(landingWork(ctx), stop, { settled: (o, landed) => void settled.push({ issue: o.issue, landed }), stopped: () => {} });
-  for (const id of ["1", "2"]) {
-    landing.push({ issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) });
-  }
-  landing.close();
-  await landing.run();
+  // Through the scheduler: both attempts are green at once, and land in order.
+  const ports = landingWork(ctx);
+  const { stop } = await createSchedule<{ id: string }, Waiting>({ tickets: [{ id: "1" }, { id: "2" }] }).run({
+    workers: 2,
+    attempt: async ({ id }) => ({
+      kind: "green",
+      green: { issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) },
+    }),
+    land: async (o) => {
+      const landed = await ports.land(o);
+      settled.push({ issue: o.issue, landed });
+      return landed;
+    },
+    host: ports.host,
+    tell: () => {},
+  });
   assert.deepEqual(
     settled.map((s) => [s.issue, s.landed.kind]),
     [
