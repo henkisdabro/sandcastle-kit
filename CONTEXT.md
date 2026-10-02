@@ -29,7 +29,7 @@ _Avoid_: using it as a ticket state
 
 **Group**:
 One of the status view's buckets a ticket state falls into - working, needs you, ready, queued,
-blocked, merged - shared by every view so none disagrees about a ticket.
+blocked, merged, other - shared by every view so none disagrees about a ticket.
 _Avoid_: bucket, category
 
 **Word**:
@@ -39,4 +39,6 @@ _Avoid_: label, display state
 
 **Derived state**:
 A state the status view works out for itself and no run record holds - a run that died
-(stalled, orphaned), or a branch from an older run (left over).
+(stalled, orphaned), a branch from an older run (left over), a branch of this run that waits for
+landing to decide it (finished), or an older run's branch whose ticket was labelled again
+(requeued).
