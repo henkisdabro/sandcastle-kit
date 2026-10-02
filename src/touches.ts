@@ -1,7 +1,8 @@
 // The `Touches:` line of a ticket body: the files the ticket expects to change. A new ticket has
 // no branch yet, so this line is the only way to see which tickets will meet at landing. It is
-// agent-written, so it is a scheduling hint and a warning source, never a guard. Nothing here
-// changes scheduling; it parses the line and says which files git cannot merge line by line.
+// agent-written, so it is a scheduling hint and a warning source, never a guard. This file parses
+// the line and says which files git cannot merge line by line; burndown.ts reads both to decide
+// which tickets start together (the file hold in schedule.ts).
 
 import { spawnSync } from "node:child_process";
 import { stripCode } from "./blockers.ts";

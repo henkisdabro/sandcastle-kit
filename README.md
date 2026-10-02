@@ -600,9 +600,12 @@ A queued ticket with a branch from an earlier run builds on that branch:
   re-run whose only change since its last review is the base merge gets a review of the merge
   alone. The record behind both is `.sandcastle/logs/heads.json`; `sandcastle requeue` clears a
   ticket's entry.
-- Tickets whose existing branches change the same file do not start in the same run: the first in
-  queue order runs, the others show as blocked, "waits for #N (this run) - next run". Two new tickets
-  have no branch to compare, so they can still conflict; the second lands on its next run.
+- A file git cannot merge (a lockfile, a [`generated`](#-a-gate-for-generated-files) path, a minified
+  blob) conflicts at landing whatever the order, so one ticket at a time has it in flight. Each
+  ticket's files are its branch's changed files plus its `Touches:` line; a ticket that shares such a
+  file with one in flight shows as blocked, "waits for #N: both change <file> (git cannot merge it)",
+  and starts when that ticket lands or leaves the run. Tickets that share only mergeable files start
+  together, the start naming them, and landing (with one requeue) resolves the overlap.
 - A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
   merging and closing is finished by the next one.
 
@@ -933,7 +936,7 @@ starting issues before that, once a usage window passes `USAGE_STOP` percent.
 | `gated green but not merged` | The issue was closed, unqueued or labelled `needs-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
 | A branch conflicts at landing | Leave it queued: its next run merges the base into it first and resolves the conflict (see [Re-runs](#-re-runs)); `autonomy` can do that within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
-| `waits for #N (this run) - next run` on a ticket nobody blocks | Its existing branch changes a file that #N's branch also changes, so it waits for #N to land rather than conflict with it. |
+| `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 

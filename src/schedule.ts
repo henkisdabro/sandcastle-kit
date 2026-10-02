@@ -58,3 +58,80 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
     },
   };
 };
+
+/** The files of one ticket: every path it changes or declares, and the ones among them git cannot merge. */
+export type TicketFiles = { all: string[]; unmergeable: string[] };
+
+/** What a ticket waits for: the ticket in flight that has `file`, a file git cannot merge. */
+export type FileWait = { with: string; file: string };
+
+/** Mergeable files two tickets that run together both change; landing and the requeue resolve them. */
+export type FileShare = { with: string; files: string[] };
+
+const SHOWN = 3;
+const named = (files: string[]) => `${files.slice(0, SHOWN).join(", ")}${files.length > SHOWN ? ` and ${files.length - SHOWN} more` : ""}`;
+
+/** The ticket's status note while it waits. */
+export const fileWaitNote = (ref: (id: string) => string, w: FileWait) => `waits for ${ref(w.with)}: both change ${w.file} (git cannot merge it)`;
+
+/** One line per pair that starts together and changes the same mergeable files. */
+export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) => `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - landing resolves it`;
+
+/**
+ * Which tickets may start. A file git cannot merge (a lockfile, a generated file, a minified
+ * blob) conflicts at landing whatever the order, so one ticket at a time has it in flight; a ticket
+ * that shares such a file with one in flight is parked. Files git can merge never hold anything:
+ * the landing and the requeue deal with them, and `admit` only names them.
+ * A ticket is in flight from `admit` until `end` (it landed, or left the run).
+ */
+export const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => TicketFiles) => {
+  const flying = new Map<string, TicketFiles>();
+  // In arrival order; the first to be admitted again is the one that waited longest.
+  const parked: T[] = [];
+  const read = new Map<string, TicketFiles>();
+  const admit = (t: T): { wait: FileWait } | { shares: FileShare[] } => {
+    let mine = read.get(t.id);
+    if (!mine) read.set(t.id, (mine = filesOf(t)));
+    const shares: FileShare[] = [];
+    for (const [id, theirs] of flying) {
+      if (id === t.id) continue;
+      const hard = mine.unmergeable.filter((f) => theirs.unmergeable.includes(f)).sort();
+      if (hard.length) {
+        if (!parked.some((p) => p.id === t.id)) parked.push(t);
+        return { wait: { with: id, file: hard[0] } };
+      }
+      const soft = mine.all.filter((f) => theirs.all.includes(f)).sort();
+      if (soft.length) shares.push({ with: id, files: soft });
+    }
+    flying.set(t.id, mine);
+    const at = parked.findIndex((p) => p.id === t.id);
+    if (at >= 0) parked.splice(at, 1);
+    return { shares };
+  };
+  return {
+    /** Starts the ticket (claiming its files) or parks it, saying what it waits for. */
+    admit,
+    /**
+     * The ticket landed or left the run: its files are free, and each parked ticket that no longer
+     * collides is admitted, in the order they waited. `waits` is what the ones still parked wait
+     * for now, which may be another ticket than before.
+     */
+    end(id: string): { freed: { ticket: T; shares: FileShare[] }[]; waits: { id: string; wait: FileWait }[] } {
+      flying.delete(id);
+      const freed: { ticket: T; shares: FileShare[] }[] = [];
+      const waits: { id: string; wait: FileWait }[] = [];
+      for (const t of [...parked]) {
+        const r = admit(t);
+        if ("shares" in r) freed.push({ ticket: t, shares: r.shares });
+        else waits.push({ id: t.id, wait: r.wait });
+      }
+      return { freed, waits };
+    },
+    /** Tickets parked now. */
+    get size() {
+      return parked.length;
+    },
+  };
+};
+
+export type FileHold<T extends { id: string }> = ReturnType<typeof createFileHold<T>>;
