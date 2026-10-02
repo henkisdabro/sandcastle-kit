@@ -222,7 +222,7 @@ comments, and the gates can prove it.
    guess how long it takes: once the project has run before, the run prints a rough estimate at
    the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
-   offer `USAGE_CHECK=1` if the plan is close to its limit. If the config sets `autonomy` (or the
+   offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
    shows `Blocked by` chains and no autonomy is set, recommend `AUTONOMY_LEVEL=drain` (or `autonomy: "drain"`): it
    takes turns until the queue is drained or a stop holds (no progress, the same ticket conflicting twice running,

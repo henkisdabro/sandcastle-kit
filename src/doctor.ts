@@ -347,6 +347,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       }
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
+      // Apart from whether the token is accepted: any 403 from the usage endpoint means the guard cannot read this token's plan usage.
+      if (key === "CLAUDE_CODE_OAUTH_TOKEN" && status === 403) console.log("warn USAGE_CHECK=1 cannot work with this token: the usage endpoint answered HTTP 403, so the guard would be off for a run.");
     }
     console.log();
   }
