@@ -45,7 +45,10 @@ and spend the user's plan allowance or API credits. Say so and get a yes before 
 them for a project, set `model` or `effort` under `implement` or `review` in the project's
 `.sandcastle/config.ts` and commit it - for example `review: { effort: "medium" }`. For one run
 only, prefix the command with `IMPL_MODEL`, `IMPL_EFFORT`, `REVIEW_MODEL` or `REVIEW_EFFORT`;
-these win over the config. Repair uses the implementer's model and effort. A run that is already
+these win over the config. For the implementer the order is: the ticket's own `model:` or
+`effort:` label, then `IMPL_MODEL` / `IMPL_EFFORT`, then the config, then the kit's default - so
+`IMPL_MODEL` does not change a ticket that carries a `model:` label; to override a label for one
+run, remove the label. Repair uses the implementer's model and effort. A run that is already
 going keeps its models; the change applies from the next one. It never needs a change to the kit.
 
 ## init - set up a project
@@ -217,7 +220,8 @@ comments, and the gates can prove it.
 
 1. Check the tree: `git status --porcelain` empty, the base branch checked out, and
    `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using the
-   same checkout). Show the user the queue (`sandcastle queue`), the models, whether it is a dry
+   same checkout). Show the user the queue (`sandcastle queue`), the models (a ticket whose label sets its own
+   implementer shows `[implement <model>/<effort>]` after its title there), whether it is a dry
    run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
    guess how long it takes: once the project has run before, the run prints a rough estimate at
    the start - quote that. Say that a red gate gets a repair pass (`repair.attempts`, default 1),

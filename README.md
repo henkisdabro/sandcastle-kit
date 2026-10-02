@@ -942,7 +942,7 @@ Examples: [`examples/`](examples/).
 
 | Variable | Default | |
 |---|---|---|
-| `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer |
+| `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer. The order, first wins: a ticket's `model:` / `effort:` label, then these, then `implement` in the config, then the kit's default. To override a label for one run, remove the label; `sandcastle queue` shows each ticket's label as `[implement <model>/<effort>]` |
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
 | `TICKETS`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; `ISSUES` is the older name for `TICKETS` (if both are set, `TICKETS` wins). The same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
