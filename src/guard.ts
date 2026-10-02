@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { sh } from "./sandbox.ts";
@@ -235,7 +235,9 @@ const rewrittenWorktrees = (project: Project): string[] => {
   return readdirSync(records)
     .filter((name) => /^(agent-issue-|sandcastle-)/.test(name) && existsSync(join(records, name, "gitdir")))
     .filter((name) => {
-      const at = readFileSync(join(records, name, "gitdir"), "utf8").trim();
+      // `worktree.useRelativePaths` (git 2.48+) writes the path relative to the record's own
+      // directory: read as it stands, every kit worktree would look rewritten.
+      const at = resolve(join(records, name), readFileSync(join(records, name, "gitdir"), "utf8").trim());
       return !under.some((u) => at.startsWith(u));
     })
     .sort();

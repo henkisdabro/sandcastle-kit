@@ -9,9 +9,9 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { after, test } from "node:test";
 
 // pool.ts and sandbox.ts derive their directories from these at import: nothing here may touch the user's.
@@ -311,6 +311,21 @@ test("a worktree record a sandbox rewrote to its container path is named", async
     assert.doesNotMatch(e.message, /agent-issue-4|feature/);
     return true;
   });
+});
+
+test("a worktree record git wrote as a relative path (worktree.useRelativePaths) is no alarm", async () => {
+  const root = makeRepo();
+  const p = project(root);
+  const worktrees = join(root, ".sandcastle", "worktrees");
+  mkdirSync(worktrees, { recursive: true });
+  git(root, "worktree", "add", "-q", "-b", "agent/issue-3", join(worktrees, "agent-issue-3"), "main");
+  const host = createHostGit(p, gitFingerprint(p));
+  // What git 2.48+ writes with the setting on: the path from the record's own directory.
+  const records = realpathSync(join(root, ".git", "worktrees", "agent-issue-3"));
+  const record = join(records, "gitdir");
+  writeFileSync(record, `${relative(records, realpathSync(join(worktrees, "agent-issue-3", ".git")))}\n`);
+  assert.ok(!isAbsolute(readFileSync(record, "utf8").trim()));
+  await host.check("after #1");
 });
 
 test("no mount of a sandbox reaches the backup repo", async () => {
