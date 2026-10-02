@@ -62,7 +62,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MODELS_LINE } from "./agents.ts";
+import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
@@ -344,7 +344,17 @@ try {
       if (args.includes("--json")) console.log(JSON.stringify(rows));
       else {
         console.log(`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}":`);
-        for (const r of rows) console.log(`  ${tracker.ref(r.id)} ${r.title}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
+        for (const r of rows) {
+          // The run's own start-line text. A bad label is the run's refusal, shown here without stopping the listing.
+          let own = "";
+          try {
+            own = implementNote(ticketOverride(tracker.ref(r.id), queued.find((t) => t.id === r.id)?.labels ?? []));
+          } catch (e) {
+            if (!(e instanceof OperatorError)) throw e;
+            own = ` [${e.message}]`;
+          }
+          console.log(`  ${tracker.ref(r.id)} ${r.title}${own}${r.blockedOn.length ? `  [waits for ${r.blockedOn.join(", ")}]` : ""}`);
+        }
         for (const line of await blockerProblems(project, tracker, queued)) console.log(`  warning: ${line}`);
         if (!rows.length) {
           // A queue is empty when nothing is labelled, not only when nothing is open: say how many
