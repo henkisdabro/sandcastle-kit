@@ -17,6 +17,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the ticket is not landed, and the summary names the tickets it is red with. While landing runs,
   pipelines leave one machine-wide sandbox slot free for it, so a run may start one sandbox fewer
   than `CONCURRENCY`.
+- **A ticket whose blockers are all in the same run now starts in that run**, once its last
+  blocker has landed and been closed, instead of waiting for the next run. A chain of `Blocked by`
+  tickets can drain in one run, so a run may take longer and spend more than before. A ticket
+  that also waits on anything outside the run still waits for a later one.
 - **A ticket that conflicts or goes red at landing is sent back once, in the same run.** Its
   pipeline merges the base in, resolves, gates and gets a narrow review, as a re-run does, so
   the run spends that pass now rather than on the next run. A second conflict or red holds it for
