@@ -33,6 +33,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land (merge or squash, on the landing worker as each ticket goes green), verify, report; dependencies and file overlaps, re-runs of carried branches (land-only, narrow review), timings |
 | `src/landing.ts` | `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a merge as it is when the branch holds the base's tip, otherwise a merge gated in a sandbox, close) and what it returns; `createLanding`: the one worker that lands each ticket as it goes green; `createHostGit`: the mutex through which every host git write goes and which moves the run's expected base; also the landing merge, its abort, the close comment and the conflict line |
+| `src/resolution.ts` | `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines |
 | `src/schedule.ts` | `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`, `close`, `run(workers, fn)`); workers wait while it is open and empty, so an item can be pushed mid-run; a higher `rank` goes first, equals in arrival order |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
@@ -42,6 +43,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore |
 | `src/touches.ts` | The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeable` (lockfiles, `generated` paths, minified blobs). A scheduling hint and warning source, never a guard |
+| `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, `blockerProblems`, a rough turn count. Read-only advice |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |

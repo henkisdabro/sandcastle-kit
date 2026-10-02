@@ -18,6 +18,8 @@
 //   preflight        one reply from every model, nothing else
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
 //                    GitHub Issues or ticket files; see README, Trackers); no model calls
+//   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
+//                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0
 //   requeue <ticket> [--note TEXT]
 //                    put a ticket back in the queue (needs-human off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
@@ -55,6 +57,7 @@ import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
+import { lintQueue } from "./lint.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, summary } from "./report.ts";
@@ -210,6 +213,11 @@ try {
       const project = await loadProject(root);
       const tracker = makeTracker(project);
       const queued = tracker.queued(false);
+      if (args.includes("--lint")) {
+        // Advice only: exit 0 whatever it finds.
+        for (const line of await lintQueue(project, tracker, queued)) console.log(line);
+        break;
+      }
       const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
       const rows = await Promise.all(
         queued.map(async (t) => ({

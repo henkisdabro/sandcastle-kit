@@ -38,6 +38,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
   recordRun, renderPrompts, runTokens, type TicketRecord, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
+import { strayChanges } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
@@ -550,6 +551,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
+      // The base as the merge below sees it, for checking the resolution against git's own merge.
+      const baseTip = sh("git", ["rev-parse", base]);
       if (behind > 0 && carried) {
         const identity = hostIdentity(project.root);
         const merge = `git ${identity} merge --no-edit ${shq(base)}`;
@@ -620,6 +623,21 @@ export const burndown = async (project: Project): Promise<boolean> => {
         if ((await sandbox.exec("git rev-parse -q --verify MERGE_HEAD")).exitCode === 0) {
           console.log(`${ref(issue.id)}: the merge is still unresolved - the full implement and review run.`);
           landOnly = false;
+        }
+      }
+      if (landOnly && mergeConflicted && greenHead !== undefined) {
+        // A resolution may touch only what git could not merge itself: a change to any other
+        // path can drop another ticket's landed lines with every gate green.
+        const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
+        if (stray?.length) {
+          console.log(`${ref(issue.id)}: the conflict resolution also changed ${stray.join(", ")}, which merged cleanly - held for a human.`);
+          run.ticket(issue.id, { files: stray });
+          notes.push({
+            issue: issue.id,
+            kind: "hold",
+            text: `Sandcastle held this: the conflict resolution also changed ${stray.join(", ")}, which merged cleanly - check that no other ticket's lines were lost.`,
+          });
+          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
         }
       }
       // Review passes run on the same warm sandbox and branch. Their commits

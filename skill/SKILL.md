@@ -206,7 +206,10 @@ comments, and the gates can prove it.
    `gh label create`. A hard ticket can carry `model:`/`effort:` labels (GitHub) for a stronger
    implementer; offer it, do not add it unasked.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
-   from the files in `.sandcastle/triage/`.
+   from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
+   (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
+   `Touches:`, wide tickets, hot and unmergeable files, and a rough turn count. It is advice, so
+   quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags; do not edit unasked.
 
 ## run - start a burndown
 
