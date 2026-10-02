@@ -18,8 +18,8 @@ import { after, test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
-const { createStopState } = await import("../src/schedule.ts");
-const { createHostGit, createLanding } = await import("../src/landing.ts");
+const { createLanding, createStopState } = await import("../src/schedule.ts");
+const { createHostGit, landingWork } = await import("../src/landing.ts");
 const { assertGitUnchanged, backupRepo, gitFingerprint } = await import("../src/guard.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
@@ -249,7 +249,7 @@ test("a squash landing, which deletes its branch, raises no alarm and drops the 
     gate: async () => ({ gates: [], failures: [] }),
     landed: new Map(),
   };
-  const landing = createLanding(ctx, createStopState(host), { settled: (_o, landed) => void settled.push(landed), stopped: () => {} });
+  const landing = createLanding(landingWork(ctx), createStopState(host), { settled: (_o, landed) => void settled.push(landed), stopped: () => {} });
   landing.push({ issue: "1", branch: "agent/issue-1", status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", "agent/issue-1") });
   landing.close();
   await landing.run();

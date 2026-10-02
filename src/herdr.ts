@@ -199,7 +199,7 @@ const TTL = "150000";
 
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
 // Gates have one too: the orchestrator writes their output as it arrives
-// (burndown.ts), so a pane shows the test run instead of the review's last words.
+// (burndown.ts), so a pane shows the test run instead of the review's closing lines.
 const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
 
 export const openSandboxView = (

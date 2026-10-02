@@ -8,7 +8,7 @@
 // A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
 // (`createFlow`); a second one holds it for the next run.
 //
-// Landing runs on one worker beside the pipelines (`createLanding`), and every write to the
+// Landing runs on one worker beside the pipelines (schedule.ts), and every write to the
 // host's git goes through `HostGit.write`: the merge, the tracker's commits on the base, the
 // branch delete. The worker moves the run's expected base with each write, so the `.git` check
 // the pipelines make after their sandbox closes still catches any other movement of the base.
@@ -23,7 +23,7 @@ import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
-import { createQueue, type Queue, type StopState } from "./schedule.ts";
+import type { LandPorts, Queue, StopState } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -572,57 +572,33 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
 export type Waiting = Landable & { carried?: boolean };
 
 /**
- * The landing worker. Pipelines `push` a green outcome as theirs ends; one worker lands them
- * one at a time, in arrival order except that a carried branch goes before a new one when both
- * wait (in finish order it came last - it had a merge to resolve - and lost a conflict to a new
- * branch on the same lines, run after run). `close()` says the pipelines are done: `run` resolves
- * once the queue is empty. `settled` is awaited before the next landing, so a ticket it releases
- * (burndown.ts) starts before that one lands. Once the run's stop state `landsNothing` - a `.git`
- * check that failed here or after a pipeline, a host git write refused - what is queued and what
- * arrives later is handed to `stopped`, not landed. A usage or plan limit still lands what is green.
+ * The scheduler's land and host ports over one `LandContext`: `landOne`, and the `.git` check
+ * before it. A refused write or a failed check still throws, and stops the run; anything else (a
+ * tracker call that failed, a full disk, a branch gone) costs this ticket only. Thrown on, it ended
+ * the process while pipelines still ran: no summary, and tickets already landed went unreported.
  */
-export const createLanding = (
-  ctx: LandContext,
-  stop: StopState,
-  on: { settled(o: Waiting, landed: Landed): void | Promise<void>; stopped(o: Waiting): void | Promise<void> },
-) => {
-  const queue = createQueue<Waiting>((o) => (o.carried ? 1 : 0));
-  return {
-    push: (o: Waiting) => queue.push(o),
-    close: () => queue.close(),
-    get size() {
-      return queue.size;
+export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
+  land: async (o) => {
+    try {
+      return await landOne(ctx, o);
+    } catch (error) {
+      if (error instanceof OperatorError) throw error;
+      const reason = errorLine(error);
+      try {
+        ctx.run.ticket(o.issue, { state: "not landed", note: reason });
+      } catch {
+        /* the record is what failed; the outcome below still stands */
+      }
+      return { kind: "not-landed", reason };
+    }
+  },
+  host: {
+    check: (id) => ctx.host.check(`before landing ${ctx.tracker.ref(id)}`),
+    get failed() {
+      return ctx.host.failed;
     },
-    run: () =>
-      queue.run(1, async (o) => {
-        if (stop.landsNothing) return on.stopped(o);
-        let landed: Landed;
-        try {
-          await ctx.host.check(`before landing ${ctx.tracker.ref(o.issue)}`);
-          landed = await landOne(ctx, o);
-        } catch (error) {
-          if (error instanceof OperatorError) {
-            // A refused write is the host's failure, which the stop state reads live; any other is a `.git` check.
-            if (error !== ctx.host.failed) stop.add({ kind: "tampered", error });
-            return on.stopped(o);
-          }
-          // Anything else (a tracker call that failed, a full disk, a branch gone) costs this
-          // ticket only. Thrown on, it ended the process while pipelines still ran: no summary,
-          // and tickets already landed went unreported.
-          const reason = errorLine(error);
-          try {
-            ctx.run.ticket(o.issue, { state: "not landed", note: reason });
-          } catch {
-            /* the record is what failed; the outcome below still stands */
-          }
-          landed = { kind: "not-landed", reason };
-        }
-        // A write refused after its merge (the close, the branch delete): this one landed, and the
-        // stop state reads the host's failure live, so nothing after it does.
-        await on.settled(o, landed);
-      }),
-  };
-};
+  },
+});
 
 /** "conflicted again with #1, #3 after a requeue": what a second conflict or red at landing is held as. */
 export const againLine = (kind: "conflict" | "red", tickets: string[]) =>
@@ -634,10 +610,11 @@ export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
 
 /**
  * One ticket's way through a run when landing may send it back: the pipeline queue stays open
- * until every ticket has had its last word, because a landing that conflicts or goes red can push
- * its ticket onto it after every other pipeline has ended. A ticket ends once - a pipeline that
- * is not green, or a landing that is not requeued - and `finish` then counts it; the last one
- * closes the pipeline queue and the landing queue. A ticket that conflicts or goes red at
+ * until every ticket has its ending, because a landing that conflicts or goes red can push its
+ * ticket onto it after every other pipeline has ended. A ticket ends once - a pipeline that is not
+ * green, or a landing that is not requeued - and `finish` then counts it; the last one closes the
+ * pipeline queue and the landing queue. The scheduler (schedule.ts) runs it; `work` is for the
+ * tests that still wire it by hand. A ticket that conflicts or goes red at
  * landing is requeued once: its pipeline takes the land-only path (merge the base in, resolver,
  * gates, repair, narrow review) when its `heads` record matches, the full path otherwise. A
  * second conflict or red is final, and `earlier` names the tickets of the first.
@@ -661,7 +638,7 @@ export const createFlow = <I extends { id: string }>(tickets: number, pipelines:
     },
     /**
      * The pipeline workers' function for `Queue.run`: `fn` says with `true` that it handed the
-     * ticket to landing, which then says its last word; any other end is the pipeline's own,
+     * ticket to landing, which then gives its ending; any other end is the pipeline's own,
      * a throw included (`ended`, when given, is called for it instead of `finish` and must call it).
      */
     work: (fn: (issue: I) => Promise<boolean | void>, ended?: (issue: I) => void | Promise<void>) => async (issue: I) => {
@@ -671,7 +648,7 @@ export const createFlow = <I extends { id: string }>(tickets: number, pipelines:
         handed = (await fn(issue)) === true;
       } finally {
         working--;
-        // `ended` says the last word itself and must reach `finish`; without it the pipeline's end is the last word.
+        // `ended` gives the ending itself and must reach `finish`; without it the pipeline's end is the ending.
         if (!handed) await (ended ? ended(issue) : finish());
       }
     },
@@ -683,16 +660,16 @@ export const createFlow = <I extends { id: string }>(tickets: number, pipelines:
       open++;
       pipelines.push(issue);
     },
-    /** The ticket's last word is said: nothing of it is queued or running any more. */
+    /** The ticket has its ending: nothing of it is queued or running any more. */
     finish,
     /**
      * After a landing: pushes `issue` back on the pipeline queue and returns the line the second
      * attempt carries, when this was its first conflict or red; otherwise undefined and the
      * landing stands as it is. Not for a run that is stopping: the caller says `stopping`.
      * `record` runs with the line before the push, so a ticket is never queued with nothing
-     * written about it; it returns the undo that runs when the push fails (a closed queue).
+     * written about it; it may return the undo that runs when the push fails (a closed queue).
      */
-    retry(issue: I, landed: Landed, stopping = false, record?: (line: string) => () => void): string | undefined {
+    retry(issue: I, landed: Landed, stopping = false, record?: (line: string) => (() => void) | void): string | undefined {
       if (stopping || (landed.kind !== "conflict" && landed.kind !== "red") || first.has(issue.id)) return undefined;
       const note = { kind: landed.kind, with: landed.with };
       const line = requeuedLine(note.kind, note.with);
@@ -713,20 +690,110 @@ export const createFlow = <I extends { id: string }>(tickets: number, pipelines:
   };
 };
 
-/** What the closing report is built from: where each landing's last word put its ticket. `burndown()` owns the lists. */
+/** What the closing report is built from: where each landing ending put its ticket. `burndown()` builds the lists from the endings. */
 export type Landings = {
   merged: string[];
+  /** Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen. */
   regenerated: Map<string, { files: string[]; regen: string[] }>;
   conflicted: { issue: string; branch: string; files: string[]; with: string[] }[];
+  /** Green alone, red once merged: the pair is named, and nothing is landed. */
   redMerged: { issue: string; branch: string; with: string[]; gates: string[] }[];
   heldBack: { issue: string; paths: string[] }[];
   failedToLand: { issue: string; reason: string }[];
   skipped: { issue: string; reason: string }[];
   withdrawn: { issue: string; reason: string }[];
+  /** Marked for a human by a person during the run: theirs now, not a merge to make. */
   takenBack: string[];
   closedEarlier: string[];
   closeFailed: string[];
 };
+
+export const newLandings = (): Landings => ({
+  merged: [],
+  regenerated: new Map(),
+  conflicted: [],
+  redMerged: [],
+  heldBack: [],
+  failedToLand: [],
+  skipped: [],
+  withdrawn: [],
+  takenBack: [],
+  closedEarlier: [],
+  closeFailed: [],
+});
+
+/** Puts one landing ending in the list the closing report reads it from. */
+export const accountLanding = (lists: Landings, o: { issue: string; branch: string }, landed: Landed) => {
+  switch (landed.kind) {
+    case "merged":
+    case "close-failed":
+      lists.merged.push(o.issue);
+      if (landed.regenerated) lists.regenerated.set(o.issue, landed.regenerated);
+      if (landed.kind === "close-failed") lists.closeFailed.push(o.issue);
+      break;
+    case "conflict":
+      lists.conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
+      break;
+    case "red":
+      lists.redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
+      break;
+    case "held":
+      lists.heldBack.push({ issue: o.issue, paths: landed.paths });
+      break;
+    case "withdrawn":
+      lists.withdrawn.push({ issue: o.issue, reason: landed.reason });
+      break;
+    case "taken-back":
+      lists.takenBack.push(o.issue);
+      break;
+    case "closed-earlier":
+      lists.closedEarlier.push(o.issue);
+      break;
+    case "skipped":
+      lists.skipped.push({ issue: o.issue, reason: landed.reason });
+      break;
+    case "not-landed":
+      lists.failedToLand.push({ issue: o.issue, reason: landed.reason });
+      break;
+    case "dry-run":
+      break;
+  }
+};
+
+/** Each landed ticket's outcome line for the status view; `againNote` is what a second conflict or red was held as. */
+export const landingLines = (lists: Landings, againNote: Map<string, string>): Map<string, string> => {
+  const out = new Map<string, string>();
+  for (const n of lists.merged) out.set(n, "merged");
+  for (const n of lists.closeFailed) out.set(n, "merged (ticket not closed)");
+  for (const c of lists.conflicted) out.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
+  for (const r of lists.redMerged) {
+    out.set(r.issue, againNote.get(r.issue) ?? `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
+  }
+  for (const f of lists.failedToLand) out.set(f.issue, "failed to land");
+  for (const k of lists.skipped) out.set(k.issue, `not merged: ${k.reason}`);
+  for (const w of lists.withdrawn) out.set(w.issue, `withdrawn: ${w.reason}`);
+  for (const h of lists.heldBack) out.set(h.issue, "needs a human merge");
+  for (const id of lists.takenBack) out.set(id, "needs a human: marked for a human during the run");
+  return out;
+};
+
+/** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
+export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {
+  const line = againLine(landed.kind, landed.with);
+  return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
+};
+
+/** The record of a requeued ticket whose second attempt never began: the state it had before, and no longer "requeued". */
+export const restoredRecord = (was: TicketRecord | undefined): TicketRecord => ({ ...(was?.state ? { state: was.state } : {}), note: was?.note ?? null, requeued: null });
+
+/** The record of a ticket the tracker withdrew before its attempt began. */
+export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "withdrawn", note: `${reason.replace(" during the run", "")} - not started` });
+
+/**
+ * Green before the base moved: finished, and landing on a later run like the ones whose own check
+ * failed - not "ready", which says this run lands it. `outcome` is its line for the status view.
+ */
+export const STOPPED_GREEN = { record: { state: "stopped", note: "finished before the run stopped - lands on a later run" } satisfies TicketRecord, outcome: "stopped: the run stopped before landing" };
 
 /** The run record as settling uses it: a ticket's fields, and what is written so far. */
 export type SettlingRecord = { ticket(id: string, fields: TicketRecord): void; tickets(): Record<string, TicketRecord> };
@@ -750,7 +817,10 @@ export type SettlingDeps<I extends { id: string }> = {
 };
 
 /**
- * The landing worker's `settled` and `stopped`, and the bookkeeping of a ticket landing sent back.
+ * The hand wiring of a landing's `settled` and `stopped`, and of a ticket landing sent back, that
+ * the landing-requeue tests still copy; a run's own path is the scheduler (schedule.ts), whose
+ * `tell` and endings the burndown records with the helpers above.
+ *
  * A conflict or a red merge requeues the ticket once: its state, the line its second pipeline's
  * setup carries and what to put back are written first, then the ticket is pushed, and a push that
  * fails (the queue is closed: the run is ending) undoes them so the landing stands as it came.
@@ -775,45 +845,8 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
     }
   };
   // The state the ticket had before it was sent back, and no longer "requeued".
-  const restore = (id: string, was: TicketRecord | undefined) =>
-    bookkeep(id, () => run.ticket(id, { ...(was?.state ? { state: was.state } : {}), note: was?.note ?? null, requeued: null }));
-
-  const account = (o: Waiting, landed: Landed) => {
-    switch (landed.kind) {
-      case "merged":
-      case "close-failed":
-        lists.merged.push(o.issue);
-        if (landed.regenerated) lists.regenerated.set(o.issue, landed.regenerated);
-        if (landed.kind === "close-failed") lists.closeFailed.push(o.issue);
-        break;
-      case "conflict":
-        lists.conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
-        break;
-      case "red":
-        lists.redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
-        break;
-      case "held":
-        lists.heldBack.push({ issue: o.issue, paths: landed.paths });
-        break;
-      case "withdrawn":
-        lists.withdrawn.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "taken-back":
-        lists.takenBack.push(o.issue);
-        break;
-      case "closed-earlier":
-        lists.closedEarlier.push(o.issue);
-        break;
-      case "skipped":
-        lists.skipped.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "not-landed":
-        lists.failedToLand.push({ issue: o.issue, reason: landed.reason });
-        break;
-      case "dry-run":
-        break;
-    }
-  };
+  const restore = (id: string, was: TicketRecord | undefined) => bookkeep(id, () => run.ticket(id, restoredRecord(was)));
+  const account = (o: Waiting, landed: Landed) => accountLanding(lists, o, landed);
 
   /**
    * A ticket sent back whose second pipeline will not start: clears its requeue, and accounts the
@@ -841,7 +874,7 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
      */
     withdraw(id: string, called: { reason: string }, dropFirst: () => void) {
       if (keepFirst(id, called)) dropFirst();
-      run.ticket(id, { state: "withdrawn", note: `${called.reason.replace(" during the run", "")} - not started` });
+      run.ticket(id, withdrawnRecord(called.reason));
     },
     /** The second pipeline starts: what the first landing said no longer stands in for it. */
     began(id: string) {
@@ -868,41 +901,23 @@ export const createSettling = <I extends { id: string }>(d: SettlingDeps<I>) => 
       const earlier = d.flow.earlier(o.issue);
       if (earlier && (landed.kind === "conflict" || landed.kind === "red")) {
         // Held for the next run, with the tickets of both attempts named - in the outcome and in the comment.
-        const named = [...new Set([...earlier.with, ...landed.with])];
-        const line = againLine(landed.kind, named);
-        const note = landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
+        landed = { ...landed, with: [...new Set([...earlier.with, ...landed.with])] };
+        const note = againNoteOf(landed);
         againNote.set(o.issue, note);
         bookkeep(o.issue, () => run.ticket(o.issue, { note }));
-        landed = { ...landed, with: named };
       }
       account(o, landed);
       await d.afterLanding(o.issue, landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "closed-earlier");
     },
-    // Green before the base moved: finished, and landing on a later run like
-    // the ones whose own check failed - not "ready", which says this run lands it.
     stopped: async (o: Waiting) => {
       d.dealt();
       bookkeep(o.issue, () => {
-        run.ticket(o.issue, { state: "stopped", note: "finished before the run stopped - lands on a later run" });
-        d.outcomes({ [o.issue]: "stopped: the run stopped before landing" });
+        run.ticket(o.issue, STOPPED_GREEN.record);
+        d.outcomes({ [o.issue]: STOPPED_GREEN.outcome });
       });
       await d.afterLanding(o.issue, false);
     },
     /** Each landed ticket's outcome line for the status view, from what `settled` accounted. */
-    lines(): Map<string, string> {
-      const out = new Map<string, string>();
-      for (const n of lists.merged) out.set(n, "merged");
-      for (const n of lists.closeFailed) out.set(n, "merged (ticket not closed)");
-      for (const c of lists.conflicted) out.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
-      for (const r of lists.redMerged) {
-        out.set(r.issue, againNote.get(r.issue) ?? `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
-      }
-      for (const f of lists.failedToLand) out.set(f.issue, "failed to land");
-      for (const k of lists.skipped) out.set(k.issue, `not merged: ${k.reason}`);
-      for (const w of lists.withdrawn) out.set(w.issue, `withdrawn: ${w.reason}`);
-      for (const h of lists.heldBack) out.set(h.issue, "needs a human merge");
-      for (const id of lists.takenBack) out.set(id, "needs a human: marked for a human during the run");
-      return out;
-    },
+    lines: () => landingLines(lists, againNote),
   };
 };

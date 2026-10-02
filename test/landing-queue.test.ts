@@ -17,10 +17,10 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { createHostGit, createLanding, landOne, pipelineWorkers } = await import("../src/landing.ts");
+const { createHostGit, landingWork, landOne, pipelineWorkers } = await import("../src/landing.ts");
 const { disableHostGitGc, gitFingerprint } = await import("../src/guard.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
-const { createQueue, createStopState } = await import("../src/schedule.ts");
+const { createLanding, createQueue, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -121,7 +121,7 @@ const harness = (root: string, over: Over = {}) => {
   const settled: { issue: string; landed: Landed }[] = [];
   const stopped: string[] = [];
   const stop = createStopState(host);
-  const landing = createLanding(ctx, stop, {
+  const landing = createLanding(landingWork(ctx), stop, {
     settled: (o, landed) => void settled.push({ issue: o.issue, landed }),
     stopped: (o) => void stopped.push(o.issue),
   });

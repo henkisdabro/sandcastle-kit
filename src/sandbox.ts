@@ -90,7 +90,7 @@ export const reapOrphans = (project: Project) => {
   }
 };
 
-/** A failed command's own last word (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */
+/** A failed command's own closing line (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */
 export const errorLine = (error: unknown) => {
   const stderr = (error as { stderr?: unknown })?.stderr;
   const said = typeof stderr === "string" ? stderr.trim().split("\n").filter(Boolean).at(-1) : undefined;
