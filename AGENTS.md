@@ -33,6 +33,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
 | `src/burndown.ts` | The orchestrator: base gates, fan out, implement, review, gate (with repair), land (merge or squash), verify, report; dependencies and file overlaps, re-runs of carried branches (land-only, narrow review), timings |
 | `src/landing.ts` | `landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, merge, generated-files redo in a sandbox, close) and what it returns; also the landing merge, its abort, the close comment and the conflict line |
+| `src/resolution.ts` | `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines |
 | `src/schedule.ts` | `createQueue<T>()`: the pipeline fan-out's work queue (`push`, `close`, `run(workers, fn)`); workers wait while it is open and empty, so a ticket can be pushed mid-run |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
