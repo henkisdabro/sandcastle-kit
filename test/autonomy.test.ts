@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { autonomyLevel, confirm, nextTurn, rerunList, rerunnable } = await import("../src/autonomy.ts");
+const { autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, drainLine, drainStop, nextTurn, noRerunCause, rerunList, rerunnable } = await import("../src/autonomy.ts");
 const { recordRun } = await import("../src/run.ts");
 const { lockRun } = await import("../src/guard.ts");
 const { OperatorError } = await import("../src/errors.ts");
@@ -34,17 +34,25 @@ test("autonomyLevel: the env wins over config, unset is 0", () => {
   assert.equal(autonomyLevel(" 1 ", undefined), 1);
 });
 
-test("autonomyLevel: anything but 0-3 is an OperatorError", () => {
-  for (const bad of ["4", "x", "1.5"]) {
+test("autonomyLevel: drain, from env or config", () => {
+  assert.equal(autonomyLevel("drain", undefined), "drain");
+  assert.equal(autonomyLevel(" drain ", 1), "drain");
+  assert.equal(autonomyLevel(undefined, "drain"), "drain");
+  assert.equal(autonomyLevel("0", "drain"), 0);
+});
+
+test("autonomyLevel: anything but 0-3 or drain is an OperatorError", () => {
+  for (const bad of ["4", "x", "1.5", "forever", "Drain"]) {
     assert.throws(
       () => autonomyLevel(bad, undefined),
-      (e: Error) => e instanceof OperatorError && e.message.includes("AUTONOMY_LEVEL=") && e.message.includes("expected 0, 1, 2 or 3"),
+      (e: Error) => e instanceof OperatorError && e.message.includes("AUTONOMY_LEVEL=") && e.message.includes("expected 0, 1, 2, 3 or drain"),
     );
   }
   assert.throws(
     () => autonomyLevel(undefined, 5),
     (e: Error) => e instanceof OperatorError && e.message.includes("autonomy: 5 in .sandcastle/config.ts"),
   );
+  assert.throws(() => autonomyLevel(undefined, "forever"), (e: Error) => e instanceof OperatorError && e.message.includes("autonomy: forever in .sandcastle/config.ts"));
 });
 
 const facts: Facts = {
@@ -83,6 +91,59 @@ test("nextTurn: the level caps the turns, level 1 always asks", () => {
   assert.equal(nextTurn(3, 3, r), "cap");
   assert.equal(nextTurn(3, 1, undefined), "stop");
   assert.equal(nextTurn(3, 1, { conflicted: [], unblocked: [] }), "stop");
+});
+
+test("nextTurn: drain runs while there is work, up to the cap", () => {
+  const r = { conflicted: [], unblocked: ["3"] };
+  assert.equal(nextTurn("drain", 1, r), "run");
+  assert.equal(nextTurn("drain", DRAIN_CAP - 1, r), "run");
+  assert.equal(nextTurn("drain", DRAIN_CAP, r), "cap");
+  assert.equal(DRAIN_CAP, 20);
+  assert.equal(nextTurn("drain", 1, undefined), "stop");
+  assert.equal(nextTurn("drain", 1, { conflicted: [], unblocked: [] }), "stop");
+  assert.match(capLine("drain", ["3"], "#3"), /^Autonomy level drain: 20 turn\(s\) done, the cap; 1 ticket\(s\) can still run again/);
+  assert.match(capLine(2, ["3"], "#3"), /^Autonomy level 2: 2 turn\(s\) done/);
+});
+
+test("noRerunCause: names why a turn is not followed, and is silent when one may be", () => {
+  assert.equal(noRerunCause(facts), undefined);
+  assert.match(noRerunCause({ ...facts, dryRun: true })!, /dry run/);
+  assert.match(noRerunCause({ ...facts, stopped: "usage limit" })!, /usage limit/);
+  assert.match(noRerunCause({ ...facts, verify: { green: false, line: "" } })!, /base is red/);
+  assert.match(noRerunCause({ ...facts, tickets: { 5: { state: "skipped" } } })!, /stopped early/);
+  assert.equal(
+    noRerunCause({ ...facts, tickets: { 5: { state: "skipped", note: "not started: #4 hit the plan's usage limit" } } }),
+    "the run stopped early (#4 hit the plan's usage limit)",
+  );
+});
+
+test("drainStop: no progress, and the same ticket conflicting in two turns running", () => {
+  const turn = (landed: number, released: string[] = [], conflicted: string[] = []) => ({ landed, released, conflicted });
+  assert.equal(drainStop(turn(1), undefined), undefined);
+  assert.equal(drainStop(turn(0, ["4"]), undefined), undefined);
+  assert.equal(drainStop(turn(0, ["4"], ["1"]), turn(2, [], ["2"])), undefined);
+  assert.match(drainStop(turn(0), undefined)!, /^no progress: the turn landed nothing and released nothing$/);
+  assert.match(drainStop(turn(0), turn(3))!, /^no progress/);
+  assert.equal(drainStop(turn(2, [], ["1", "2"]), turn(1, [], ["2", "3"]), refOf), "#2 conflicted in two turns running");
+  // A conflict naming the ticket wins over the progress other tickets made.
+  assert.match(drainStop(turn(5, ["9"], ["1"]), turn(1, [], ["1"]), refOf)!, /^#1 conflicted/);
+});
+
+test("conflictedIn: the tickets this run's outcomes record as a conflict", () => {
+  const outcomes = {
+    1: { run: "r2", outcome: "merge conflict: src/a.ts" },
+    2: { run: "r2", outcome: "merged" },
+    3: { run: "r1", outcome: "merge conflict: src/b.ts" },
+    4: { run: "r2", outcome: "merge conflict: conflicted again after a requeue" },
+    5: { run: "r2" },
+  };
+  assert.deepEqual(conflictedIn(outcomes, "r2"), ["1", "4"]);
+  assert.deepEqual(conflictedIn({}, "r2"), []);
+});
+
+test("drainLine: turns, landed and the cause", () => {
+  assert.equal(drainLine(3, 7, "no progress"), "Drain: 3 turns, 7 landed, stopped because no progress");
+  assert.equal(drainLine(1, 0, "x"), "Drain: 1 turn, 0 landed, stopped because x");
 });
 
 test("rerunList names each part, and leaves out an empty one", () => {
@@ -160,6 +221,6 @@ test("the CLI refuses a bad AUTONOMY_LEVEL with a message and no stack, before a
     encoding: "utf8",
   });
   assert.equal(r.status, 1);
-  assert.ok(r.stderr.includes("AUTONOMY_LEVEL=7 - expected 0, 1, 2 or 3."), r.stderr);
+  assert.ok(r.stderr.includes("AUTONOMY_LEVEL=7 - expected 0, 1, 2, 3 or drain."), r.stderr);
   assert.ok(!r.stderr.split("\n").some((l) => /^\s+at /.test(l)), r.stderr);
 });

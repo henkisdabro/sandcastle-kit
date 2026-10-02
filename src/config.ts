@@ -35,8 +35,8 @@ export type ProjectConfig = {
   label?: string;
   /** Parallel sandboxes. Default 4. */
   concurrency?: number;
-  /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two; `AUTONOMY_LEVEL` overrides it for one run. */
-  autonomy?: 0 | 1 | 2 | 3;
+  /** Automatic re-runs in one `sandcastle run`: 0 none (default), 1 ask first, 2 one re-run, 3 up to two, "drain" until the queue is drained or a stop condition holds; `AUTONOMY_LEVEL` overrides it for one run. */
+  autonomy?: 0 | 1 | 2 | 3 | "drain";
   /**
    * Which Claude Code the sandbox image installs: `"stable"` (default) or `"latest"`, the release
    * channels resolved on the host when the image is ensured, or an exact version such as `"2.1.285"`
@@ -153,7 +153,7 @@ const checkShape = (config: ProjectConfig) => {
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
   if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
-  if (config.autonomy !== undefined && ![0, 1, 2, 3].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2 or 3, not ${JSON.stringify(config.autonomy)}.`);
+  if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.repair?.attempts !== undefined && !isCount(config.repair.attempts, 0)) refuse(`\`repair.attempts\` must be a whole number of 0 or more (0 turns repair off), not ${JSON.stringify(config.repair.attempts)}.`);
   if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
     refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");

@@ -9,7 +9,8 @@ This continues the run steps 1-3 in SKILL.md.
    project root and take the summary from its own stdout, not from a pane scrape. With `autonomy` set, one
    `sandcastle run` can hold several turns, each printing its own closing summary; `sandcastle
    report` shows only the last turn, so read the earlier turns' `Autonomy level` lines and
-   summaries from the run's output before writing the hand-back. Then write your
+   summaries from the run's output before writing the hand-back. At level `drain` the last lines are
+   `Drain: <N> turns, <landed> landed, stopped because <cause>`: quote the cause in the hand-back. Then write your
    closing message with **all seven sections, in this order, with these headings**, each one
    present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
    report` printed, emoji included** - retyping a heading is how the emoji get lost; the

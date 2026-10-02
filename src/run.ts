@@ -577,14 +577,20 @@ export const estimate = (project: Project, tickets: number, slots: number): stri
 // from this run's.
 // ---------------------------------------------------------------------------
 
+export type Outcomes = Record<string, { run?: string; outcome?: string; at?: string }>;
+
+/** A missing or broken file is no outcomes. */
+export const readOutcomes = (root: string): Outcomes => {
+  try {
+    return JSON.parse(readFileSync(join(root, ".sandcastle/logs/outcomes.json"), "utf8"));
+  } catch {
+    return {};
+  }
+};
+
 export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, string>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
-  let all: Record<string, unknown> = {};
-  try {
-    all = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    /* first run */
-  }
+  const all = readOutcomes(project.root);
   const at = new Date().toISOString();
   for (const [slug, outcome] of Object.entries(outcomes)) all[slug] = { run, outcome, at };
   writeFileSync(file, JSON.stringify(all, null, 2) + "\n");

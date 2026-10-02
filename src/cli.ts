@@ -50,7 +50,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { autonomyLevel, capLine, confirm, nextTurn, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
+import { autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, nextTurn, noRerunCause, type Rerun, rerunList, rerunnable } from "./autonomy.ts";
 import { burndown } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -62,7 +62,7 @@ import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, rewordLibraryLines } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -130,10 +130,23 @@ try {
       const project = await loadProject(root);
       const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
       checkUsageSettings();
-      for (let turn = 1; await burndown(project); turn++) {
+      // `drain` keeps its own tally: each turn still prints its closing report, and the last line
+      // says how many turns ran, what they landed and why the loop stopped.
+      const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, unblocked: [] as string[], cause: undefined as string | undefined };
+      for (let turn = 1; ; turn++) {
+        if (!(await burndown(project))) {
+          drain.cause ??= "no ticket could start";
+          break;
+        }
         if (level === 0) break;
-        const again = rerunnable(await gather(project));
-        if (!again) break;
+        const facts = await gather(project);
+        drain.turns = turn;
+        drain.landed += Object.values(facts.tickets).filter((t) => t.state === "merged").length;
+        const again = rerunnable(facts);
+        if (!again) {
+          drain.cause = noRerunCause(facts);
+          break;
+        }
         // A ticket closed by hand since the turn would make the ISSUES path throw.
         const tracker = makeTracker(project);
         const open = (id: string) => {
@@ -147,11 +160,29 @@ try {
         const ids = [...left.conflicted, ...left.unblocked];
         const list = rerunList(left, tracker.ref);
         const verdict = nextTurn(level, turn, left);
-        if (verdict === "stop") break;
+        if (verdict === "stop") {
+          drain.cause = "no ticket is left to run again";
+          break;
+        }
+        if (level === "drain") {
+          const now: DrainTurn = {
+            landed: Object.values(facts.tickets).filter((t) => t.state === "merged").length,
+            released: left.unblocked.filter((id) => !drain.unblocked.includes(id)),
+            conflicted: conflictedIn(readOutcomes(root), facts.started),
+          };
+          const why = drainStop(now, drain.last, tracker.ref);
+          drain.last = now;
+          drain.unblocked = left.unblocked;
+          if (why) {
+            drain.cause = why;
+            break;
+          }
+        }
         const many = `${ids.length} ticket(s) can`;
         const manual = `\`sandcastle run ${ids.join(" ")}\``;
         if (verdict === "cap") {
-          console.log(capLine(level, ids, list));
+          console.log(capLine(level as Exclude<typeof level, 0 | 1>, ids, list));
+          drain.cause = `the cap of ${DRAIN_CAP} turns was reached`;
           break;
         }
         if (verdict === "ask") {
@@ -166,10 +197,15 @@ try {
           }
           console.log(`Running again (turn ${turn + 1}) for ${list}.`);
         } else {
-          console.log(`Autonomy level ${level}: running again (turn ${turn + 1} of ${level}) for ${list}.`);
+          console.log(`Autonomy level ${level}: running again (turn ${turn + 1} of ${level === "drain" ? `at most ${DRAIN_CAP}` : level}) for ${list}.`);
         }
         // Exactly the re-runnable tickets, never the whole queue: red ones still queued stay out.
         process.env.ISSUES = ids.join(",");
+      }
+      if (level === "drain" && drain.turns > 0) {
+        const cause = drain.cause ?? "the run ended";
+        console.log(`Autonomy level drain: not running again - ${cause}.`);
+        console.log(drainLine(drain.turns, drain.landed, cause));
       }
       break;
     }
