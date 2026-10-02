@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -96,7 +96,15 @@ const fixture = (o: { gate?: string; generated?: boolean; mainChange?: "same-lin
     };
   };
   const prepare = () => ({ open });
-  const land = (arg: string | undefined = ID) => landTicket(project, makeTracker(project), arg, prepare);
+  // landTicket prints a red gate's FAIL lines to stdout; a green suite must not carry them.
+  const land = async (arg: string | undefined = ID) => {
+    const log = mock.method(console, "log", () => {});
+    try {
+      return await landTicket(project, makeTracker(project), arg, prepare);
+    } finally {
+      log.mock.restore();
+    }
+  };
   const ticketFile = (num = "01") => readFileSync(join(root, `.scratch/demo/issues/${num}-thing.md`), "utf8");
   return { root, project, marker, land, ticketFile, mainTip: git(root, "rev-parse", "main").out };
 };

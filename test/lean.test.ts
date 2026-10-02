@@ -31,8 +31,8 @@ const repo = (settings: object, { gitignore, commit }: { gitignore?: string; com
   return { name: "fixture", root, lean: { keep: [], dropHooks: [] }, hookTests: [] } as unknown as Project;
 };
 
-const output = (t: { mock: { method: (o: object, m: string) => { mock: { calls: { arguments: unknown[] }[] } } } }, project: Project) => {
-  const log = t.mock.method(console, "log");
+const output = (t: { mock: { method: (o: object, m: string, impl: () => void) => { mock: { calls: { arguments: unknown[] }[] } } } }, project: Project) => {
+  const log = t.mock.method(console, "log", () => {});
   report(project, plan(project));
   return log.mock.calls.map((c) => c.arguments.join(" ")).join("\n");
 };
