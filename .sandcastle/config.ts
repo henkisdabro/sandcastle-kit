@@ -26,6 +26,9 @@ export default {
 
   rules: ".sandcastle/rules.md",
 
+  // Adds gitleaks: the repo's pre-commit hook refuses every commit without it.
+  dockerfile: ".sandcastle/Dockerfile",
+
   // Models and effort differ from the kit's defaults only when set here, per agent.
   // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
   // review: { model: "claude-opus-5-5", effort: "medium" },
