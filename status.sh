@@ -338,16 +338,16 @@ load_pool() {
 # from branches, logs and label times, and a green branch waiting to land read
 # as `queued` for over an hour. Inference is left for tickets outside the run,
 # and for all of them once it ends - people merge and clean up after a run.
-#   TICKETS  "id US state US since US started US order US note" lines
+#   TICKETS  "id US state US since US started US order US note US requeued" lines
 #   RECORD   1 while the live run keeps TICKETS (an older orchestrator does not)
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
 WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
+TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; INRUN=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; INRUN=0
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|outcome" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover.
@@ -361,20 +361,27 @@ load_run() {
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
   TICKETS=$(jq -r '(.tickets // {}) | to_entries[] | [.key, (.value.state // ""), (.value.since // "" | tostring),
-      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // "")] | join("\u001f")' "$f" 2>/dev/null)
+      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // "")] | join("\u001f")' "$f" 2>/dev/null)
   if [ -n "$TICKETS" ]; then
     RECORD=1
     TICKET_IDS=$(printf '%s\n' "$TICKETS" | cut -d"$US" -f1 | sort -V)
   fi
+  # `landing: "in-run"`: tickets land one by one as they go green, while others
+  # still run, so there is no separate landing phase after the last of them.
+  [ "$(jq -r '.landing // empty' "$f" 2>/dev/null)" = in-run ] && INRUN=1
   # Sandboxes the run has yet to fill: queued tickets that fit in them start
-  # at once, so none of them is "behind" another.
-  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair", "landing"))] | length)), 0] | max' "$f" 2>/dev/null)
+  # at once, so none of them is "behind" another. A ticket that is landing holds
+  # no slot: its merge runs on the host, or in the landing worker's own box.
+  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
   [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
   TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
   # When landing should start: the queued tickets at a typical issue's length
   # each, the working ones at what is left of theirs (a minute at least), over
   # the sandboxes the run uses at once. Only once there is a typical issue -
-  # from earlier runs, or this run's first finished one.
+  # from earlier runs, or this run's first finished one. A ticket that is
+  # landing is neither queued nor working here, so with in-run landing the
+  # figure is when the last pipeline ends: the run's end, not the start of a
+  # landing phase (see run_cell).
   RUN_ETA=$(jq -r --argjson now "$(date +%s)" '
     (.typical.issue // null) as $t
     | if $t == null or (.stage // "") != "running" then empty else
@@ -457,7 +464,7 @@ style_of() {
     setup|impl|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
     stalled|orphaned|stopped|"gate red"|conflict|held|uncommitted|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
     ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
-    queued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
+    queued|requeued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
     blocked) glyph='~'; colour="$blu"; prio=4; grp=blocked;;
     merged) glyph='+'; colour="$grn"; prio=5; grp=merged;;
     "left over"|withdrawn) glyph='-'; colour="$gry"; prio=6; grp="left over";;
@@ -496,7 +503,7 @@ cpu_cols() {
 
 # The run's state, its times and its tokens, as the run cell's three rows (RUNC).
 run_cell() {
-  local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta
+  local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta eta_word
   RUNC=("" "" "")
   [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
@@ -516,7 +523,9 @@ run_cell() {
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
     kvl state "${ylw}running${off}${dry:+ ${accent}${dry}${off}} ${mute}· $(dur $(( $(date +%s) - t0 )))${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}"; RUNC[0]="$REPLY"
-    if [ -n "$RUN_ETA" ]; then kvl lands "${accent}~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off} ${mute}· since ${started}${off}"
+    if [ -n "$RUN_ETA" ]; then
+      eta_word=lands; [ "$INRUN" = 1 ] && eta_word=ends
+      kvl "$eta_word" "${accent}~$(epoch_fmt "$RUN_ETA" '+%H:%M')${off} ${mute}· since ${started}${off}"
     else kvl since "${mute}${started}${off}"; fi
     RUNC[1]="$REPLY"
   else
@@ -631,7 +640,7 @@ render() {
 
   # 1. The live run's tickets, as its record has them.
   for n in $TICKET_IDS; do
-    IFS="$US" read -r _ tstate since started order note <<<"$(ticket_of "$n")"
+    IFS="$US" read -r _ tstate since started order note requeued <<<"$(ticket_of "$n")"
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
     age=$(ago $(( now_s - since ))); age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
@@ -640,6 +649,8 @@ render() {
     case "$tstate" in
       setup) activity="${note:-setting up its sandbox}";;
       landing) activity="${note:-merging into $BASE}";;
+      # Put back in the queue by the run (a landing that went red, say): it starts again on the next run.
+      requeued) activity="${note:-for the next run}";;
       queued)
         # Next to start first: the run takes its queue in this order.
         pos=$(printf '%s\n' "$TICKETS" | awk -F"$US" -v o="${order:-0}" '$2=="queued" && $5+0 < o+0 {c++} END{print c+1}')
@@ -671,6 +682,10 @@ render() {
           age_col="$hot"; activity="usually $(ago "$typ") - $activity"
         fi;;
     esac
+    # A ticket landing sent back keeps saying so through its second attempt.
+    if [ -n "$requeued" ]; then
+      case "$activity" in *"$requeued"*) ;; *) activity="$requeued${activity:+ - $activity}";; esac
+    fi
     style_of "$state"
     # A spent plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
@@ -1018,10 +1033,30 @@ if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
 # which leaves Ctrl-C unable to stop the script at all.
 # Line wrap off as well: a line wider than the pane would wrap onto a second
 # row, and enough of them push the frame's top off the screen.
-restore() { printf '\e[?7h\e[?25h\e[?1049l'; }
+# The input side too, when there is a terminal: in cooked mode the kernel
+# echoes every key at the cursor (on the frame's free bottom row) and keeps it
+# queued for the shell once the view exits. So echo is off, input is
+# unbuffered (-icanon, min 0 time 0: a read returns at once, empty or not) so it
+# can be drained, and the wheel's alternate-scroll (?1007) is off so it does
+# not arrive as arrow keys. isig stays on: Ctrl-C must still stop the view.
+# A background view would be stopped by SIGTTIN/SIGTTOU on those tty calls, so
+# both are ignored (the calls then fail and the view carries on as before).
+# TTY_SAVED is set only while that mode is in force: Ctrl-C runs restore twice
+# (the INT trap, then the EXIT trap its `exit` fires), and a drain of a tty
+# back in canonical mode blocks until lines are typed, hanging the view.
+TTY_SAVED=$( { stty -g </dev/tty; } 2>/dev/null) || TTY_SAVED=""
+drain() { [ -n "$TTY_SAVED" ] && { dd if=/dev/tty of=/dev/null bs=1024 count=4; } 2>/dev/null; return 0; }
+restore() {
+  drain
+  [ -n "$TTY_SAVED" ] && { stty "$TTY_SAVED" </dev/tty; } 2>/dev/null
+  TTY_SAVED=""
+  printf '\e[?1007h\e[?7h\e[?25h\e[?1049l'
+}
 trap restore EXIT
 trap 'restore; exit 130' INT TERM
-printf '\e[?1049h\e[?25l\e[?7l\e[2J'
+trap '' TTIN TTOU
+if [ -n "$TTY_SAVED" ]; then { stty -echo -icanon min 0 time 0 </dev/tty; } 2>/dev/null || TTY_SAVED=""; fi
+printf '\e[?1049h\e[?25l\e[?7l\e[?1007l\e[2J'
 
 # Redraw on a pane resize instead of waiting out the interval. A render takes
 # seconds (docker stats, git), and a resize that lands during one used to be
@@ -1039,6 +1074,7 @@ while true; do
     printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi
   RESIZED=0
+  drain
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be

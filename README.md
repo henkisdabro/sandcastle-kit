@@ -18,7 +18,7 @@ gated and merged while you are away from the keyboard.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
-[Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [After a run](#-after-a-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
+[Website](https://henkisdabro.github.io/sandcastle-kit/) · [Who it is for](#-who-is-this-for) · [Quick start](#-quick-start) · [Why](#-why-sandcastle-kit) · [Install details](docs/INSTALL.md) · [Set up a project](#-set-up-a-project) · [Mark tickets ready](#-how-to-mark-a-ticket-ready) · [Trackers](#-trackers-github-or-ticket-files) · [Run](#-run) · [After a run](#-after-a-run) · [Herdr](#-works-best-in-herdr) · [Updating](#-updating) · [Safety](#-safety-model) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -346,8 +346,9 @@ gathers the facts, asks you the open decisions in batches, writes each decision 
 labels it. No issues yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 An issue that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
-A run skips it while #12 is open - even when #12 is in the same run, because the dependent
-would branch before #12 lands - and the next run picks it up. A blocker can also live outside
+A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
+soon as #12 has landed and closed (a chain of tickets drains in one run); a blocker outside the run
+holds it for a later one. A blocker can also live outside
 GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue
 and what holds each ticket back.
 
@@ -512,9 +513,10 @@ AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its earlier tickets. Tickets that others wait for start first; a ticket
-whose blocker is open, or whose existing branch changes a file another ready ticket's branch also
-changes, waits for the next run. Then come the image check, preflight, the hook check and the base
+time from the medians of its tickets in the last three runs. Tickets that others wait for start first; a ticket
+whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
+in the run waits for a later run, and so does one whose existing branch changes a file another ready
+ticket's branch also changes. Then come the image check, preflight, the hook check and the base
 gates; a red one stops the run before any agent starts.
 
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
@@ -541,7 +543,7 @@ with the run:
 
 **Landing.** Green branches land when every sandbox has finished, not as each passes: landing moves
 the base branch, which the run guards against sandboxes changing, and a ticket-file tracker commits
-there. So a dependant of a ticket in this run always waits for the next run. Branches from earlier
+there. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
@@ -815,7 +817,10 @@ compressor, a preview server, a notification), never a guard. Before any sandbox
 kept hook is checked in the image: executable on PATH, scripts present, Python compiles, top-level
 imports resolve. A failing hook stops the run; fix it in the project's Dockerfile. Hooks in the
 untracked `.claude/settings.local.json` never reach a sandbox, and the check warns about them. Git
-hooks run on agent commits inside the sandbox as usual. The Codex review does not run Claude Code
+hooks run on agent commits inside the sandbox as usual, so `sandcastle gates` and every run's base
+check also run the repo's `pre-commit` and `commit-msg` hooks there (`git hook run`, nothing committed,
+git 2.36 or newer): a hook the image cannot satisfy stops the run before any agent starts, and the
+fix is in the project's Dockerfile. The Codex review does not run Claude Code
 hooks.
 
 ### Hook tests
@@ -968,7 +973,8 @@ fix its cause or ask the user.
 `AGENTS.md` has the layout and conventions. This repository is public and used daily by its
 maintainer, so nothing personal, client-specific or secret may be committed: enable the guard with
 `git config core.hooksPath .githooks` (requires `gitleaks`; add your own denylist at
-`~/.config/sandcastle-kit/denylist`). CI scans every push for secrets.
+`~/.config/sandcastle-kit/denylist`, and in `allowlist` beside it the few lines you mean to
+publish anyway, such as an author credit). CI scans every push for secrets.
 
 ## 🙏 Credits and licence
 
@@ -979,3 +985,5 @@ are the place to start if you want to build your own workflow. If this kit helps
 the original.
 
 MIT - see [`LICENSE`](LICENSE). Sandcastle's licence is reproduced in [`NOTICE`](NOTICE).
+
+Built by [Henrik Söderlund](https://www.henriksoderlund.com/?utm_source=github&utm_medium=referral&utm_campaign=oss-sandcastle-kit&utm_content=readme-author-link).

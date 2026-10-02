@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://henkisdabro.github.io/sandcastle-kit/sitemap.xml

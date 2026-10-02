@@ -45,6 +45,11 @@ export const nextTurn = (level: number, turn: number, again: Rerun | undefined):
   return turn < level ? "run" : "cap";
 };
 
+/** The last turn's line when tickets could still run again: the ids' own command, and the bare one, as the freed tickets are in the queue anyway. */
+export const capLine = (level: number, ids: string[], list: string): string =>
+  `Autonomy level ${level}: ${level} turn(s) done, the cap; ${ids.length} ticket(s) can still run again - ${list}. ` +
+  `\`sandcastle run ${ids.join(" ")}\` runs them, or \`sandcastle run\` takes the whole queue.`;
+
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
   const all = [...again.conflicted, ...again.unblocked].map(ref).join(", ");
   const parts = [
