@@ -264,7 +264,7 @@ test("the keys the block binds name actions the manifest declares, and the link 
 
 test("the link handler's pattern matches the links the status view prints", () => {
   const pattern = new RegExp(JSON.parse(`"${/^pattern = "(.*)"$/m.exec(MANIFEST)![1]}"`));
-  assert.ok(pattern.test("file:///home/me/my%20repo/.sandcastle/logs/agent-issue-12-impl-12.log"));
-  assert.ok(!pattern.test("file:///home/me/repo/.sandcastle/logs/archive/agent-issue-12-impl-12.log"));
-  assert.ok(!pattern.test("file:///home/me/repo/src/main.ts"));
+  assert.ok(pattern.test("file:///home/user/my%20repo/.sandcastle/logs/agent-issue-12-impl-12.log"));
+  assert.ok(!pattern.test("file:///home/user/repo/.sandcastle/logs/archive/agent-issue-12-impl-12.log"));
+  assert.ok(!pattern.test("file:///home/user/repo/src/main.ts"));
 });
