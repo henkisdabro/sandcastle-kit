@@ -17,7 +17,8 @@ import { sh, USER_CONFIG } from "./sandbox.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
-export type Blocker = Ref & { state: "open" | "closed" | "unreadable" };
+// `closed-unmerged`: closed as not planned, so the work it stood for will never land.
+export type Blocker = Ref & { state: "open" | "closed" | "closed-unmerged" | "unreadable" };
 
 export const refLabel = (r: Ref) => (r.kind === "github" ? `#${r.id}` : r.id);
 
@@ -57,12 +58,13 @@ export const stripCode = (text: string): string => {
   return lines.join("\n").replace(/(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g, " ");
 };
 
-/** Every blocker named after a trigger phrase; a list ("#1, #2 and ENG-3") counts each. */
-export const parseRefs = (project: Project, text: string): Ref[] => {
+// `text` is read as given: parseRefs strips code first, blockerProblems also reads the raw body
+// to find what the stripping hid.
+const refsIn = (project: Project, text: string): Ref[] => {
   const token = tokens(project);
   const phrase = new RegExp(`${TRIGGER}((?:${token})(?:\\s*(?:,|and|&)\\s*(?:${token}))*)`, "gi");
   const seen = new Map<string, Ref>();
-  for (const m of stripCode(text).matchAll(phrase)) {
+  for (const m of text.matchAll(phrase)) {
     for (const t of m[1].match(new RegExp(token, "gi")) ?? []) {
       const ref: Ref = t.startsWith("#")
         ? { kind: "github", id: t.slice(1) }
@@ -74,6 +76,9 @@ export const parseRefs = (project: Project, text: string): Ref[] => {
   }
   return [...seen.values()];
 };
+
+/** Every blocker named after a trigger phrase; a list ("#1, #2 and ENG-3") counts each. */
+export const parseRefs = (project: Project, text: string): Ref[] => refsIn(project, stripCode(text));
 
 // Linear's key: the user-level credentials file, then the process
 // environment. Never the project's .sandcastle/.env: Sandcastle forwards every
@@ -118,11 +123,12 @@ const fileState = (project: Project, path: string): Blocker["state"] => {
 };
 
 // The issues API also answers for a pull request (`closed` once merged),
-// where `gh issue view` does not.
+// where `gh issue view` does not. An issue closed as not planned is not done: nobody did the work.
 const githubState = (id: string): Blocker["state"] => {
   try {
-    const out = execFileSync("gh", ["api", `repos/{owner}/{repo}/issues/${id}`, "--jq", ".state"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return out === "closed" ? "closed" : "open";
+    const out = execFileSync("gh", ["api", `repos/{owner}/{repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const [state, reason] = out.split(/\s+/);
+    return state !== "closed" ? "open" : reason === "not_planned" ? "closed-unmerged" : "closed";
   } catch {
     return "unreadable";
   }
@@ -152,6 +158,39 @@ export const blockerResolver = (project: Project, tracker: Tracker, known = new 
 };
 
 type Blocked = { id: string; body?: string };
+
+export type Why = "not-planned" | "held" | "unqueued";
+
+/** The words after "waits for #B" in the closing summary. */
+export const whyShort: Record<Why, string> = {
+  "not-planned": "closed as not planned",
+  held: "held for a human (needs-human)",
+  unqueued: "open but not queued",
+};
+
+/**
+ * Why an open blocker will not close by itself: closed as not planned, held for a person, or not
+ * in the queue. GitHub and ticket-file blockers only: Linear issues and task files have no queue.
+ * `queued`: ids the caller knows are in the queue; without it a ticket's own queue label decides.
+ * One `tracker.get` per distinct blocker; a ticket that cannot be read says nothing.
+ */
+export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<string>) => {
+  const seen = new Map<string, Why | undefined>();
+  return (b: Blocker): Why | undefined => {
+    if (b.state === "closed-unmerged") return "not-planned";
+    if (b.state !== "open" || !(b.kind === "ticket" || (b.kind === "github" && tracker.kind === "github")) || queued?.has(b.id)) return undefined;
+    const key = `${b.kind}:${b.id}`;
+    if (!seen.has(key)) {
+      try {
+        const t = tracker.get(b.id);
+        seen.set(key, t.held ? "held" : (queued ? true : t.status !== project.label) ? "unqueued" : undefined);
+      } catch {
+        seen.set(key, undefined);
+      }
+    }
+    return seen.get(key);
+  };
+};
 
 /** Every blocker a ticket names: in its body, and any its tracker declares. */
 export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] => {
@@ -212,7 +251,9 @@ export const commentBlockLine = (f: Awaited<ReturnType<typeof commentOnlyBlocks>
  * name (the line is ignored, so the ticket starts at once). Each line says what to change.
  */
 export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
-  const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
+  const queuedIds = new Set(queued.map((t) => t.id));
+  const resolve = blockerResolver(project, tracker, queuedIds);
+  const whyOf = blockerWhy(project, tracker, queuedIds);
   const lines: string[] = [];
   const waits = new Map<string, string[]>();
   for (const t of queued) {
@@ -220,8 +261,12 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     const refs = refsOf(project, tracker, t);
     waits.set(t.id, refs.filter((r) => r.kind === "ticket" || r.kind === "github").map((r) => r.id).filter((id) => queued.some((q) => q.id === id)));
     for (const b of await Promise.all(refs.map(resolve))) {
-      if (b.state !== "unreadable") continue;
       const name = refLabel(b);
+      const why = whyOf(b);
+      if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. Remove the line, or reopen ${name}.`);
+      else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human (needs-human) - it starts once ${name} is closed.`);
+      else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or remove the line.`);
+      if (b.state !== "unreadable") continue;
       lines.push(
         b.kind === "ticket"
           ? `${who} waits for ${name}, which does not exist - it will never start. Fix the "Blocked by" line, or remove it.`
@@ -229,6 +274,11 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
             ? `${who} waits for ${name}, which could not be read from Linear${linearKey() ? "" : " (no LINEAR_API_KEY in ~/.config/sandcastle-kit/.env)"} - a blocker that cannot be read counts as open, so it waits.`
             : `${who} waits for ${name}, which gh could not read (no such issue, or no access) - it counts as open, so it waits.`,
       );
+    }
+    // Stripped on purpose, so a run starts the ticket without waiting: say so, as the author thinks it waits.
+    const read = new Set(refsIn(project, stripCode(t.body ?? "")).map((r) => `${r.kind}:${r.id}`));
+    for (const r of refsIn(project, t.body ?? "")) {
+      if (!read.has(`${r.kind}:${r.id}`)) lines.push(`${who} mentions "Blocked by ${refLabel(r)}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
     }
     const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
     for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
