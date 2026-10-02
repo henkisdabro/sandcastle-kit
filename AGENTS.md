@@ -149,3 +149,17 @@ the latest release (`gh release view`) and keep it:
 - Each bullet starts with an emoji and a bold or short lead, then a dash and one line. Pick the
   handful of changes a user notices, and end Fixed and Upgrading with a link to the changelog's
   version anchor for the rest.
+
+## Agent skills
+
+### Issue tracker
+
+This repository's own work is tracked in GitHub Issues (`gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Matt Pocock's five default role names, unchanged (the kit reads this file too). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the root, created when a term or decision settles. See `docs/agents/domain.md`.
