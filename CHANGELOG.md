@@ -36,6 +36,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `ISSUES=` still works (with `TICKETS` winning when both are set). Branch and log names
   (`agent/issue-N`, `agent-issue-*.log`), run-record fields and `{{ISSUE_NUMBER}}` are unchanged,
   so scripts that read them keep working.
+- **Inside Herdr, sandbox panes are now off by default.** A run is one agent on its status
+  view's pane: working, then blocked or idle at the end, beside the workspace's progress and the
+  tab bar entry. `herdr: { panes: "all" }` in the config, or `SANDBOX_PANES=all` for one run,
+  brings back a pane per sandbox.
+- **The agent skill now starts a run detached** (`sandcastle run --detach`) and waits for it with
+  `sandcastle wait`, so the run outlives the agent's session and no longer opens beside it. A run
+  typed in your own terminal is unchanged. A detached run refuses autonomy level 1, which asks
+  its question on the terminal.
 - **A ticket that conflicts or goes red at landing is sent back once, in the same run.** Its
   pipeline merges the base in, resolves, gates and gets a narrow review, as a re-run does, so
   the run spends that pass now rather than on the next run. A second conflict or red holds it for
@@ -115,6 +123,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   to change". The implement prompt asks the agent to check its commit landed.
 - A requeued ticket withdrawn before its second attempt is recorded as withdrawn, not green; a
   second conflict keeps its files in the summary and names both attempts' tickets.
+- The file hold re-reads the files of each ticket in flight, so a lockfile a branch gains during
+  the run holds a ticket that declares it. A stopped run leaves held tickets naming their real
+  holder, and a broad `Touches:` line reads file sizes in one `git ls-tree`, not one call per file.
+- A run started by an agent no longer adopts the agent's tab and splits its panes beside it: a
+  run adopts the tab it is alone in only when started from a terminal.
 - The live status view no longer echoes typed keys or the mouse wheel's escapes onto its frame,
   or leaves them queued for the shell. Ctrl-C ends it at once.
 - Later autonomy turns keep every waiting ticket, so a ticket freed by a landing in that turn is
@@ -145,6 +158,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - The pre-commit hook reads an **allowlist** beside your denylist
   (`~/.config/sandcastle-kit/allowlist`): a staged line matching it passes, so an author credit
   you mean to publish can carry a name the denylist blocks everywhere else.
+- `sandcastle run --detach` starts a run as its own process, with its output in
+  `.sandcastle/logs/run-output.log` and its last lines under the status view; `sandcastle wait
+  [seconds]` ends with the run and prints its summary, and `sandcastle stop` stops it as Ctrl-C
+  does.
+- A red merged base at the end of a run (`RED TOGETHER`) keeps its gates' output in
+  `.sandcastle/logs/verify-gates.log`, as red base gates keep theirs in `base-gates.log`.
 - **The Herdr plugin** (`herdr/`, set up by `sandcastle herdr configure`): the status view over
   any tab and the last run's report as a popup (`prefix+shift+s`, `prefix+shift+e`), Ctrl-click a
   ticket in the status view to read its log in a popup, "sandboxes first" in the Agents panel

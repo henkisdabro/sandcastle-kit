@@ -55,5 +55,19 @@ was set up with.
       in the project: if a gate's command or a test it runs reads one, it now sees nothing. Propose
       giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
       needs), and run `sandcastle gates` after the user agrees.
+   10. **Chains, overlaps and hooks.** Run `sandcastle queue --lint` (read-only, no model calls).
+       - If it reports a `Blocked by` chain deeper than the project's autonomy level allows in
+         one run (`autonomy` in the config; off when unset), suggest `autonomy: "drain"`, which
+         takes turns until the queue is drained and names why it stops. It spends more per
+         `sandcastle run`, so set it only after the user agrees.
+       - If queued tickets have no `Touches:` line, say that a run now holds a ticket back only for
+         a file git cannot merge that another ticket in flight changes, read from its branch and
+         its `Touches:` line, so a new ticket without the line is held only once its branch has
+         such a file. Offer to add the lines (format in audit.md) to the queued tickets the user
+         picks, as an edit to each ticket body.
+       - Step 3.1's `sandcastle gates` now also runs the repo's `pre-commit` and `commit-msg` hooks in
+         the sandbox. If it reports a refused hook, the tool the hook needs is missing from the
+         image: add it to `.sandcastle/Dockerfile` with the user's agreement, then
+         `sandcastle build` and `sandcastle gates` again.
 4. **Commit** any project file that changed, by the repo's own rules, and report: kit version
    before and after, what changed for this project, and what the user decided.
