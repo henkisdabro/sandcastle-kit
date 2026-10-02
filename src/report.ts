@@ -75,7 +75,7 @@ const LEFT = ["blocked", "skipped"];
 const redTogether = (t: TicketRecord) => t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "");
 // Where a ticket's part in a run ends. Any other state at the end - a phase, or
 // "ready" outside a dry run - is a ticket the run stopped mid-work.
-const SETTLED = ["merged", "nochange", "uncommitted", "withdrawn", "stopped", "held", "shipped", "queued", "requeued", ...NEEDS_FIXING, ...LEFT];
+const SETTLED = ["merged", "nochange", "uncommitted", "withdrawn", "stopped", "held", "queued", ...NEEDS_FIXING, ...LEFT];
 
 // A run that started agents owes a summary (due); an exit before it is printed
 // (Ctrl-C, a crash) says where to find one instead of ending silently.
@@ -239,7 +239,8 @@ export const render = (f: Facts, plain = false): string => {
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
   // it runs again next time, and nothing here asks a person to act on it.
-  const requeued = ids(["requeued"]);
+  // A fact about the attempt, not a ticket state: the record says "queued" and carries the line in `requeued`.
+  const requeued = ids(["queued"]).filter((id) => !!f.tickets[id].requeued);
   // The gates on the base were red before any agent ran: nothing was attempted,
   // and the queue is untouched. Said first, as nothing below it is news.
   const baseRed = f.stage === "base gates" && !!f.finished && typeof f.exitCode === "number" && f.exitCode !== 0 &&
@@ -249,7 +250,7 @@ export const render = (f: Facts, plain = false): string => {
   const early = !baseRed && !f.stopped && !f.live &&
     (!!f.killed || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
   const cut = early ? Object.keys(f.tickets).filter((id) => !SETTLED.includes(f.tickets[id].state ?? "") && !(f.dryRun && f.tickets[id].state === "ready")) : [];
-  const unstarted = early ? ids(["queued"]) : [];
+  const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
   // Finished, but the commit was refused: the work sits in a kept worktree.
@@ -401,7 +402,7 @@ export const render = (f: Facts, plain = false): string => {
     `▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`,
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
-    ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].note ? ` - ${f.tickets[id].note}` : ""} - still queued for the next run`),
+    ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].requeued ? ` - ${f.tickets[id].requeued}` : ""} - still queued for the next run`),
     ...(cut.length ? [`Cut short when the run ended: ${cut.map((id) => `${refOf(id)} (${f.tickets[id].state})`).join(", ")} - still queued`] : []),
     ...(unstarted.length ? [`Not started (the run ended early): ${list(unstarted)}`] : []),
     ...(f.blockCheck ? [`Could not re-read blockers: ${f.blockCheck}`] : []),
