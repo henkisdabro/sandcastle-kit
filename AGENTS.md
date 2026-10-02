@@ -39,6 +39,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `src/herdr.ts` | Herdr helpers and the per-sandbox view (panes, agent-state reports) |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files (Matt Pocock's "Local Markdown" layout). Which one a project uses: config, then `docs/agents/`, then GitHub |
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore |
+| `src/touches.ts` | The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeable` (lockfiles, `generated` paths, minified blobs). A scheduling hint and warning source, never a guard |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
