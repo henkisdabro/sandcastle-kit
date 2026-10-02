@@ -13,7 +13,7 @@ import { test } from "node:test";
 
 const KIT = join(import.meta.dirname, "..");
 
-const setup = (denylist: string) => {
+const setup = (denylist: string, allowlist?: string) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-hook-"));
   const bin = join(root, ".bin");
   mkdirSync(bin);
@@ -25,6 +25,7 @@ const setup = (denylist: string) => {
   const config = join(root, ".config");
   mkdirSync(join(config, "sandcastle-kit"), { recursive: true });
   writeFileSync(join(config, "sandcastle-kit/denylist"), denylist);
+  if (allowlist !== undefined) writeFileSync(join(config, "sandcastle-kit/allowlist"), allowlist);
   const env = { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, XDG_CONFIG_HOME: config };
   const git = (...a: string[]) => spawnSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...a], { cwd: root, env, encoding: "utf8" });
   git("init", "-q", "-b", "main");
@@ -43,6 +44,16 @@ test("comments and blank lines in the denylist are skipped; a listed name still 
   const r = commit("SecretClientName in a comment");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /staged lines match your personal denylist/);
+});
+
+// A maintainer's own name is on their denylist, yet an author credit they mean to publish
+// carries it. The allowlist lets that one line through, not the name everywhere.
+test("a line the allowlist matches passes; the name anywhere else still blocks", () => {
+  const { commit } = setup("jane doe\njanedoe\\.example\n", "# my author credit\n\nutm_campaign=oss-example\n");
+  assert.equal(commit('Built by <a href="https://janedoe.example/?utm_campaign=oss-example">Jane Doe</a>').status, 0);
+  const r = commit("thanks to Jane Doe for the fix");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /Jane Doe/);
 });
 
 test("a denylist of only comments blocks nothing", () => {

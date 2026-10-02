@@ -67,6 +67,7 @@ bug no gate would fail"), never as an incident from a named project.
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
+| `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also opens from disk), no build step. `js/status.js` ports the status view's grid to play a made-up run; `js/sand.js` draws the castle, dunes and grains. `.github/workflows/pages.yml` deploys it |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
 `@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in

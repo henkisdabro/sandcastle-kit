@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sandcastle-kit - unattended Claude Code agents for your backlog</title>
+  <meta name="description" content="Queue your GitHub issues, start a run, walk away. sandcastle-kit runs Claude Code agents in Docker sandboxes: implemented, reviewed, gated by your own tests and merged locally. Open source.">
+  <link rel="canonical" href="https://henkisdabro.github.io/sandcastle-kit/">
+  <meta name="theme-color" content="#0e1116">
+  <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="preload" href="fonts/monaspace-neon.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/site.css">
+  <script>document.documentElement.classList.add('js')</script>
+  <script>
+    // Google Analytics on the published site only: a local preview or the
+    // page opened from disk would count as visits.
+    if (location.hostname === 'henkisdabro.github.io') {
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function () { dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', 'G-DW7VRVNPHY');
+      const tag = document.createElement('script');
+      tag.async = true;
+      tag.src = 'https://www.googletagmanager.com/gtag/js?id=G-DW7VRVNPHY';
+      document.head.append(tag);
+    }
+  </script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="sandcastle-kit">
+  <meta property="og:title" content="sandcastle-kit - turn your ticket backlog into a software factory">
+  <meta property="og:description" content="Unattended Claude Code agents burn down your GitHub issues in Docker sandboxes - implemented, reviewed, gated and merged while you are away from the keyboard.">
+  <meta property="og:url" content="https://henkisdabro.github.io/sandcastle-kit/">
+  <meta property="og:image" content="https://henkisdabro.github.io/sandcastle-kit/img/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The sandcastle-kit castle logo above a terminal status view of an overnight run">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
+        "name": "sandcastle-kit",
+        "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
+        "url": "https://henkisdabro.github.io/sandcastle-kit/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux",
+        "license": "https://opensource.org/licenses/MIT",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "codeRepository": "https://github.com/henkisdabro/sandcastle-kit",
+        "author": { "@id": "https://www.henriksoderlund.com/#person" }
+      },
+      {
+        "@type": "Person", "@id": "https://www.henriksoderlund.com/#person", "name": "Henrik Söderlund", "url": "https://www.henriksoderlund.com/",
+        "sameAs": ["https://github.com/henkisdabro"]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://henkisdabro.github.io/sandcastle-kit/#site",
+        "name": "sandcastle-kit",
+        "url": "https://henkisdabro.github.io/sandcastle-kit/",
+        "inLanguage": "en-GB"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and USAGE_CHECK=1 stops it starting tickets before then." } },
+          { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label changes one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
+          { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed." } },
+          { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake until it ends (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. With autonomy set, one run re-runs its conflicted and newly unblocked tickets by itself." } },
+          { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
+          { "@type": "Question", "name": "Linear, Jira, Windows?", "acceptedAnswer": { "@type": "Answer", "text": "Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux." } }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <canvas class="sand" aria-hidden="true"></canvas>
+
+  <header class="top">
+    <a class="top-logo" href="./" aria-label="sandcastle-kit home"><svg class="top-castle" viewBox="0 1 5 5" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e8d6b4" d="M0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4z"/><path fill="#cdb894" d="M0 2h5v2H0z"/><path fill="#705c42" d="M0 4h5v1H0zM0 5h2v1H0zM3 5h2v1H3z"/></svg>sandcastle-kit</a>
+    <nav aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#safety">Safety</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="mark">
+        <button type="button" class="castle-btn" aria-label="Knock the sandcastle down and watch it build again">
+        <svg class="castle" viewBox="0 1 5 5" shape-rendering="crispEdges" aria-hidden="true">
+          <g class="castle-px">
+            <rect data-r="1" x="0" y="1" width="1" height="1" fill="#e8d6b4"/>
+            <rect data-r="1" x="2" y="1" width="1" height="1" fill="#e8d6b4"/>
+            <rect data-r="1" x="4" y="1" width="1" height="1" fill="#e8d6b4"/>
+            <rect data-r="2" x="0" y="2" width="5" height="2" fill="#cdb894"/>
+            <rect data-r="4" x="0" y="4" width="5" height="1" fill="#705c42"/>
+            <rect data-r="5" x="0" y="5" width="2" height="1" fill="#705c42"/>
+            <rect data-r="5" x="3" y="5" width="2" height="1" fill="#705c42"/>
+          </g>
+        </svg>
+        </button>
+        <p class="wordmark" aria-hidden="true"><span class="wm-sand">sandcastle</span><span class="wm-kit">-kit</span></p>
+        <canvas class="castle-sand" aria-hidden="true"></canvas>
+      </div>
+
+      <h1 id="hero-title">Turn your ticket backlog into a software factory.</h1>
+      <p class="lede">sandcastle-kit runs Claude Code agents unattended, one Docker sandbox per ticket. A second agent reviews each branch against its ticket, and only a branch that passes your own lint, tests and build is merged, into your local branch. Nothing is pushed until you push it.</p>
+
+      <div class="cta">
+        <div class="cmd" data-copy>
+          <code><span class="c-mute">$</span> git clone https://github.com/henkisdabro/sandcastle-kit.git ~/sandcastle-kit &amp;&amp; cd ~/sandcastle-kit &amp;&amp; pnpm install &amp;&amp; ./bin/sandcastle setup</code>
+          <button type="button" class="copy">Copy</button>
+        </div>
+        <p class="cta-links">
+          <a href="#install">Start with a dry run</a>
+          <a href="https://github.com/henkisdabro/sandcastle-kit">Read the source on GitHub</a>
+        </p>
+      </div>
+      <p class="req">macOS or Linux, Docker (or OrbStack, or Podman), Node 22+, and a Claude subscription or API key.</p>
+    </section>
+
+    <section class="run" aria-labelledby="run-title">
+      <h2 id="run-title" class="sr-only">A run, as the status view shows it</h2>
+      <canvas class="dunes" aria-hidden="true"></canvas>
+      <pre class="status" aria-hidden="true"></pre>
+      <p class="run-caption">An example night, played back as <code>sandcastle status</code> shows it: thirteen tickets, each landing in your local branch as it goes green - nine merged, two left for you, two waiting on those.</p>
+      <ul class="sr-only">
+        <li>Ticket 41, rate limiting: implemented and reviewed, failed its tests, repaired, reviewed again, merged.</li>
+        <li>Tickets 42, 43, 45, 48, 49, 52 and 53: implemented, reviewed, gates green, each merged as it went green while the others worked.</li>
+        <li>Ticket 44, a date library upgrade: still failing three tests after two repairs; left for you.</li>
+        <li>Ticket 46: gates green, but it changes CI config, so it is held for you to merge by hand.</li>
+        <li>Ticket 47: waited for ticket 41; once that landed, a second turn implemented, reviewed and merged it.</li>
+        <li>Tickets 50 and 51 wait for 44 and 46 to close.</li>
+        <li>By morning: nine branches merged into the local main branch, none of it pushed.</li>
+      </ul>
+    </section>
+
+    <section class="who" aria-labelledby="who-title">
+      <h2 id="who-title">You already run Claude Code all day. It still needs you in the loop.</h2>
+      <p>Someone has to pick the next ticket, start the next session, carry context across and check what came back. For the hard problems that someone should be you. For the well-specified tickets, sandcastle-kit does that part: write them down, mark them ready, start a run, and read what happened in the morning.</p>
+
+      <div class="fit">
+        <div class="fit-col">
+          <h3>It fits if</h3>
+          <ul>
+            <li><span class="c-head" aria-hidden="true">+</span> your work lives in GitHub Issues or Markdown ticket files in the repo;</li>
+            <li><span class="c-head" aria-hidden="true">+</span> most tickets are small and closed - a bug, a small feature, a refactor, tests, a dependency bump;</li>
+            <li><span class="c-head" aria-hidden="true">+</span> the repo has gates a machine can run: lint, typecheck, tests, a build;</li>
+            <li><span class="c-head" aria-hidden="true">+</span> you would rather review a report than watch a terminal.</li>
+          </ul>
+        </div>
+        <div class="fit-col">
+          <h3>Not yet if</h3>
+          <ul>
+            <li><span class="c-gry" aria-hidden="true">-</span> your tickets say "make it faster" - an agent with no chat context needs a closed spec;</li>
+            <li><span class="c-gry" aria-hidden="true">-</span> nothing in the repo tests anything, so nothing stands between a guess and your main branch;</li>
+            <li><span class="c-gry" aria-hidden="true">-</span> you want to pair with an agent live - use Claude Code directly for that;</li>
+            <li><span class="c-gry" aria-hidden="true">-</span> your tickets live only in Linear or Jira. GitHub Issues and ticket files are the queues today.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="night" aria-labelledby="night-title">
+      <h2 id="night-title">One night, one run</h2>
+      <ol class="log">
+        <li><time>22:41</time><div><code>sandcastle run</code>. It checks tokens, images and hooks, then runs every gate on <code>main</code> before an agent starts. Red there, and the run stops before it spends anything.</div></li>
+        <li><time>22:43</time><div>Six sandboxes start, one per ticket, each on its own branch in its own container. The rest wait their turn; <span class="c-blu">#47</span> waits for <span class="c-blu">#41</span>.</div></li>
+        <li><time>22:53</time><div><span class="c-grn">#43</span> goes green, and the landing worker merges it into your local <code>main</code> straight away, gating the merge, while the other sandboxes keep working.</div></li>
+        <li><time>22:55</time><div><span class="c-hot">#46</span> is green too, but it changes CI config, so it is held for you to merge by hand.</div></li>
+        <li><time>22:56</time><div><span class="c-ylw">#41</span> fails its tests. A repair pass gets the gate's own output on the same warm sandbox. Green again means a second review before it lands.</div></li>
+        <li><time>23:18</time><div>The last branch lands: nine merged into your local <code>main</code>, two left for you. Nothing is pushed.</div></li>
+        <li><time>07:30</time><div>You read the report: what merged, what is red and why, what needs you. Push what you like; <code>sandcastle requeue 44 --note "..."</code> sends one back with a note.</div></li>
+      </ol>
+      <p class="after">With <code>autonomy</code> set, the run takes another turn by itself: <span class="c-blu">#47</span>'s blocker has landed, so it starts, and lands too. <span class="c-hot">#44</span> waits for you; requeued with a note, it builds on its branch instead of starting over.</p>
+    </section>
+
+    <section class="how" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">How it works</h2>
+      <ol class="steps">
+        <li>
+          <h3>Install once</h3>
+          <p><code>./bin/sandcastle setup</code> puts <code>sandcastle</code> on your PATH, installs the agent skill for Claude Code, Codex and OpenCode, walks you through your tokens and ends with a health check.</p>
+        </li>
+        <li>
+          <h3>Point it at a project</h3>
+          <p><code>sandcastle init</code> reads your stack and fills in the gate commands for you to check against CI. <code>sandcastle build</code> makes the project's image.</p>
+        </li>
+        <li>
+          <h3>Queue tickets</h3>
+          <p>Label a GitHub issue <code>ready-for-agent</code>, or give a ticket file that status. Ask your agent for <code>/sandcastle queue</code> to tighten the vague ones first.</p>
+        </li>
+        <li>
+          <h3>Run</h3>
+          <p><code>sandcastle run</code>, or <code>DRY_RUN=1 sandcastle run</code> the first time: implement, review and gate, but never merge or close. Watch it with <code>sandcastle status</code>.</p>
+        </li>
+        <li>
+          <h3>Land and push</h3>
+          <p><code>sandcastle report</code> prints the summary again. <code>land</code> merges a branch you fixed, <code>requeue</code> sends a ticket back. Then you push.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="safety" id="safety" aria-labelledby="safety-title">
+      <h2 id="safety-title">Safe to leave alone</h2>
+      <p class="section-lede">Agents run with permission prompts off, inside Docker. The container is the boundary, and the kit narrows what can cross it.</p>
+      <div class="bounds">
+        <div class="bound">
+          <h3>Into the sandbox</h3>
+          <ul>
+            <li><b>A token that cannot push.</b> Only a fine-grained GitHub token for issues goes in, and <code>sandcastle doctor --verify</code> checks it cannot push. An empty value is refused, so a host API key cannot leak in.</li>
+            <li><b>Tickets grant no permissions.</b> A ticket that asks an agent to touch <code>.git/</code>, credentials or a push is not the work, and the guards below hold if an agent tries anyway.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>Before a merge</h3>
+          <ul>
+            <li><b>Review, then your gates.</b> A second agent reviews every branch against its ticket and fixes what it finds. Then the orchestrator, never the agent, runs your lint, tests and build. Only a green branch merges, and the merged branch is gated again.</li>
+            <li><b>Risky changes wait.</b> A green branch that touches hooks, CI, agent settings, package-manager config or install scripts is labelled <code>needs-human</code> and left for you.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>On your machine</h3>
+          <ul>
+            <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it only labels, comments on and closes issues.</li>
+            <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>info/</code> or hooks, the run stops before your machine runs another git command there.</li>
+            <li><b>Host hooks stay off.</b> During a run your own git calls ignore hooks, so a branch that adds one cannot run it on your machine as it lands.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="install" id="install" aria-labelledby="install-title">
+      <h2 id="install-title">Install</h2>
+      <ol class="install-steps">
+        <li>
+          <p>Install the kit, once per machine:</p>
+          <div class="cmd" data-copy><code><span class="c-mute">$</span> git clone https://github.com/henkisdabro/sandcastle-kit.git ~/sandcastle-kit &amp;&amp; cd ~/sandcastle-kit &amp;&amp; pnpm install &amp;&amp; ./bin/sandcastle setup</code><button type="button" class="copy">Copy</button></div>
+        </li>
+        <li>
+          <p>Point it at a project:</p>
+          <div class="cmd" data-copy><code><span class="c-mute">$</span> cd ~/code/your-project &amp;&amp; sandcastle init &amp;&amp; sandcastle build</code><button type="button" class="copy">Copy</button></div>
+        </li>
+        <li>
+          <p>Mark a couple of tickets <code>ready-for-agent</code> and try a dry run. It implements, reviews and gates them, but never merges or closes a ticket:</p>
+          <div class="cmd" data-copy><code><span class="c-mute">$</span> DRY_RUN=1 sandcastle run</code><button type="button" class="copy">Copy</button></div>
+        </li>
+      </ol>
+      <p class="req">Needs macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (skippable with ticket files) and a container runtime. <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md">Full requirements</a>.</p>
+    </section>
+
+    <section class="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">Questions</h2>
+      <details>
+        <summary>What does it cost to run?</summary>
+        <p>The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and <code>USAGE_CHECK=1</code> stops it starting tickets before then.</p>
+      </details>
+      <details>
+        <summary>Which models does it use?</summary>
+        <p>By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A <code>model:</code> or <code>effort:</code> label changes one ticket, and <code>CROSS_REVIEW=1</code> adds a third review by an OpenAI model through Codex.</p>
+      </details>
+      <details>
+        <summary>Does it push to GitHub?</summary>
+        <p>No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed.</p>
+      </details>
+      <details>
+        <summary>Can a run go all night?</summary>
+        <p>Yes. A run keeps the machine awake until it ends (<code>caffeinate</code> on macOS, <code>systemd-inhibit</code> on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. With <code>autonomy</code> set, one run re-runs its conflicted and newly unblocked tickets by itself.</p>
+      </details>
+      <details>
+        <summary>Do I need Matt Pocock's skills?</summary>
+        <p>No, but they help. His <code>/to-tickets</code> and <code>/triage</code> are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records.</p>
+      </details>
+      <details>
+        <summary>Linear, Jira, Windows?</summary>
+        <p>Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux.</p>
+      </details>
+    </section>
+
+    <section class="credits" aria-labelledby="credits-title">
+      <h2 id="credits-title">Built on Sandcastle</h2>
+      <p><a href="https://github.com/mattpocock/sandcastle">Sandcastle</a> by <a href="https://github.com/mattpocock">Matt Pocock</a> does the sandboxing, worktrees and agent orchestration underneath. This kit is one opinionated way to put it to work. If it helps you, go and star the original.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="foot-credit">Built by <a href="https://www.henriksoderlund.com/?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=footer-author-link" rel="author">Henrik Söderlund</a></p>
+    <p><a href="https://www.henriksoderlund.com/expertise?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=more-work-link#showcase-projects">More AI and automation work →</a></p>
+    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.3.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
+  </footer>
+
+  <script src="js/status.js" defer></script>
+  <script src="js/sand.js" defer></script>
+  <script src="js/main.js" defer></script>
+</body>
+</html>
