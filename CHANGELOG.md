@@ -28,6 +28,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A sandbox's Herdr pane closes once the run has stopped**, instead of staying open as if busy.
 - **A `.git` change found while a landing waited for its own check no longer lets that ticket
   land.** The landing worker checks for a safety stop again once its check returns.
+- **`sandcastle status 0` fills the terminal's width** like the live view, instead of drawing 80
+  columns in any pane. Without a terminal it still uses `COLUMNS`, or 80.
 
 ## [0.4.2] - 2026-10-02
 

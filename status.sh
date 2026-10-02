@@ -1120,7 +1120,20 @@ build_header() {
   HDR="$BUF"; HDR_N=$BUF_N
 }
 
-if [ "$INTERVAL" = "0" ]; then load_queue; render; exit 0; fi
+# The pane's size from its terminal; without one (a test, an agent's tool), the
+# size given. render asks tput from inside $(...), which cannot see the
+# terminal and falls back to 80 columns - the snapshot was 80 wide in any pane.
+# A pty that reports 0 0 counts as no terminal.
+tty_size() {
+  local size
+  if size=$( { stty size </dev/tty; } 2>/dev/null) && [[ "$size" =~ ^[1-9][0-9]*\ [1-9][0-9]*$ ]]; then
+    TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"
+  fi
+  export TERM_ROWS TERM_COLS
+}
+
+# A size given (the tests, the frame checks) wins over the terminal's.
+if [ "$INTERVAL" = "0" ]; then [ -n "${TERM_COLS:-}" ] || tty_size; load_queue; render; exit 0; fi
 
 # Alternate screen + hidden cursor, restored on exit. INT and TERM must exit
 # explicitly: a handler that only restores the screen returns into the loop,
@@ -1161,9 +1174,7 @@ SLEEP_PID=""; RESIZED=0; frame=""
 trap 'RESIZED=1; [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
 
 while true; do
-  # The pane's size from its terminal; without one (a test), the size given.
-  if size=$( { stty size </dev/tty; } 2>/dev/null) && [ -n "$size" ]; then TERM_ROWS="${size%% *}"; TERM_COLS="${size##* }"; fi
-  export TERM_ROWS TERM_COLS
+  tty_size
   if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "$TERM_ROWS" =~ ^[0-9]+$ ]]; then
     printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi
