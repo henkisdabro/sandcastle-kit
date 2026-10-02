@@ -1060,7 +1060,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
   };
   const pipelines = queue.run(workers, async (issue) => {
     // A stopped run drains what is left without starting it; those tickets read as skipped.
-    if (limitHit !== undefined || usageHit || tampered) return;
+    if (limitHit !== undefined || usageHit || tampered || landing.stop) return;
     const stop = await usageStop(env);
     if (stop) {
       usageHit ??= stop;
@@ -1202,6 +1202,8 @@ export const burndown = async (project: Project): Promise<boolean> => {
       land(n.issue, "held", "handed back - for a human");
     }
   }
+  // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
+  if (host.failed) await stopLanding(host.failed);
   for (const n of merged) view.landed(n, true, closeFailed.includes(n) ? "merged, not closed" : "merged");
   for (const n of closedEarlier) view.landed(n, true, "closed");
   for (const c of conflicted) view.landed(c.issue, false, "merge conflict");

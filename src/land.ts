@@ -88,6 +88,9 @@ export const landInSandbox = async (
   gate?: (box: Box) => Promise<GateRun>,
   expected?: Fingerprint,
 ): Promise<LandResult> => {
+  // A run's base must still be the one it expects: a person's commit made while this waited for a
+  // sandbox slot is not merged over, and taken as expected, by the fresh fingerprint below.
+  if (expected) assertGitUnchanged(project, expected, `before landing ${t.branch} in a sandbox`);
   // Before any container starts: it runs with the shared .git mounted.
   const before = gitFingerprint(project);
   const baseTip = sh("git", ["rev-parse", project.baseBranch], project.root);

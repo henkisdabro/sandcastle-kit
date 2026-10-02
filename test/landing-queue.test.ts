@@ -393,3 +393,41 @@ test("the pool cap leaves a slot for landing when CONCURRENCY equals the pool li
   // A dry run lands nothing, so it keeps every slot.
   assert.equal(pipelineWorkers(6, 20, 6, false), 6);
 });
+
+test("a .git change found by the writer's own check stops landing, and no host git runs after it", async () => {
+  const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
+  const marker = join(TMP, `fsmonitor-ran-${n++}`);
+  const h = harness(root);
+  // After the worker's check and before the merge: a sandbox still running plants a command
+  // that the host's next `git status` would run.
+  h.ctx.withdrawal = () => {
+    git(root, "config", "core.fsmonitor", `touch ${marker}`);
+    return undefined;
+  };
+  h.landing.push(outcome(root, "1"));
+  h.landing.push(outcome(root, "2"));
+  h.landing.close();
+  await h.landing.run();
+  assert.equal(existsSync(marker), false, "a host git call ran the planted command");
+  assert.match(String(h.landing.stop), /STOPPED before writing to the base branch: .*config changed while sandboxes ran/);
+  assert.deepEqual(h.stopped, ["1", "2"]);
+  assert.deepEqual(h.settled, []);
+});
+
+test("a hand commit made after the worker's check is not merged over, even on the last ticket", async () => {
+  const root = makeRepo({ 1: { "a.txt": "a\n" } });
+  const h = harness(root);
+  // As while the landing waits for a sandbox slot: the branch no longer holds the base, so its
+  // merge is made in a sandbox, which must not take the moved base as the one the run expects.
+  h.ctx.withdrawal = () => {
+    git(root, "commit", "-q", "--allow-empty", "-m", "by hand");
+    return undefined;
+  };
+  h.landing.push(outcome(root, "1"));
+  h.landing.close();
+  await h.landing.run();
+  assert.match(String(h.landing.stop), /STOPPED before landing agent\/issue-1 in a sandbox: main moved/);
+  assert.deepEqual(h.stopped, ["1"]);
+  assert.deepEqual(mergeOrder(root), []);
+  assert.equal(git(root, "log", "-1", "--format=%s", "main"), "by hand");
+});

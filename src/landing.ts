@@ -104,6 +104,11 @@ export type HostGit = {
   write<T>(fn: () => T): Promise<T>;
   /** The check a pipeline makes once its sandbox is closed, and the worker before each landing. */
   check(when: string): Promise<void>;
+  /**
+   * The `LandingStop` a refused `write` threw, kept: a caller that reads a failed write as a
+   * failed close or branch delete still must not land, or run git on the host, after it.
+   */
+  readonly failed: LandingStop | undefined;
 };
 
 export const createHostGit = (project: Project, expected: Fingerprint): HostGit => {
@@ -114,13 +119,23 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
     return done;
   };
   const check = (when: string) => assertGitUnchanged(project, expected, when);
+  let failed: LandingStop | undefined;
   return {
     expected,
     exclusive,
     check: (when) => exclusive(() => check(when)),
+    get failed() {
+      return failed;
+    },
     write: (fn) =>
       exclusive(() => {
-        check("before writing to the base branch");
+        try {
+          check("before writing to the base branch");
+        } catch (error) {
+          if (!(error instanceof OperatorError)) throw error;
+          failed ??= new LandingStop(error.message, { cause: error });
+          throw failed;
+        }
         try {
           return fn();
         } finally {
@@ -226,6 +241,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       return { kind: "closed-earlier" };
     }
   } catch (error) {
+    if (error instanceof LandingStop) throw error;
     land(o.issue, "not landed", errorLine(error));
     return { kind: "not-landed", reason: errorLine(error) };
   }
@@ -297,6 +313,8 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       // The commit the gates passed on, not whatever the branch names now.
       await host.write(() => mergeBranch(root, o.branch, o.head!, ref(o.issue), project.land));
     } catch (error) {
+      // The write was refused before it ran: nothing to abort, and no git may run on the host now.
+      if (error instanceof LandingStop) throw error;
       try {
         abortLanding(root, project.land);
       } catch {
@@ -445,6 +463,8 @@ export const createLanding = (
           return on.stopped(o, error);
         }
         on.settled(o, landed);
+        // Refused after its merge (the close, the branch delete): it landed, and nothing after it does.
+        stop ??= ctx.host.failed;
       }),
   };
 };
