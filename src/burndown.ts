@@ -137,6 +137,26 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
     return t;
   });
 
+/** The tickets a turn runs plus the rest of the queue: a named ticket not queued (hand-picked) stays, as it was. */
+export const wholeQueue = (tracker: Tracker, named: Issue[]): Issue[] => [...named, ...tracker.queued(false).filter((t) => !named.some((n) => n.id === t.id))];
+
+/**
+ * Every queued ticket with an open blocker, whether or not this turn runs it. A later autonomy
+ * turn names its tickets in `ISSUES`, and a `waiting` built from those alone loses every
+ * dependant outside the list - so the closing summary never says they were freed.
+ */
+export const waitingTickets = async (project: Project, tracker: Tracker, whole: Issue[]): Promise<{ issue: string; on: string[] }[]> => {
+  const resolve = blockerResolver(project, tracker, new Set(whole.map((i) => i.id)));
+  return (
+    await Promise.all(
+      whole.map(async (i) => {
+        const on = await openBlockers(project, tracker, resolve, i);
+        return on.length ? [{ issue: i.id, on: on.map(refLabel) }] : [];
+      }),
+    )
+  ).flat();
+};
+
 /** Tickets to hold for the next run: each shares a file with an earlier ticket in `ids` that does start. */
 export const fileOverlaps = (root: string, base: string, ids: string[]): { id: string; with: string; files: string[] }[] => {
   // Three dots: the branch's own changes since it forked or last merged the
@@ -204,15 +224,9 @@ export const burndown = async (project: Project): Promise<boolean> => {
   // branch without it. The next run picks it up. Blockers are GitHub issues
   // and, if the project configures them, Linear issues and task files
   // (blockers.ts); one that cannot be read counts as open.
-  const resolve = blockerResolver(project, tracker, new Set(queued.map((i) => i.id)));
-  const waiting = (
-    await Promise.all(
-      queued.map(async (i) => {
-        const on = await openBlockers(project, tracker, resolve, i);
-        return on.length ? [{ issue: i.id, on: on.map(refLabel) }] : [];
-      }),
-    )
-  ).flat();
+  // `waiting` covers the whole queue, not only the named tickets, so a later turn still records the dependants.
+  const whole = process.env.ISSUES ? wholeQueue(tracker, queued) : queued;
+  const waiting = await waitingTickets(project, tracker, whole);
   for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   // A comment is not read as a blocker; say so where the run would start the issue.
   for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
@@ -291,7 +305,7 @@ export const burndown = async (project: Project): Promise<boolean> => {
     typical: typicalTimes(project),
     tickets: Object.fromEntries([
       ...issues.map((i, order) => [i.id, { state: "queued", order, since: Math.floor(Date.now() / 1000), title: i.title }]),
-      ...waiting.map((w) => [w.issue, { state: "blocked", note: blockedNote(w.on), title: queued.find((q) => q.id === w.issue)?.title }]),
+      ...waiting.map((w) => [w.issue, { state: "blocked", note: blockedNote(w.on), title: whole.find((q) => q.id === w.issue)?.title }]),
     ]),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
