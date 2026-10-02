@@ -85,13 +85,13 @@ import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree, unlockAll } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
+import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
-const HELP = readFileSync(new URL(import.meta.url), "utf8").split("\n").filter((l) => l.startsWith("//")).map((l) => l.slice(3));
 // Every command the help names, and the internal hook. Checked before the repository is, so a
 // typo typed outside one was told "Not inside a git repository" instead of what it was.
 const COMMANDS = [...HELP.flatMap((l) => /^  ([a-z][a-z-]*)/.exec(l)?.[1] ?? []), "lean-apply"];
@@ -102,6 +102,11 @@ try {
   if (!["help", "--help", "-h", "--version", ...COMMANDS].includes(command)) {
     const near = nearest(command, COMMANDS.filter((c) => c !== "lean-apply"));
     throw new OperatorError(`Unknown command "${command}".${near ? ` Did you mean \`sandcastle ${near}\`?` : ""} Run \`sandcastle help\` for the list.`);
+  }
+  // Before anything runs: `clean --help` is a request for text, not a clean.
+  if (wantsHelp(args)) {
+    console.log(helpFor(command));
+    process.exit(0);
   }
   // `setup` and `doctor` also work outside a repository (fresh install). Git's own
   // "fatal: not a git repository" is not shown: it preceded every command, help included.
