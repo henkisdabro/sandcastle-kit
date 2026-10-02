@@ -33,7 +33,9 @@ export const noRerunCause = (facts: Facts): string | undefined => {
   if (facts.dryRun) return "the run was a dry run";
   if (facts.stopped) return `the run stopped (${facts.stopped})`;
   if (facts.verify?.green === false) return "the merged base is red";
-  if (Object.values(facts.tickets).some((t) => t.state === "skipped")) return "the run skipped tickets";
+  // A usage limit leaves no `stopped`, only skipped tickets whose note names it.
+  const skipped = Object.values(facts.tickets).find((t) => t.state === "skipped");
+  if (skipped) return `the run stopped early (${skipped.note?.replace(/^not started: /, "") || "tickets were not started"})`;
   return undefined;
 };
 

@@ -110,7 +110,11 @@ test("noRerunCause: names why a turn is not followed, and is silent when one may
   assert.match(noRerunCause({ ...facts, dryRun: true })!, /dry run/);
   assert.match(noRerunCause({ ...facts, stopped: "usage limit" })!, /usage limit/);
   assert.match(noRerunCause({ ...facts, verify: { green: false, line: "" } })!, /base is red/);
-  assert.match(noRerunCause({ ...facts, tickets: { 5: { state: "skipped" } } })!, /skipped/);
+  assert.match(noRerunCause({ ...facts, tickets: { 5: { state: "skipped" } } })!, /stopped early/);
+  assert.equal(
+    noRerunCause({ ...facts, tickets: { 5: { state: "skipped", note: "not started: #4 hit the plan's usage limit" } } }),
+    "the run stopped early (#4 hit the plan's usage limit)",
+  );
 });
 
 test("drainStop: no progress, and the same ticket conflicting in two turns running", () => {
