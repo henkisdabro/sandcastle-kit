@@ -55,7 +55,8 @@ test("a depth-3 chain is printed as the chain, and the estimate counts it", asyn
     "04-d.md": ticket("D"),
   });
   assert.match(text, /blocker depth: 3 - shop-01 -> shop-02 -> shop-03/);
-  assert.match(text, /about 3 turn\(s\)/);
+  assert.match(text, /rough estimate: one run; 3 tickets one after another in it \(blocker depth 3\)/);
+  assert.ok(!/turn/.test(text.split("rough estimate")[1]), text);
   assert.match(text, /rough/);
 });
 
@@ -89,13 +90,13 @@ test("a file four tickets declare is hot, with the tickets; three is not", async
   assert.ok(!/src\/x\.ts: shop/.test(text.split("unmergeable")[0]), text);
 });
 
-test("a lockfile two tickets declare is listed and adds one turn; one ticket's does not", async () => {
+test("a lockfile two tickets declare is listed and may add one turn; one ticket's does not", async () => {
   const text = await lint({ "01-a.md": ticket("A", "Touches: pnpm-lock.yaml"), "02-b.md": ticket("B", "Touches: pnpm-lock.yaml, app.ts") });
   assert.match(text, /pnpm-lock\.yaml: shop-01, shop-02/);
-  assert.match(text, /about 2 turn\(s\) = blocker depth 1 \+ 1 for a shared unmergeable file/);
+  assert.match(text, /rough estimate: one run; no ticket waits for another \(blocker depth 1\), maybe one more turn for a shared unmergeable file/);
   const alone = await lint({ "01-a.md": ticket("A", "Touches: pnpm-lock.yaml"), "02-b.md": ticket("B", "Touches: app.ts") });
   assert.match(alone, /unmergeable files declared by 2\+ tickets: none/);
-  assert.match(alone, /about 1 turn\(s\)/);
+  assert.match(alone, /rough estimate: one run; no ticket waits for another \(blocker depth 1\); a guess/);
 });
 
 test("every blockerProblems line appears", async () => {
