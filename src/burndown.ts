@@ -34,6 +34,7 @@ import { blockedNote, blockerProblems, blockerResolver, commentBlockLine, commen
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
+import { registerRun } from "./live-runs.ts";
 import { isTicketState, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -384,6 +385,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
+  // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
+  registerRun(project.root);
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.

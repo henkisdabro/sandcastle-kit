@@ -12,7 +12,7 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
-import type { RunRecord, TicketRecord } from "../mod/hooks/run-record.ts";
+import { type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
@@ -390,7 +390,10 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   current?.(0);
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
-  let run: RunRecord = { orchestrator: project.name, pid: process.pid, startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
+  // Only the id: the session's other variables include tokens. It tells the Claude Code mod
+  // whose run this is, wherever the project's root is.
+  const session = sessionId(process.env.CLAUDE_CODE_SESSION_ID);
+  let run: RunRecord = { orchestrator: project.name, pid: process.pid, ...(session ? { session } : {}), startedAt: new Date().toISOString(), models: MODELS_LINE, ...extra };
   // Written whole and renamed into place: the view reads it every few seconds,
   // and a half-written file read as no record at all, so every row fell back
   // to the guesswork the record is there to replace.

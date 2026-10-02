@@ -257,23 +257,49 @@ test("after /clear the arming stays with the terminal, and the store learns the 
   expect(w.prompts.length).toBe(1);
 });
 
-test("a session moved to another project gets no note, so the skill keeps its own watcher", async ($, on) => {
+test("a run that records another session is that session's to close, whoever used the skill here last", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "implement" } }, { session: "session-2" });
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.toasts).toEqual(["run ended without a clean exit"]);
+  expect(w.prompts).toEqual([]);
+});
+
+test("a run that records this session's id from before /clear is still closed here", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "implement" } }, { session: "session-1" });
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  w.session = "session-9";
+  await $.classic.SessionStart({ source: "clear" });
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.prompts.length).toBe(1);
+});
+
+test("a session moved to another project still gets the note: a run it starts there is followed by the session's id", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
   w.root = "/elsewhere";
   const skill = await $.skill.prompt(SKILL);
-  expect(skill.text).toBe("the skill");
+  expect(skill.text).toMatch(/^the skill\n\n---\nThe sandcastle mod is loaded/);
+  // The watch of the first project is not the one that closes a run: its store entry is not this session's.
   w.pid = false;
   await w.clock.advance(3000);
   expect(w.prompts).toEqual([]);
 });
 
-test("outside a sandcastle project the mod does nothing", async ($, on) => {
+test("outside a sandcastle project the mod does nothing until the skill is used, and then reads no record there", async ($, on) => {
   const w = world(on, { project: false });
   await $.session.start(START);
-  const skill = await $.skill.prompt(SKILL);
   await w.clock.advance(60000);
-  expect(skill.text).toBe("the skill");
+  expect(w.reads).toBe(0);
+  const skill = await $.skill.prompt(SKILL);
+  expect(skill.text).toMatch(/^the skill\n\n---\nThe sandcastle mod is loaded/);
+  await w.clock.advance(60000);
   expect(w.reads).toBe(0);
   expect(w.commands).toEqual([]);
 });

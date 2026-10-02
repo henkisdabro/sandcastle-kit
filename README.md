@@ -814,7 +814,11 @@ itself, in the status view's castle, glyphs and colours:
 - 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the
   run's process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that
   died seconds after it started - and closes the run with the seven-section summary. It needs no
-  Herdr and no `sandcastle wait`. A session you quit and resumed in the meantime hears it when
+  Herdr and no `sandcastle wait`. It follows the run that session started wherever its project
+  is - a second clone of the repository, a package of a monorepo - because every run records the
+  id of the Claude Code session that started it (and only the id). A run started from a plain
+  terminal, Codex or OpenCode has no such session: the mod shows it only in the session's own
+  project, and the skill's `sandcastle wait` covers the rest. A session you quit and resumed in the meantime hears it when
   it comes back; after `/clear` the terminal you started from still hears it.
 - 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
   answers while Claude is working.
@@ -847,6 +851,10 @@ all of it. The mod:
   `.sandcastle/` exists and that the record is a plain file, not a link;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
+- once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
+  writing) that lists the machine-wide live-runs directory (`$XDG_CACHE_HOME/sandcastle-kit/runs`,
+  `~/.cache` when unset) and the resolved roots in it, then reads `run.json` there only to see
+  whether it names this session;
 - keeps one small entry per project in its own store: which session closes the run, and the
   last run it has accounted for;
 - submits one prompt when a run ends.
