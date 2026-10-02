@@ -3,7 +3,7 @@
 import { createInterface } from "node:readline/promises";
 import { OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
-import type { Tracker } from "./tracker.ts";
+import type { Ticket, Tracker } from "./tracker.ts";
 
 /** `drain`: turns until the queue is drained or a stop condition holds, never more than DRAIN_CAP. */
 export type Level = 0 | 1 | 2 | 3 | "drain";
@@ -101,6 +101,28 @@ export const conflictedIn = (outcomes: Record<string, { run?: string; outcome?: 
 
 export const drainLine = (turns: number, landed: number, cause: string): string =>
   `Drain: ${turns} turn${turns === 1 ? "" : "s"}, ${landed} landed, stopped because ${cause}`;
+
+/**
+ * The closing lines for tickets the queue holds now that no turn of the run had: queued after it
+ * started, so the drain does not take them (a turn takes only the last turn's re-runnable tickets,
+ * never the whole queue) and the next `sandcastle run` does. `held` names the ones a blocker holds
+ * back, which a bare `sandcastle run` would not start either. Unreadable queue: no line, as the
+ * run is over and the lines are only a courtesy.
+ */
+export const lateQueueLines = async (
+  tracker: Tracker,
+  inRun: ReadonlySet<string>,
+  held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
+): Promise<string[]> => {
+  try {
+    const late = tracker.queued(false).filter((t) => !inRun.has(t.id));
+    if (late.length === 0) return [];
+    const blocked = await held(late);
+    return late.filter((t) => !blocked.has(t.id)).map((t) => `${tracker.ref(t.id)} was queued after this run started: \`sandcastle run\` takes it`);
+  } catch {
+    return [];
+  }
+};
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
   const all = [...again.conflicted, ...again.unblocked].map(ref).join(", ");

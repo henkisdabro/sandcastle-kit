@@ -64,8 +64,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
-import { burndown } from "./burndown.ts";
+import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
+import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -186,7 +186,16 @@ try {
       for (const line of upgradeLines(root, KIT, false)) console.log(line);
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
-      const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, unblocked: [] as string[], cause: undefined as string | undefined };
+      const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, inRun: new Set<string>(), unblocked: [] as string[], cause: undefined as string | undefined };
+      // The queue as the drain starts: a first turn that names its tickets leaves the rest of the queue
+      // off the run record, and the closing lines must not say those were queued after the run started.
+      // Unreadable: no closing lines rather than wrong ones.
+      let queuedAtStart: Set<string> | undefined;
+      if (level === "drain") {
+        try {
+          queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
+        } catch {}
+      }
       for (let turn = 1; ; turn++) {
         if (!(await burndown(project, { level, turn }))) {
           drain.cause ??= "no ticket could start";
@@ -195,6 +204,7 @@ try {
         if (level === 0) break;
         const facts = await gather(project);
         drain.turns = turn;
+        for (const id of Object.keys(facts.tickets)) drain.inRun.add(id);
         drain.landed += Object.values(facts.tickets).filter((t) => t.state === "merged").length;
         const tracker = makeTracker(project);
         // A ticket closed by hand since the turn would make the TICKETS path throw: afterTurn drops it.
@@ -256,6 +266,10 @@ try {
         const cause = drain.cause ?? "the run ended";
         console.log(`Autonomy level drain: not running again - ${cause}.`);
         console.log(drainLine(drain.turns, drain.landed, cause));
+        // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
+        const tracker = makeTracker(project);
+        const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
+        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()))) console.log(line);
       }
       break;
     }
