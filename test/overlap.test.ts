@@ -21,7 +21,6 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { branchFiles, refreshFiles, ticketFiles } = await import("../src/burndown.ts");
 const { createDependants, createRelease } = await import("../src/blockers.ts");
-const { createFlow } = await import("../src/landing.ts");
 const { createFileHold, createQueue, createStopState, fileShareLine, fileWaitNote, startHold } = await import("../src/schedule.ts");
 type Project = import("../src/config.ts").Project;
 type Ticket = import("../src/tracker.ts").Ticket;
@@ -97,10 +96,40 @@ type FlowOptions = {
 
 /**
  * Wires what burndown.ts wires: the start of the run through `startHold` (the function burndown()
- * calls), the real hold with the same `refreshFiles`, `createFlow` over the pipeline queue,
- * `createRelease` with the hold after each ticket's ending. A fake pipeline works `delay` ms,
+ * calls), the real hold with the same `refreshFiles`, the scheduler's open count over the pipeline
+ * queue (`openCount`, a stand-in until this harness drives `createSchedule`), `createRelease` with
+ * the hold after each ticket's ending. A fake pipeline works `delay` ms,
  * then "lands" (or, for a ticket in `leave`, ends without landing).
  */
+/**
+ * The scheduler's open count (schedule.ts), copied: the queue closes once every ticket has its
+ * ending, a ticket the release starts counts before the ending that freed it, and `work`'s `fn`
+ * says with `true` that its ticket's ending comes later (it landed, or was sent back); any other
+ * end calls `ended`.
+ */
+const openCount = <I>(tickets: number, queue: ReturnType<typeof createQueue<I>>) => {
+  let open = tickets;
+  const finish = () => {
+    if (--open <= 0) queue.close();
+  };
+  if (open <= 0) queue.close();
+  return {
+    start(item: I) {
+      open++;
+      queue.push(item);
+    },
+    finish,
+    work: (fn: (item: I) => Promise<boolean>, ended: (item: I) => Promise<void>) => async (item: I) => {
+      let handed = false;
+      try {
+        handed = await fn(item);
+      } finally {
+        if (!handed) await ended(item);
+      }
+    },
+  };
+};
+
 const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = {}): Promise<Flow> => {
   const after = opts.after ?? {};
   const out: Flow = { events: [], said: [], notes: {}, noted: [], peak: 0, started: [], waiting: [], order: new Map(), skipped: [], updates: [] };
@@ -130,7 +159,7 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
   out.order = start.order;
   for (const p of start.parked) record.ticket(p.ticket.id, { state: "blocked", note: fileWaitNote(ref, p.wait) });
   const queue = createQueue<Ticket>();
-  const flow = createFlow(start.issues.length, queue, { close() {} });
+  const flow = openCount(start.issues.length, queue);
   let landings = 0;
   const stop = createStopState();
   // A fake `createDependants`: a ticket is released when the one it waits for lands.
@@ -176,7 +205,7 @@ const runFlow = async (project: Project, tickets: Ticket[], opts: FlowOptions = 
         if (opts.leave?.includes(t.id)) return false;
         if (attempt === 1 && opts.requeue?.includes(t.id)) {
           out.events.push(`requeue ${t.id}`);
-          flow.retry(t, { kind: "conflict", with: [] } as never);
+          queue.push(t);
           return true;
         }
         out.events.push(`land ${t.id}`);
