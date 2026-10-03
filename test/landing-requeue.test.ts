@@ -1,11 +1,12 @@
 // A ticket that conflicts or goes red at landing is requeued once, in the same run: the scheduler's
 // requeue-once rule (createSchedule in src/schedule.ts). Its second attempt runs on the land-only
-// path, and a second conflict or red holds it for the next run. The record's side of a requeue is
-// `createRequeueRecord` (src/landing.ts), which burndown.ts hands what the scheduler tells, and the
-// outcome lines are the ledger's (`describe`, src/ledger.ts). Every
-// test drives `createSchedule(plan).run(work)`: the first ones with fake attempts and the real
-// `landOne` (`landingWork`) on temp repos, a fake tracker and a host worktree for the sandbox; the
-// later ones with made-up landings and a run record in a temp dir. No Docker, no gh, no network.
+// path, and a second conflict or red holds it for the next run. What the run says of it - the
+// requeue, the state it ends on, the outcome line, the comment - is the ledger's (`createLedger`,
+// src/ledger.ts): every test drives `createSchedule(plan).run(work)` with the real ledger's `tell`,
+// as burndown.ts hands it what the scheduler tells, over a run record in a temp dir, and reads back
+// what the ledger wrote. The first tests have fake attempts and the real `landOne` (`landingWork`) on
+// temp repos, a fake tracker and a host worktree for the sandbox; the later ones made-up landings.
+// No Docker, no gh, no network.
 // Paths come from node:path and os.tmpdir(), and the fake sandbox strips the `timeout -k` wrapper
 // macOS lacks.
 //
@@ -17,16 +18,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import type { TicketState } from "../mod/hooks/run-record.ts";
+import type { Outcome } from "../mod/hooks/run-record.ts";
 
 // pool.ts and sandbox.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { againLine, createHostGit, createRequeueRecord, landingWork, requeuedLine } = await import("../src/landing.ts");
-const { notLandedComment } = await import("../src/burndown.ts");
-const { describe } = await import("../src/ledger.ts");
+const { againLine, createHostGit, landingWork, requeuedLine } = await import("../src/landing.ts");
+const { accountLanding, createLedger } = await import("../src/ledger.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { landOnlyHead, recordHead, recordRun } = await import("../src/run.ts");
 const { createSchedule } = await import("../src/schedule.ts");
@@ -35,10 +35,11 @@ type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
 type Project = import("../src/config.ts").Project;
 type GateRun = import("../src/gates.ts").GateRun;
+type Finished = import("../src/ledger.ts").Finished;
 type StopCause = import("../src/schedule.ts").StopCause;
-type Attempted = import("../src/schedule.ts").Attempted<Waiting, string>;
-type Change = import("../src/schedule.ts").Change<Waiting, string>;
-type Work = import("../src/schedule.ts").Work<Issue, Waiting, string>;
+type Attempted = import("../src/schedule.ts").Attempted<Waiting, Finished>;
+type Change = import("../src/schedule.ts").Change<Waiting, Finished>;
+type Work = import("../src/schedule.ts").Work<Issue, Waiting, Finished>;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-landing-requeue-"));
 // recordRun finishes its record in an exit handler, so the temp directory goes after it: registered once the
@@ -104,6 +105,8 @@ const failure = { name: "test", command: "test", exitCode: 1, output: "FAIL: a.t
 const RED: GateRun = { gates: [{ name: "test", pass: false }], failure, failures: [failure] };
 
 type Issue = { id: string };
+// A pipeline that ended on a red gate: nothing to land.
+const redGate = (id: string): Finished => ({ issue: id, branch: `agent/issue-${id}`, status: "gate-failed", commits: 1, repairs: 0, gates: [{ name: "test", pass: false }] });
 // A ticket's pipeline: the green branch it leaves, or nothing (it ended red, say).
 type Pipeline = (issue: Issue, attempt: number) => Promise<Waiting | undefined>;
 
@@ -127,55 +130,47 @@ const endings = () => {
 };
 
 /**
- * What the run is told and ends with, as burndown.ts reads it: the requeues and endings through the
- * record's side of a requeue (`createRequeueRecord`, the code burndown.ts calls), each landing
- * ending sorted by how it landed, and the outcome the ledger gives each (`describe`).
+ * The run's ledger as burndown.ts makes it, over `record`: the scheduler's `tell` goes to it, and
+ * what it wrote is read back - the outcomes, the lines it said, the first pipelines it dropped, each
+ * ticket's entry. `told` keeps every change, for the tests that ask what was told.
  */
-const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => void) => {
+const newLedger = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => void) => {
   const told: Change[] = [];
   const said: string[] = [];
   const dropped: string[] = [];
-  const requeues = createRequeueRecord({ run: record, bookkeep: (_id, fn) => fn(), dropFirst: (id) => void dropped.push(id), ref: (id) => `#${id}`, say: (line) => void said.push(line) });
-  const tell = (c: Change) => {
-    told.push(c);
-    if (c.kind === "requeued") requeues.requeued(c.id, c.again);
-    if (c.kind === "ended") requeues.ended(c.id, c.ending);
-    onTell?.(c);
+  const outcomes = new Map<string, Outcome>();
+  const ledger = createLedger({
+    run: record,
+    outcomes: (o) => Object.entries(o).forEach(([id, out]) => outcomes.set(id, out)),
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test" }),
+    bookkeep: (_id, fn) => fn(),
+    dropFirst: (id) => void dropped.push(id),
+    ref: (id) => `#${id}`,
+    say: (line) => void said.push(line),
+  });
+  const landed = (id: string) => {
+    const e = ledger.entries.get(id)?.ending;
+    return e?.kind === "landing" ? e.landed : undefined;
   };
-  const ended = () => told.flatMap((c) => (c.kind === "ended" ? [{ id: c.id, ending: c.ending }] : []));
-  const lists = () => {
-    const l = {
-      merged: [] as string[],
-      conflicted: [] as { issue: string; branch: string; files: string[]; with: string[] }[],
-      redMerged: [] as { issue: string; branch: string; with: string[]; gates: string[] }[],
-      withdrawn: [] as { issue: string; reason: string }[],
-    };
-    for (const { ending: e } of ended()) {
-      if (e.kind !== "landing") continue;
-      const [{ issue, branch }, landed] = [e.green, e.landed];
-      if (landed.kind === "merged" || landed.kind === "close-failed") l.merged.push(issue);
-      if (landed.kind === "conflict") l.conflicted.push({ issue, branch, files: landed.files, with: landed.with });
-      if (landed.kind === "red") l.redMerged.push({ issue, branch, with: landed.with, gates: landed.gates });
-      if (landed.kind === "withdrawn") l.withdrawn.push({ issue, reason: landed.reason });
-    }
-    return l;
-  };
-  const outcomes = () =>
-    new Map(ended().flatMap(({ id, ending: e }) => {
-      const o = e.kind === "landing" ? describe(e, { base: "main", gateNames: "test" }).outcome : undefined;
-      return o ? [[id, o] as const] : [];
-    }));
   return {
+    ledger,
     told,
     said,
     dropped,
-    requeues,
-    tell,
-    ended,
-    lists,
     outcomes,
+    tell: (c: Change) => {
+      told.push(c);
+      ledger.tell(c);
+      onTell?.(c);
+    },
+    landed,
+    // The landing endings in the order they were told, with what each was recorded as.
+    landings: () => told.flatMap((c) => (c.kind === "ended" && c.ending.kind === "landing" ? [{ issue: c.id, landed: c.ending.landed }] : [])),
     // Each outcome's line alone, as the status view shows it.
-    lines: () => new Map([...outcomes()].map(([id, o]) => [id, o.text])),
+    line: (id: string) => outcomes.get(id)?.text,
+    // The one comment the ticket gets after the schedule, in the ledger's words.
+    comment: (id: string) => ledger.entries.get(id)?.said.tracker?.text,
     // "2: requeued after conflict with #1", for each "runs again in this run" line.
     sentBack: () => said.flatMap((line) => (/; its pipeline runs again in this run\.$/.test(line) ? [line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
@@ -218,8 +213,8 @@ const run = async (
     landed: new Map(),
   };
   const attempts = new Map<string, number>();
-  const seen = observe(record, o.onTell);
-  const { endings, stop } = await createSchedule<Issue, Waiting, string>({ tickets: ids.map((id) => ({ id })) }).run({
+  const seen = newLedger(record, o.onTell);
+  const { endings, stop } = await createSchedule<Issue, Waiting, Finished>({ tickets: ids.map((id) => ({ id })) }).run({
     workers,
     ...landingWork(ctx),
     attempt: async (issue, { n }) => {
@@ -230,14 +225,12 @@ const run = async (
       host.begin(`agent/issue-${issue.id}`);
       const out = await pipeline(issue, n);
       await host.settle(`agent/issue-${issue.id}`, `after #${issue.id}`);
-      return out ? { kind: "green", green: out } : { kind: "pipeline", outcome: "red" };
+      return out ? { kind: "green", green: out } : { kind: "pipeline", outcome: redGate(issue.id) };
     },
     tell: seen.tell,
   });
-  // Each landing ending in the order it came, with what a second conflict or red was held as.
-  const final = seen.ended().flatMap(({ id, ending: e }) => (e.kind === "landing" ? [{ issue: id, landed: e.landed, line: seen.requeues.againNote.get(id) }] : []));
-  const stopped = seen.ended().flatMap(({ id, ending: e }) => (e.kind === "stopped" && e.finished ? [id] : []));
-  return { final, sentBack: seen.sentBack(), stopped, states: written(), calls, host, stop, attempts, endings, told: seen.told, lists: seen.lists(), lines: seen.lines() };
+  const stopped = [...endings].flatMap(([id, e]) => (e.kind === "stopped" && e.finished ? [id] : []));
+  return { final: seen.landings(), sentBack: seen.sentBack(), stopped, states: written(), calls, host, stop, attempts, endings, seen };
 };
 
 const mergeOrder = (root: string) =>
@@ -322,7 +315,7 @@ test("a second conflict holds the ticket, naming both tickets it collided with",
   const r = await run(root, ["1", "2", "3"], pipeline, async () => GREEN, 3);
   const two = r.final.find((f) => f.issue === "2")!;
   assert.equal(two.landed.kind, "conflict");
-  assert.equal(two.line, "conflicted again with #1, #3 after a requeue: other.txt");
+  assert.equal(r.states["2"].note, "conflicted again with #1, #3 after a requeue: other.txt");
   assert.deepEqual(r.sentBack, ["2: requeued after conflict with #1"]);
   assert.equal(r.attempts.get("2"), 2, "requeued once, never twice");
   assert.deepEqual(mergeOrder(root).sort(), ["1", "3"]);
@@ -343,7 +336,7 @@ test("a merged tree that is red is requeued once too, and a second red holds it"
   assert.deepEqual(r.sentBack, ["2: requeued after red with #1"]);
   const two = r.final.find((f) => f.issue === "2")!;
   assert.deepEqual(two.landed, { kind: "red", with: ["1"], gates: ["test"] });
-  assert.equal(two.line, "red again with #1 after a requeue");
+  assert.equal(r.states["2"].note, "red again with #1 after a requeue");
   assert.equal(r.attempts.get("2"), 2);
   assert.deepEqual(mergeOrder(root), ["1"]);
 });
@@ -372,15 +365,14 @@ test("after a usage stop a conflict at landing is not requeued, and a green tick
   const usage: StopCause = { kind: "usage limit", line: "usage 97% of the 5-hour window" };
   const { root, r } = await stopMidRun({ kind: "not begun", why: usage });
   // One attempt, no requeue told, a conflicted ending.
-  assert.equal(r.told.some((c) => c.kind === "requeued"), false, "no requeue told");
+  assert.equal(r.seen.told.some((c) => c.kind === "requeued"), false, "no requeue told");
   assert.deepEqual(r.sentBack, [], "no 'runs again in this run' line");
   assert.equal(r.attempts.get("2"), 1);
   assert.deepEqual(r.endings.get("2"), { kind: "landing", green: outcome(root, "2"), landed: { kind: "conflict", files: ["shared.txt"], with: ["1"] }, attempts: 1 });
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "conflict"], ["3", "merged"]]);
   assert.equal(r.states["2"].state, "conflict");
   assert.equal(r.states["2"].requeued ?? null, null, "no requeue recorded");
-  assert.deepEqual(r.lists.conflicted.map((c) => [c.issue, c.with]), [["2", ["1"]]]);
-  assert.equal(r.lines.get("2"), "merge conflict: with #1: shared.txt");
+  assert.deepEqual(r.seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt" });
   assert.deepEqual(r.stopped, []);
   // A limit still lands what is green.
   assert.deepEqual(mergeOrder(root), ["1", "3"]);
@@ -391,7 +383,7 @@ test("after a usage stop a conflict at landing is not requeued, and a green tick
 test("after a .git change nothing more lands: the conflicting and the green ticket both end stopped", async () => {
   const cause: StopCause = { kind: "tampered", error: new Error("STOPPED after #4: main moved while sandboxes ran") };
   const { root, r } = await stopMidRun({ kind: "stopped", cause });
-  assert.equal(r.told.some((c) => c.kind === "requeued"), false);
+  assert.equal(r.seen.told.some((c) => c.kind === "requeued"), false);
   assert.deepEqual(r.sentBack, []);
   assert.equal(r.attempts.get("2"), 1);
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"]]);
@@ -436,25 +428,24 @@ test("a ticket whose pipeline ends without landing, or whose landing needs no re
   assert.deepEqual(r.sentBack, []);
   assert.deepEqual([...r.endings.keys()].sort(), ["1", "2"]);
   // No tickets at all: the run ends at once.
-  const empty = await createSchedule<Issue, Waiting, string>({ tickets: [] }).run(fakeWork({}, {}));
+  const empty = await createSchedule<Issue, Waiting, Finished>({ tickets: [] }).run(fakeWork({}, {}));
   assert.equal(empty.endings.size, 0);
 });
 
 // ---------------------------------------------------------------------------
-// The scheduler over made-up landings: the requeue-once rule, and what the record's side of a
-// requeue (createRequeueRecord) writes to a run record as it is told.
+// The scheduler over made-up landings: the requeue-once rule, and what the ledger writes to a run
+// record as it is told.
 // ---------------------------------------------------------------------------
 
 const waiting = (id: string): Waiting => ({ issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0 });
 
 /**
  * Fake work: each attempt is green unless `attempt` says otherwise, and each ticket's k-th landing
- * is `lands[id][k]` (merged past the end), written to `record` first as landOne writes its state.
+ * is `lands[id][k]` (merged past the end). Like landOne, the land port writes no verdict.
  */
-type Made = { landed: Landed; as?: [TicketState, string] };
 const fakeWork = (
-  lands: Record<string, Made[]>,
-  o: { record?: ReturnType<typeof recordRun>; attempt?: Work["attempt"]; tell?: (c: Change) => void; workers?: number; landFirst?: (g: Waiting) => Promise<void> },
+  lands: Record<string, Landed[]>,
+  o: { attempt?: Work["attempt"]; tell?: (c: Change) => void; workers?: number; landFirst?: (g: Waiting) => Promise<void> },
 ): Work => {
   const k = new Map<string, number>();
   return {
@@ -464,28 +455,26 @@ const fakeWork = (
       await o.landFirst?.(g);
       const at = k.get(g.issue) ?? 0;
       k.set(g.issue, at + 1);
-      const made = lands[g.issue]?.[at] ?? { landed: { kind: "merged" } };
-      if (made.as) o.record?.ticket(g.issue, { state: made.as[0], note: made.as[1] });
-      return made.landed;
+      return lands[g.issue]?.[at] ?? { kind: "merged" };
     },
     host: { check: async () => {}, failed: undefined },
     tell: o.tell ?? (() => {}),
   };
 };
-const conflictWith1: Made = { landed: { kind: "conflict", files: ["shared.txt"], with: ["1"] }, as: ["conflict", "with #1: shared.txt"] };
-const redWith1: Made = { landed: { kind: "red", with: ["1"], gates: ["test"] }, as: ["red", "test red with #1"] };
+const conflictWith1: Landed = { kind: "conflict", files: ["shared.txt"], with: ["1"] };
+const redWith1: Landed = { kind: "red", with: ["1"], gates: ["test"] };
 
 test("the requeue-once rule: a first conflict or red is requeued, a second is final, and anything else stands", async () => {
-  const lands: Record<string, Made[]> = {
+  const lands: Record<string, Landed[]> = {
     2: [conflictWith1, conflictWith1],
-    3: [redWith1, { landed: { kind: "merged" } }],
-    4: [{ landed: { kind: "merged" } }],
-    5: [{ landed: { kind: "not-landed", reason: "ENOSPC" } }],
-    6: [{ landed: { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" } }],
+    3: [redWith1, { kind: "merged" }],
+    4: [{ kind: "merged" }],
+    5: [{ kind: "not-landed", reason: "ENOSPC" }],
+    6: [{ kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" }],
   };
   const told: Change[] = [];
   const n: Record<string, number[]> = {};
-  const { endings } = await createSchedule<Issue, Waiting, string>({ tickets: ["2", "3", "4", "5", "6"].map((id) => ({ id })) }).run(
+  const { endings } = await createSchedule<Issue, Waiting, Finished>({ tickets: ["2", "3", "4", "5", "6"].map((id) => ({ id })) }).run(
     fakeWork(lands, {
       tell: (c) => void told.push(c),
       attempt: async (t, at) => {
@@ -512,23 +501,23 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
   assert.equal(againLine("conflict", ["1", "3"]), "conflicted again with #1, #3 after a requeue");
 });
 
-/** One run over made-up landings, with a run record and the record's side of a requeue observing it; `o` may read both as the run goes. */
-type Seen = { written: () => Record<string, Record<string, unknown>>; seen: ReturnType<typeof observe> };
-const settle = async (ids: string[], lands: Record<string, Made[]>, o: (s: Seen) => { attempt?: Work["attempt"]; onTell?: (c: Change) => void; workers?: number } = () => ({})) => {
+/** One run over made-up landings, its ledger writing a run record; `o` may read both as the run goes. */
+type Seen = { written: () => Record<string, Record<string, unknown>>; seen: ReturnType<typeof newLedger> };
+const settle = async (ids: string[], lands: Record<string, Landed[]>, o: (s: Seen) => { attempt?: Work["attempt"]; onTell?: (c: Change) => void; workers?: number } = () => ({})) => {
   const { record, written } = newRecord();
   let opts: ReturnType<typeof o> = {};
-  const seen = observe(record, (c) => opts.onTell?.(c));
+  const seen = newLedger(record, (c) => opts.onTell?.(c));
   opts = o({ written, seen });
-  const r = await createSchedule<Issue, Waiting, string>({ tickets: ids.map((id) => ({ id })) }).run(fakeWork(lands, { record, attempt: opts.attempt, tell: seen.tell, workers: opts.workers }));
+  const r = await createSchedule<Issue, Waiting, Finished>({ tickets: ids.map((id) => ({ id })) }).run(fakeWork(lands, { attempt: opts.attempt, tell: seen.tell, workers: opts.workers }));
   return { ...r, seen, written };
 };
 
 test("conflict, requeued, merged: the second landing is the outcome and the status view is not left prefixed", async () => {
-  let atSecond: { record: Record<string, unknown>; requeuedAs?: string; ended: string[] } | undefined;
-  const r = await settle(["2"], { 2: [conflictWith1, { landed: { kind: "merged" }, as: ["merged", "merged"] }] }, ({ written, seen }) => ({
+  let atSecond: { record: Record<string, unknown>; requeuedAs?: string; recorded: string[] } | undefined;
+  const r = await settle(["2"], { 2: [conflictWith1, { kind: "merged" }] }, ({ written, seen }) => ({
     attempt: async (t, { n }) => {
-      // As the second attempt begins: queued, with the line its setup carries, and nothing accounted.
-      if (n === 2) atSecond = { record: written()["2"], requeuedAs: seen.requeues.requeuedAs.get("2"), ended: seen.ended().map((e) => e.id) };
+      // As the second attempt begins: queued, with the line its setup carries, and nothing recorded as an ending.
+      if (n === 2) atSecond = { record: written()["2"], requeuedAs: seen.ledger.requeuedAs.get("2"), recorded: [...seen.ledger.entries.keys()] };
       return { kind: "green", green: waiting(t.id) };
     },
   }));
@@ -536,43 +525,40 @@ test("conflict, requeued, merged: the second landing is the outcome and the stat
   assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; its pipeline runs again in this run."]);
   assert.deepEqual(atSecond.record, { ...atSecond.record, state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1" });
   assert.equal(atSecond.requeuedAs, "requeued after conflict with #1");
-  assert.deepEqual(atSecond.ended, [], "nothing is accounted while the second attempt is to come");
-  assert.deepEqual(r.seen.lists().merged, ["2"]);
-  assert.deepEqual(r.seen.lists().conflicted, []);
-  assert.equal(r.seen.lines().get("2"), "merged");
+  assert.deepEqual(atSecond.recorded, [], "nothing is accounted while the second attempt is to come");
+  assert.deepEqual(accountLanding(r.seen.ledger.entries.values()).merged, ["2"]);
+  assert.equal(accountLanding(r.seen.ledger.entries.values()).notLanded, 0);
+  assert.equal(r.seen.line("2"), "merged");
+  assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["merged", "merged and closed"]);
 });
 
 test("conflict, requeued, conflict again: the outcome keeps the files, and the comment names both attempts' tickets", async () => {
-  const again: Made = { landed: { kind: "conflict", files: ["other.txt", "more.txt"], with: ["3"] }, as: ["conflict", "with #3: other.txt, more.txt"] };
-  const r = await settle(["2"], { 2: [conflictWith1, again] });
-  assert.equal(r.seen.lines().get("2"), "merge conflict: conflicted again with #1, #3 after a requeue: other.txt, more.txt");
-  assert.equal(r.seen.outcomes().get("2")?.kind, "conflict");
+  const r = await settle(["2"], { 2: [conflictWith1, { kind: "conflict", files: ["other.txt", "more.txt"], with: ["3"] }] });
+  assert.equal(r.seen.line("2"), "merge conflict: conflicted again with #1, #3 after a requeue: other.txt, more.txt");
+  assert.deepEqual(r.seen.outcomes.get("2")?.with, ["1", "3"]);
+  assert.equal(r.seen.outcomes.get("2")?.kind, "conflict");
   assert.equal(r.written()["2"].note, "conflicted again with #1, #3 after a requeue: other.txt, more.txt");
   assert.equal(r.written()["2"].state, "conflict");
-  const lists = r.seen.lists();
-  assert.deepEqual(lists.conflicted.map((c) => [c.issue, c.with, c.files]), [["2", ["1", "3"], ["other.txt", "more.txt"]]]);
-  const c = lists.conflicted[0];
-  const comment = notLandedComment(undefined, { branch: c.branch, base: "main", files: c.files, with: c.with })!;
-  assert.match(comment, /conflicted \(with #1, #3: other\.txt, more\.txt\)/);
+  assert.deepEqual(r.written()["2"].files, ["other.txt", "more.txt"]);
+  assert.deepEqual(r.seen.landed("2"), { kind: "conflict", files: ["other.txt", "more.txt"], with: ["1", "3"] });
+  assert.match(r.seen.comment("2") ?? "", /conflicted \(with #1, #3: other\.txt, more\.txt\)/);
 });
 
 test("red, requeued, red again: no doubled 'red', and the comment names both attempts' tickets", async () => {
   let requeued: unknown;
-  const r = await settle(["2"], { 2: [redWith1, { landed: { kind: "red", with: ["3"], gates: ["test"] }, as: ["red", "test red with #3"] }] }, ({ written }) => ({
+  const r = await settle(["2"], { 2: [redWith1, { kind: "red", with: ["3"], gates: ["test"] }] }, ({ written }) => ({
     attempt: async (t, { n }) => {
       if (n === 2) requeued = written()["2"].requeued;
       return { kind: "green", green: waiting(t.id) };
     },
   }));
   assert.equal(requeued, "requeued after red with #1");
-  assert.equal(r.seen.lines().get("2"), "red again with #1, #3 after a requeue");
+  assert.equal(r.seen.line("2"), "red again with #1, #3 after a requeue");
   // Red at landing again is still `red`, the kind every reader decides on, whatever the line says.
-  assert.equal(r.seen.outcomes().get("2")?.kind, "red");
+  assert.equal(r.seen.outcomes.get("2")?.kind, "red");
   assert.equal(r.written()["2"].note, "red again with #1, #3 after a requeue");
-  const lists = r.seen.lists();
-  assert.deepEqual(lists.redMerged, [{ issue: "2", branch: "agent/issue-2", with: ["1", "3"], gates: ["test"] }]);
-  const red = lists.redMerged[0];
-  assert.match(notLandedComment(undefined, undefined, { branch: red.branch, base: "main", with: red.with, gates: red.gates })!, /since this branch forked: #1, #3/);
+  assert.deepEqual(r.seen.landed("2"), { kind: "red", with: ["1", "3"], gates: ["test"] });
+  assert.match(r.seen.comment("2") ?? "", /since this branch forked: #1, #3/);
 });
 
 test("a first red or conflict that is not requeued keeps the plain outcome lines", async () => {
@@ -580,7 +566,7 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
   let found!: () => void;
   const limit = new Promise<void>((resolve) => (found = resolve));
   const usage: StopCause = { kind: "usage limit", line: "usage 97% of the 5-hour window" };
-  const r = await settle(["1", "2", "3"], { 2: [redWith1], 3: [{ landed: { kind: "conflict", files: ["a.txt", "b.txt", "c.txt", "d.txt"], with: ["1"] } }] }, () => ({
+  const r = await settle(["1", "2", "3"], { 2: [redWith1], 3: [{ kind: "conflict", files: ["a.txt", "b.txt", "c.txt", "d.txt"], with: ["1"] }] }, () => ({
     workers: 3,
     attempt: async (t) => {
       if (t.id === "1") {
@@ -591,9 +577,10 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
       return { kind: "green", green: waiting(t.id) };
     },
   }));
-  assert.equal(r.seen.lines().get("2"), "red when merged with #1");
-  assert.equal(r.seen.lines().get("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
-  assert.deepEqual([r.seen.outcomes().get("2"), r.seen.outcomes().get("3")?.kind, r.seen.outcomes().get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1" }, "conflict", ["1"]]);
+  assert.equal(r.seen.line("2"), "red when merged with #1");
+  assert.equal(r.seen.line("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
+  assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1" }, "conflict", ["1"]]);
+  assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1"]);
   assert.deepEqual(r.seen.said, []);
 });
 
@@ -604,16 +591,16 @@ test("requeued, then withdrawn before the second start: withdrawn, not green, an
     attempt: async (t, { n }) => (n === 2 || t.id === "9" ? withdrawn : { kind: "green", green: waiting(t.id) }),
   }));
   assert.deepEqual(r.seen.dropped, ["2"]);
-  const lists = r.seen.lists();
-  assert.deepEqual(lists.withdrawn, [{ issue: "2", reason: "closed during the run" }]);
-  assert.deepEqual(lists.conflicted, [], "its first landing does not stand: it was withdrawn since");
-  assert.equal(r.seen.lines().get("2"), "withdrawn: closed during the run");
+  assert.deepEqual(r.seen.landed("2"), { kind: "withdrawn", reason: "closed during the run" }, "its first landing does not stand: it was withdrawn since");
+  assert.equal(accountLanding(r.seen.ledger.entries.values()).withdrawn, 1);
+  assert.equal(accountLanding(r.seen.ledger.entries.values()).notLanded, 0);
+  assert.equal(r.seen.line("2"), "withdrawn: closed during the run");
   assert.equal(r.written()["2"].state, "withdrawn");
   assert.equal(r.written()["2"].note, "closed - not started");
   assert.equal(r.written()["2"].requeued, null);
-  assert.equal(r.seen.requeues.requeuedAs.has("2"), false);
+  assert.equal(r.seen.ledger.requeuedAs.has("2"), false);
   assert.deepEqual(r.endings.get("9"), { kind: "not begun", why: { kind: "withdrawn", reason: "closed during the run" } });
-  assert.deepEqual(lists.withdrawn.map((w) => w.issue), ["2"]);
+  assert.equal(r.seen.landed("9"), undefined);
 });
 
 test("requeued, then the run stops: the first outcome stands, and the status view is no longer told it was requeued", async () => {
@@ -635,18 +622,17 @@ test("requeued, then the run stops: the first outcome stands, and the status vie
   }));
   assert.equal(requeued, "requeued after conflict with #1");
   // Each has one ending: its first landing.
-  assert.deepEqual(r.seen.ended().map((e) => e.id).sort(), ["2", "3"]);
+  assert.deepEqual([...r.seen.ledger.entries.keys()].sort(), ["2", "3"]);
   for (const id of ["2", "3"]) {
     const e = r.endings.get(id);
     assert.equal(e?.kind === "landing" && e.attempts, 1);
   }
-  const lists = r.seen.lists();
-  assert.deepEqual(lists.conflicted.map((c) => c.issue), ["2"]);
-  assert.deepEqual(lists.redMerged.map((red) => red.issue), ["3"]);
-  assert.equal(r.seen.lines().get("2"), "merge conflict: with #1: shared.txt");
-  assert.equal(r.seen.lines().get("3"), "red when merged with #1");
+  assert.deepEqual([r.seen.landed("2")?.kind, r.seen.landed("3")?.kind], ["conflict", "red"]);
+  assert.equal(accountLanding(r.seen.ledger.entries.values()).notLanded, 2);
+  assert.equal(r.seen.line("2"), "merge conflict: with #1: shared.txt");
+  assert.equal(r.seen.line("3"), "red when merged with #1");
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note, r.written()["2"].requeued], ["conflict", "with #1: shared.txt", null]);
-  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "test red with #1", null]);
+  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "red with #1", null]);
   assert.deepEqual(r.seen.dropped, []);
 });
 
@@ -654,7 +640,7 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
   // Reading 2's files again as 1's pipeline ends fails, so the pipelines close while 2 is landing:
   // 2's conflict has nowhere to go back to.
   const { record, written } = newRecord();
-  const seen = observe(record);
+  const seen = newLedger(record);
   let landing!: () => void;
   const isLanding = new Promise<void>((resolve) => (landing = resolve));
   let failed!: () => void;
@@ -662,7 +648,6 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
   const work = fakeWork(
     { 2: [conflictWith1] },
     {
-      record,
       tell: seen.tell,
       landFirst: async () => {
         landing();
@@ -673,13 +658,13 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
       attempt: async (t) => {
         if (t.id === "2") return { kind: "green", green: waiting(t.id) };
         await isLanding;
-        return { kind: "pipeline", outcome: "red" };
+        return { kind: "pipeline", outcome: redGate(t.id) };
       },
     },
   );
   const boom = new Error("git diff failed");
   let ended = false;
-  const run = createSchedule<Issue, Waiting, string>({
+  const run = createSchedule<Issue, Waiting, Finished>({
     tickets: [{ id: "1" }, { id: "2" }],
     files: {
       of: () => ({ all: [], unmergeable: [] }),
@@ -699,11 +684,9 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
   await assert.rejects(run, boom);
   assert.equal(seen.told.some((c) => c.kind === "requeued"), false);
   assert.deepEqual(seen.said, []);
-  assert.equal(seen.requeues.requeuedAs.has("2"), false);
-  const two = seen.ended().find((e) => e.id === "2")?.ending;
-  assert.deepEqual(two, { kind: "landing", green: waiting("2"), landed: conflictWith1.landed, attempts: 1 });
-  assert.deepEqual(seen.lists().conflicted.map((c) => [c.issue, c.with]), [["2", ["1"]]]);
-  assert.equal(seen.lines().get("2"), "merge conflict: with #1: shared.txt");
+  assert.equal(seen.ledger.requeuedAs.has("2"), false);
+  assert.deepEqual(seen.ledger.entries.get("2")?.ending, { kind: "landing", green: waiting("2"), landed: conflictWith1, attempts: 1 });
+  assert.deepEqual(seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt" });
   // Nothing to undo: no requeue was ever written.
   assert.deepEqual([written()["2"].state, written()["2"].note, written()["2"].requeued ?? null], ["conflict", "with #1: shared.txt", null]);
 });
@@ -714,11 +697,11 @@ test("a requeue is told, and recorded, before the ticket is queued again", async
   const { record } = newRecord();
   const order: string[] = [];
   const spy = { ...record, ticket: (id: string, f: Parameters<typeof record.ticket>[1]) => (order.push(`write ${f.state}`), record.ticket(id, f)) };
-  const seen = observe(spy as typeof record);
+  const seen = newLedger(spy as typeof record);
   let last!: () => boolean;
   let sentBack!: () => void;
   const isBack = new Promise<void>((resolve) => (sentBack = resolve));
-  await createSchedule<Issue, Waiting, string>({ tickets: [{ id: "1" }, { id: "2" }] }).run(
+  await createSchedule<Issue, Waiting, Finished>({ tickets: [{ id: "1" }, { id: "2" }] }).run(
     fakeWork(
       { 2: [conflictWith1] },
       {
@@ -739,5 +722,6 @@ test("a requeue is told, and recorded, before the ticket is queued again", async
       },
     ),
   );
-  assert.deepEqual(order, ["told, queued: false", "write queued", "after, queued: true"]);
+  // Then each ticket's landing, as the ledger records its ending.
+  assert.deepEqual(order, ["told, queued: false", "write queued", "after, queued: true", "write merged", "write merged"]);
 });

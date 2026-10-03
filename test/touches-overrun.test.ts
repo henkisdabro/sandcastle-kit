@@ -1,5 +1,6 @@
 // A diff that leaves its ticket's `Touches:` line: named in run.json and in the close comment as a
-// warning, never a hold. Temp repos and a fake tracker: no Docker, no gh, no network.
+// warning, never a hold. landOne returns it with the merge, and the ledger records it. Temp repos and a
+// fake tracker: no Docker, no gh, no network.
 //
 //   pnpm exec tsx --test test/touches-overrun.test.ts
 
@@ -16,6 +17,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
 const { createHostGit, landOne, touchesOverrun } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
+const { describe } = await import("../src/ledger.ts");
 const { render } = await import("../src/report.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Project = import("../src/config.ts").Project;
@@ -120,9 +122,12 @@ const harness = (root: string, body: string) => {
 test("landing still merges, records the overrun and says it in the close comment", async () => {
   const root = makeRepo({ "src/a.ts": "a2\n", "src/other.ts": "x\n" });
   const { ctx, comments, states, outcome } = harness(root, "Touches: src/a.ts");
-  assert.equal((await landOne(ctx, outcome)).kind, "merged");
-  assert.deepEqual(states["1"].overrun, ["src/other.ts"]);
-  assert.equal(states["1"].state, "merged");
+  const landed = await landOne(ctx, outcome);
+  assert.deepEqual(landed, { kind: "merged", overrun: ["src/other.ts"] });
+  // The record the ledger writes of the merge.
+  const record = describe({ kind: "landing", green: outcome, landed, attempts: 1 }, { base: "main", gateNames: "test" }).record;
+  assert.deepEqual(record, { state: "merged", note: "merged and closed", overrun: ["src/other.ts"] });
+  assert.equal(states["1"].overrun, undefined, "landOne writes no verdict, nor the facts that go with it");
   assert.equal(comments.length, 1);
   assert.ok(comments[0].includes("\n\nchanged beyond its Touches line: src/other.ts"), comments[0]);
   assert.equal(git(root, "show", "main:src/other.ts"), "x");
@@ -131,8 +136,9 @@ test("landing still merges, records the overrun and says it in the close comment
 test("a declared change lands with no overrun and no extra line", async () => {
   const root = makeRepo({ "src/a.ts": "a2\n" });
   const { ctx, comments, states, outcome } = harness(root, "Touches: src/a.ts");
-  assert.equal((await landOne(ctx, outcome)).kind, "merged");
-  assert.equal(states["1"].overrun, undefined);
+  const landed = await landOne(ctx, outcome);
+  assert.deepEqual(landed, { kind: "merged" });
+  assert.equal(describe({ kind: "landing", green: outcome, landed, attempts: 1 }, { base: "main", gateNames: "test" }).record?.overrun, undefined);
   assert.ok(!comments[0].includes("Touches"), comments[0]);
 });
 

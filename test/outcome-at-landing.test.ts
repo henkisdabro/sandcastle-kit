@@ -33,6 +33,9 @@ test("the ledger records each landing's outcome as its ending is told, in descri
     view: { landed: () => {} },
     context: () => CONTEXT,
     bookkeep: (_id, fn) => fn(),
+    dropFirst: () => {},
+    ref: (id) => `#${id}`,
+    say: () => {},
   });
   const cases = [
     ["11", { kind: "merged" }],
@@ -51,12 +54,13 @@ test("the ledger records each landing's outcome as its ending is told, in descri
   for (const [id, landed] of cases) assert.deepEqual(written[id], describe(landing(id, landed), CONTEXT).outcome, id);
 });
 
-// burndown() needs Docker, so no test drives it: its `ended` is held to handing every ending to the ledger by its source.
+// burndown() needs Docker, so no test drives it: its `tell` is held to handing every ending to the ledger by its source.
 test("burndown hands each ending to the ledger as the scheduler tells it, and records no outcome of its own there", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  const ended = src.slice(src.indexOf("const ended = "), src.indexOf("const tell = "));
-  assert.match(ended, /ledger\.record\(id, e\)/);
-  assert.doesNotMatch(ended, /recordOutcomes|view\.landed/);
+  const tell = src.slice(src.indexOf("const tell = "));
+  const ended = tell.slice(tell.indexOf('case "ended":'), tell.indexOf("case \"blocked\":"));
+  assert.match(ended, /return ledger\.tell\(c\);/);
+  assert.doesNotMatch(ended, /recordOutcomes|view\.landed|run\.ticket/);
   assert.doesNotMatch(src, /landingLines|view\.landed\(/);
 });
 

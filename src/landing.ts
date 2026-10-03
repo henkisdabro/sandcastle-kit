@@ -2,8 +2,9 @@
 // word (withdrawn, taken back), the head the gates vouched for, what a person must merge, then
 // the merge and the closing comment. A branch that already holds the base lands as it is; any
 // other is merged and gated in a sandbox first (the tree no gate has seen). `landOne` returns
-// what happened and writes the ticket's state to the run record; what the tracker is told, it
-// takes from the ledger (ledger.ts), which also records the ending the scheduler makes of it.
+// what happened, with the facts the run record keeps (the files, the failing tests, the error of a
+// failed close), and writes no verdict: the ledger (ledger.ts) records the ending the scheduler
+// makes of it. What the tracker is told at landing, `landOne` takes from the ledger too.
 //
 // A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
 // (the scheduler's requeue-once rule, schedule.ts); a second one holds it for the next run.
@@ -19,11 +20,11 @@ import { type GateRun, failingTests } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import type { Outcome, TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
+import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
-import type { Again, Ending, LandPorts } from "./schedule.ts";
+import type { LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
@@ -250,7 +251,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
 /** What `landOne` needs of a green branch's outcome. */
 export type Landable = { issue: string; branch: string; status: string; commits: number; repairs: number; head?: string; unreviewed?: boolean };
 
-/** What the run record takes from landing: a ticket's state, note and the odd extra field. */
+/** What landing writes to the run record itself: its progress (the `landing` stage), never a verdict. */
 export type LandingRecord = { ticket(id: string, fields: TicketRecord): void };
 
 export type LandContext = {
@@ -293,8 +294,11 @@ export type Landed =
   /** `overrun`: the paths it changed beyond its ticket's `Touches:` line, which the close comment names. */
   | { kind: "merged"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "conflict"; files: string[]; with: string[] }
-  /** The branch was green alone; its merge with the base, which holds `with` landed since it forked, was red. Not landed. */
-  | { kind: "red"; with: string[]; gates: string[] }
+  /**
+   * The branch was green alone; its merge with the base, which holds `with` landed since it forked, was red. Not landed.
+   * `failing`: the test ids the red gate named.
+   */
+  | { kind: "red"; with: string[]; gates: string[]; failing?: string[] }
   /** `by`: what held it - a protected path, a large file, or a repair no review passed. */
   | { kind: "held"; paths: string[]; reason: string; by: "protected" | "large" | "unreviewed" }
   | { kind: "withdrawn"; reason: string }
@@ -302,8 +306,8 @@ export type Landed =
   | { kind: "closed-earlier" }
   | { kind: "skipped"; reason: string }
   | { kind: "not-landed"; reason: string }
-  /** Merged, but the tracker would not close the ticket: still a merge, never a failure to land. */
-  | { kind: "close-failed"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
+  /** Merged, but the tracker would not close the ticket (`error`, short): still a merge, never a failure to land. */
+  | { kind: "close-failed"; error: string; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "dry-run" };
 
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
@@ -325,11 +329,9 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   const root = project.root;
   const squash = project.land === "squash";
   const tip = () => sh("git", ["rev-parse", `refs/heads/${base}`], root);
-  // Each ticket's state as landing decides it, so the view counts landing
-  // down rather than showing one opaque stage for minutes.
-  const land = (id: string, state: TicketState, note: string) => run.ticket(id, { state, note });
   // What the tracker is told of this landing: the ledger's words, posted here as it happens.
   const words = (said: Landed) => describe({ kind: "landing", green: o, landed: said, attempts: 1 }, { base, gateNames, report: reports.get(o.issue) }).tracker!.text;
+  // Progress only: the ledger writes the state the landing ends on, as the scheduler tells it.
   run.ticket(o.issue, { state: "landing" });
   // The issue can change during a long run: closed by hand, or sent to a
   // human. Merging then would land work nobody still wants. A gh error here
@@ -339,69 +341,49 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     // back as a branch to fix and merge. A ticket sent to a human is theirs
     // now, its branch there if it helps; one closed or unqueued is done with.
     const called = withdrawal(o.issue);
-    if (called?.held) {
-      land(o.issue, "held", called.reason);
-      return { kind: "taken-back" };
-    }
-    if (called) {
-      land(o.issue, "withdrawn", called.reason);
-      return { kind: "withdrawn", reason: called.reason };
-    }
+    if (called?.held) return { kind: "taken-back" };
+    if (called) return { kind: "withdrawn", reason: called.reason };
     if (o.status === "merged-earlier") {
       if (dryRun) {
         console.log(`[dry run] would close ${ref(o.issue)} - merged by an earlier run (${o.head})`);
-        land(o.issue, "ready", "dry run: would close");
         return { kind: "dry-run" };
       }
       await host.write(() => tracker.close(o.issue, words({ kind: "closed-earlier" })), trackerMade(root));
-      land(o.issue, "merged", `closed, merged earlier (${o.head})`);
       return { kind: "closed-earlier" };
     }
   } catch (error) {
     if (error instanceof LandingStop) throw error;
-    land(o.issue, "not landed", errorLine(error));
     return { kind: "not-landed", reason: errorLine(error) };
   }
   // The gates vouched for one commit. Anything added after it is ungated.
-  if (sh("git", ["rev-parse", o.branch], root) !== o.head) {
-    const reason = `${o.branch} moved after its gates passed`;
-    land(o.issue, "not landed", reason);
-    return { kind: "skipped", reason };
-  }
+  if (sh("git", ["rev-parse", o.branch], root) !== o.head) return { kind: "skipped", reason: `${o.branch} moved after its gates passed` };
   // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
   // costs the warning only.
   let overrun: string[] = [];
   try {
     overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "");
-    if (overrun.length) run.ticket(o.issue, { overrun });
   } catch {
     overrun = [];
   }
   const touched = protectedChanges(project, o.branch);
   if (touched.length) {
     const held: Landed = { kind: "held", paths: touched, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`, by: "protected" };
-    land(o.issue, "held", held.reason);
-    run.ticket(o.issue, { files: touched });
     if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
     return held;
   }
   const large = largeFiles(project, o.branch);
   if (large.length) {
     const held: Landed = { kind: "held", paths: large, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`, by: "large" };
-    land(o.issue, "held", held.reason);
-    run.ticket(o.issue, { files: large });
     if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
     return held;
   }
   if (o.unreviewed) {
     const held: Landed = { kind: "held", paths: [], reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${UNREVIEWED}`, by: "unreviewed" };
-    land(o.issue, "held", held.reason);
     if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
     return held;
   }
   if (dryRun) {
     console.log(`[dry run] would merge ${o.branch} and close ${ref(o.issue)}`);
-    land(o.issue, "ready", "dry run: would merge");
     return { kind: "dry-run" };
   }
 
@@ -447,7 +429,6 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
         dirty.length > 0
           ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
           : errorLine(error);
-      land(o.issue, "not landed", reason);
       return { kind: "not-landed", reason };
     }
     record(before, tip());
@@ -477,17 +458,14 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       if (error instanceof OperatorError) throw new LandingStop(error.message, { cause: error });
       const reason = `could not land it in a sandbox: ${errorLine(error)}`;
       console.log(`${ref(o.issue)}: ${reason}.`);
-      land(o.issue, "not landed", reason);
       return { kind: "not-landed", reason };
     }
     if (result.kind === "red") {
       const gates = [...new Set([...result.run.failures.map((f) => f.name), ...result.run.gates.filter((g) => !g.pass).map((g) => g.name)])];
-      const earlier = since().map(([id]) => id);
       // The pair, named: which tickets this one is red with.
-      land(o.issue, "red", earlier.length ? `red with ${earlier.map(refOf).join(", ")}` : "red on the merged tree");
+      const earlier = since().map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
-      if (failing.length) run.ticket(o.issue, { failing });
-      return { kind: "red", with: earlier, gates };
+      return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
     }
     if (result.kind === "merged") {
       record(before, result.commit);
@@ -503,14 +481,11 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       if (!result.files.length) {
         // Refused outright, with no unmerged file: not a conflict, and calling it one sent us looking for conflicts that were not there.
         const reason = result.kind === "conflict" && result.note ? result.note : "the merge was refused in the sandbox";
-        land(o.issue, "not landed", reason);
         return { kind: "not-landed", reason };
       }
       // Named, with the landed ticket it collides with: "merge conflict" alone left a human to find both.
       const files = result.files;
       const other = since().filter(([, r]) => files.some((f) => r.files.includes(f))).map(([id]) => id);
-      land(o.issue, "conflict", conflictLine({ files, with: other }));
-      run.ticket(o.issue, { files });
       return { kind: "conflict", files, with: other };
     }
   }
@@ -533,11 +508,9 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }), ...(overrun.length ? { overrun } : {}) };
   try {
     await host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
-    land(o.issue, "merged", regenerated ? "merged and closed (generated files regenerated)" : "merged and closed");
     return { kind: "merged", ...merged };
   } catch (error) {
-    run.ticket(o.issue, { state: "merged", note: "merged; closing the ticket failed", closeFailed: errorLine(error) });
-    return { kind: "close-failed", ...merged };
+    return { kind: "close-failed", error: errorLine(error), ...merged };
   }
 };
 
@@ -564,13 +537,7 @@ export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
       return await landOne(ctx, o);
     } catch (error) {
       if (error instanceof OperatorError) throw error;
-      const reason = errorLine(error);
-      try {
-        ctx.run.ticket(o.issue, { state: "not landed", note: reason });
-      } catch {
-        /* the record is what failed; the outcome below still stands */
-      }
-      return { kind: "not-landed", reason };
+      return { kind: "not-landed", reason: errorLine(error) };
     }
   },
   host: {
@@ -591,7 +558,7 @@ export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
 
 /**
  * Where a carried branch's work came from: the ticket's first attempt when this run requeued it
- * (the scheduler's requeue-once rule, which `requeuedAs` records), otherwise a branch kept from an
+ * (the scheduler's requeue-once rule, which the ledger's `requeuedAs` records), otherwise a branch kept from an
  * earlier `sandcastle run`. Saying "earlier run" of this run's own first attempt sent operators
  * looking for a run that never existed.
  */
@@ -615,9 +582,6 @@ export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }
   return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
 };
 
-/** The record of a requeued ticket whose second attempt never began: the state it had before, and no longer "requeued". */
-export const restoredRecord = (was: TicketRecord | undefined): TicketRecord => ({ ...(was?.state ? { state: was.state } : {}), note: was?.note ?? null, requeued: null });
-
 /** The record of a ticket the tracker withdrew before its attempt began. */
 export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "withdrawn", note: `${reason.replace(" during the run", "")} - not started` });
 
@@ -628,63 +592,4 @@ export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "with
 export const STOPPED_GREEN = {
   record: { state: "stopped", note: "finished before the run stopped - lands on a later run" } satisfies TicketRecord,
   outcome: { kind: "stopped", text: "stopped: the run stopped before landing" } satisfies Outcome,
-};
-
-/** The run record as the requeue's record uses it: a ticket's fields, and what is written so far. */
-export type RequeueRecordRun = { ticket(id: string, fields: TicketRecord): void; tickets(): Record<string, TicketRecord> };
-
-/**
- * The run record's side of the requeue-once rule, which the scheduler decides (schedule.ts):
- * `burndown()` hands it what the scheduler tells. A requeue is written as queued, with the line its
- * second attempt's setup carries (`requeuedAs`), as it is told - before the ticket is pushed back.
- * A second conflict or red is noted on the record with the tickets of both attempts (`againNote`;
- * the outcome line is the ledger's). A requeued ticket whose second attempt never began ends with its first landing: its record
- * goes back to what it was, or to withdrawn when the tracker took it back meanwhile, and `dropFirst`
- * removes its first pipeline's entry from the per-issue lines.
- */
-export const createRequeueRecord = (d: {
-  run: RequeueRecordRun;
-  /** A write that throws (a git call, a full disk) must not cost the ticket its ending. */
-  bookkeep(id: string, fn: () => void): void;
-  dropFirst(id: string): void;
-  ref(id: string): string;
-  say(line: string): void;
-}) => {
-  const requeuedAs = new Map<string, string>();
-  // A requeued ticket's record before it was sent back: put back if its second attempt never begins.
-  const before = new Map<string, TicketRecord | undefined>();
-  const againNote = new Map<string, string>();
-  return {
-    requeuedAs,
-    againNote,
-    requeued(id: string, again: Again) {
-      const line = requeuedLine(again.kind, again.with);
-      requeuedAs.set(id, line);
-      d.bookkeep(id, () => {
-        before.set(id, d.run.tickets()[id]);
-        d.run.ticket(id, { state: "queued", note: line, requeued: line });
-      });
-      d.say(`${d.ref(id)}: ${line}; its pipeline runs again in this run.`);
-    },
-    ended(id: string, e: Ending<unknown, unknown>) {
-      if (e.kind !== "landing") return;
-      const { landed } = e;
-      if (e.attempts === 1 && before.has(id)) {
-        // Sent back, and its second attempt never began: the first landing stands, or, withdrawn
-        // since, that - recorded as withdrawn, never as the green the first pipeline left.
-        requeuedAs.delete(id);
-        d.bookkeep(id, () => d.run.ticket(id, restoredRecord(before.get(id))));
-        if (landed.kind === "withdrawn") {
-          d.dropFirst(id);
-          d.bookkeep(id, () => d.run.ticket(id, withdrawnRecord(landed.reason)));
-        }
-      }
-      if (e.again && (landed.kind === "conflict" || landed.kind === "red")) {
-        // Held for the next run, with the tickets of both attempts named in its note (the ledger names them in the outcome and the comment).
-        const note = againNoteOf(landed);
-        againNote.set(id, note);
-        d.bookkeep(id, () => d.run.ticket(id, { note }));
-      }
-    },
-  };
 };

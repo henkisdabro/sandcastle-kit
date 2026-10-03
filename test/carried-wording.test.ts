@@ -1,18 +1,28 @@
 // What a carried branch's lines call its source: "its first attempt" when this run requeued the
-// ticket (the requeue-once state, `createRequeueRecord`'s `requeuedAs`, is what burndown.ts asks),
+// ticket (the requeue-once state, the ledger's `requeuedAs`, is what burndown.ts asks),
 // "an earlier run" for a branch kept from an earlier `sandcastle run`. No Docker, no git, no network.
 //
 //   pnpm exec tsx --test test/carried-wording.test.ts
 
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
-const { carriedBranch, carriedMergeLine, createRequeueRecord, greenCarriedLine } = await import("../src/landing.ts");
+// sandbox.ts derives its directories from these at import: nothing here may touch the user's.
+process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
+const { carriedBranch, carriedMergeLine, greenCarriedLine } = await import("../src/landing.ts");
+const { createLedger } = await import("../src/ledger.ts");
 
 const requeueRecord = () => {
   const said: string[] = [];
-  const record = createRequeueRecord({
-    run: { tickets: () => ({}), ticket: () => {} } as never,
+  const record = createLedger({
+    run: { ticket: () => {} },
+    outcomes: () => {},
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test" }),
     bookkeep: (_id, fn) => fn(),
     dropFirst: () => {},
     ref: (id) => `#${id}`,
@@ -65,6 +75,6 @@ test("a requeued ticket whose second attempt never began is a branch from an ear
   const { record } = requeueRecord();
   record.requeued("141", { kind: "conflict", with: [] } as never);
   assert.equal(record.requeuedAs.has("141"), true);
-  record.ended("141", { kind: "landing", attempts: 1, landed: { kind: "merged" } } as never);
+  record.record("141", { kind: "landing", attempts: 1, green: { issue: "141", branch: "agent/issue-141", status: "green", commits: 1, repairs: 0 }, landed: { kind: "conflict", files: ["a"], with: [] } });
   assert.equal(record.requeuedAs.has("141"), false);
 });

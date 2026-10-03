@@ -1,7 +1,8 @@
 // The in-run landing worker (src/schedule.ts, src/landing.ts): through the scheduler, each attempt's
 // green outcome goes to one worker as it ends, which lands them in arrival order and moves the run's
 // expected base with its own writes. Fake attempts, temp repos, a fake tracker and a host worktree
-// for the sandbox: no Docker, no gh, no network.
+// for the sandbox: no Docker, no gh, no network. What the run record says of each landing is the
+// ledger's (src/ledger.ts): landOne writes no verdict.
 //
 //   pnpm exec tsx --test test/landing-queue.test.ts
 
@@ -20,6 +21,7 @@ for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)
 const { createHostGit, landingWork, landOne, pipelineWorkers } = await import("../src/landing.ts");
 const { disableHostGitGc, gitFingerprint } = await import("../src/guard.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
+const { createLedger } = await import("../src/ledger.ts");
 const { createQueue, createSchedule, createStopState } = await import("../src/schedule.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
@@ -122,7 +124,17 @@ const harness = (root: string, over: Over = {}) => {
   const stopped: string[] = [];
   // The run's stop state once `schedule` has run.
   const stop: StopState = createStopState();
-  return { ctx, host, stop, calls, history, states, settled, stopped, beforeLand: undefined as ((id: string) => Promise<void>) | undefined };
+  const ledger = createLedger({
+    run: ctx.run,
+    outcomes: () => {},
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test", dryRun: ctx.dryRun }),
+    bookkeep: (_id, fn) => fn(),
+    dropFirst: () => {},
+    ref: tracker.ref,
+    say: () => {},
+  });
+  return { ctx, host, stop, calls, history, states, settled, stopped, ledger, beforeLand: undefined as ((id: string) => Promise<void>) | undefined };
 };
 
 /**
@@ -139,6 +151,8 @@ const schedule = async (h: ReturnType<typeof harness>, ids: string[], attempt: (
       await h.beforeLand?.(o.issue);
       const landed = await ports.land(o);
       h.settled.push({ issue: o.issue, landed });
+      // What the ledger records of this landing as its ending (a conflict here is sent back, and its second attempt ends in its pipeline).
+      h.ledger.record(o.issue, { kind: "landing", green: o, landed, attempts: 1 });
       return landed;
     },
     host: ports.host,
