@@ -1149,8 +1149,11 @@ Several projects can run at once; one project runs once at a time (`run.lock`). 
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
-[personal settings](#personal-settings). The status header
-shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
+[personal settings](#personal-settings). When every slot is taken, a freed slot goes to the run
+that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
+freed one does not take it back from another run that was already waiting. Within one run nothing
+changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 

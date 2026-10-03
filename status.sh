@@ -380,7 +380,7 @@ legacy_id() { [[ "$1" =~ ^[0-9]+(-[a-z]+)*$ ]]; }
 disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1"; fi; }
 
 # Machine-wide slots (pool.ts): one lock file per slot, holding its owner's
-# pid. Counts live ones only; the limits come from the CLI.
+# pid first (then token, run and label, which this ignores). Counts live ones only; the limits come from the CLI.
 # A slot's owner is a process of the kit, the rule of src/pool.ts `holderRunning`: a pid that
 # `ps` shows as some other process is a killed run's, whose pid came round. When `ps` cannot say
 # (BusyBox has no -p) the pid still counts if the process exists, as a signal of 0 shows.
