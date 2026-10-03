@@ -8,12 +8,24 @@ that show a person where each ticket stands.
 ### A run and its record
 
 **Run**:
-One `sandcastle run`: the tickets it takes, the sandboxes it fills, and its end.
+One `sandcastle run`: the tickets it takes, the sandboxes it fills, and its end. It makes one or
+more turns.
 _Avoid_: job, session
 
+**Turn**:
+One pass of a run over the tickets it can take. A run at autonomy 0 makes one; a higher level
+lets it turn again, up to the level's cap.
+_Avoid_: round, iteration (an agent's own loop)
+
 **Run record**:
-The file a live run keeps of itself and of each of its tickets, which every view reads.
+The file a live run keeps of itself, its current turn and each of its tickets, which every
+view reads.
 _Avoid_: run.json (the file's name, not the concept), status file
+
+**Run setting**:
+A choice fixed when a run starts that shapes what it does or spends - the run record keeps it,
+unchanged for the run's life. A per-ticket override (a ticket's model label) is not one.
+_Avoid_: option, flag, config (one of the places a setting comes from, not the setting)
 
 **Ticket state**:
 Where one ticket of a run stands, as the run record holds it - one of a closed set. A phase
