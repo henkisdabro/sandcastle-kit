@@ -27,12 +27,13 @@ const project = (lines: string[]) => {
   return { root, name: "fixture" } as Project;
 };
 
-// Ticket 1: default model, 10m and 1M in. Ticket 2: Opus, 40m and 8M in; its review line names another model.
+// Ticket 1: default model, 10m and 1M in. Ticket 2: Opus, 40m and 8M in; its review line, first so that
+// taking the first model seen would pick it, names another model.
 // Ticket 3: a line from before models were recorded, so the default model.
 const history = [
   line({ issue: "1", phase: "implement", ms: 600_000, model: IMPL_MODEL, tokens: tok(1_000_000, 10_000) }),
-  line({ issue: "2", phase: "implement", ms: 2_000_000, model: OPUS, tokens: tok(8_000_000, 80_000) }),
   line({ issue: "2", phase: "review", ms: 400_000, model: IMPL_MODEL, tokens: tok(0, 0) }),
+  line({ issue: "2", phase: "implement", ms: 2_000_000, model: OPUS, tokens: tok(8_000_000, 80_000) }),
   line({ issue: "3", phase: "implement", ms: 600_000, tokens: tok(1_000_000, 10_000) }),
 ];
 
