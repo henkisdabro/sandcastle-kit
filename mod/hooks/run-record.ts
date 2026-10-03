@@ -13,6 +13,7 @@ export const TICKET_STATES = [
   "blocked",
   "setup",
   "implement",
+  "resolve",
   "review",
   "cross-review",
   "gates",
@@ -105,6 +106,7 @@ export type Group = "working" | "needs you" | "ready" | "queued" | "blocked" | "
 export const GROUPS: Record<TicketState, Group> = {
   setup: "working",
   implement: "working",
+  resolve: "working",
   review: "working",
   "cross-review": "working",
   gates: "working",

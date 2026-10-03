@@ -813,10 +813,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // not resolve it without changing what the ticket does, so the full
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
-        await timed(issue.id, "implement", () => {
-          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
+        await timed(issue.id, "resolve", () => {
+          const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
           return pass({
-            name: `impl-${issue.id}`,
+            name: `resolve-${issue.id}`,
             logging,
             agent: implAgent(own),
             promptFile: prompts.resolve,
