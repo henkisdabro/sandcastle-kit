@@ -11,7 +11,7 @@ import { CONFIG_PATH, loadProject } from "./config.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
-import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
+import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { probeOAuth } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
@@ -288,6 +288,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   // bad limit lands here as a FIX line instead of crashing every command.
   const settingsProblem = (() => {
     try {
+      // limit() skips the file when an environment variable sets the limit, so read it here too.
+      machineSettings();
       limit("sandboxes");
       limit("gates");
       return undefined;

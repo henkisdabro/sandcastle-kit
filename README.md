@@ -1000,7 +1000,7 @@ kit or a repository. `.env` holds every token (`CLAUDE_CODE_OAUTH_TOKEN` or `ANT
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-`sandcastle doctor` reports a `config.json` that is not valid JSON or holds a bad limit.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key or holds a bad limit.
 
 ### 🐳 The image's agent versions
 
