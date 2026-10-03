@@ -8,7 +8,6 @@
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
 import { basename, join } from "node:path";
 import { CONFIG_PATH } from "./config.ts";
 import { KIT } from "./sandbox.ts";
@@ -55,21 +54,9 @@ const node = (root: string): Stack | undefined => {
   const gates: [string, string][] = names.map((n) => [n, `${pm} run ${n}`]);
   if (!gates.length) gates.push(["test", `${pm} test`]);
 
-  let mounts = "";
-  let setup = [install];
-  if (pm === "pnpm") {
-    // The host store, so each sandbox's install hardlinks instead of downloading.
-    let store = platform() === "darwin" ? "~/Library/pnpm/store/v11" : "~/.local/share/pnpm/store/v11";
-    try {
-      store = execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 })
-        .trim()
-        .replace(homedir(), "~");
-    } catch {
-      /* pnpm not on the host - the platform default */
-    }
-    mounts = `  mounts: [{ hostPath: ${JSON.stringify(store)}, sandboxPath: "/home/agent/.pnpm-store" }],\n`;
-    setup = ["pnpm config set store-dir /home/agent/.pnpm-store", install];
-  }
+  // The kit mounts the host's pnpm store itself, resolved at run time: no host path is committed.
+  const mounts = pm === "pnpm" ? "  pnpmStore: true,\n" : "";
+  const setup = [install];
   return {
     label: `Node (${pm}; scripts: ${names.join(", ") || "none - check the test gate"})`,
     block: `${mounts}  setup: [${setup.map((c) => JSON.stringify(c)).join(", ")}],\n${gatesBlock(gates)}`,

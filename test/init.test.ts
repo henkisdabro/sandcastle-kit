@@ -15,8 +15,8 @@ import type { TestContext } from "node:test";
 // Importing init.ts must not read the real user config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 
-// A fake `pnpm` first on PATH: init asks the host's pnpm for its store, and the
-// answer must not depend on the host's pnpm or its platform default path.
+// A fake `pnpm` first on PATH, so init never depends on the host's pnpm: it writes `pnpmStore: true`
+// and no path, whatever the host's pnpm or platform.
 const bin = mkdtempSync(join(tmpdir(), "sandcastle-bin-"));
 writeFileSync(join(bin, "pnpm"), '#!/bin/sh\n[ "$1" = store ] && [ "$2" = path ] && echo /fake/pnpm-store/v11\n');
 chmodSync(join(bin, "pnpm"), 0o755);
@@ -64,11 +64,11 @@ test("npm: the placeholder test script is no gate, and no lockfile means no lock
   assert.ok(config.includes("npm install --no-package-lock"));
 });
 
-test("pnpm: a lockfile gives a frozen install and mounts the host store", (t) => {
+test("pnpm: a lockfile gives a frozen install and asks for the host store, naming no path", (t) => {
   const { config } = run(t, { "package.json": pkg({ test: "vitest" }), "pnpm-lock.yaml": "" });
-  assert.ok(config.includes("pnpm config set store-dir /home/agent/.pnpm-store"));
   assert.ok(config.includes("pnpm install --frozen-lockfile"));
-  assert.match(config, /hostPath: "\/fake\/pnpm-store\/v11"/);
+  assert.ok(config.includes("pnpmStore: true"));
+  assert.ok(!config.includes("hostPath") && !config.includes("/fake/pnpm-store") && !config.includes("store-dir"));
 });
 
 test("yarn: a Berry lockfile gets --immutable", (t) => {

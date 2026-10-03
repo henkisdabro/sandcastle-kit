@@ -2,6 +2,7 @@
 // Everything else - default models, image base, orchestrator, prompts, status
 // view - lives in this kit and is shared.
 
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -58,6 +59,13 @@ export type ProjectConfig = {
   mounts?: Mount[];
   /** Commands run in each sandbox once it is up, e.g. dependency install. */
   setup?: string[];
+  /**
+   * `true`: mount the host's pnpm store (`pnpm store path`, asked of the host's pnpm before each
+   * command) at `/home/agent/.pnpm-store` and point the sandbox's pnpm at it before `setup`, so
+   * each sandbox's install hardlinks instead of downloading. The config holds no host path. Without
+   * pnpm on the host the mount is skipped, with a note.
+   */
+  pnpmStore?: boolean;
   /**
    * Sandboxes load none of the repo's skills, agents, commands, MCP servers or
    * plugins unless `keep` names them (ids in src/lean.ts). Hooks are the
@@ -117,14 +125,26 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr">> &
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore">> &
   Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
+export const PNPM_STORE_SANDBOX = "/home/agent/.pnpm-store";
+export const PNPM_STORE_SETUP = `pnpm config set store-dir ${PNPM_STORE_SANDBOX}`;
+
+/** The host's pnpm store, or undefined when pnpm is not on the host (or cannot say). */
+export const hostPnpmStore = (root: string): string | undefined => {
+  try {
+    return execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 }).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -171,6 +191,7 @@ const checkShape = (config: ProjectConfig) => {
   if (!Array.isArray(config.gates) || config.gates.some((g) => typeof g?.name !== "string" || !g.name || typeof g.command !== "string" || !g.command)) {
     refuse("each gate needs a `name` and a `command`, both strings: { name: \"test\", command: \"pnpm test\" }.");
   }
+  if (config.pnpmStore !== undefined && typeof config.pnpmStore !== "boolean") refuse(`\`pnpmStore\` must be true or false, not ${JSON.stringify(config.pnpmStore)}.`);
   if (config.mounts !== undefined && (!Array.isArray(config.mounts) || config.mounts.some((m) => typeof m?.hostPath !== "string" || typeof m.sandboxPath !== "string"))) {
     refuse("each mount needs a `hostPath` and a `sandboxPath`, both strings.");
   }
@@ -218,18 +239,32 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     );
   }
   configureModels(config);
+  // Resolved here, on the host, so the committed config holds no path that exists on one machine
+  // only. A literal mount of the same sandbox path (a config from before the key) wins: Docker
+  // refuses two mounts at one path.
+  let mounts = config.mounts ?? [];
+  let setup = config.setup ?? [];
+  if (config.pnpmStore) {
+    const store = hostPnpmStore(root);
+    if (!store) {
+      console.warn("pnpmStore is set but pnpm is not on this host (`pnpm store path` failed): no store mounted, each sandbox's install downloads.");
+    } else {
+      if (!mounts.some((m) => m.sandboxPath === PNPM_STORE_SANDBOX)) mounts = [...mounts, { hostPath: store, sandboxPath: PNPM_STORE_SANDBOX }];
+      if (!setup.includes(PNPM_STORE_SETUP)) setup = [PNPM_STORE_SETUP, ...setup];
+    }
+  }
   return {
     root,
     baseBranch: "main",
     concurrency: DEFAULT_CONCURRENCY,
     land: "merge",
-    mounts: [],
-    setup: [],
     implement: {},
     review: {},
     repair: {},
     hookTests: [],
     ...config,
+    mounts,
+    setup,
     // Defaults to [] when unset; a leading ./ is stripped so a path compares equal to git's.
     generated: generated.map((g) => ({ ...g, paths: g.paths.map((p) => p.replace(/^\.\//, "")) })),
     label: config.label ?? detectFromDocs(root).labels?.["ready-for-agent"] ??"ready-for-agent",
