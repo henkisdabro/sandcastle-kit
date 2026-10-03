@@ -41,8 +41,9 @@
 //   gates            every gate on the base branch in a sandbox, as a run's
 //                    first phase does; no model calls
 //   land <ticket>    merge one agent branch with the kit's message, gate the merge in the
-//                    project image, then close the ticket; nothing is merged on a red gate
-//                    or a conflict; no model calls
+//                    project image, then close the ticket (left open with a criterion
+//                    recorded unmet); nothing is merged on a red gate or a conflict; no
+//                    model calls
 //   preview          dry-merge every unlanded agent branch onto the base, oldest first,
 //                    in the project image; lists clean and conflicting branches with their
 //                    files; merges nothing; no model calls
