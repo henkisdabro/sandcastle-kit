@@ -36,7 +36,7 @@ test("a chain of 7 among 9 tickets, 5 slots: 7 rounds and the chain note", () =>
   assert.equal(chain.length, 7);
   assert.equal(
     estimate(p, 9, 5, chain.length),
-    "Estimate (rough, from 1 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 1h 10m for 9 ticket(s), 5 at a time (a chain of 7 runs in order).",
+    "Estimate (rough, from 1 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 1h 10m for 9 ticket(s), 5 at a time (7 tickets in sequence).",
   );
 });
 

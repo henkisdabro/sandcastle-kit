@@ -589,16 +589,25 @@ const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n
  * recorded tokens, so a new project prints nothing rather than a guess. It
  * covers the tickets' own pipelines only - not the image check, preflight,
  * base gates, landing or verify. A line that does not parse is skipped.
+ *
+ * `models` is the implement model of each ticket in the run (its `model:`
+ * label, else the default): each is estimated from the history of tickets
+ * that model implemented, as an Opus ticket takes several times a Sonnet one.
+ * A history ticket's model is the one on its implement or repair lines; lines
+ * with none (older ones) count as the default model. A model with no history
+ * falls back to the median of all of them, and the line says it is low.
+ * Without `models` every ticket is estimated from the one median.
  */
-export const estimate = (project: Project, tickets: number, slots: number, chain = 0): string | undefined => {
+export const estimate = (project: Project, tickets: number, slots: number, chain = 0, models?: string[]): string | undefined => {
   let text: string;
   try {
     text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  const groups = new Map<string, { ms: number; tokened: boolean; inTokens: number; out: number }>();
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Group = { ms: number; tokened: boolean; inTokens: number; out: number; model?: string };
+  const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
     let l: Line;
@@ -615,6 +624,8 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0 };
     g.ms += l.ms as number;
+    // The review lines name the reviewer's model: only the steps the implementer ran say who implemented.
+    if ((l.phase === "implement" || l.phase === "repair") && typeof l.model === "string" && l.model) g.model ??= l.model;
     if (l.tokens && typeof l.tokens === "object") {
       g.tokened = true;
       g.inTokens += (l.tokens.input ?? 0) + (l.tokens.cacheWrite ?? 0) + (l.tokens.cacheRead ?? 0);
@@ -624,13 +635,29 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
   }
   const counted = [...groups.values()].filter((g) => g.tokened);
   if (!counted.length) return undefined;
-  const inAll = median(counted.map((g) => g.inTokens))! * tickets;
-  const outAll = median(counted.map((g) => g.out))! * tickets;
+  const medians = (gs: Group[]) => ({ inTokens: median(gs.map((g) => g.inTokens))!, out: median(gs.map((g) => g.out))!, ms: median(gs.map((g) => g.ms))! });
+  const overall = medians(counted);
+  let inAll = overall.inTokens * tickets;
+  let outAll = overall.out * tickets;
+  let msAll = overall.ms * tickets;
+  let unknown = 0;
+  if (models) {
+    inAll = outAll = msAll = 0;
+    for (const model of models) {
+      const same = counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
+      if (!same.length) unknown++;
+      const m = same.length ? medians(same) : overall;
+      inAll += m.inTokens;
+      outAll += m.out;
+      msAll += m.ms;
+    }
+  }
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots.
   const rounds = Math.max(chain, Math.ceil(tickets / slots));
-  const m = Math.round((median(counted.map((g) => g.ms))! * rounds) / 60_000);
+  const m = Math.round(((msAll / Math.max(tickets, 1)) * rounds) / 60_000);
   const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (a chain of ${chain} runs in order)` : ""}.`;
+  const low = unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "";
+  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (${chain} tickets in sequence)` : ""}.${low}`;
 };
 
 // ---------------------------------------------------------------------------
@@ -681,6 +708,8 @@ export type BranchHead = {
   reviewed?: string;
   /** The tip a pipeline ended green on, not held as unreviewed. */
   green?: string;
+  /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
+  unmet?: string;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -697,7 +726,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

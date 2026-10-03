@@ -153,6 +153,8 @@ export type TicketRecord = {
   closeFailed?: string;
   /** What the reviewer said no gate exercises; a merged ticket with one needs a person. */
   ungated?: string;
+  /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */
+  unmet?: string;
   /** Paths the branch changed beyond its ticket's `Touches:` line. */
   overrun?: string[];
 };
@@ -166,9 +168,9 @@ export const sessionId = (value: unknown): string | undefined => (typeof value =
 
 /**
  * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
- * level, the turn this record is, the level's cap, and the usage guard. Each field is optional and
- * a reader shows only what is there - an older kit's record has no group at all, level 1 has no cap
- * (it asks after every turn), and a record without the guard's fields shows nothing about it.
+ * level, the turn this record is, the level's cap, whether cross-review runs, and the usage guard. Each field is
+ * optional and a reader shows only what is there - an older kit's record has no group at all, level 1
+ * has no cap (it asks after every turn), and a record without the guard's fields shows nothing about it.
  */
 export type RunSettings = {
   /** The level, resolved once per run. */
@@ -177,6 +179,12 @@ export type RunSettings = {
   turn?: number;
   /** The most turns the level allows. */
   cap?: number;
+  /** Whether cross-review runs, resolved once per run. */
+  crossReview?: boolean;
+  /** Cross-review's model: written only when it is on. */
+  crossReviewModel?: string;
+  /** Cross-review's effort: written only when it is on. */
+  crossReviewEffort?: string;
   /** Whether the usage guard (`USAGE_CHECK=1`) was asked for. */
   usageGuard?: boolean;
   /** The guard's stop threshold in percent; only while it is on. */

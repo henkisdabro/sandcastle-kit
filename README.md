@@ -309,6 +309,15 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. The next run
+picks up the remainder.
+
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -527,7 +536,7 @@ moments earlier (the search index lags), so a run started straight after `--add-
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its tickets in the last three runs (when a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(a chain of N runs in order)`). Tickets that others wait for start first; a ticket
+time from the medians of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). When a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(N tickets in sequence)`. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -545,7 +554,9 @@ The status view reads each ticket of a live run from the run's own record, so it
 with the run. Under the run band, one full-width **settings** row shows the run's settings:
 `settings  autonomy 0 1 2 [3] drain · turn 2/3` - the autonomy level lit and bracketed, the
 others greyed, and the turn out of the level's cap (level 1 asks after every turn, so it has no
-cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`). A live
+cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`).
+Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
+`○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
 marked `(next run)`, and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
@@ -624,7 +635,8 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 ### 📊 After a run
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
-branches, merged tickets the reviewer says no gate proves, follow-up tickets agents filed); **Needs
+branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
+undone, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
@@ -670,8 +682,9 @@ A queued ticket with a branch from an earlier run builds on that branch:
 - A branch that was reviewed and green, and has not moved since, skips implement and review: a clean
   base merge goes straight to the gates, a conflicted one gets a short resolver prompt first. A
   re-run whose only change since its last review is the base merge gets a review of the merge
-  alone. The record behind both is `.sandcastle/logs/heads.json`; `sandcastle requeue` clears a
-  ticket's entry.
+  alone. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+  agents left undone, so a branch that skips them still lands as partly done; `sandcastle requeue`
+  clears a ticket's entry.
 - When the short resolver prompt resolves a conflicted base merge, the kit checks the result
   against git's own automatic merge: a resolution may change only the files git could not
   merge itself (and [`generated`](#-a-gate-for-generated-files) paths). If it also edits a file git
@@ -698,7 +711,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with any criterion left undone, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
@@ -1156,8 +1169,11 @@ Several projects can run at once; one project runs once at a time (`run.lock`). 
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
-[personal settings](#personal-settings). The status header
-shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
+[personal settings](#personal-settings). When every slot is taken, a freed slot goes to the run
+that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
+freed one does not take it back from another run that was already waiting. Within one run nothing
+changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 

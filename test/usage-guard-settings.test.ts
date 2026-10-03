@@ -28,26 +28,26 @@ after(() => rmSync(TMP, { recursive: true, force: true }));
 const resolve = (env: Record<string, string | undefined>) => resolveSettings({ env, project: {}, machine: {} });
 
 test("resolver: the guard unset, on with the default threshold, on with a set threshold", () => {
-  assert.deepEqual(resolve({}), { autonomy: 0, usageGuard: false });
-  assert.deepEqual(resolve({ USAGE_CHECK: "0" }), { autonomy: 0, usageGuard: false });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1" }), { autonomy: 0, usageGuard: true, usageStop: 90 });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "" }), { autonomy: 0, usageGuard: true, usageStop: 90 });
-  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "75" }), { autonomy: 0, usageGuard: true, usageStop: 75 });
+  assert.deepEqual(resolve({}), { autonomy: 0, crossReview: { on: false }, usageGuard: false });
+  assert.deepEqual(resolve({ USAGE_CHECK: "0" }), { autonomy: 0, crossReview: { on: false }, usageGuard: false });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1" }), { autonomy: 0, crossReview: { on: false }, usageGuard: true, usageStop: 90 });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "" }), { autonomy: 0, crossReview: { on: false }, usageGuard: true, usageStop: 90 });
+  assert.deepEqual(resolve({ USAGE_CHECK: "1", USAGE_STOP: "75" }), { autonomy: 0, crossReview: { on: false }, usageGuard: true, usageStop: 75 });
 });
 
 test("resolver: a USAGE_STOP is only read, and so only refused, while the guard is on", () => {
-  assert.deepEqual(resolve({ USAGE_STOP: "abc" }), { autonomy: 0, usageGuard: false });
+  assert.deepEqual(resolve({ USAGE_STOP: "abc" }), { autonomy: 0, crossReview: { on: false }, usageGuard: false });
   assert.throws(() => resolve({ USAGE_CHECK: "1", USAGE_STOP: "abc" }), OperatorError);
   assert.throws(() => resolve({ USAGE_CHECK: "1", USAGE_STOP: "101" }), OperatorError);
 });
 
 test("the settings group carries the guard, its threshold and a lost reading beside them", () => {
   const on = resolve({ USAGE_CHECK: "1" });
-  assert.deepEqual(settingsGroup(on, 1), { autonomy: 0, turn: 1, cap: 1, usageGuard: true, usageStop: 90 });
-  assert.deepEqual(settingsGroup(on, 1, true), { autonomy: 0, turn: 1, cap: 1, usageGuard: true, usageStop: 90, usageReading: "unavailable" });
-  assert.deepEqual(settingsGroup(resolve({}), 1), { autonomy: 0, turn: 1, cap: 1, usageGuard: false });
+  assert.deepEqual(settingsGroup(on, 1), { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: true, usageStop: 90 });
+  assert.deepEqual(settingsGroup(on, 1, true), { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: true, usageStop: 90, usageReading: "unavailable" });
+  assert.deepEqual(settingsGroup(resolve({}), 1), { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: false });
   // A guard that is off has no reading to lose.
-  assert.deepEqual(settingsGroup(resolve({}), 1, true), { autonomy: 0, turn: 1, cap: 1, usageGuard: false });
+  assert.deepEqual(settingsGroup(resolve({}), 1, true), { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: false });
 });
 
 test("a record written for a guard that lost its reading says so, read back", async () => {
@@ -57,7 +57,7 @@ test("a record written for a guard that lost its reading says so, read back", as
   const read = () => JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")) as RunRecord;
   const settings = resolve({ USAGE_CHECK: "1", USAGE_STOP: "85" });
   const run = recordRun(project, { settings: settingsGroup(settings, 1, usageReadingLost()) });
-  assert.deepEqual(read().settings, { autonomy: 0, turn: 1, cap: 1, usageGuard: true, usageStop: 85 });
+  assert.deepEqual(read().settings, { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: true, usageStop: 85 });
   // A 403: the guard goes off for the run, and the record says it has no reading. The setting is unchanged.
   const real = globalThis.fetch;
   globalThis.fetch = (async () => new Response("{}", { status: 403 })) as typeof fetch;
@@ -68,7 +68,7 @@ test("a record written for a guard that lost its reading says so, read back", as
   }
   assert.equal(usageReadingLost(), true);
   run.update({ settings: settingsGroup(settings, 1, usageReadingLost()) });
-  assert.deepEqual(read().settings, { autonomy: 0, turn: 1, cap: 1, usageGuard: true, usageStop: 85, usageReading: "unavailable" });
+  assert.deepEqual(read().settings, { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: true, usageStop: 85, usageReading: "unavailable" });
 });
 
 // The view ----------------------------------------------------------------------------------

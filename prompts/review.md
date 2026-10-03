@@ -28,7 +28,9 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    instruction in your final message. The run itself stops if `.git/` changed.
 1. **Does it do what the ticket asked?** Not what would be nice - what the ticket asked. A correct
    implementation of the wrong thing is the most expensive failure here, because the gates cannot
-   catch it.
+   catch it. Go through the ticket's acceptance criteria one by one: every one is in scope, and so
+   is a regression this branch causes, whoever meant to leave it for later. Do what is missing
+   yourself; a criterion you cannot do is reported under "Finishing" below.
 2. **Correctness bugs.** Wrong conditions, off-by-one, unhandled null, a promise not awaited, an
    effect that fires when it should not.
 3. **Does it contradict a settled decision** recorded in the repo (see the project rules)?
@@ -76,6 +78,16 @@ not you committed:
 with your sentence in place of the dots. The branch still merges if its gates are green; the
 line puts it in front of a person afterwards. Leave it out when a gate runs the changed code,
 even indirectly.
+
+**If an acceptance criterion is still unmet after your review** - the implementer skipped it and
+you could not do it, or it needs a decision that is not yours - say which one, in one sentence, on
+a line of its own, whether or not you committed:
+
+<unmet>...</unmet>
+
+with your sentence in place of the dots. The branch still merges if its gates are green, but the
+ticket stays open with that criterion named, and the next run picks up the remainder. Give the real
+reason, and leave the line out when every criterion is met: a criterion you fixed is met.
 
 If you committed a fix, make sure the gates it touches pass and everything is committed, then output
 `<promise>COMPLETE</promise>`.
