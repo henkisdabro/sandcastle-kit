@@ -175,6 +175,53 @@ test("a run over its share takes no new slot while another waits, and keeps ever
   await Promise.all([a.done, b.done]);
 });
 
+test("a run between two of its tickets keeps its share: another run leaves those free slots alone", async () => {
+  const dir = tmp();
+  // A live run that wants 3 and holds none at this instant: no wait entry, only its registration.
+  const idle = kitLikeProcess();
+  try {
+    registered("idle", idle.pid, 3);
+    const a = run(
+      dir,
+      `joinPool("alpha", 6, 6);
+       await Promise.all(Array.from({ length: 6 }, (_, i) => withSlot("sandboxes", "a" + i, async () => { while (!has("stop")) await sleep(25); }, (why) => mark("why-" + why), 25)));`,
+    );
+    await until(() => heldBy().join() === "3", "run A to take its share");
+    await until(() => existsSync(join(dir, "why-share")), "run A to say it waits for its share");
+    // Three slots stay free: they are the other run's share, not anyone's to take.
+    await holds(() => heldBy().join() === "3", 600);
+    // A drained run (demand 0) wants nothing: with no one else wanting one, a free slot is taken as before.
+    registered("idle", idle.pid, 0);
+    await until(() => heldBy().join() === "6", "run A to take the slots no one wants");
+    writeFileSync(join(dir, "stop"), "");
+    await a.done;
+  } finally {
+    idle.kill();
+  }
+});
+
+test("an older wait of a run above its share does not hold back a run below its own", async () => {
+  const dir = tmp();
+  // A holds the whole pool and has a seventh ticket waiting before B arrives.
+  const a = run(
+    dir,
+    `joinPool("alpha", 7, 7);
+     const held = Array.from({ length: 6 }, (_, i) => withSlot("sandboxes", "a" + i, async () => { mark("held" + i); while (!has("release" + i) && !has("stop")) await sleep(25); }, undefined, 25));
+     while (!Array.from({ length: 6 }, (_, i) => has("held" + i)).every(Boolean)) await sleep(25);
+     const seventh = withSlot("sandboxes", "a6", async () => log("a6"), () => mark("a6-waits"), 25);
+     await Promise.all([...held, seventh]);`,
+  );
+  await until(() => existsSync(join(dir, "a6-waits")), "A's seventh ticket to wait");
+  const b = run(dir, `joinPool("beta", 5, 5); await Promise.all(Array.from({ length: 5 }, (_, i) => withSlot("sandboxes", "b" + i, async () => { log("b" + i); while (!has("stop")) await sleep(25); }, () => mark("b-waits"), 25)));`);
+  await until(() => existsSync(join(dir, "b-waits")), "run B to wait");
+  // The slot A frees goes to B, below its share, though A's seventh has waited longer.
+  writeFileSync(join(dir, "release0"), "");
+  await until(() => existsSync(join(dir, "log")), "a run to take the freed slot");
+  assert.match(readFileSync(join(dir, "log"), "utf8"), /^b\d\n$/);
+  writeFileSync(join(dir, "stop"), "");
+  await Promise.all([a.done, b.done]);
+});
+
 test("when one run ends, the other takes the whole pool", async () => {
   const dir = tmp();
   // A holds the pool, three of its tickets finish and are not replaced (it is above its share
