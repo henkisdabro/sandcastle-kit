@@ -273,7 +273,7 @@ Then edit, in this order:
    ran [Matt Pocock's setup skill](https://github.com/mattpocock/skills), recommended but optional). `sandcastle queue` shows which tracker the kit chose and why;
    see [Trackers](#-trackers-github-or-ticket-files).
 1. **`.sandcastle/config.ts`** - `gates` (the commands CI runs: lint, typecheck, build, test),
-   `setup` (dependency install in the sandbox), `mounts` (e.g. the host package store), `lean`.
+   `setup` (dependency install in the sandbox), `mounts` (e.g. a host cache; `pnpmStore: true` mounts the host's pnpm store), `lean`.
    See [Configuration](#-configuration).
 2. **`.sandcastle/rules.md`** - what an agent in *this* repo must read first, must never do
    (deploys, production databases), and how a visual or data change is proven. It is added to
@@ -929,6 +929,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
+| `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store into every sandbox and points the sandbox's pnpm at it before `setup`, so installs hardlink instead of downloading. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note |
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |

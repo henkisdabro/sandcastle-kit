@@ -4,9 +4,9 @@ export default {
   name: "shopfront",
   dockerfile: ".sandcastle/Dockerfile",
 
-  // `pnpm store path` on the host; this is the macOS default.
-  mounts: [{ hostPath: "~/Library/pnpm/store/v11", sandboxPath: "/home/agent/.pnpm-store" }],
-  setup: ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"],
+  // The host's pnpm store, mounted into each sandbox; the kit asks `pnpm store path` at run time.
+  pnpmStore: true,
+  setup: ["pnpm install --frozen-lockfile"],
 
   gates: [
     { name: "lint", command: "pnpm run lint" },

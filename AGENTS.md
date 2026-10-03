@@ -68,7 +68,7 @@ read a module's section there before changing it.
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
 | `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
 | `src/generated.ts` | Generated files: `covers`, `regensFor`, and `resolveGenerated` (take a side, rerun setup and `regen` in the sandbox, commit); also the shell quoting and host git identity the base merge uses |
-| `src/config.ts` | The `ProjectConfig` type, loader and validation |
+| `src/config.ts` | The `ProjectConfig` type, loader and validation; `pnpmStore`'s run-time mount and setup step |
 | `src/versions.ts` | Which Claude Code and Codex versions the image gets, resolved on the host and part of the image tag |
 | `prompts/` | Implement, review, repair and resolve templates; the kit fills `{{KIT_*}}`, Sandcastle the rest |
 | `container/` | Mounted read-only at `/etc/claude-code` in every sandbox: managed settings and `git-guard.sh`, the hook that refuses damage to the shared `.git` |

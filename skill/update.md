@@ -85,6 +85,12 @@ was set up with.
        offer either to move them across (`gh issue edit <n> --add-label ready-for-human
        --remove-label needs-human`, or the `Status:` line), or to keep `needs-human` by mapping
        `ready-for-human` to it in `triage-labels.md`. Apply after the user agrees.
+   12. **Literal pnpm store mount.** If `.sandcastle/config.ts` has a `mounts` entry whose
+       `sandboxPath` is `/home/agent/.pnpm-store` (a host path such as `~/Library/pnpm/store/v11`,
+       valid on one OS only), propose replacing it with `pnpmStore: true`, and dropping the
+       `pnpm config set store-dir /home/agent/.pnpm-store` line from `setup`: the kit now resolves
+       the store with `pnpm store path` on the host and adds both. Leave any other mount alone.
+       Apply after the user agrees, then `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: kit version
