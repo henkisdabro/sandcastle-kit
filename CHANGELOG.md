@@ -43,6 +43,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The tip backup is pruned reliably.** Every fetch into `.sandcastle/backup.git` started git's
+  background auto maintenance, which repacked it behind the kit's back and could hold the lock the
+  kit's own prune needs, so the prune failed silently and packs piled up. The kit now runs its
+  git calls there with auto maintenance off. Nothing to do.
 - **A branch red at landing no longer shows as ready after the run.** The status view read the
   outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
   row as ready to land; it now shows gate red, like a red pipeline.
