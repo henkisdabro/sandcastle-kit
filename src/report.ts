@@ -59,7 +59,7 @@ export type Facts = {
   stopped?: string;
   /** Files changed per held branch. */
   changed: Record<string, number>;
-  /** Issues agents filed during the run, carrying the triage label and still open (GitHub only). */
+  /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
   filed?: { id: string; title: string }[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
   stage?: string;
@@ -194,13 +194,20 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
 
-  // Agent-filed follow-ups: open, carrying the triage label, created since the run
-  // began. Dates are compared here, not with a shell `date`, which differs on macOS.
+  // Issues opened during the run: open, carrying the triage label, created between its start
+  // and its end. Agents file with the person's own token, so the author cannot say who opened
+  // one; the report says "opened", never "filed by an agent". A run still going has no end yet
+  // (each autonomy turn writes a finishedAt and the run goes on), and one that is only now
+  // summing itself up has not written its own, so the window closes only for a finished run:
+  // otherwise `sandcastle report` would list whatever a person opens afterwards, every time.
+  // Dates are compared here, not with a shell `date`, which differs on macOS.
   let filed: { id: string; title: string }[] = [];
   if (project.tracker.kind === "github") {
     try {
       const open = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", project.tracker.triage, "--limit", "500", "--json", "number,title,createdAt"], root)) as { number: number; title: string; createdAt: string }[];
-      filed = open.filter((i) => Date.parse(i.createdAt) >= Date.parse(run.startedAt)).map((i) => ({ id: String(i.number), title: i.title }));
+      const from = Date.parse(run.startedAt);
+      const to = alive.state === "finished" && run.finishedAt ? Date.parse(run.finishedAt) : Infinity;
+      filed = open.filter((i) => Date.parse(i.createdAt) >= from && Date.parse(i.createdAt) <= to).map((i) => ({ id: String(i.number), title: i.title }));
     } catch {
       filed = [];
     }
@@ -313,6 +320,8 @@ export const render = (f: Facts, plain = false): string => {
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
+      `${(f.filed ?? []).length ? `${(f.filed ?? []).length} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -381,7 +390,7 @@ export const render = (f: Facts, plain = false): string => {
         const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
         return `- ${name(id)} - merged - check by hand: ${note}${more}`;
       }),
-      ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - filed by an agent during this run: triage it, then queue or close it`),
+      ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
 

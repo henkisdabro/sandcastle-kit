@@ -617,7 +617,7 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 ### 📊 After a run
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
-branches, merged tickets the reviewer says no gate proves, follow-up tickets agents filed); **Needs
+branches, merged tickets the reviewer says no gate proves, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
