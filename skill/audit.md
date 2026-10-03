@@ -9,7 +9,9 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
 2. **Scope, with the user** (the harness's question tool, `AskUserQuestion` in Claude Code).
    Ask:
    - Which lenses. Offer the ones that fit this repo: correctness bugs, security, tests (what the
-     gates do not cover), performance, docs and developer experience, and accessibility and SEO
+     gates do not cover), performance, docs and developer experience (including docs that still describe behaviour the
+     code has since changed: check each claim in the README, docs and agent files against the
+     code), and accessibility and SEO
      only for a web front end.
    - Which areas (directories) are in or out.
    - A cap per lens (default 10 findings) and on tickets filed in total (default 25).

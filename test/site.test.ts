@@ -16,6 +16,11 @@ const readme = readFileSync(join(KIT, "README.md"), "utf8");
 
 const text = (s: string) => s.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/^\$\s*/, "").trim();
 
+test("the footer's version is the changelog's latest release", () => {
+  const released = /^## \[(\d+\.\d+\.\d+)\]/m.exec(readFileSync(join(KIT, "CHANGELOG.md"), "utf8"))?.[1];
+  assert.match(html, new RegExp(`<span data-version>v${released}</span>`), "bump site/index.html's data-version with each release");
+});
+
 test("every install line on the site is the README's", () => {
   const install = readme.match(/^git clone https:\/\/github\.com\/henkisdabro\/sandcastle-kit\.git .*$/m)?.[0];
   assert.ok(install, "the README's quick start has no install line");

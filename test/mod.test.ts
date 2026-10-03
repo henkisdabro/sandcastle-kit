@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -241,5 +241,15 @@ test("the mod's own tests pass", { skip }, (t) => {
   const r = claude(["plugin", "test", "mod"]);
   // Claude Code can turn mods off for a machine from its side; nothing here can turn them on.
   if (/hooks modules are turned off/.test(r.stdout + r.stderr)) return t.skip("Claude Code has mods turned off here");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+// The kit's own tsc leaves mod/ out: its types come only from a `claude --plugin-dir mod` session,
+// which writes them (gitignored) beside a mod/tsconfig.json. Wherever that session has run, a type
+// error in the mod fails here instead of going unseen.
+const modTypes = existsSync(join(root, "mod", "tsconfig.json")) ? false : "no mod/tsconfig.json: run `claude --plugin-dir mod` once";
+
+test("the mod type-checks against Claude Code's types", { skip: modTypes }, () => {
+  const r = spawnSync(join(root, "node_modules", ".bin", "tsc"), ["-p", "mod", "--noEmit"], { cwd: root, encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
