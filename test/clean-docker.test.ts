@@ -18,7 +18,8 @@ import { buildArgs, KIT_LABEL, removeDanglingImages, removeExitedSandboxes } fro
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-cleandocker-")));
 
 // A docker that answers from files: `containers` (id per line), `mounts/<id>`, `images` (ids), and
-// `busy` (images `rm` refuses); everything it is asked to remove is appended to `removed`.
+// `busy` (images `rm` refuses); everything it is asked to remove is appended to `removed`, and each
+// call's arguments to `calls`, so a test holds the filters the real daemon would apply.
 const fakeDocker = (state: string) => {
   const bin = join(state, "bin");
   mkdirSync(bin, { recursive: true });
@@ -27,6 +28,7 @@ const fakeDocker = (state: string) => {
     script,
     `#!/bin/sh
 state="${state}"
+echo "$*" >> "$state/calls"
 case "$1 $2" in
   "ps -aq") cat "$state/containers" ;;
   "image ls") cat "$state/images" ;;
@@ -40,8 +42,10 @@ esac
   chmodSync(script, 0o755);
   writeFileSync(join(state, "removed"), "");
   writeFileSync(join(state, "busy"), "");
+  writeFileSync(join(state, "calls"), "");
   mkdirSync(join(state, "mounts"), { recursive: true });
-  return { bin, removed: () => readFileSync(join(state, "removed"), "utf8").split("\n").filter(Boolean) };
+  const lines = (file: string) => readFileSync(join(state, file), "utf8").split("\n").filter(Boolean);
+  return { bin, removed: () => lines("removed"), calls: () => lines("calls") };
 };
 
 const withPath = <T>(bin: string, fn: () => T): T => {
@@ -70,6 +74,10 @@ test("exited containers of this project, or with a worktree that no longer exist
   const removed = withPath(docker.bin, () => removeExitedSandboxes({ root, name: "demo" } as Project));
   assert.deepEqual(removed.sort(), ["gone", "mine"]);
   assert.deepEqual(docker.removed().sort(), ["gone", "mine"]);
+  // Running containers are reapOrphans' business, and only the sandcastle library's are listed.
+  const ps = docker.calls().find((c) => c.startsWith("ps "));
+  assert.match(ps ?? "", /--filter status=exited/);
+  assert.match(ps ?? "", /--filter name=\^sandcastle-/);
 });
 
 test("a missing worktree directory below a mount with a subpath still counts as gone", () => {
@@ -89,6 +97,9 @@ test("dangling kit images are removed, one in use is kept, and the query is limi
   const removed = withPath(docker.bin, () => removeDanglingImages());
   assert.deepEqual(removed, ["img1"]);
   assert.deepEqual(docker.removed(), ["img1"]);
+  const ls = docker.calls().find((c) => c.startsWith("image ls "));
+  assert.match(ls ?? "", /--filter dangling=true/);
+  assert.match(ls ?? "", /--filter label=sandcastle-kit=1/, "another project's dangling image is never listed");
 });
 
 test("without Docker, there is nothing to remove and no error", () => {
