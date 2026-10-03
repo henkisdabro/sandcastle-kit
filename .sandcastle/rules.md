@@ -33,3 +33,6 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
 - Nothing personal in any file, commit or ticket comment: no names, emails, tokens, home paths or
   private repo names. Write a lesson as a pattern, not as an incident.
 - Leave `docker/base.Dockerfile` version pins alone unless the ticket is about them.
+- **How the test runner reports.** `pnpm test` runs `node:test` with its spec output: a pass is
+  `ℹ pass N`, a failure is a line starting `✖` and `ℹ fail N`. It does not print TAP, so grepping
+  for `^not ok` or `^# pass` finds nothing. Redirect the run to a file and grep that.
