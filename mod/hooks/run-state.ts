@@ -68,8 +68,7 @@ const text = (v: unknown, max: number) =>
 const whole = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined);
 const MAX_TICKETS = 200;
 
-/** What the run's process shows in its command line (bin/sandcastle starts it): how a look tells it from a process that got its pid later. */
-export const RUN_COMMAND = "src/cli.ts";
+export { RUN_COMMAND } from "./run-live";
 
 // A ticket as the kit writes it (src/tracker.ts, `refOf`): `#12` for a number, the id itself
 // for a ticket file.

@@ -77,7 +77,7 @@ read a module's section there before changing it.
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`ls test/` first: a test file a ticket names may not exist). The `skill*` tests read SKILL.md, run.md, update.md and this table's `skill/` row |
 | `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action). Before editing it, read its portability rules in `docs/architecture.md` |
-| `mod/` | The optional Claude Code mod: `hooks/register.tsx` (the hooks), `hooks/run-record.ts` (the run record's types, imported by `src/` too), `hooks/run-state.ts` (the drawing). Runs inside Claude Code, imports nothing from `src/` |
+| `mod/` | The optional Claude Code mod: `hooks/register.tsx` (the hooks), `hooks/run-record.ts` (the run record's types, imported by `src/` too), `hooks/run-live.ts` (the one "is this run live" rule, imported by `src/` too), `hooks/run-state.ts` (the drawing). Runs inside Claude Code, imports nothing from `src/` |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |

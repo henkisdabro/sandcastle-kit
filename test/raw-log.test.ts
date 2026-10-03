@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { Project } from "../src/config.ts";
+import { kitLikeProcess } from "./kit-process.ts";
 import { agentLog, agentLogging, archiveFinishedLogs, logOwner, rawLog } from "../src/run.ts";
 
 const KIT = join(import.meta.dirname, "..");
@@ -118,18 +119,23 @@ test("the status view reads the readable log, not a newer sidecar", () => {
   const raw = join(logs, "agent-issue-205-impl-205.jsonl");
   writeFileSync(log, "Bash(pnpm test)\n");
   writeFileSync(raw, '{"type":"assistant","message":"x"}\n{"type":"user"}\n');
-  // A live run (this process's pid) with #205 implementing, so its row shows the newest log's last line.
+  // A live run (a process under the kit's command line) with #205 implementing, so its row shows the newest log's last line.
   const now = Math.floor(Date.now() / 1000);
+  const run = kitLikeProcess();
   writeFileSync(
     join(logs, "run.json"),
     JSON.stringify({
-      orchestrator: "fixture", pid: process.pid, startedAt: new Date().toISOString(), models: "implement m/high", stage: "implementing",
+      orchestrator: "fixture", pid: run.pid, startedAt: new Date().toISOString(), models: "implement m/high", stage: "implementing",
       concurrency: 1, issues: ["205"], tickets: { "205": { state: "implement", since: now - 30, started: now - 60 } },
     }),
   );
   utimesSync(log, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
   utimesSync(raw, new Date(), new Date());
-  const frame = view(project);
-  assert.match(frame, /pnpm test/);
-  assert.doesNotMatch(frame, /"type":/);
+  try {
+    const frame = view(project);
+    assert.match(frame, /pnpm test/);
+    assert.doesNotMatch(frame, /"type":/);
+  } finally {
+    run.kill();
+  }
 });

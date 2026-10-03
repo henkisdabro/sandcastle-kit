@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { sessionId } from "../mod/hooks/run-record.ts";
 import { followable, parse, parseRegistry, REGISTRY_SCRIPT, startedBy } from "../mod/hooks/run-state.ts";
 import { liveRuns } from "../src/herdr-plugin.ts";
+import { everyPidIsTheKit } from "./kit-process.ts";
 import { registerRun, runFile } from "../src/live-runs.ts";
 
 const KIT = join(import.meta.dirname, "..");
@@ -74,7 +75,7 @@ test("while it lives the file holds the root as given, and the tab bar lists the
   registerRun(root, runsIn(cache));
   assert.equal(readdirSync(runsIn(cache)).length, 1);
   assert.equal(readFileSync(runFile(root, runsIn(cache)), "utf8"), root);
-  const [run] = liveRuns(runsIn(cache));
+  const [run] = liveRuns(runsIn(cache), everyPidIsTheKit);
   assert.equal(run.root, root);
   assert.equal(run.orchestrator, "demo");
 });

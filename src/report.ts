@@ -16,8 +16,10 @@ import { afterTurn, DRAIN_CAP, type Level, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, type Tokens, tokenLine } from "./run.ts";
+import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { makeTracker, refOf } from "./tracker.ts";
+import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { isTicketState, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 export type Facts = {
@@ -141,20 +143,16 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
   return total ? { total, byModel } : undefined;
 };
 
-export const gather = async (project: Project): Promise<Facts> => {
+/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */
+export const gather = async (project: Project, probe: Probe = commandOf): Promise<Facts> => {
   const root = project.root;
   const base = project.baseBranch;
   const run = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
   const tickets = readTickets(run);
-  const pid = Number(run.pid);
-  const live = !run.finishedAt && (() => {
-    try {
-      process.kill(pid, 0);
-      return pid !== process.pid;
-    } catch {
-      return false;
-    }
-  })();
+  // The asking process itself is neither another live run nor a killed one: it is summing itself
+  // up, before its exit writes the end.
+  const alive = liveness({ record: run, self: process.pid }, probe);
+  const live = alive.state === "live";
 
   // Blockers read again now: this run's own merges close some of them, and a
   // list from the start of the run said "blocked" for issues ready to go.
@@ -215,7 +213,7 @@ export const gather = async (project: Project): Promise<Facts> => {
     started: run.startedAt,
     finished: run.finishedAt,
     live,
-    killed: !run.finishedAt && !live && pid !== process.pid,
+    killed: alive.state === "dead",
     dryRun: !!run.dryRun,
     tokens: run.tokens,
     tokenTotal: timed?.total,

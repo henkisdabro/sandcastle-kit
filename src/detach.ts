@@ -13,29 +13,32 @@ import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OperatorError } from "./errors.ts";
-import { alive } from "./pool.ts";
+import { commandOf } from "./live-runs.ts";
+import { kitRunning, liveness, type Probe } from "../mod/hooks/run-live.ts";
 
 export const OUTPUT_LOG = ".sandcastle/logs/run-output.log";
 
 const lockFile = (root: string) => join(root, ".sandcastle/logs/run.lock");
 
-/** The pid in the run lock if that process is alive: the live run of this project, if there is one. */
-export const livePid = (root: string): number | undefined => {
-  let text: string;
+/** The pid in the run lock if that process is the kit's and running: the live run of this project, if there is one. */
+export const livePid = (root: string, probe: Probe = commandOf): number | undefined => {
+  const pid = lockPid(root);
+  return kitRunning(pid, probe) ? pid : undefined;
+};
+
+const lockPid = (root: string): number | undefined => {
   try {
-    text = readFileSync(lockFile(root), "utf8");
+    return Number(readFileSync(lockFile(root), "utf8").split(" ")[0]);
   } catch {
     return undefined;
   }
-  const pid = Number(text.split(" ")[0]);
-  return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : undefined;
 };
 
-/** The pid run.json names while the run has written no `exitCode`: a run that has not finished, whether or not it still holds the lock. */
-const unfinishedPid = (root: string): number | undefined => {
+/** The pid run.json names while the run has written no end: a run that has not finished, whether or not it still holds the lock. */
+const unfinishedPid = (root: string, probe: Probe): number | undefined => {
   try {
-    const { pid, exitCode } = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
-    return Number.isInteger(pid) && pid > 0 && !Number.isInteger(exitCode) && alive(pid) ? pid : undefined;
+    const live = liveness({ record: JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")) }, probe);
+    return live.state === "live" ? live.pid : undefined;
   } catch {
     return undefined;
   }
@@ -146,11 +149,11 @@ export const startDetached = async (
  * seen is waited for too: reading the record any sooner gave the previous exit code. `seconds`
  * undefined waits as long as it takes.
  */
-export const waitForRun = async (root: string, seconds?: number, pollMs = 500): Promise<{ ended: boolean; pid?: number }> => {
+export const waitForRun = async (root: string, seconds?: number, pollMs = 500, probe: Probe = commandOf): Promise<{ ended: boolean; pid?: number }> => {
   const deadline = seconds === undefined ? Infinity : Date.now() + seconds * 1000;
   let seen: number | undefined;
   for (;;) {
-    const now = livePid(root) ?? unfinishedPid(root) ?? (seen !== undefined && alive(seen) ? seen : undefined);
+    const now = livePid(root, probe) ?? unfinishedPid(root, probe) ?? (kitRunning(seen, probe) ? seen : undefined);
     if (now === undefined) return { ended: true };
     seen = now;
     if (Date.now() >= deadline) return { ended: false, pid: now };

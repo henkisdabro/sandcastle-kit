@@ -14,6 +14,7 @@ import { liveRuns } from "../src/herdr-plugin.ts";
 import { endSummary } from "../src/notify.ts";
 import type { Project } from "../src/config.ts";
 import { render } from "../src/report.ts";
+import { everyPidIsTheKit } from "./kit-process.ts";
 
 // Not a ticket state; typed loosely on purpose, as a file on disk is.
 const STRANGE = "shipped";
@@ -43,7 +44,7 @@ test("the sidebar's run line reads each ticket's state through the guard", () =>
   writeFileSync(join(root, ".sandcastle/logs/run.json"), JSON.stringify(record));
   mkdirSync(join(dir, "runs"));
   writeFileSync(join(dir, "runs", "one"), root);
-  const [run] = liveRuns(join(dir, "runs"));
+  const [run] = liveRuns(join(dir, "runs"), everyPidIsTheKit);
   assert.equal(run.tickets?.["2"].state, undefined);
   assert.equal(run.tickets?.["1"].state, "merged");
 });
