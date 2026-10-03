@@ -1,7 +1,7 @@
 // The sandcastle mod: shows a live run in the Claude Code session, in the status view's own
 // castle, glyphs and colours - a band above the prompt, a notice when a ticket needs a person -
 // and submits a prompt when the run ends, so the session that started it closes it. Between runs,
-// in a project `sandcastle init` has set up, it pins a quiet idle mark in the status line.
+// in a project `sandcastle init` has set up, it draws a quiet idle mark in sand above the prompt.
 //
 // It reads `.sandcastle/logs/run.json` under the session's root and asks whether the run's
 // process is alive. Once the session has used the sandcastle skill it also follows a run this
@@ -13,13 +13,17 @@
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
-import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, startedBy, summarise } from "./run-state";
+import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state";
 import { kitRunning } from "./run-live";
 import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
 const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
+/** The castle tower (a chess rook: one cell, text style, no emoji form) that leads the idle mark's row. */
+const MARK_ICON = "♜";
+/** The idle mark's line the band draws between runs, in sand; null for none. */
+const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 
 const RECORD = ".sandcastle/logs/run.json";
 // What makes a project set up: `sandcastle init` writes it.
@@ -76,7 +80,7 @@ let reading = false;
 let again = false;
 /** The `sandcastle` to run, found once: the kit's own `bin/sandcastle` beside the mod, else the one on PATH. */
 let kitBin: string | undefined;
-/** The last round pinned the idle mark (no needs-you text, no live run of the root): a choice made now redraws it at once. */
+/** The last round drew the idle mark (no needs-you text, no live run of the root): a choice made now redraws it at once. */
 let idling = false;
 let drawn = "";
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
@@ -151,6 +155,21 @@ const ours = (run: Run | undefined) => [...known].some((id) => startedBy(run, id
 
 async function owns($: EngineInterface, kept: Kept): Promise<boolean> {
   return kept?.session === (await $.session.id());
+}
+
+/** The idle mark the band was last told to draw; undefined until the first look of this load. */
+let marked: string | null | undefined;
+
+/**
+ * The idle mark is drawn by the band, not pinned as a status line: Claude Code prefixes every
+ * pinned status line with its warning triangle and paints it in its notice colour, and a mod
+ * cannot change either. The pinned line stays for what needs a person.
+ */
+async function place($: EngineInterface, text: string | undefined) {
+  const line = text ?? null;
+  if (line === marked) return;
+  marked = line;
+  await update($, markLine, () => line);
 }
 
 function pin($: EngineInterface, text: string | undefined) {
@@ -270,7 +289,7 @@ async function adopt($: EngineInterface, root: string) {
     seenAt(root).since = kept?.since;
   }
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
-  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", immediate: true });
+  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
 }
 
 /** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
@@ -381,7 +400,7 @@ async function choose($: EngineInterface, root: string, args: string): Promise<s
     const input = await facts($, root);
     const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}) };
     await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now));
-    if (idling) pin($, await mark($, root));
+    if (idling) await place($, await mark($, root));
   }
   const input = await facts($, root);
   const done = { dismiss: "Dismissed: the count stays quiet until a ticket not ready now becomes ready.", hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
@@ -406,7 +425,8 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   // unless the session root's own run is alive, when the band has it. Last, so after the end
   // notice: the mark returns once the run is over.
   idling = !now.length && !own && adopted;
-  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : idling ? await mark($, root) : undefined);
+  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : undefined);
+  await place($, idling ? await mark($, root) : undefined);
   await draw($, shown);
   return live.length > 0;
 }
@@ -507,27 +527,38 @@ export const register: Register = (on) => {
 
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const now = await read($, view);
-    if (now === null || e.props.hasSurvey) return next(e);
+    const line = await read($, markLine);
+    if ((now === null && line === null) || e.props.hasSurvey) return next(e);
     const frame = CASTLE_FRAMES[await read($, castle)] ?? CASTLE_FRAMES[HELD];
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {band(now, e.props.bodyColumns - BAND_MARGIN, frame).map((row) => (
-          <Box flexDirection="row" columnGap={2}>
-            {row.map((seg) => (
-              <Box flexDirection="row" columnGap={1}>
-                <Text color={seg.colour} bold={seg.bold}>
-                  {seg.text}
-                </Text>
-                {seg.count === undefined ? null : (
-                  <Text color={seg.colour} bold>
-                    {String(seg.count)}
-                  </Text>
-                )}
+        {line === null ? null : (
+          <Box flexDirection="row" columnGap={1}>
+            <Text color={SAND.top} bold>
+              {MARK_ICON}
+            </Text>
+            <Text color={SAND.name}>{line}</Text>
+          </Box>
+        )}
+        {now === null
+          ? null
+          : band(now, e.props.bodyColumns - BAND_MARGIN, frame).map((row) => (
+              <Box flexDirection="row" columnGap={2}>
+                {row.map((seg) => (
+                  <Box flexDirection="row" columnGap={1}>
+                    <Text color={seg.colour} bold={seg.bold}>
+                      {seg.text}
+                    </Text>
+                    {seg.count === undefined ? null : (
+                      <Text color={seg.colour} bold>
+                        {String(seg.count)}
+                      </Text>
+                    )}
+                  </Box>
+                ))}
               </Box>
             ))}
-          </Box>
-        ))}
         {await next(e)}
       </Box>
     );
