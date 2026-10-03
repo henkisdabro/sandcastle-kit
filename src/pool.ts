@@ -31,6 +31,7 @@
 // above its share (the slots it holds count) takes no new sandbox slot while another run below
 // its share wants one, and never loses one it holds. A run with slots and no registration is from an
 // older kit: it is counted as wanting its concurrency (its run record's), or the slots it holds.
+// A run that starts beside others says how the pool is split (`startLines`), and its estimate divides by its share.
 // The gates pool has no shares.
 //
 // The run lock (guard.ts) is the same kind of file, taken the same way. An owner
@@ -43,6 +44,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
+import type { RunRecord } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
 import { commandOf, RUNS_DIR } from "./live-runs.ts";
 import { machineSettings } from "./sandbox.ts";
@@ -308,24 +310,30 @@ export const setDemand = (demand: number) => {
   writeRegistration(joined);
 };
 
-/** A kit that wrote no registration is told by its pid: the concurrency its run record holds, if the live-runs directory leads to it. */
-const concurrencyOfRun = (pid: number): number | undefined => {
+/** A run's record by its pid, found through the live-runs directory: the project's root and the record. Undefined when no record leads there. */
+export const recordOfRun = (pid: number): { root: string; record: RunRecord } | undefined => {
   try {
     for (const f of readdirSync(RUNS_DIR)) {
       const root = read(join(RUNS_DIR, f))?.trim();
       if (!root) continue;
-      let record: { pid?: unknown; concurrency?: unknown };
+      let record: RunRecord;
       try {
         record = JSON.parse(read(join(root, ".sandcastle/logs/run.json")) ?? "");
       } catch {
         continue;
       }
-      if (record.pid === pid && Number.isInteger(record.concurrency) && (record.concurrency as number) > 0) return record.concurrency as number;
+      if (record.pid === pid) return { root, record };
     }
   } catch {
-    /* no live-runs directory, or one that cannot be read: the slots held stand in */
+    /* no live-runs directory, or one that cannot be read */
   }
   return undefined;
+};
+
+/** A kit that wrote no registration is told by its pid: the concurrency its run record holds, if the live-runs directory leads to it. */
+const concurrencyOfRun = (pid: number): number | undefined => {
+  const concurrency = recordOfRun(pid)?.record.concurrency;
+  return Number.isInteger(concurrency) && concurrency! > 0 ? concurrency : undefined;
 };
 
 /** One live run as the pool sees it: what it wants, what it holds and, for the sandbox pool, its share. */
@@ -376,6 +384,56 @@ export const myShare = (): { demand: number; share: number; held: number } | und
   if (!joined) return undefined;
   const me = members().find((m) => m.run === RUN_ID);
   return me && { demand: me.demand, share: me.share, held: me.held };
+};
+
+/** The live runs other than this one that hold a sandbox slot or want one: the ones a run starting now has to share with. */
+export const otherRuns = (): Member[] => members().filter((m) => m.run !== RUN_ID && (m.held > 0 || m.demand > 0));
+
+/**
+ * What a run that wants `demand` slots would get if it joined now beside `others`: its share of
+ * the sandbox limit (the same split every run works out from the same files) and how many slots
+ * are free this moment, which it can take without waiting for any run to finish a ticket.
+ */
+export const splitAtStart = (demand: number, others: Member[], total = limit("sandboxes")): { share: number; free: number } => {
+  const shares = splitShares(total, [...others, { run: RUN_ID, demand, since: Date.now() }]);
+  return { share: shares.get(RUN_ID) ?? 0, free: Math.max(0, total - others.reduce((n, m) => n + m.held, 0)) };
+};
+
+/** The sandboxes the start estimate divides by: the run's workers within its share when another run is live, else within the machine limit. */
+export const estimateSlots = (workers: number, split?: { share: number }, total = limit("sandboxes")) => Math.max(1, Math.min(workers, total, split?.share ?? Infinity));
+
+/** Another live run as the start line tells it: `wait` is the seconds until its first ticket likely ends, when the history says. */
+export type Neighbour = { project?: string; registered: boolean; held: number; demand: number; wait?: number };
+
+const slotsOf = (n: number) => `${n} slot${n === 1 ? "" : "s"}`;
+
+/** Seconds as the start line says them, like the estimate's time: `12m`, `1h 05m`. */
+const approx = (seconds: number) => {
+  const m = Math.max(1, Math.round(seconds / 60));
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+};
+
+/**
+ * The start lines of a run that begins while others are live: who they are, what each holds and
+ * wants, this run's share and, when no slot is free, when the first is likely. A run from an older
+ * kit gets a line of its own - it takes no share on trust, and the run still starts. No other run:
+ * no line. No history for the wait: the line leaves it out.
+ */
+export const startLines = (split: { share: number; free: number }, others: Neighbour[]): string[] => {
+  const name = (n: Neighbour) => n.project || "another project";
+  const lines: string[] = [];
+  const aware = others.filter((n) => n.registered);
+  if (aware.length) {
+    const live = aware.map((n) => `${name(n)} is live (${slotsOf(n.held)}, demand ${n.demand})`).join(" and ");
+    const holders = others.filter((n) => n.held > 0);
+    const waits = others.flatMap((n) => (n.wait === undefined ? [] : [n.wait]));
+    const first = waits.length ? `, the first likely in ~${approx(Math.min(...waits))}` : "";
+    const finish = `as ${holders.map((n) => `${name(n)}'s`).join(" and ")} tickets finish${first}`;
+    const tail = split.free >= split.share ? "it starts at once" : split.free > 0 ? `it starts with ${slotsOf(split.free)} now and takes the rest ${finish}` : `it starts ${finish}`;
+    lines.push(`${live}: this run's share is ${split.share}; ${tail}`);
+  }
+  for (const n of others) if (!n.registered) lines.push(`${name(n)}'s run predates shares: it keeps taking free slots until it ends`);
+  return lines;
 };
 
 /** A run that could take a slot if one were free: one that knows no shares, or holds fewer than its share. */

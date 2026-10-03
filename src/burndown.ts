@@ -35,10 +35,10 @@ import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLine
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { joinPool, limit, myShare, setDemand, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
+import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -420,8 +420,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   console.log(versionsLine(versions));
+  // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
+  const others = otherRuns();
+  const split = others.length ? splitAtStart(workers, others) : undefined;
+  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, others.map((m) => {
+    const found = recordOfRun(m.pid);
+    const name = m.project || found?.record.orchestrator;
+    return { project: name, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
+  }))) console.log(line);
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
-  const slots = Math.min(workers, limit("sandboxes"));
+  const slots = estimateSlots(workers, split);
   const rough = estimate(
     project, candidates.length, slots, blockerChain(project, tracker, candidates).length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
