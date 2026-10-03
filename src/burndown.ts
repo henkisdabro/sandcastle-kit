@@ -89,6 +89,8 @@ type Outcome = {
   unreviewed?: boolean;
   /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
   ungated?: string;
+  /** The `<changelog>` lines of the implementer and reviewers (`changelog: true`), for the closing summary. */
+  changelog?: string[];
   /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
   unmet?: string;
 };
@@ -187,6 +189,16 @@ const lineOf = (tag: string) => (text: string): string | undefined => {
 export const ungatedOf = lineOf("ungated");
 // An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
 export const unmetOf = lineOf("unmet");
+
+// The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
+// Unlike `<ungated>` every tag counts, not the last alone: a ticket may need several lines. An
+// empty tag or the echoed placeholder "..." does not count; a line is cut at CHANGELOG_MAX.
+export const CHANGELOG_MAX = 500;
+export const changelogOf = (text: string): string[] =>
+  [...text.matchAll(/<changelog>([\s\S]*?)<\/changelog>/g)]
+    .map((m) => m[1].replace(/\s+/g, " ").trim())
+    .filter((said) => said && said !== "...")
+    .map((said) => cutAtWord(said, CHANGELOG_MAX));
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
@@ -722,7 +734,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; changelog?: string[] }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -927,6 +939,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
+      // The lines of every agent's final message, only when the project asked for them. A land-only
+      // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
+      const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
+      const noteChangelog = (text: string | undefined) => {
+        if (project.changelog && text) changelog.push(...changelogOf(text));
+      };
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
       // A land-only branch runs no implementer or review: what its agents said stands from its head record.
@@ -940,6 +958,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
         reviewCommits += resolved.commits.length;
+        noteChangelog(resolved.stdout);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
         const u = unmetOf(resolved.stdout);
@@ -970,6 +989,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
+        noteChangelog(impl.stdout);
         implUnmet = unmetOf(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
@@ -994,6 +1014,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits = merged.commits.length;
+          noteChangelog(merged.stdout);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
           const u = unmetOf(merged.stdout);
@@ -1029,6 +1050,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
             if (u) ungated.push(u);
+            noteChangelog(r?.stdout);
             const m = r && unmetOf(r.stdout);
             if (m) unmet.push(m);
           }
@@ -1158,6 +1180,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           reviewCommits += after.commits.length;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
+          noteChangelog(after.stdout);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
@@ -1169,8 +1192,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
       const head = sh("git", ["rev-parse", branch]);
       const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
+      const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, changelog: changelogNote });
       return {
         issue: issue.id,
         branch,
@@ -1186,6 +1210,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        changelog: changelogNote,
         unmet: unmetNote,
       };
     } finally {
@@ -1319,6 +1344,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
+          ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
         run.update({ typical: typicalTimes(project, [...took.values()]) });

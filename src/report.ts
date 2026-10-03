@@ -423,6 +423,16 @@ export const render = (f: Facts, plain = false): string => {
     const kept = f.standing.includes(`agent/issue-${id}`) ? ` (branch agent/issue-${id} kept)` : "";
     done.push(`Not landed, as the tracker now says: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
   }
+  // Changelog lines the agents suggested (`changelog: true`), for the tickets that landed: the
+  // maintainer writes the entries from them. A line starting with none of the three words is a Changed.
+  const lines = merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })));
+  if (lines.length) {
+    done.push("Changelog lines the agents suggested:");
+    for (const group of ["Added", "Changed", "Fixed"]) {
+      const mine = lines.filter(({ line }) => (/^(Added|Changed|Fixed):/.exec(line)?.[1] ?? "Changed") === group);
+      for (const { id, line } of mine) done.push(`  ${group}: ${line.replace(/^(Added|Changed|Fixed):\s*/, "")} (${refOf(id)})`);
+    }
+  }
   section(h("## ✅ Done", "## Done"), done);
 
   // Needs you

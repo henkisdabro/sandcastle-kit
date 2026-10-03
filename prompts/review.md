@@ -79,7 +79,7 @@ with your sentence in place of the dots. The branch still merges if its gates ar
 line puts it in front of a person afterwards. Leave it out when a gate runs the changed code,
 even indirectly.
 
-**If an acceptance criterion is still unmet after your review** - the implementer skipped it and
+{{KIT_CHANGELOG}}**If an acceptance criterion is still unmet after your review** - the implementer skipped it and
 you could not do it, or it needs a decision that is not yours - say which one, in one sentence, on
 a line of its own, whether or not you committed:
 

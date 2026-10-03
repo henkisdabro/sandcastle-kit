@@ -698,7 +698,8 @@ A queued ticket with a branch from an earlier run builds on that branch:
   base merge goes straight to the gates, a conflicted one gets a short resolver prompt first. A
   re-run whose only change since its last review is the base merge gets a review of the merge
   alone. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
-  agents left undone, so a branch that skips them still lands as partly done; `sandcastle requeue`
+  agents left undone, so a branch that skips them still lands as partly done, and their
+  [`changelog`](#-configuration) lines, so its closing summary still lists them; `sandcastle requeue`
   clears a ticket's entry.
 - When the short resolver prompt resolves a conflicted base merge, the kit checks the result
   against git's own automatic merge: a resolution may change only the files git could not
@@ -726,7 +727,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with any criterion left undone, and each branch's last outcome |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
@@ -1031,6 +1032,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store into every sandbox and points the sandbox's pnpm at it before `setup`, so installs hardlink instead of downloading. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note |
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
+| `changelog` | `false` | For a project whose rules keep agents out of its changelog: the implement and review prompts ask for each changelog line in a `<changelog>...</changelog>` tag (starting `Added:`, `Changed:` or `Fixed:`), and the closing summary lists the lines of the tickets that merged under Done, grouped by those words, for you to write the entries from |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |

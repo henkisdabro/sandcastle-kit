@@ -406,6 +406,19 @@ const AFTER_MERGE =
   "reviewed already: leave it alone unless the merge broke it.\n\n" +
   "!`git log -p --cc --first-parent {{REVIEW_BASE}}..HEAD --format='%h %s%n%b'`\n\n";
 
+// What `changelog: true` adds to the implement and review prompts. The tag's dots are the
+// placeholder the orchestrator ignores if an agent echoes it back (see `changelogOf`).
+const CHANGELOG_ASK =
+  "**Changelog lines.** This project's changelog is written from the closing summary, so do not edit the changelog file. " +
+  "Say what each user-facing change belongs in it as, one line each, in a tag on a line of its own:\n\n" +
+  "<changelog>...</changelog>\n\n" +
+  "with a sentence in place of the dots, starting `Added:`, `Changed:` or `Fixed:`. Write the sentence for a reader of the " +
+  "changelog, not the diff. ";
+const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
+const CHANGELOG_REVIEW =
+  `${CHANGELOG_ASK}The implementer has given its own: add a line only for a user-facing change you made yourself in this review, ` +
+  "and none otherwise.\n\n";
+
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
@@ -427,6 +440,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
+      .replaceAll("{{KIT_CHANGELOG}}", () => (!project.changelog ? "" : kind === "implement" ? CHANGELOG_IMPLEMENT : CHANGELOG_REVIEW))
       .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? tracker.dryRunNote : ""));
     // Sandcastle refuses a prompt with any other {{NAME}} - but only inside
     // the sandbox, after the install. Refuse it here instead. (A literal
@@ -729,6 +743,8 @@ export type BranchHead = {
   green?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
+  /** The `<changelog>` lines the agents gave by `green` (`changelog: true`): a later land-only run reads no agent, so without them the lines never reach a closing summary. */
+  changelog?: string[];
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -745,7 +761,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; changelog?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
