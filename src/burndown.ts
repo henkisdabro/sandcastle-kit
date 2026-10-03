@@ -108,20 +108,6 @@ export const keptPath = (root: string, path: string) => {
 /** The run's own steps, timed beside a ticket's states: they are the run line's `stage`, never a ticket's state. */
 type Stage = "image" | "preflight" | "hook check" | "base gates" | "verify";
 
-/** The record of a pipeline that added no commits: uncommitted work first, then a hand-back, then nothing to change. */
-export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">, kept: { issue: string; path: string }[], root: string, handedBack: boolean): TicketRecord => {
-  const k = keptFor(o, kept);
-  if (k) return { state: "uncommitted", note: `work left uncommitted in ${keptPath(root, k.path)}` };
-  return { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
-};
-
-// The ticket's state for a pipeline that ended without a green branch or a red gate. A ticket the
-// kit held says so from the first write; "handed back" is only for an agent that handed it back.
-export const settledUnlanded = (o: Pick<Outcome, "status" | "heldNote">, handedBack: boolean): TicketRecord =>
-  o.status === "held"
-    ? { state: "held", note: o.heldNote ?? "held for a human" }
-    : { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
-
 /**
  * The `.git` check after a pipeline's sandbox closed, in the pipeline's `finally`. A failure is
  * kept (`kept`) for the attempt, which stops the run with it, and never thrown: thrown from the

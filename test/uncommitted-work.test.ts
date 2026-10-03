@@ -8,13 +8,24 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { rerunnable } from "../src/autonomy.ts";
-import { keptFor, noCommitRecord } from "../src/burndown.ts";
+import { keptFor, keptPath } from "../src/burndown.ts";
+import { describe } from "../src/ledger.ts";
 import { type Facts, render } from "../src/report.ts";
 
 // Built with node:path, so the test holds on a path with backslashes as well as slashes.
 const root = join("/", "work", "project");
 const kept = join(root, ".sandcastle", "worktrees", "agent-issue-7");
 const none = { issue: "7", status: "nochange" as const, commits: 0 };
+
+/**
+ * The state a pipeline that added no commits ends on: the ledger's, from its ending, described with
+ * the ticket's kept worktree (as burndown's context names it) and whether it has a hold note.
+ */
+const noCommitRecord = (o: typeof none, kept: { issue: string; path: string }[], root: string, holdNote: boolean) => {
+  const k = kept.find((w) => w.issue === o.issue);
+  const ending = { kind: "pipeline" as const, outcome: { ...o, branch: `agent/issue-${o.issue}`, repairs: 0, gates: [] }, attempts: 1 as const };
+  return describe(ending, { base: "main", gateNames: "test", ...(k && { kept: keptPath(root, k.path) }), ...(holdNote && { hold: "note" as const }) }).record!;
+};
 
 test("0 commits and a kept worktree: uncommitted, with the worktree named", () => {
   const record = noCommitRecord(none, [{ issue: "7", path: kept }], root, false);
@@ -27,9 +38,9 @@ test("0 commits and no kept worktree: nothing to change; another ticket's worktr
   assert.equal(noCommitRecord(none, [{ issue: "8", path: kept }], root, false).state, "nochange");
 });
 
-test("a hand-back with a kept worktree is uncommitted, not held", () => {
+test("a hand-back with a kept worktree is uncommitted, not held; without one, held", () => {
   assert.equal(noCommitRecord(none, [{ issue: "7", path: kept }], root, true).state, "uncommitted");
-  assert.deepEqual(noCommitRecord(none, [], root, true), { state: "nochange", note: "handed back - for a human" });
+  assert.deepEqual(noCommitRecord(none, [], root, true), { state: "held", note: "handed back - for a human" });
 });
 
 test("a pipeline that committed is not uncommitted work, whatever else is kept", () => {
