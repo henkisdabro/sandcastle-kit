@@ -4,7 +4,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
@@ -174,6 +174,18 @@ export const otherKitCheckoutNote = (repoRoot: string, kit = KIT) => {
   return `info This project is a different checkout of the kit (${here}) than the one running (${running}): \`sandcastle ...\` runs the other one; \`./bin/sandcastle\` runs this checkout.`;
 };
 
+/** The kit checkout a `sandcastle` on PATH resolves to (the parent of its bin/), or undefined for none or a non-kit. */
+export const kitCheckoutOnPath = (onPath: string | undefined) => {
+  if (!onPath) return undefined;
+  try {
+    const root = dirname(dirname(realpathSync(onPath)));
+    // isKitCheckout alone would accept any script named bin/sandcastle, as it exists by construction here.
+    return isKitCheckout(root) && existsSync(join(root, "src/cli.ts")) ? root : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const doctor = async (repoRoot?: string, verify = false) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
@@ -247,7 +259,11 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   // With no `sandcastle` on PATH, "run `sandcastle setup`" cannot work: name the kit's own script.
   const bin = shellQuote(join(KIT, "bin/sandcastle"));
   const setup = linked ? "sandcastle setup" : `${bin} setup`;
-  check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
+  // Another kit checkout on PATH (the installed kit, while this one is a clone or worktree) is a
+  // fact, not a fault: relinking PATH to a development checkout would hijack the installed kit.
+  const pathKit = linked ? undefined : kitCheckoutOnPath(onPath);
+  if (pathKit) console.log(`info \`sandcastle\` on PATH runs another kit checkout (${pathKit}), not this one (${realpathSync(KIT)}): \`./bin/sandcastle\` runs this checkout.`);
+  else check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
 
   const skill = join(homedir(), ".claude/skills/sandcastle");
   const skillOk = (() => {
