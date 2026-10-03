@@ -41,6 +41,7 @@ const world = (on: Parameters<TestBody>[1], ids: string[] = ["1", "2", "3"], sto
     statuses: [] as (string | undefined)[],
     prompts: [] as string[],
     commands: [] as string[],
+    hints: {} as Record<string, string | undefined>,
     store: new Map<string, unknown>(Object.entries({ [READY_KEY]: entry(1, ids), ...store })),
   };
   on("session.start", () => ({ cwd: "/work" }));
@@ -56,7 +57,7 @@ const world = (on: Parameters<TestBody>[1], ids: string[] = ["1", "2", "3"], sto
     // `ps` finds no run process: nothing is alive.
     return { value: { exitCode: e.argv[0] === "ps" ? 1 : 0, stdout: settings ? w.settings : "", ...RESULT } };
   });
-  on("command.register", ($, e) => (w.commands.push(e.name), { value: { command: e.name } }));
+  on("command.register", ($, e) => (w.commands.push(e.name), (w.hints[e.name] = e.argumentHint), { value: { command: e.name } }));
   on("store.get", ($, e) => ({ value: w.store.get(e.key) }));
   on("store.set", ($, e) => (w.store.set(e.key, e.value), { value: undefined }));
   on("ui.toast", () => ({ value: undefined }));
@@ -71,6 +72,9 @@ test("the command is registered with the status command, once the project has .s
   const w = world(on);
   await $.session.start(START);
   expect(w.commands).toEqual(["sandcastle-status", "sandcastle-mark"]);
+  // The typeahead shows the choices after the name, the same ones the usage line names.
+  expect(w.hints["sandcastle-mark"]).toBe("[dismiss|hide|show]");
+  expect((await $.command.run(MARK("pause"))).text).toContain(w.hints["sandcastle-mark"]!);
 });
 
 test("dismiss takes the count off at once and keeps the mark; the reply is text and no model turn", async ($, on) => {

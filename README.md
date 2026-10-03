@@ -885,7 +885,8 @@ itself, in the status view's castle, glyphs and colours:
   it comes back; after `/clear` the terminal you started from still hears it.
 - 🏷️ **An idle mark between runs.** In a project `sandcastle init` has set up - its
   `.sandcastle/config.ts` is a plain file; a stray `.sandcastle/` directory does not count - the
-  mod draws the word `sandcastle` in sand, one quiet row above the prompt, so the session shows the
+  mod draws the word `sandcastle` in sand, one quiet row above the prompt led by a small castle tower
+  (`♜`), so the session shows the
   project takes runs. (It is the mod's own row, not Claude Code's status line: that one carries a
   warning triangle and a notice colour the mod cannot change, and is kept for what needs you.) The
   live band replaces it while a run of the session's project is alive,

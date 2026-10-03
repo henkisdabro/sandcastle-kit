@@ -20,6 +20,8 @@ import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, m
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
 const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
+/** The castle tower (a chess rook: one cell, text style, no emoji form) that leads the idle mark's row. */
+const MARK_ICON = "♜";
 /** The idle mark's line the band draws between runs, in sand; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 
@@ -287,7 +289,7 @@ async function adopt($: EngineInterface, root: string) {
     seenAt(root).since = kept?.since;
   }
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
-  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", immediate: true });
+  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", argumentHint: "[dismiss|hide|show]", immediate: true });
 }
 
 /** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
@@ -531,7 +533,14 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e);
     return (
       <Box flexDirection="column">
-        {line === null ? null : <Text color={SAND.name}>{line}</Text>}
+        {line === null ? null : (
+          <Box flexDirection="row" columnGap={1}>
+            <Text color={SAND.top} bold>
+              {MARK_ICON}
+            </Text>
+            <Text color={SAND.name}>{line}</Text>
+          </Box>
+        )}
         {now === null
           ? null
           : band(now, e.props.bodyColumns - BAND_MARGIN, frame).map((row) => (

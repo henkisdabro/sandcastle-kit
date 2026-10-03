@@ -23,8 +23,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The idle mark is drawn in sand above the prompt, not pinned in the status line.** Claude Code gives
   every pinned status line a warning triangle and its notice colour, which a mod cannot change, so
   the quiet `sandcastle · 3 ready` read as a warning and clashed with its own indicators. The mod
-  now draws it as one row of its band in the status view's sand; the status line is kept for what
-  needs you. Nothing to do: `/sandcastle-mark` and `"idleMark": false` work as before.
+  now draws it as one row of its band, led by a castle tower (`♜`), in the status view's sand; the
+  status line is kept for what needs you. Nothing to do: `/sandcastle-mark` and `"idleMark": false` work as before, and the command's typeahead
+  now shows its choices: `/sandcastle-mark [dismiss|hide|show]`.
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
   terminal draws it - in place of the plain heading.
 - **Each outcome in `.sandcastle/logs/outcomes.json` carries a kind** (merged, conflict, red, held

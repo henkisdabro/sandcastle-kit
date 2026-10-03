@@ -63,7 +63,7 @@ const world = (on: Parameters<TestBody>[1], start: { project?: boolean; store?: 
   on("fs.exists", () => ({ value: w.project }));
   on("fs.stat", ($, e) =>
     String(e.path).endsWith("/.sandcastle/config.ts")
-      ? { value: { kind: w.setUp ? "file" : "directory", size: 0, mtimeMs: 0, isLink: false } }
+      ? { value: { kind: w.setUp ? "file" : "dir", size: 0, mtimeMs: 0, isLink: false } }
       : { value: { kind: "file", size: w.file.length, mtimeMs: 0, isLink: w.link } },
   );
   on("fs.read", ($, e) => ((w.reads += 1), { value: String(e.path).startsWith("/elsewhere/") ? (w.other ?? w.file) : w.file }));
@@ -454,9 +454,12 @@ test("the idle mark is one row of the band in the status view's sand, never a pi
   await $.session.start(START);
   const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
   const row = (await ui.findAll({ type: "Text", text: /^sandcastle/ })).find((r) => r.props.color === "#cdb894");
+  const icon = await ui.find({ type: "Text", text: "♜" });
   await ui.unmount();
   // Claude Code gives a pinned status line its warning triangle and notice colour; the band's Text is the mod's own.
   expect(row?.props.color).toBe("#cdb894");
+  // A castle tower leads the row, in the lighter sand of the logo's top.
+  expect(icon?.props.color).toBe("#e8d6b4");
   expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
 });
 
