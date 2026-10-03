@@ -309,6 +309,15 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. The next run
+picks up the remainder.
+
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -617,7 +626,8 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 ### 📊 After a run
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
-branches, merged tickets the reviewer says no gate proves, follow-up tickets agents filed); **Needs
+branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
+undone, follow-up tickets agents filed); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and

@@ -62,9 +62,13 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
 // the agent's, the author the operator's (see AGENT_COMMITTER).
 // --no-verify: a pre-commit hook re-running what the gates covered only adds a way for a
 // green branch to fail to land. (Hooks are off for the whole host process anyway - see guard.ts.)
-export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge") => {
+// A branch that leaves a criterion unmet is merged as "part of" its ticket: the ticket stays open, and
+// "closes" would have the next run find the merge and close it as merged earlier (`mergedEarlier`).
+export const mergeSubject = (branch: string, ticket: string, partly = false) => `Merge ${branch} (${partly ? "part of" : "closes"} ${ticket})`;
+
+export const mergeBranch = (root: string, branch: string, head: string, ticket: string, mode: "merge" | "squash" = "merge", partly = false) => {
   if (mode === "merge") {
-    return sh("git", ["merge", "--no-ff", "--no-verify", "-m", `Merge ${branch} (closes ${ticket})`, head], root, AGENT_COMMITTER);
+    return sh("git", ["merge", "--no-ff", "--no-verify", "-m", mergeSubject(branch, ticket, partly), head], root, AGENT_COMMITTER);
   }
   const body = squashBody(root, "HEAD", head);
   // Throws on a conflict or a refused merge, as the merge does, leaving the unmerged files for the caller.
@@ -78,7 +82,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
       "--no-verify",
       "--allow-empty",
       "-m",
-      `Merge ${branch} (closes ${ticket})`,
+      mergeSubject(branch, ticket, partly),
       ...(body ? ["-m", body] : []),
     ],
     root,
@@ -98,7 +102,7 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
 //   log is archived - correct.
 // - status.sh `requeued`: a subject `--grep` on the base - works unchanged.
 // - status.sh section 3 (logs the record does not hold): a missing branch whose subject is on the
-//   base reads `merged`, not `no branch`.
+//   base reads `merged`, not `no branch` (a "part of" subject, `mergeSubject`, counts too).
 // - status.sh `merged_list` (`git branch --merged`) and the `git cherry` case: only reached when
 //   the branch exists - unaffected.
 // A squash leaves no MERGE_HEAD, so `git merge --abort` refuses it; `git reset --merge` undoes the
@@ -249,7 +253,17 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
 };
 
 /** What `landOne` needs of a green branch's outcome. */
-export type Landable = { issue: string; branch: string; status: string; commits: number; repairs: number; head?: string; unreviewed?: boolean };
+export type Landable = {
+  issue: string;
+  branch: string;
+  status: string;
+  commits: number;
+  repairs: number;
+  head?: string;
+  unreviewed?: boolean;
+  /** An acceptance criterion an agent knowingly left undone: the branch lands, the ticket stays open. */
+  unmet?: string;
+};
 
 /** What landing writes to the run record itself: its progress (the `landing` stage), never a verdict. */
 export type LandingRecord = { ticket(id: string, fields: TicketRecord): void };
@@ -308,6 +322,8 @@ export type Landed =
   | { kind: "not-landed"; reason: string }
   /** Merged, but the tracker would not close the ticket (`error`, short): still a merge, never a failure to land. */
   | { kind: "close-failed"; error: string; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
+  /** Merged, with an acceptance criterion left undone (`unmet`): the ticket stays open, and the next run picks up the remainder. */
+  | { kind: "partly-done"; unmet: string; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "dry-run" };
 
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
@@ -383,7 +399,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     return held;
   }
   if (dryRun) {
-    console.log(`[dry run] would merge ${o.branch} and close ${ref(o.issue)}`);
+    console.log(`[dry run] would merge ${o.branch} and ${o.unmet ? "leave" : "close"} ${ref(o.issue)}${o.unmet ? " open (a criterion is unmet)" : ""}`);
     return { kind: "dry-run" };
   }
 
@@ -405,7 +421,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   if (isAncestor(root, before, o.head!)) {
     try {
       // The commit the gates passed on, not whatever the branch names now.
-      await host.write(() => mergeBranch(root, o.branch, o.head!, ref(o.issue), project.land), landingMade(root, o.head!, project.land));
+      await host.write(() => mergeBranch(root, o.branch, o.head!, ref(o.issue), project.land, !!o.unmet), landingMade(root, o.head!, project.land));
     } catch (error) {
       // The write was refused before it ran: nothing to abort, and no git may run on the host now.
       if (error instanceof LandingStop) throw error;
@@ -444,7 +460,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
           waiting = false;
           return landInSandbox(
             project,
-            { branch: o.branch, head: o.head!, message: `Merge ${o.branch} (closes ${ref(o.issue)})`, squash },
+            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash },
             opener,
             (box) => ctx.gate(box, o.issue),
             host.expected,
@@ -506,6 +522,8 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // merged ticket still open, not one that failed to land - calling it "not
   // landed" sent a human to merge work already on the base branch.
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }), ...(overrun.length ? { overrun } : {}) };
+  // Left open on purpose: the ledger's comment (posted after the schedule) names the criterion.
+  if (o.unmet) return { kind: "partly-done", unmet: o.unmet, ...merged };
   try {
     await host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
     return { kind: "merged", ...merged };

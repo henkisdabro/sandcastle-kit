@@ -38,8 +38,9 @@ ticket names. The project rules below say what else to read.
 
 # Rules
 
-- **Scope is the ticket and nothing else.** Anything you discover that is out of scope becomes a new
-  {{KIT_NEW_TICKET}}, never a TODO comment and never scope creep.
+- **Scope is the ticket and nothing else.** Every acceptance criterion the ticket lists is in scope,
+  and so is a regression your change causes: fix both here, never "for the next ticket". Anything you
+  discover that is out of scope becomes a new {{KIT_NEW_TICKET}}, never a TODO comment and never scope creep.
 - **Never remove a safety guard to make something pass.** A failing assertion, a blocking lint rule
   or a type error is a signal to fix the cause. Deleting the guard is a blocked outcome, not a fix -
   unless the ticket itself names that guard as the defect *and* you can show what independently
@@ -80,6 +81,17 @@ observed.
 
 **If you completed the ticket:** make sure the gates pass, make sure everything is committed, then
 output `<promise>COMPLETE</promise>`.
+
+**If you knowingly leave an acceptance criterion undone** (you could not do it, or it needs a decision
+that is not yours), commit the rest and say which one, in one sentence, on a line of its own in your
+final message:
+
+<unmet>...</unmet>
+
+with your sentence in place of the dots. The branch still merges if its gates are green, but the ticket
+stays open with that criterion named, and the next run picks up the remainder. Leave the line out when
+every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
+to omit it.
 
 **If the ticket turns out to be already fixed, false, or latent:** commit nothing. {{KIT_NOCHANGE}}
 Then output `<promise>COMPLETE</promise>`.

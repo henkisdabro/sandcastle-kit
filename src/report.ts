@@ -260,7 +260,9 @@ export const render = (f: Facts, plain = false): string => {
   const merged = ids(["merged"]);
   // Merged, but the tracker refused the close: the work is on base, the ticket still open.
   const notClosed = merged.filter((id) => f.tickets[id].closeFailed);
-  const closed = merged.filter((id) => !notClosed.includes(id));
+  // Merged with an acceptance criterion knowingly left undone: the ticket was left open on purpose.
+  const partly = merged.filter((id) => f.tickets[id].unmet);
+  const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
@@ -312,7 +314,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -337,6 +339,8 @@ export const render = (f: Facts, plain = false): string => {
   if (closed.length) done.push(`${closed.length} merged and ${closedWhere}: ${list(closed)}`);
   // Merged with the close refused: done in git, still open in the tracker - not "closed on GitHub".
   if (notClosed.length) done.push(`${notClosed.length} merged, but still open in the tracker: ${list(notClosed)} (see Needs you)`);
+  // Merged, but not closed on purpose: a criterion is unmet, so the next run does the rest.
+  if (partly.length) done.push(`${partly.length} merged, partly done, and left open in the tracker: ${list(partly)} (see Needs you)`);
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
   if (wouldMerge.length) {
@@ -375,6 +379,12 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
+      // The criterion is the agent's own words, cut at the cap like an ungated note.
+      ...partly.map((id) => {
+        const note = f.tickets[id].unmet ?? "";
+        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+        return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open, and the next \`sandcastle run\` picks up the remainder`;
+      }),
       // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
       ...ungated.map((id) => {
         const note = f.tickets[id].ungated ?? "";
@@ -486,6 +496,7 @@ export const render = (f: Facts, plain = false): string => {
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
   if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
+  if (partly.length) next.push(`Read what is left on ${list(partly)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
