@@ -42,7 +42,7 @@ test("the pipeline writes the criterion with the green head and reads it back fo
   // Without the record, a land-only branch's implementer word starts empty and the landing closes the ticket.
   assert.match(src, /let implUnmet = landOnly \? readHeads\(project\.root\)\[issue\.id\]\?\.unmet : undefined;/);
   // Written even when undefined, so a later green head with nothing unmet replaces an earlier one.
-  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote \}\)/);
+  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote[,}\s]/);
   // The same note the outcome carries to landing.
   assert.match(src, /unmet: unmetNote,/);
 });

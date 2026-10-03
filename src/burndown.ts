@@ -732,7 +732,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; changelog?: string[] }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -937,8 +937,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
-      // The lines of every agent's final message, only when the project asked for them.
-      const changelog: string[] = [];
+      // The lines of every agent's final message, only when the project asked for them. A land-only
+      // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
+      const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
       const noteChangelog = (text: string | undefined) => {
         if (project.changelog && text) changelog.push(...changelogOf(text));
       };
@@ -1189,8 +1190,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
       const head = sh("git", ["rev-parse", branch]);
       const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
+      const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, changelog: changelogNote });
       return {
         issue: issue.id,
         branch,
@@ -1206,7 +1208,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
-        changelog: changelog.length ? [...new Set(changelog)] : undefined,
+        changelog: changelogNote,
         unmet: unmetNote,
       };
     } finally {
