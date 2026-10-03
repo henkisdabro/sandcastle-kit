@@ -545,7 +545,10 @@ The status view reads each ticket of a live run from the run's own record, so it
 with the run. Under the run band, one full-width **settings** row shows the run's settings:
 `settings  autonomy 0 1 2 [3] drain · turn 2/3` - the autonomy level lit and bracketed, the
 others greyed, and the turn out of the level's cap (level 1 asks after every turn, so it has no
-cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`). A live
+cap: `turn 2`). Then the repair attempts a ticket gets after a red gate (`repair 1`; with
+`repair.attempts: 0` it is a greyed `○ repair`, which drops below 80 columns) and the run's
+concurrency after the machine-wide sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when
+the cap clamped what `--concurrency`, `CONCURRENCY` or the config asked for). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`). A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
 marked `(next run)`, and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,

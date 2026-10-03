@@ -54,13 +54,16 @@ const SETTING = {
   gates: { env: "SANDCASTLE_MAX_GATES", key: "maxGates", fallback: 2 },
 } as const;
 
-export const limit = (pool: PoolName): number => {
+/** A pool's limit from the given environment and machine settings; `limit` is this over the process's own. */
+export const poolLimit = (pool: PoolName, env: Record<string, string | undefined>, machine: Record<string, unknown>): number => {
   const s = SETTING[pool];
   // Name the setting the value came from: an operator told about an env var
   // they never set looks for the wrong thing.
-  const fromEnv = process.env[s.env] !== undefined;
-  return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
+  const fromEnv = env[s.env] !== undefined;
+  return wholeNumber(fromEnv ? s.env : s.key, fromEnv ? env[s.env] : (machine[s.key] ?? s.fallback), 1);
 };
+
+export const limit = (pool: PoolName): number => (settings[pool] ??= poolLimit(pool, process.env, machineSettings()));
 
 const exists = (pid: number) => {
   try {

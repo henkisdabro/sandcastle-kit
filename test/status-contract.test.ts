@@ -76,7 +76,7 @@ test("every field the status view reads from the run record is a run record fiel
   }
   assert.ok(RUN_FIELDS.includes("tickets") && TICKET_FIELDS.includes("state") && WAITING_FIELDS.includes("on"), "the schema's fields were found");
   // The settings group's own fields: the row reads each of them, and each is one the record holds.
-  assert.deepEqual(SETTINGS_FIELDS, ["autonomy", "turn", "cap"], "the settings group's fields were found");
+  assert.deepEqual(SETTINGS_FIELDS, ["autonomy", "turn", "cap", "repair", "concurrency", "asked"], "the settings group's fields were found");
   for (const field of SETTINGS_FIELDS) assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
   for (const p of programs) assert.deepEqual(strays(p), [], `status.sh reads fields the run record does not hold, in: ${p.replace(/\s+/g, " ").trim()}`);
   // The legacy field stays a known exception only while the view still reads it.

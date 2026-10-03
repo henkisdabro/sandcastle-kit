@@ -10,6 +10,9 @@ import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } fro
 import { nearest, OperatorError } from "./errors.ts";
 import { isClaudeSetting } from "./versions.ts";
 
+/** Tickets at once when neither `CONCURRENCY` nor the project's `concurrency` says. */
+export const DEFAULT_CONCURRENCY = 4;
+
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
 
 export type HookTest = { name: string; tool: string; input: Record<string, unknown>; expect: "block" | "allow" };
@@ -218,7 +221,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   return {
     root,
     baseBranch: "main",
-    concurrency: 4,
+    concurrency: DEFAULT_CONCURRENCY,
     land: "merge",
     mounts: [],
     setup: [],

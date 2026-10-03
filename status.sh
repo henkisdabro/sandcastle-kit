@@ -634,14 +634,14 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US mark" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US repair US concurrency US asked" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
 # with no settings group gives no row. $1: a file holding a run record.
 read_settings() {
   local f="$1"
-  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring), (.repair // "" | tostring), (.concurrency // "" | tostring), (.asked // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -660,11 +660,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap l i levels="" sep="${rule} · ${off}"
+  local lvl turn cap repair conc asked ask l i levels="" sep="${rule} · ${off}"
   SETTINGS_ROW=""; SET_ITEMS=()
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap repair conc asked <<<"$SET_FIELDS"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
     0|1|2|3|drain)
@@ -675,6 +675,17 @@ settings_row() {
   esac
   [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
   [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  # Repair attempts: off is greyed, with the ○ that says so without colour, and drops below 80 columns.
+  if [[ "$repair" =~ ^[0-9]+$ ]]; then
+    if [ "$repair" -eq 0 ]; then set_item "${gry}○ repair${off}" "" 80
+    else set_item "${mute}repair${off} ${head}${repair}${off}"; fi
+  fi
+  # Concurrency, as the run takes it after the machine-wide sandbox cap; what it asked for only when that differs.
+  if [[ "$conc" =~ ^[0-9]+$ ]]; then
+    ask=""
+    [[ "$asked" =~ ^[0-9]+$ ]] && [ "$asked" -ne "$conc" ] && ask=" ${gry}(asked ${asked})${off}"
+    set_item "${mute}concurrency${off} ${head}${conc}${off}${ask}"
+  fi
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
   SETTINGS_ROW="${SET_ITEMS[0]}"
   for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done

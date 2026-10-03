@@ -164,7 +164,8 @@ export const sessionId = (value: unknown): string | undefined => (typeof value =
 
 /**
  * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
- * level, the turn this record is, and the level's cap. Each field is optional and a reader shows
+ * level, the turn this record is, the level's cap, the repair attempts and the concurrency (asked
+ * and effective). Each field is optional and a reader shows
  * only what is there - an older kit's record has no group at all, and level 1 has no cap (it asks
  * after every turn).
  */
@@ -175,6 +176,12 @@ export type RunSettings = {
   turn?: number;
   /** The most turns the level allows. */
   cap?: number;
+  /** The repair attempts a ticket gets after a red gate; 0 is repair off. */
+  repair?: number;
+  /** The tickets the run takes at once, after the machine-wide sandbox cap. */
+  concurrency?: number;
+  /** The tickets at once the run asked for; the view shows it only when it differs from `concurrency`. */
+  asked?: number;
 };
 
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
