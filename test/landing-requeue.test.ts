@@ -154,7 +154,9 @@ const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => v
     tell,
     ended,
     lists,
-    lines: () => landingLines(lists(), requeues.againNote),
+    outcomes: () => landingLines(lists(), requeues.againNote),
+    // Each outcome's line alone, as the status view shows it.
+    lines: () => new Map([...landingLines(lists(), requeues.againNote)].map(([id, o]) => [id, o.text])),
     // "2: requeued after conflict with #1", for each "runs again in this run" line.
     sentBack: () => said.flatMap((line) => (/; its pipeline runs again in this run\.$/.test(line) ? [line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
@@ -525,6 +527,7 @@ test("conflict, requeued, conflict again: the outcome keeps the files, and the c
   const again: Made = { landed: { kind: "conflict", files: ["other.txt", "more.txt"], with: ["3"] }, as: ["conflict", "with #3: other.txt, more.txt"] };
   const r = await settle(["2"], { 2: [conflictWith1, again] });
   assert.equal(r.seen.lines().get("2"), "merge conflict: conflicted again with #1, #3 after a requeue: other.txt, more.txt");
+  assert.equal(r.seen.outcomes().get("2")?.kind, "conflict");
   assert.equal(r.written()["2"].note, "conflicted again with #1, #3 after a requeue: other.txt, more.txt");
   assert.equal(r.written()["2"].state, "conflict");
   const lists = r.seen.lists();
@@ -544,6 +547,8 @@ test("red, requeued, red again: no doubled 'red', and the comment names both att
   }));
   assert.equal(requeued, "requeued after red with #1");
   assert.equal(r.seen.lines().get("2"), "red again with #1, #3 after a requeue");
+  // Red at landing again is still `red`, the kind every reader decides on, whatever the line says.
+  assert.equal(r.seen.outcomes().get("2")?.kind, "red");
   assert.equal(r.written()["2"].note, "red again with #1, #3 after a requeue");
   const lists = r.seen.lists();
   assert.deepEqual(lists.redMerged, [{ issue: "2", branch: "agent/issue-2", with: ["1", "3"], gates: ["test"] }]);
@@ -569,6 +574,7 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
   }));
   assert.equal(r.seen.lines().get("2"), "red when merged with #1");
   assert.equal(r.seen.lines().get("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
+  assert.deepEqual([r.seen.outcomes().get("2"), r.seen.outcomes().get("3")?.kind, r.seen.outcomes().get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1" }, "conflict", ["1"]]);
   assert.deepEqual(r.seen.said, []);
 });
 

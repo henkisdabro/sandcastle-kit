@@ -247,20 +247,25 @@ git_ branch agent/issue-113 main; log 113 impl 'done'
 # Red at landing, once and again after a requeue: red, not ready.
 branch 114 1; log 114 impl 'done'
 branch 115 1; log 115 impl 'done'
+# The kind decides, never the line: a line no prefix foresaw is still red, and a person's take-back is held.
+branch 116 1; log 116 impl 'done'
+branch 117 1; log 117 impl 'done'
 rm -rf "$REPO/.sandcastle/worktrees/agent-issue-101"
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0,
   "models": "implement old-model/low", "tickets": { "104": { "state": "red" } } }
 EOF
 cat >"$L/outcomes.json" <<EOF
-{ "104": { "run": "$started", "outcome": "gate red: pytest=FAIL" },
-  "109": { "run": "$started", "outcome": "merge conflict: src/a.ts" },
-  "111": { "run": "$started", "outcome": "withdrawn: taken out of the queue during the run" },
-  "112": { "run": "$started", "outcome": "needs a human: handed back" },
-  "113": { "run": "$started", "outcome": "uncommitted" },
-  "114": { "run": "$started", "outcome": "red when merged with #110" },
-  "115": { "run": "$started", "outcome": "red again with #110 after a requeue" },
-  "110": { "run": "$started", "outcome": "merged" },
+{ "104": { "run": "$started", "kind": "gate red", "text": "gate red: pytest=FAIL" },
+  "109": { "run": "$started", "kind": "conflict", "with": ["110"], "text": "merge conflict: src/a.ts" },
+  "111": { "run": "$started", "kind": "withdrawn", "text": "withdrawn: taken out of the queue during the run" },
+  "112": { "run": "$started", "kind": "held", "text": "needs a human: handed back" },
+  "113": { "run": "$started", "kind": "uncommitted", "text": "uncommitted" },
+  "114": { "run": "$started", "kind": "red", "with": ["110"], "text": "red when merged with #110" },
+  "115": { "run": "$started", "kind": "red", "with": ["110", "114"], "text": "red again with #110, #114 after a requeue" },
+  "116": { "run": "$started", "kind": "red", "with": ["110"], "text": "test red with #110" },
+  "117": { "run": "$started", "kind": "taken back", "text": "needs a human: marked for a human during the run" },
+  "110": { "run": "$started", "kind": "merged", "text": "merged" },
   "103": { "run": "earlier", "outcome": "gate red: ruff=FAIL" } }
 EOF
 render ""
@@ -275,8 +280,11 @@ row '#112' held 'handed back'
 row '#113' uncommitted
 row '#114' 'gate red' 'red when merged'
 row '#115' 'gate red' 'red again'
-git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 # only this scenario's
-row '#103' 'left over' 'earlier run'
+row '#116' 'gate red' 'test red with'
+row '#117' held 'needs a human'
+git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 agent/issue-116 agent/issue-117 # only this scenario's
+# An older kit's entry carries no kind: its line is shown, and no state is taken from it.
+row '#103' 'left over' 'earlier run: gate red'
 has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
 hasnt 'old-model'
 # Below 80 columns the CPU column goes, and the legend line explaining it with it.

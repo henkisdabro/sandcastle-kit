@@ -19,7 +19,7 @@ import { type GateRun, failingTests } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, largeFilesNote, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import type { TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
+import type { Outcome, TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import { overrunLine } from "./report.ts";
@@ -707,21 +707,29 @@ export const accountLanding = (lists: Landings, o: { issue: string; branch: stri
   }
 };
 
-/** Each landed ticket's outcome line for the status view; `againNote` is what a second conflict or red was held as. */
-export const landingLines = (lists: Landings, againNote: Map<string, string>): Map<string, string> => {
-  const out = new Map<string, string>();
-  for (const n of lists.merged) out.set(n, "merged");
-  for (const n of lists.closeFailed) out.set(n, "merged (ticket not closed)");
-  for (const c of lists.conflicted) out.set(c.issue, `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}`);
+/** Each landed ticket's outcome for the status view; `againNote` is what a second conflict or red was held as. */
+export const landingLines = (lists: Landings, againNote: Map<string, string>): Map<string, Outcome> => {
+  const out = new Map<string, Outcome>();
+  const withOf = (w: string[]) => (w.length ? { with: w } : {});
+  for (const n of lists.merged) out.set(n, { kind: "merged", text: "merged" });
+  for (const n of lists.closeFailed) out.set(n, { kind: "merged", text: "merged (ticket not closed)" });
+  for (const c of lists.conflicted) out.set(c.issue, { kind: "conflict", ...withOf(c.with), text: `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}` });
   for (const r of lists.redMerged) {
-    out.set(r.issue, againNote.get(r.issue) ?? `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}`);
+    out.set(r.issue, { kind: "red", ...withOf(r.with), text: againNote.get(r.issue) ?? `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}` });
   }
-  for (const f of lists.failedToLand) out.set(f.issue, "failed to land");
-  for (const k of lists.skipped) out.set(k.issue, `not merged: ${k.reason}`);
-  for (const w of lists.withdrawn) out.set(w.issue, `withdrawn: ${w.reason}`);
-  for (const h of lists.heldBack) out.set(h.issue, "needs a human merge");
-  for (const id of lists.takenBack) out.set(id, "needs a human: marked for a human during the run");
+  for (const f of lists.failedToLand) out.set(f.issue, { kind: "not landed", text: "failed to land" });
+  for (const k of lists.skipped) out.set(k.issue, { kind: "not landed", text: `not merged: ${k.reason}` });
+  for (const w of lists.withdrawn) out.set(w.issue, { kind: "withdrawn", text: `withdrawn: ${w.reason}` });
+  for (const h of lists.heldBack) out.set(h.issue, { kind: "held", text: "needs a human merge" });
+  for (const id of lists.takenBack) out.set(id, { kind: "taken back", text: "needs a human: marked for a human during the run" });
   return out;
+};
+
+/** One landing ending's outcome, as `landingLines` gives it at the end of the run; none for a dry run or an earlier merge closed. */
+export const landingOutcome = (o: { issue: string; branch: string }, landed: Landed, againNote: Map<string, string>): Outcome | undefined => {
+  const one = newLandings();
+  accountLanding(one, o, landed);
+  return landingLines(one, againNote).get(o.issue);
 };
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
@@ -738,9 +746,12 @@ export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "with
 
 /**
  * Green before the base moved: finished, and landing on a later run like the ones whose own check
- * failed - not "ready", which says this run lands it. `outcome` is its line for the status view.
+ * failed - not "ready", which says this run lands it. `outcome` is what the status view shows of it.
  */
-export const STOPPED_GREEN = { record: { state: "stopped", note: "finished before the run stopped - lands on a later run" } satisfies TicketRecord, outcome: "stopped: the run stopped before landing" };
+export const STOPPED_GREEN = {
+  record: { state: "stopped", note: "finished before the run stopped - lands on a later run" } satisfies TicketRecord,
+  outcome: { kind: "stopped", text: "stopped: the run stopped before landing" } satisfies Outcome,
+};
 
 /** The run record as the requeue's record uses it: a ticket's fields, and what is written so far. */
 export type RequeueRecordRun = { ticket(id: string, fields: TicketRecord): void; tickets(): Record<string, TicketRecord> };

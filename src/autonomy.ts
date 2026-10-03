@@ -1,6 +1,7 @@
 // Autonomy levels: how many turns (runs) one `sandcastle run` may make, which tickets a
 // further turn would take, and the level-1 question. The loop itself is in cli.ts.
 import { createInterface } from "node:readline/promises";
+import type { OutcomeEntry } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
 import type { Facts } from "./report.ts";
 import type { Ticket, Tracker } from "./tracker.ts";
@@ -94,9 +95,9 @@ export const drainStop = (turn: DrainTurn, earlier: DrainTurn | undefined, ref: 
 };
 
 /** The tickets a run recorded as a merge conflict, by id: outcomes.json keeps one entry per ticket, with the run that wrote it. */
-export const conflictedIn = (outcomes: Record<string, { run?: string; outcome?: string }>, run: string): string[] =>
+export const conflictedIn = (outcomes: Record<string, OutcomeEntry>, run: string): string[] =>
   Object.entries(outcomes)
-    .filter(([, o]) => o?.run === run && /^merge conflict/.test(o.outcome ?? ""))
+    .filter(([, o]) => o?.run === run && o.kind === "conflict")
     .map(([id]) => id);
 
 export const drainLine = (turns: number, landed: number, cause: string): string =>
