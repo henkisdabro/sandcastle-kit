@@ -634,14 +634,17 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US mark" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US cross US model US effort" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
 # with no settings group gives no row. $1: a file holding a run record.
 read_settings() {
   local f="$1"
-  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring),
+    (if .crossReview == true then "on" elif .crossReview == false then "off" else "" end),
+    (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
+    (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -660,11 +663,12 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap l i levels="" sep="${rule} · ${off}"
-  SETTINGS_ROW=""; SET_ITEMS=()
+  local lvl turn cap cross xmodel xeffort l i levels="" sep="${rule} · ${off}"
+  SETTINGS_ROW=""; SET_ITEMS=(); CROSS_SET=""
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap cross xmodel xeffort <<<"$SET_FIELDS"
+  CROSS_SET="$cross"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
     0|1|2|3|drain)
@@ -675,6 +679,15 @@ settings_row() {
   esac
   [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
   [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  # The record is a file in a repository: a model or effort that is not plain text is left out,
+  # never drawn into the terminal.
+  case "$cross" in
+    on)
+      [[ "$xmodel" =~ ^[A-Za-z0-9._:/-]+$ ]] || xmodel=""
+      case "$xeffort" in low|medium|high|xhigh) ;; *) xeffort="";; esac
+      set_item "${accent}●${off} ${mute}cross-review${off}${xmodel:+ ${head}${xmodel}${xeffort:+ ${xeffort}}${off}}";;
+    off) set_item "${gry}○ cross-review${off}" "" 80;;
+  esac
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
   SETTINGS_ROW="${SET_ITEMS[0]}"
   for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done
@@ -1004,8 +1017,20 @@ render() {
   if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
   MAC[2]="$REPLY"
   # "implement X · review Y", one row each in the models cell.
+  settings_row
   models=$(models_line); mprefix=""
   case "$models" in "next run: "*|"last run: "*) mprefix="${models%%: *}"; models="${models#*: }";; esac
+  # A record that carries cross-review as a setting shows it in the settings row, so the models cell
+  # drops that part of the string; an older record's string is shown as written.
+  case "$CROSS_SET" in
+    on|off)
+      case "$models" in
+        *" · cross-review "*)
+          part="${models#* · cross-review }"
+          case "$part" in *" · "*) part=" · ${part#* · }";; *) part="";; esac
+          models="${models%% · cross-review *}${part}";;
+      esac;;
+  esac
   part="$models"; i=0
   while [ -n "$part" ] && [ "$i" -lt 3 ]; do
     item="${part%% · *}"
@@ -1014,7 +1039,6 @@ render() {
     case "$part" in *" · "*) part="${part#* · }";; *) part="";; esac
   done
   [ -n "$mprefix" ] && [ -n "${MOD[0]:-}" ] && MOD[0]="${MOD[0]} ${gry}(${mprefix})${off}"
-  settings_row
 
   # The header, with the logo in 3 rows or, in a short pane, 1.
   build_header 3

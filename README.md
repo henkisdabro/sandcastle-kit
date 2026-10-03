@@ -554,7 +554,9 @@ The status view reads each ticket of a live run from the run's own record, so it
 with the run. Under the run band, one full-width **settings** row shows the run's settings:
 `settings  autonomy 0 1 2 [3] drain · turn 2/3` - the autonomy level lit and bracketed, the
 others greyed, and the turn out of the level's cap (level 1 asks after every turn, so it has no
-cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`). A live
+cap: `turn 2`). Below 100 columns only the active level stays (`autonomy 3 · turn 2/3`).
+Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
+`○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
 marked `(next run)`, and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
