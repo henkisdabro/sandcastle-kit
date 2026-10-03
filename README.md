@@ -571,6 +571,13 @@ marked `(next run)`, and a bare `status.sh` falls back to the last run's record,
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
 and draws no row.
 
+The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
+threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
+When the guard cannot get a reading (a 403 turns it off for the run, a rate limit or a missing
+OAuth token leaves it without one for now) the row says so in the warning colour:
+`● usage-guard 90% (no reading - not guarding)`. A row too wide for the pane wraps onto further
+lines rather than cut anything off.
+
 | State | Means |
 |---|---|
 | `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project |

@@ -222,9 +222,10 @@ gauge() {
 put() { BUF="${BUF}$1
 "; BUF_N=$((BUF_N+1)); }
 # Items joined by " · " into as few lines of $1 columns as they fit, into the
-# WRAPPED array: the note's last clause was cut off in a narrow pane.
+# WRAPPED array: the note's last clause was cut off in a narrow pane. A caller's
+# own WRAP_SEP keeps its row's separator colour.
 wrap_items() {
-  local w="$1" sep="${gry} · ${off}" line="" item; shift
+  local w="$1" sep="${WRAP_SEP:-${gry} · ${off}}" line="" item; shift
   WRAPPED=()
   for item in "$@"; do
     vlen "$line$sep$item"
@@ -639,7 +640,7 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US cross US model US effort" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US cross US model US effort US guard US stop US reading" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
@@ -649,7 +650,8 @@ read_settings() {
   jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring),
     (if .crossReview == true then "on" elif .crossReview == false then "off" else "" end),
     (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
-    (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end)] | join("\u001f") else "" end' "$f" 2>/dev/null
+    (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end),
+    (.usageGuard | if . == null then "" else tostring end), (.usageStop // "" | tostring), (.usageReading // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -659,7 +661,9 @@ settings_fields() {
   fi
 }
 
-# The settings row into SETTINGS_ROW ("" for none), from the pane's width in $cols. Each item is
+# The settings row into SETTINGS_ROWS (empty for none), from the pane's width in $cols. A row too
+# wide for the pane wraps whole items onto further lines, so the usage guard's warning is never cut
+# off. Each item is
 # added with set_item: its text, the shorter text it has below 100 columns, and the narrowest pane
 # it stays in (0: always; 80 for an item marked ○ in the plan, which drops below 80 columns).
 SET_ITEMS=()
@@ -668,11 +672,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap cross xmodel xeffort l i levels="" sep="${rule} · ${off}"
-  SETTINGS_ROW=""; SET_ITEMS=(); CROSS_SET=""
+  local lvl turn cap cross xmodel xeffort guard stop reading l i n levels="" WRAP_SEP="${rule} · ${off}"
+  SETTINGS_ROWS=(); SET_ITEMS=(); CROSS_SET=""
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap cross xmodel xeffort <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap cross xmodel xeffort guard stop reading <<<"$SET_FIELDS"
   CROSS_SET="$cross"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
@@ -693,11 +697,25 @@ settings_row() {
       set_item "${accent}●${off} ${mute}cross-review${off}${xmodel:+ ${head}${xmodel}${xeffort:+ ${xeffort}}${off}}";;
     off) set_item "${gry}○ cross-review${off}" "" 80;;
   esac
+  # The usage guard: only a record that holds the field says anything about it. A lost reading is a
+  # fact beside the setting, drawn in the warning colour, and stays at any width.
+  [[ "$stop" =~ ^[0-9]+$ ]] || stop=""
+  case "$guard" in
+    true)
+      if [ "$reading" = unavailable ]; then set_item "${ylw}● usage-guard${stop:+ ${stop}%} (no reading - not guarding)${off}"
+      else set_item "${grn}●${off} ${mute}usage-guard${off}${stop:+ ${head}${stop}%${off}}"; fi;;
+    false) set_item "${gry}○ usage-guard${off}" "" 80;;
+  esac
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
-  SETTINGS_ROW="${SET_ITEMS[0]}"
-  for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done
-  kvl settings "$SETTINGS_ROW"; SETTINGS_ROW="$REPLY"
-  [ -n "$SET_MARK" ] && SETTINGS_ROW="${SETTINGS_ROW} ${gry}(${SET_MARK})${off}"
+  wrap_items $(( cols - 14 )) "${SET_ITEMS[@]}"
+  if [ -n "$SET_MARK" ]; then
+    # The mark ends the last line, or stands on a line of its own when that would cut the line.
+    n=$(( ${#WRAPPED[@]} - 1 ))
+    vlen "${WRAPPED[n]} (${SET_MARK})"
+    if [ "$VN" -le $(( cols - 14 )) ]; then WRAPPED[n]="${WRAPPED[n]} ${gry}(${SET_MARK})${off}"; else WRAPPED[n+1]="${gry}(${SET_MARK})${off}"; fi
+  fi
+  kvl settings "${WRAPPED[0]}"; SETTINGS_ROWS[0]="$REPLY"
+  for (( i=1; i<${#WRAPPED[@]}; i++ )); do SETTINGS_ROWS[i]="          ${WRAPPED[i]}"; done
   return 0
 }
 
@@ -1014,7 +1032,7 @@ render() {
   fi
   # Tickets queued for a gates slot: gates are what the machine is busy with
   # while the table stands still.
-  local gate_wait models mprefix SETTINGS_ROW part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
+  local gate_wait models mprefix SETTINGS_ROWS part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
   local -a LG=() MAC=() MOD=() LEG=() NOTE=()
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
   run_cell
@@ -1231,10 +1249,10 @@ build_header() {
     fi
   fi
   # The run settings, one full-width row under the run band.
-  if [ -n "$SETTINGS_ROW" ]; then
+  if [ "${#SETTINGS_ROWS[@]}" -gt 0 ]; then
     prev="$BARS"; split_cols 1; AL=(l)
     junction '├' '┤' '─' "$prev" ""; put "$REPLY"
-    CELL=("$SETTINGS_ROW"); cells_line; put "$REPLY"
+    for part in "${SETTINGS_ROWS[@]}"; do CELL=("$part"); cells_line; put "$REPLY"; done
     BARS=""
   fi
   prev="$BARS"
