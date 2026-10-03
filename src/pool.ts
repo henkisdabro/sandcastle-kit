@@ -14,14 +14,19 @@
 // still applies inside the machine-wide cap.
 //
 // A slot is a lock file holding the owner's pid, created with O_EXCL. A slot
-// whose pid is gone is stale and taken over, so a killed run never leaks one.
-// The run lock (guard.ts) is the same kind of file, taken the same way.
+// whose owner is gone is stale and taken over, so a killed run never leaks one.
+// The run lock (guard.ts) is the same kind of file, taken the same way. An owner
+// is a process of the kit (its command line holds RUN_COMMAND, as for a run):
+// a killed run's pid comes round as some other process, and the lock would
+// otherwise be held for as long as that one lasts.
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import { OperatorError } from "./errors.ts";
+import { commandOf } from "./live-runs.ts";
 import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
@@ -57,13 +62,25 @@ export const limit = (pool: PoolName): number => {
   return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
 };
 
-export const alive = (pid: number) => {
+const exists = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+};
+
+/**
+ * The lock's owner is still running: a process of the kit holds the pid. When `ps` cannot say
+ * what the pid is (no `-p`, as in BusyBox, or `ps` failing) but the process exists, the lock is
+ * kept: a live run misread as gone would let a second one take the same project, while a
+ * recycled pid kept for want of an answer only waits for a later look.
+ */
+export const holderRunning = (pid: number, probe: Probe = commandOf): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  const command = probe(pid);
+  return command === undefined ? exists(pid) : isKit(command);
 };
 
 // A lock that vanished between two calls reads as undefined: its owner
@@ -112,7 +129,7 @@ export const takeLock = (file: string, label: string): { mine?: string; owner?: 
     // Empty is a lock being written, unless it has been empty for too long.
     if (!stale && age(file) < WEDGED_MS) return {};
     const pid = Number(stale.split(" ")[0]);
-    if (stale && alive(pid)) return { owner: pid };
+    if (stale && holderRunning(pid)) return { owner: pid };
     const guard = `${file}.takeover`;
     try {
       writeFileSync(guard, `${process.pid}\n`, { flag: "wx" });
@@ -185,7 +202,7 @@ export const usage = () =>
             // Not a `.takeover` guard: that is a slot changing hands, not a second one.
             if (!f.startsWith(`${pool}-`) || !f.endsWith(".lock")) return false;
             const content = read(join(DIR, f));
-            return !!content && alive(Number(content.split(" ")[0]));
+            return !!content && holderRunning(Number(content.split(" ")[0]));
           }).length
         : 0;
       return `${pool} ${used}/${limit(pool)}`;

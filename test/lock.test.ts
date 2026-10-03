@@ -10,6 +10,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
+import { kitLikeProcess } from "./kit-process.ts";
 
 // Importing pool.ts must not touch the real slots.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -19,11 +21,16 @@ const dir = mkdtempSync(join(tmpdir(), "sandcastle-lock-"));
 // The pid of a process that has exited: a lock a killed run left behind.
 const deadPid = () => spawnSync("true").pid!;
 
-test("a lock held by a live process is refused, naming it", () => {
+test("a lock held by a live process of the kit is refused, naming it", () => {
   const file = join(dir, "live.lock");
-  writeFileSync(file, `${process.ppid} someone-else other run\n`);
-  assert.deepEqual(takeLock(file, "me"), { owner: process.ppid });
-  assert.match(readFileSync(file, "utf8"), /someone-else/);
+  const kit = kitLikeProcess();
+  try {
+    writeFileSync(file, `${kit.pid} someone-else other run\n`);
+    assert.deepEqual(takeLock(file, "me"), { owner: kit.pid });
+    assert.match(readFileSync(file, "utf8"), /someone-else/);
+  } finally {
+    kit.kill();
+  }
 });
 
 test("a lock whose pid is gone is taken over", () => {
@@ -50,12 +57,15 @@ test("a release removes only the lock it took", () => {
 test("eight processes racing one stale lock: exactly one takes it", async () => {
   const file = join(dir, "race.lock");
   writeFileSync(file, `${deadPid()} old-token killed run\n`);
-  const tsx = join(import.meta.dirname, "../node_modules/.bin/tsx");
+  const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
   const pool = join(import.meta.dirname, "../src/pool.ts");
   // All start at the same instant, and stay alive until every one has
   // answered: a winner that exits early is a dead pid, fairly taken over.
+  // Each looks like the kit to `ps` (its script holds the kit's entry, as a
+  // run's command line does): any other owner's lock is a recycled pid's.
   const at = Date.now() + 3000;
   const script =
+    `globalThis.entry = ${JSON.stringify(RUN_COMMAND)};` + // survives the transform, which drops a comment
     `const { takeLock } = await import(${JSON.stringify(pool)});` +
     `while (Date.now() < ${at}) {}` +
     `console.log(takeLock(${JSON.stringify(file)}, "racer").mine ? "won" : "lost");` +
@@ -64,7 +74,7 @@ test("eight processes racing one stale lock: exactly one takes it", async () => 
     { length: 8 },
     () =>
       new Promise<string>((resolve, reject) => {
-        const child = spawn(tsx, ["--input-type=module", "-e", script], { env: process.env });
+        const child = spawn(process.execPath, [tsx, "--input-type=module", "-e", script], { env: process.env });
         let out = "";
         child.stdout.on("data", (d) => (out += d));
         child.stderr.on("data", (d) => (out += d));
