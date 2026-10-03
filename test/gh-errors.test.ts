@@ -4,14 +4,13 @@
 //   pnpm exec tsx --test test/gh-errors.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
 
 const project = () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-gh-"));
@@ -30,10 +29,10 @@ const project = () => {
   return { root, bin };
 };
 
-// process.execPath and tsx's cli.mjs, not bin/sandcastle: a mise or asdf node shim breaks once
-// the environment moves (see .sandcastle/rules.md).
+// runKit (test/cli-spawn.ts) starts process.execPath, not bin/sandcastle: a mise or asdf node shim
+// breaks once the environment moves (see .sandcastle/rules.md).
 const sandcastle = (p: { root: string; bin: string }, ...args: string[]) =>
-  spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), ...args], {
+  runKit([...args], {
     cwd: p.root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

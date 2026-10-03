@@ -12,12 +12,13 @@
 //   pnpm exec tsx --test test/ticket-wording.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 delete process.env.LINEAR_API_KEY;
@@ -95,7 +96,7 @@ test("the closing summary says ticket, never issue, outside GitHub phrases", () 
 
 test("`sandcastle help` says ticket, and names TICKETS rather than ISSUES", () => {
   const cwd = mkdtempSync(join(tmpdir(), "sandcastle-help-"));
-  const r = spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), "help"], {
+  const r = runKit(["help"], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

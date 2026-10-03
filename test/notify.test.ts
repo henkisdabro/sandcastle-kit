@@ -5,18 +5,17 @@
 //   pnpm exec tsx --test test/notify.test.ts
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
+import { runNode, startNode } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
-// The loader in one process, as bin/sandcastle runs the CLI: the tsx binary's child is SIGKILLed
-// on a slow answer to SIGTERM, and the notifier with it.
-const TSX = join(KIT, "node_modules/tsx/dist/loader.mjs");
+// runNode and startNode run the loader in one process, as bin/sandcastle runs the CLI: the tsx
+// binary's child is SIGKILLed on a slow answer to SIGTERM, and the notifier with it.
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-notify-"));
 const cache = join(dir, "cache");
 const href = (f: string) => JSON.stringify(pathToFileURL(join(KIT, f)).href);
@@ -56,7 +55,7 @@ const logs = (root: string) => join(root, ".sandcastle/logs");
 
 test("a normal end runs the notifier with name, summary and exit, blocked tickets left out", () => {
   const { root, out, env } = setup("writer");
-  const res = spawnSync(process.execPath, ["--import", TSX, fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runNode([fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 0, res.stderr);
   assert.deepEqual(JSON.parse(readFileSync(out, "utf8")), { n: "fixture", s: "run finished - 1 merged, 1 need you, 1 need fixing, of 3", e: "0" });
   assert.ok(existsSync(join(logs(root), "history.jsonl")));
@@ -64,7 +63,7 @@ test("a normal end runs the notifier with name, summary and exit, blocked ticket
 
 test("process.exit(3) notifies with the exit and keeps the exit status", () => {
   const { out, env } = setup("writer");
-  const res = spawnSync(process.execPath, ["--import", TSX, fixture], { encoding: "utf8", env: { ...env, END: "exit3" }, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runNode([fixture], { encoding: "utf8", env: { ...env, END: "exit3" }, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 3, res.stderr);
   const got = JSON.parse(readFileSync(out, "utf8"));
   assert.ok(got.s.startsWith("run ended with exit 3"), got.s);
@@ -74,10 +73,10 @@ test("process.exit(3) notifies with the exit and keeps the exit status", () => {
 test("a SIGTERM ends the run through the exit handler and notifies with 143", async () => {
   const { out, env } = setup("writer");
   const ended = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--import", TSX, fixture], { env: { ...env, END: "signal" }, stdio: ["ignore", "pipe", "inherit"] });
+    const child = startNode([fixture], { env: { ...env, END: "signal" }, stdio: ["ignore", "pipe", "inherit"] });
     let seen = "";
     let sent = false;
-    child.stdout.on("data", (d) => {
+    child.stdout!.on("data", (d) => {
       seen += d;
       if (!sent && seen.includes("ready")) {
         sent = true;
@@ -101,7 +100,7 @@ test("a SIGTERM ends the run through the exit handler and notifies with 143", as
 
 test("a notifier that does not exist leaves the run's result alone", () => {
   const { root, env } = setup(["/nonexistent/notify"]);
-  const res = spawnSync(process.execPath, ["--import", TSX, fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runNode([fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /notify: \/nonexistent\/notify failed/);
   assert.equal(JSON.parse(readFileSync(join(logs(root), "run.json"), "utf8")).exitCode, 0);
@@ -110,14 +109,14 @@ test("a notifier that does not exist leaves the run's result alone", () => {
 
 test("a notifier that exits 1 is reported and the run still exits 0", () => {
   const { env } = setup([process.execPath, "-e", "process.exit(1)"]);
-  const res = spawnSync(process.execPath, ["--import", TSX, fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runNode([fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /failed \(exit 1\)/);
 });
 
 test("no notify key: nothing is run and nothing is printed", () => {
   const { env } = setup(undefined);
-  const res = spawnSync(process.execPath, ["--import", TSX, fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runNode([fixture], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(res.stderr, "");
 });
@@ -129,7 +128,7 @@ test("notifyCommand refuses a shell string, an empty list and a non-string eleme
     const { env } = setup(bad);
     const probe = join(dir, "probe.mts");
     writeFileSync(probe, `import { notifyCommand } from ${href("src/notify.ts")};\ntry { notifyCommand(); console.log("no throw"); } catch (e) { console.log(JSON.stringify({ name: (e as Error).constructor.name, message: (e as Error).message })); }\n`);
-    const res = spawnSync(process.execPath, ["--import", TSX, probe], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
+    const res = runNode([probe], { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] });
     const got = JSON.parse(res.stdout.trim());
     assert.equal(got.name, "OperatorError");
     assert.equal(got.message, message(env.XDG_CONFIG_HOME));

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
 const repo = () => {
@@ -40,8 +41,8 @@ test("ENOSPC under the project: the disk is full, and what frees space", () => {
       'fs.mkdirSync = (p, o) => { if (!String(p).includes(".sandcastle")) return real(p, o); throw Object.assign(new Error("ENOSPC: no space left on device, mkdir \'" + p + "\'"), { code: "ENOSPC", path: String(p) }); };\n' +
       "syncBuiltinESMExports();\n",
   );
-  // NODE_OPTIONS, not a flag: tsx runs the CLI in a child process.
-  const r = spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), "init"], {
+  // NODE_OPTIONS, so the preload reaches every process the CLI starts.
+  const r = runKit(["init"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_OPTIONS: `--import ${preload}`, GIT_CEILING_DIRECTORIES: tmpdir() },

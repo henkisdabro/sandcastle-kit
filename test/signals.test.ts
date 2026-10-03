@@ -8,12 +8,12 @@
 //   pnpm exec tsx --test test/signals.test.ts
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { flagsOf, launcherLines, NODE_FLAGS, runNode, startNode } from "./cli-spawn.ts";
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-signals-"));
@@ -43,9 +43,6 @@ setInterval(() => {}, 1000);
 
 // The node flags the launcher passes (`exec node <flags> --import ...`), so the fixture runs as the
 // CLI does.
-const launcherLines = readFileSync(join(KIT, "bin/sandcastle"), "utf8").split("\n").filter((l) => /^(if .*; then )?exec node /.test(l));
-const flagsOf = (line: string) => line.slice(line.indexOf("exec node ") + "exec node ".length).split(" --import ")[0]!.split(" ");
-const NODE_FLAGS = flagsOf(launcherLines.at(-1)!);
 
 test("the launcher turns concurrent Maglev and Sparkplug off on both exec lines", () => {
   assert.equal(launcherLines.length, 2, "the herdr line and the CLI line");
@@ -53,7 +50,7 @@ test("the launcher turns concurrent Maglev and Sparkplug off on both exec lines"
 });
 
 test("a detached run is started with the launcher's node flags", () => {
-  const res = spawnSync(process.execPath, [...NODE_FLAGS, "-p", "JSON.stringify(process.execArgv)"], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+  const res = runNode(["-p", "JSON.stringify(process.execArgv)"], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
   assert.deepEqual(JSON.parse(res.stdout).slice(0, NODE_FLAGS.length), NODE_FLAGS, "process.execArgv, which src/detach.ts cliEntry passes on, carries the V8 flags");
 });
 
@@ -61,7 +58,7 @@ test("a detached run is started with the launcher's node flags", () => {
 const run = (sig: NodeJS.Signals, env: Record<string, string> = {}) =>
   new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
     for (const f of [marker, library, exitCalled]) rmSync(f, { force: true });
-    const child = spawn(process.execPath, [...NODE_FLAGS, "--import", "tsx", fixture], {
+    const child = startNode([fixture], {
       cwd: KIT,
       env: { ...process.env, XDG_CACHE_HOME: dir, ...env },
       stdio: ["ignore", "pipe", "inherit"],
@@ -69,7 +66,7 @@ const run = (sig: NodeJS.Signals, env: Record<string, string> = {}) =>
     let out = "";
     let sent = false;
     let again: NodeJS.Timeout | undefined;
-    child.stdout.on("data", (d) => {
+    child.stdout!.on("data", (d) => {
       out += d;
       if (sent || !out.includes("ready")) return;
       sent = true;

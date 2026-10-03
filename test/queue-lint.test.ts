@@ -7,14 +7,13 @@
 //   pnpm exec tsx --test test/queue-lint.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = fileURLToPath(new URL("..", import.meta.url));
 const XDG = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = XDG;
 delete process.env.LINEAR_API_KEY;
@@ -127,7 +126,7 @@ test("the CLI runs --lint read-only and exits 0 even with problems", () => {
   mkdirSync(join(root, ".sandcastle"));
   writeFileSync(join(root, ".sandcastle/config.ts"), 'export default { name: "t", gates: [{ name: "g", command: "true" }], tracker: "files" };\n');
   const before = execFileSync("git", ["status", "--porcelain", "--ignored"], { cwd: root, encoding: "utf8" });
-  const r = spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "queue", "--lint"], {
+  const r = runKit(["queue", "--lint"], {
     cwd: root,
     env: { ...process.env, XDG_CONFIG_HOME: XDG, GIT_CEILING_DIRECTORIES: tmpdir() },
     stdio: ["ignore", "pipe", "pipe"],

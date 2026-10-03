@@ -9,8 +9,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { mock, test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -22,7 +22,6 @@ const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 type Opener = import("../src/land.ts").Opener;
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
 const tmp = mkdtempSync(join(tmpdir(), "sandcastle-land-command-"));
 const REGEN = "tr '\\n' ' ' < src.txt > out.txt";
 const ID = "demo-01";
@@ -220,7 +219,7 @@ test("`sandcastle land` with no ticket prints the usage line, no stack trace", (
   write(root, ".sandcastle/config.ts", 'export default { name: "t", gates: [{ name: "g", command: "true" }], tracker: "files" };\n');
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "init");
-  const r = spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), "land"], {
+  const r = runKit(["land"], {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

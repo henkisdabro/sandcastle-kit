@@ -5,11 +5,12 @@
 //   pnpm exec tsx --test test/doctor-other-checkout.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
 const project = (files: Record<string, string>) => {
@@ -22,7 +23,7 @@ const project = (files: Record<string, string>) => {
   return root;
 };
 const doctor = (root: string) =>
-  spawnSync(process.execPath, ["--import", join(KIT, "node_modules/tsx/dist/loader.mjs"), join(KIT, "src/cli.ts"), "doctor"], {
+  runKit(["doctor"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },

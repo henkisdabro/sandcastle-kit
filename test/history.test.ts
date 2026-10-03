@@ -4,12 +4,12 @@
 //   pnpm exec tsx --test test/history.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
 const root = mkdtempSync(join(tmpdir(), "sandcastle-history-"));
@@ -24,7 +24,8 @@ r.ticket("7", { state: "merged" });
 );
 
 const runOnce = () => {
-  const res = spawnSync(join(KIT, "node_modules/.bin/tsx"), [script], {
+  const res = runKit([], {
+    script,
     encoding: "utf8",
     env: { ...process.env, XDG_CACHE_HOME: cache },
   });

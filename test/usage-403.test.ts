@@ -5,14 +5,13 @@
 //   pnpm exec tsx --test test/usage-403.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = join(import.meta.dirname, "..");
 process.env.USAGE_CHECK = "1";
 const { usageLine, usageStop } = await import("../src/usage.ts");
 
@@ -60,10 +59,10 @@ test("doctor --verify warns that USAGE_CHECK=1 cannot work with a token the usag
   const config = join(cwd, "xdg");
   mkdirSync(join(config, "sandcastle-kit"), { recursive: true });
   writeFileSync(join(config, "sandcastle-kit/.env"), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-fake\n", { mode: 0o600 });
-  // A preload that stubs fetch, through NODE_OPTIONS because tsx's cli starts its own child process.
+  // A preload that stubs fetch, through NODE_OPTIONS, so it reaches every process the CLI starts.
   const preload = join(cwd, "stub.mjs");
   writeFileSync(preload, 'globalThis.fetch = async () => new Response("{}", { status: 403 });\n');
-  const r = spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "doctor", "--verify"], {
+  const r = runKit(["doctor", "--verify"], {
     cwd,
     env: { ...process.env, NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`, XDG_CONFIG_HOME: config, GIT_CEILING_DIRECTORIES: tmpdir() },
     stdio: ["ignore", "pipe", "pipe"],

@@ -5,13 +5,13 @@
 //   pnpm exec tsx --test test/doctor-env-committed.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = join(import.meta.dirname, "..");
 const project = (ignore: string) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-envgit-"));
   const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...a], { cwd: root });
@@ -23,7 +23,7 @@ const project = (ignore: string) => {
   return { root, git };
 };
 const doctor = (root: string) =>
-  spawnSync(process.execPath, ["--import", join(KIT, "node_modules/tsx/dist/loader.mjs"), join(KIT, "src/cli.ts"), "doctor"], {
+  runKit(["doctor"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },

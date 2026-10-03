@@ -5,19 +5,16 @@
 //   pnpm exec tsx --test test/help.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
-const tsx = join(kit, "node_modules", ".bin", "tsx");
 
 test("help says plain clean lists unmerged branches and --all deletes them without asking", () => {
   const cwd = mkdtempSync(join(tmpdir(), "sandcastle-help-"));
-  const r = spawnSync(tsx, [join(kit, "src/cli.ts"), "help"], {
+  const r = runKit(["help"], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() },

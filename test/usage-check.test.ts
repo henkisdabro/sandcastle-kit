@@ -10,8 +10,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = join(import.meta.dirname, "..");
 process.env.USAGE_CHECK = "1";
 const { usageLine } = await import("../src/usage.ts");
 
@@ -21,7 +21,7 @@ test("a bad USAGE_STOP is refused before the run lists its queue or checks the i
   spawnSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd });
   mkdirSync(join(cwd, ".sandcastle"));
   writeFileSync(join(cwd, ".sandcastle/config.ts"), 'export default { name: "t", gates: [{ name: "g", command: "true" }] };\n');
-  const r = spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "run"], {
+  const r = runKit(["run"], {
     cwd,
     env: { ...process.env, USAGE_CHECK: "1", USAGE_STOP: "abc", XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },
     stdio: ["ignore", "pipe", "pipe"],

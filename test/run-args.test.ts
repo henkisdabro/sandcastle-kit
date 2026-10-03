@@ -5,17 +5,15 @@
 //   pnpm exec tsx --test test/run-args.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { OperatorError } from "../src/errors.ts";
 import { parseRunArgs } from "../src/run.ts";
+import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
-const tsx = join(kit, "node_modules", ".bin", "tsx");
 
 test("no arguments leave everything to the environment", () => {
   assert.deepEqual(parseRunArgs([]), { dry: false });
@@ -50,7 +48,7 @@ for (const bad of [["--bogus"], ["--failed"], ["--concurrency"], ["--concurrency
 test("a bad argument is a message with no stack, before any config is read", () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-run-args-"));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
-  const r = spawnSync(tsx, [join(kit, "src/cli.ts"), "run", "--bogus"], {
+  const r = runKit(["run", "--bogus"], {
     cwd: root,
     encoding: "utf8",
     // Never discover a repository above the throwaway directory.

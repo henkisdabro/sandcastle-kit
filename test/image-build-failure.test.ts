@@ -5,14 +5,13 @@
 //   pnpm exec tsx --test test/image-build-failure.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
 
 // The base image exists; anything else does not, and every build fails as docker reports it.
 const DOCKER = `#!/bin/sh
@@ -37,7 +36,7 @@ const project = (config: string) => {
 };
 
 const build = (p: { root: string; bin: string }) =>
-  spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), "build"], {
+  runKit(["build"], {
     cwd: p.root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
