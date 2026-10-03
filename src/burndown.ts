@@ -38,7 +38,7 @@ import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -55,7 +55,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, createHostGit, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, type Context, createLedger } from "./ledger.ts";
+import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -1199,7 +1199,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return { base, gateNames, report: reports.get(id), dryRun: DRY_RUN, ...(kept && { kept: keptPath(project.root, kept.path) }), ...(hold && { hold: "note" as const }) };
   };
   // Every ending and requeue the scheduler tells, recorded in the ledger's words: the state, the outcome and the view's word.
-  const ledger = createLedger({ run, outcomes: (o) => recordOutcomes(project, runId, o), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
+  const ledger = createLedger({ run, outcomes: outcomesFile(project, runId), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
   // The line a requeued ticket's second attempt's setup carries.
   const { requeuedAs } = ledger;
 
