@@ -874,7 +874,15 @@ itself, in the status view's castle, glyphs and colours:
   mod pins the word `sandcastle` in its status line under the prompt, so the session shows the
   project takes runs. The live band replaces it while a run of the session's project is alive,
   and it returns after the end notice. A run this session follows in another directory never
-  changes it: the mark is about the session's own project. Turn it off for every project with
+  changes it: the mark is about the session's own project. When **ready tickets** wait - queued
+  tickets with no open blocker, the ones a run would start now - it reads `sandcastle · 4 ready -
+  /sandcastle run`. The count comes from `sandcastle queue --json`, read in the background and
+  cached once per project in the mod's store, shared by every Claude Code session on the machine:
+  at most one tracker read per project every 10 minutes while nothing changes, plus one when a run
+  of the project ends and one when you use `/sandcastle` (it may just have labelled tickets). A
+  read that fails or takes over 20 seconds (offline, rate-limited, signed out of `gh`) keeps the
+  last good count for an hour and then shows the bare mark; the line never shows an error -
+  `sandcastle queue` and the status view explain one. Turn the mark off for every project with
   `"idleMark": false` in your [personal settings](#personal-settings).
 - 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
   answers while Claude is working.
@@ -908,6 +916,12 @@ all of it. The mod:
 - checks that `.sandcastle/config.ts` is a plain file (one `stat`) for the idle mark, and runs
   one `sh` script (`cat`, no writing) that prints your personal `config.json` for its `idleMark`
   switch. It never writes that file;
+- once a project is set up and the mark is on, runs `sandcastle queue --json` there for the ready
+  count - the kit's own `bin/sandcastle` beside the mod, else the `sandcastle` on your PATH - with
+  a 20 second timeout, one at a time per session, and keeps the ids in its store (one entry per
+  project, shared by every session). That read is the one place the mod reaches the tracker, and
+  it does it through the kit, never itself. It makes none while an entry under 10 minutes old
+  stands;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -918,7 +932,7 @@ all of it. The mod:
   last run it has accounted for;
 - submits one prompt when a run ends.
 
-It makes no network request, writes no file, calls no model and changes neither git nor the
+It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no file, calls no model and changes neither git nor the
 tracker. The record is a file in the repository, so the mod trusts none of it: text from it is
 cut to one short line with control and invisible characters removed, and the prompt it submits
 carries nothing from the record but a numeric exit code. Ticket titles are shown as written, as
@@ -927,7 +941,7 @@ and every call it makes, without running it:
 
 ```
 ❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, ui.render{component=AbovePrompt}
-❯ ./register.tsx calls: $.clock.after, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
+❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 
 A test in the kit fails when either list changes, so a new call cannot arrive unnoticed.
