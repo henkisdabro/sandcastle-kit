@@ -54,7 +54,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -423,7 +423,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, candidates.length, slots, blockerChain(project, tracker, candidates).length);
+  const rough = estimate(
+    project, candidates.length, slots, blockerChain(project, tracker, candidates).length,
+    candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
+  );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
@@ -818,10 +821,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // not resolve it without changing what the ticket does, so the full
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
-        await timed(issue.id, "implement", () => {
-          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
+        await timed(issue.id, "resolve", () => {
+          const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
           return pass({
-            name: `impl-${issue.id}`,
+            name: `resolve-${issue.id}`,
             logging,
             agent: implAgent(own),
             promptFile: prompts.resolve,
@@ -885,7 +888,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           () => narrowModel,
         );
       };
-      let reviewCommits = 0;
+      // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
+      let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
       // What the agents knowingly left undone. The implementer's word stands only until a full
@@ -900,7 +904,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         console.log(`${ref(issue.id)}: conflict resolved - reviewing the resolution only.`);
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-        reviewCommits = resolved.commits.length;
+        reviewCommits += resolved.commits.length;
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
         const u = unmetOf(resolved.stdout);

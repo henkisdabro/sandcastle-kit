@@ -39,7 +39,8 @@ export const conflictLine = (c: { files: string[]; with: string[] }) =>
  * has, so it is read against the branch head (a new file the glob covers) as well as the base (a
  * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
  * A file the branch adds under a conventional test path is never an overrun (`isTestPath`): its name
- * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is.
+ * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is
+ * returned here; `overrunLine` folds the test paths into a count when the overrun is reported.
  * Nor is a change to an agent-instructions file (`isAgentDoc`) when the branch adds any file: the
  * new module's row in the layout table is expected. On a branch that adds nothing it still counts.
  */
@@ -590,6 +591,17 @@ export const greenCarriedLine = (who: string, head: string, requeued: boolean) =
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
   `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
   (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
+
+/**
+ * The review commits a requeued ticket's first attempt made, which stay on its branch when the
+ * second attempt lands it: `commits` is the branch's total, so `reviewCommits` must keep them or the
+ * two disagree about one branch. Review commits carry no marker, so a branch kept from an
+ * earlier `sandcastle run` has no record here and counts 0.
+ */
+export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult<{ issue: string; reviewCommits: number }>[], id: string) => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
+};
 
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);

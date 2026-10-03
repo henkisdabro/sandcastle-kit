@@ -361,7 +361,7 @@ log_says_limit() {
 }
 # The .jsonl sidecars (each pass's raw agent stream) are deliberately not matched here or by any log glob below.
 # Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log
-# (phase impl, review, review-codex, repair, or gates - the orchestrator's gate output):
+# (phase impl, resolve, review, review-codex, repair, or gates - the orchestrator's gate output):
 # the id appears twice, and the repeat tells a ticket called "code-review-01" from the
 # phase "review". Logs of hand-suffixed branches (agent-issue-12-closeout-impl-12)
 # fall back to the first phase word. (BSD sed has no back-references in -E; awk does it.)
@@ -369,9 +369,9 @@ log_ids() {
   awk '{ f=$0; sub(/^.*\//, "", f); if (f !~ /^agent-issue-/) next
     s=substr(f, 13); sub(/\.log$/, "", s); n=length(s); found=""
     for (i=1; i<n; i++) { rest=substr(s, i+1)
-      if (rest ~ /^-(impl|review-codex|review|repair|gates)-/) { t=rest; sub(/^-(impl|review-codex|review|repair|gates)-/, "", t)
+      if (rest ~ /^-(impl|resolve|review-codex|review|repair|gates)-/) { t=rest; sub(/^-(impl|resolve|review-codex|review|repair|gates)-/, "", t)
         if (t == substr(s, 1, i)) { found=substr(s, 1, i); break } } }
-    if (found == "" && match(s, /-(impl|review|repair|gates)-/)) found=substr(s, 1, RSTART-1)
+    if (found == "" && match(s, /-(impl|resolve|review|repair|gates)-/)) found=substr(s, 1, RSTART-1)
     if (found != "") print found }'
 }
 # A ticket as a person names it: "#12", a suffixed branch "#12" (its suffix is
@@ -460,7 +460,7 @@ load_run() {
   # Sandboxes the run has yet to fill: queued tickets that fit in them start
   # at once, so none of them is "behind" another. A ticket that is landing holds
   # no slot: its merge runs on the host, or in the landing worker's own box.
-  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
+  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
   [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
   TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
   # When the run ends: the queued tickets at a typical issue's length
@@ -473,7 +473,7 @@ load_run() {
     (.typical.issue // null) as $t
     | if $t == null or (.stage // "") != "running" then empty else
       ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
-      | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair")))
+      | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair")))
           | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
       | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) | floor end' "$f" 2>/dev/null)
   return 0
@@ -552,7 +552,7 @@ outcome_state() {
 # header count and the overflow line).
 style_of() {
   case "$1" in
-    setup|impl|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
+    setup|impl|resolve|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
     stalled|orphaned|stopped|"gate red"|conflict|held|uncommitted|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
     ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
     queued|requeued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
@@ -806,7 +806,7 @@ render() {
         key=$(( 1000000 - ${order:-0} )); age="-"
         if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi;;
       blocked) age="-";;
-      implement|review|cross-review|repair|gates)
+      implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
         if [ -f "$log" ]; then
           quiet=$(( now_s - $(mtime_of "$log") ))
@@ -873,9 +873,9 @@ render() {
   # all of them once the run has ended. Their state is inferred.
   for n in $issues; do
     in_record "$n" && continue
-    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log logs/agent-issue-"$n"-gates-*.log 2>/dev/null | head -1)
+    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-resolve-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log logs/agent-issue-"$n"-gates-*.log 2>/dev/null | head -1)
     [ -z "$log" ] && continue
-    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *-gates-*) phase="gates";; *) phase="impl";; esac
+    case "$log" in *-resolve-*) phase="resolve";; *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *-gates-*) phase="gates";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
     # AGE is how long a working row has been at its phase, from an older

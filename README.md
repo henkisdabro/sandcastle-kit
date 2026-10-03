@@ -536,7 +536,7 @@ moments earlier (the search index lags), so a run started straight after `--add-
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of its tickets in the last three runs (when a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(a chain of N runs in order)`). Tickets that others wait for start first; a ticket
+time from the medians of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). When a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(N tickets in sequence)`. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -562,7 +562,7 @@ and draws no row.
 
 | State | Means |
 |---|---|
-| `setup` `impl` `review` `codex` `gates` `repair` | Working. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project |
+| `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project |
 | `ready` | Implemented, reviewed, gates green: waits for the landing worker, which lands each ticket as it goes green. `human merge: .github/` means it will be held for a person instead |
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person; `uncommitted`: the agent's work is in its kept worktree, not committed |
@@ -627,7 +627,7 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
-undone, follow-up tickets agents filed); **Needs
+undone, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and

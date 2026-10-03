@@ -83,7 +83,7 @@ What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and 
 
 ## `src/touches.ts`
 
-The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). A scheduling hint and warning source, never a guard
+The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun, and `overrunLine` folds the modified ones into a count, "+7 test files", listing only the other paths), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). A scheduling hint and warning source, never a guard
 
 ## `src/lint.ts`
 
@@ -95,7 +95,7 @@ The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a 
 
 ## `src/guard.ts`
 
-Host safety: git hooks and auto-gc off, command-running config pinned, `.git` fingerprint (config, HEAD, info, hooks; its base is the one the run expects, which the landing worker moves only by its own writes; and the tips of `agent/issue-*`, which `HostGit.begin`, `settle` and `forget` in `src/landing.ts` keep: a ticket in flight may move its branch, any other tip that moves stops the run, and a branch that vanished is restored from the bare repo `.sandcastle/backup.git`, where a pipeline's end copies it and a landing drops it), a deleted or moved base stops with the `update-ref` that restores it, a worktree record rewritten to a container path is named, protected paths and files over 50 MB held for a person, run lock
+Host safety: git hooks and auto-gc off, command-running config pinned, `.git` fingerprint (config, HEAD, info, hooks; its base is the one the run expects, which the landing worker moves only by its own writes; and the tips of `agent/issue-*`, which `HostGit.begin`, `settle` and `forget` in `src/landing.ts` keep: a ticket in flight may move its branch, any other tip that moves stops the run, and a branch that vanished is restored from the bare repo `.sandcastle/backup.git`, where a pipeline's end copies it, with the base branch under `refs/base` so a fetch is thin, and a landing drops it and, with no agent branch left, runs `gc --prune=now` in the backup alone), a deleted or moved base stops with the `update-ref` that restores it, a worktree record rewritten to a container path is named, protected paths and files over 50 MB held for a person, run lock
 
 ## `src/run.ts`
 

@@ -200,6 +200,11 @@ comments, and the gates can prove it.
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
+   When a ticket's body is written or rewritten here, its `Touches:` line names only files an agent
+   may edit under the project's rules, existing paths as they are; a new file is marked new in the
+   prose, not on that line (`(new)` would be read as part of the path). A run opens no pull request,
+   so evidence is asked for in the agent's final message or a ticket comment. `audit.md` step 10 has the full wording.
+
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
    question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
    theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
@@ -288,7 +293,7 @@ separate pane or terminal). While a run is live, every ticket it holds is shown 
 own record (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run:
 working, ready to land, need you, queued, blocked, merged. The states:
 
-- **Working** - `setup`, `impl`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
+- **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
   has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
