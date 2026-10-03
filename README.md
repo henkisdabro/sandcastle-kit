@@ -896,7 +896,21 @@ itself, in the status view's castle, glyphs and colours:
   read that fails or takes over 20 seconds (offline, rate-limited, signed out of `gh`) keeps the
   last good count for an hour and then shows the bare mark; the line never shows an error -
   `sandcastle queue` and the status view explain one. Turn the mark off for every project with
-  `"idleMark": false` in your [personal settings](#personal-settings).
+  `"idleMark": false` in your [personal settings](#personal-settings), or in one project with
+  `/sandcastle-mark hide`.
+- 🔕 **`/sandcastle-mark`**: your say over the idle mark, with no model turn.
+  - `dismiss` takes the count off while you have seen it: the line reads plain `sandcastle` until
+    a ticket that was not ready becomes ready, which brings the count back. A ticket leaving the
+    ready set does not. The mark itself stays.
+  - `hide` turns the mark off in this project until `show`; `show` undoes both hiding and a
+    dismissal.
+  - With no argument it says whether the mark is shown, hidden (here or machine-wide) or
+    dismissed, and the cached count with its age, so a stale count can be told from an empty
+    queue. Any other argument prints the usage line.
+
+  The choices are kept in the mod's store under the project root: on your machine only, across a
+  restart, and never in the repository. The machine-wide `idleMark` switch stays in your personal
+  settings, which the mod never writes.
 - 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
   answers while Claude is working.
 
@@ -941,8 +955,9 @@ all of it. The mod:
   writing) that lists the machine-wide live-runs directory (`$XDG_CACHE_HOME/sandcastle-kit/runs`,
   `~/.cache` when unset) and the resolved roots in it, then reads `run.json` there only to see
   whether it names this session;
-- keeps one small entry per project in its own store: which session closes the run, and the
-  last run it has accounted for;
+- keeps small entries per project in its own store: which session closes the run and the last run
+  it has accounted for, the cached ready count, and your `/sandcastle-mark` choices (hidden, and
+  the ids of a dismissal);
 - submits one prompt when a run ends.
 
 It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no
@@ -954,7 +969,7 @@ numeric exit code. Ticket titles are shown as written, as `sandcastle status` sh
 running it:
 
 ```
-❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, ui.render{component=AbovePrompt}
+❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
 ❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 

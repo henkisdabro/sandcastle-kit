@@ -15,7 +15,7 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, startedBy, summarise } from "./run-state";
 import { kitRunning } from "./run-live";
-import { afterRead, due, machineSwitch, markText, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle";
+import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -76,6 +76,8 @@ let reading = false;
 let again = false;
 /** The `sandcastle` to run, found once: the kit's own `bin/sandcastle` beside the mod, else the one on PATH. */
 let kitBin: string | undefined;
+/** The last round pinned the idle mark (no needs-you text, no live run of the root): a choice made now redraws it at once. */
+let idling = false;
 let drawn = "";
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
 let pinned: string | undefined | null = null;
@@ -258,7 +260,7 @@ async function discover($: EngineInterface, root: string) {
   }
 }
 
-/** The session root's store entry and `/sandcastle-status`, once `.sandcastle/` exists. */
+/** The session root's store entry, `/sandcastle-status` and `/sandcastle-mark`, once `.sandcastle/` exists. */
 async function adopt($: EngineInterface, root: string) {
   if (adopted || !(await isProject($, root))) return;
   adopted = true;
@@ -268,6 +270,7 @@ async function adopt($: EngineInterface, root: string) {
     seenAt(root).since = kept?.since;
   }
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
+  await $.command.register({ name: "sandcastle-mark", description: "Dismiss the idle mark's ready count, or hide or show the mark, with no model turn", immediate: true });
 }
 
 /** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
@@ -323,29 +326,66 @@ async function refresh($: EngineInterface, root: string, forced: boolean) {
   }
 }
 
-/**
- * The idle mark's text for the session root's project, which no followed run changes: set up is
- * one `stat` of `.sandcastle/config.ts`, the machine switch one read of the personal settings,
- * the count what the shared entry holds - a read it starts is for the next look to show.
- */
-async function mark($: EngineInterface, root: string): Promise<string | undefined> {
-  const setUp = await plain($, `${root}/${CONFIG}`);
-  if (!setUp) return markText({ setUp, idleMark: true });
-  let idleMark = true;
+/** The person's choices for a project's mark: the store's entry, none when it holds nothing usable. */
+const markKey = (root: string) => `mark:${root}`;
+
+/** The machine switch: one read of the personal settings, on unless they say `"idleMark": false`. */
+async function machineOn($: EngineInterface): Promise<boolean> {
   try {
     const out = await exec($, ["sh", "-c", SETTINGS_SCRIPT]);
-    if (out.exitCode === 0) idleMark = machineSwitch(out.stdout);
+    if (out.exitCode === 0) return machineSwitch(out.stdout);
   } catch {
     // Settings that cannot be read leave the switch on.
   }
-  if (!idleMark) return markText({ setUp, idleMark });
+  return true;
+}
+
+/**
+ * Everything the idle mark is decided from that the mod already holds: set up is one `stat` of
+ * `.sandcastle/config.ts`, the machine switch one read of the personal settings, the choices and
+ * the count what the store holds. Nothing here reaches the tracker.
+ */
+async function facts($: EngineInterface, root: string): Promise<MarkInput> {
+  const setUp = await plain($, `${root}/${CONFIG}`);
+  const idleMark = setUp ? await machineOn($) : true;
   const now = await $.clock.now();
   const entry = parseEntry(await $.store.get(readyKey(root)));
-  if (due(entry, now, trigger)) {
+  const choice = parseChoice(await $.store.get(markKey(root)));
+  return { setUp, idleMark, hidden: choice?.hidden, dismissed: choice?.dismissed, entry, now };
+}
+
+/**
+ * The idle mark's text for the session root's project, which no followed run changes - a read it
+ * starts is for the next look to show.
+ */
+async function mark($: EngineInterface, root: string): Promise<string | undefined> {
+  const input = await facts($, root);
+  if (!input.setUp || !input.idleMark) return markText(input);
+  if (input.dismissed && dismissalEnded(input.dismissed, input.entry, input.now)) {
+    // A ticket not in the dismissal is ready: the dismissal is over for good, not only while it shows.
+    await $.store.set(markKey(root), { hidden: input.hidden === true });
+    input.dismissed = undefined;
+  }
+  if (!input.hidden && due(input.entry, input.now!, trigger)) {
     void refresh($, root, trigger !== undefined);
     trigger = undefined;
   }
-  return markText({ setUp, idleMark, entry, now });
+  return markText(input);
+}
+
+/** `/sandcastle-mark`: the choice is kept, the line redrawn at once if the mark is what it shows, the reply is text. */
+async function choose($: EngineInterface, root: string, args: string): Promise<string> {
+  const action = markAction(args);
+  if (action === undefined) return MARK_USAGE;
+  if (action !== "report") {
+    const input = await facts($, root);
+    const prior: Choice = { hidden: input.hidden === true, ...(input.dismissed ? { dismissed: input.dismissed } : {}) };
+    await $.store.set(markKey(root), choiceAfter(action, prior, input.entry, input.now));
+    if (idling) pin($, await mark($, root));
+  }
+  const input = await facts($, root);
+  const done = { dismiss: "Dismissed: the count stays quiet until a ticket not ready now becomes ready.", hide: "Hidden in this project until /sandcastle-mark show.", show: "Shown." };
+  return action === "report" ? markReport(input) : `${done[action]}\n${markReport(input)}`;
 }
 
 /** One round: every watched project once; true while a run is alive. The newest live run is the one drawn. */
@@ -365,7 +405,8 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   // The line is the needs-you text while a live run needs a person, and otherwise the idle mark -
   // unless the session root's own run is alive, when the band has it. Last, so after the end
   // notice: the mark returns once the run is over.
-  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : own || !adopted ? undefined : await mark($, root));
+  idling = !now.length && !own && adopted;
+  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : idling ? await mark($, root) : undefined);
   await draw($, shown);
   return live.length > 0;
 }
@@ -461,6 +502,8 @@ export const register: Register = (on) => {
     }
     return { text: blocks.join("\n\n") || "No sandcastle run on record in this project." };
   });
+
+  on("command.run", { command: "sandcastle-mark" }, async ($, e) => ({ text: await choose($, await $.session.root(), e.args) }));
 
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const now = await read($, view);
