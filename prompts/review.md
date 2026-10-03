@@ -33,7 +33,10 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    effect that fires when it should not.
 3. **Does it contradict a settled decision** recorded in the repo (see the project rules)?
 4. **Repo conventions**, from the repo's agent instructions (`CLAUDE.md`, `AGENTS.md`).
-5. **Tests that do not test.** A test that passes against a broken implementation is worse than no
+5. **Docs left describing the old behaviour.** If the diff changes what the project does, grep its
+   README, docs, agent instructions and skill files for the words that described the old behaviour,
+   not only for the changed function's name. A sentence that is now false is a finding: fix it.
+6. **Tests that do not test.** A test that passes against a broken implementation is worse than no
    test. If you doubt one, break the implementation and confirm the test fails.
 
 {{KIT_PROJECT_RULES}}

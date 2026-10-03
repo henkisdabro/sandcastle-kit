@@ -81,7 +81,7 @@ read a module's section there before changing it.
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
-| `docs/img/` | The README's pictures: `logo.svg` (the pixel castle and wordmark), `status.gif` (the website's status window playing its scripted night) and `mod.gif` (the mod's band, recorded from the animated `terminal-logo.svg`). GitHub plays no SVG animation in a README, so the moving ones are GIFs; the castle's colours are the status view's |
+| `docs/img/` | The README's pictures: `logo.svg` (the pixel castle and wordmark), `status.gif` (the website's status window playing its scripted night) and `mod.gif` (the mod's band, recorded from the animated `terminal-logo.svg`). GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
 | `docs/architecture.md` | What each larger module owns, in more detail than this table |
 | `test/full-check.sh` | Every check below on this machine, then in a Linux container, then the outbound scan of the commits not yet on `origin/main` |
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
@@ -128,8 +128,8 @@ as CI and the sandboxes do. That checks the hooks and the tree they return, neve
 at a changed drawing in a real session, `claude --plugin-dir mod` from a project with a run
 record. The mod's API is early access, and its types are the authority, not memory. That session
 writes them to `mod/.claude-plugin/types/` with a `mod/tsconfig.json` (both gitignored; they are
-absent until then, and `mod/types/index.d.ts` holds only the band's own types); `pnpm exec tsc
--p mod` then type-checks the mod, which the kit's own `tsc` does not cover. Grep the types for the
+absent until then, and `mod/types/index.d.ts` holds only the band's own types); from then on
+`pnpm test` type-checks the mod too, which the kit's own `tsc` does not cover. Grep the types for the
 member you need rather than reading them: they run to thousands of lines. `claude plugin test mod`
 reporting "hooks modules are turned off" is Claude Code's rollout switch, not the mod.
 
@@ -149,6 +149,9 @@ directory, never in a real project.
   as an array; an interpolated string is only for a script run inside the container.
 - British English in prose; hyphens with spaces ( - ) rather than em dashes.
 - Commit messages: `type: subject` (Conventional Commits), imperative, body says why.
+- A change made by hand goes on a `feature/`, `fix/`, `docs/` or `refactor/` branch cut from
+  `origin/main`, and reaches main through a pull request the maintainer merges. A run's own
+  landings and the release commit are the exceptions.
 - Every user-facing change gets a `CHANGELOG.md` line under `[Unreleased]`. One an existing
   project may need to act on - a new default that changes what a run does or spends, a new
   convention, anything `sandcastle init` now writes differently - also gets an **Upgrading**
@@ -159,8 +162,8 @@ directory, never in a real project.
 
 ## GitHub releases
 
-A release bumps `version` in `package.json` and in `herdr/herdr-plugin.toml` with its changelog
-heading (tests check all three agree), then tags `vX.Y.Z`: the kit version counts a clone's
+A release bumps `version` in `package.json`, `herdr/herdr-plugin.toml` and `site/index.html`'s
+`data-version` with its changelog heading (tests check all four agree), then tags `vX.Y.Z`: the kit version counts a clone's
 distance from that tag.
 
 The release notes are a short, emoji-led summary, never the changelog pasted in. Copy the shape of

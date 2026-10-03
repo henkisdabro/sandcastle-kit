@@ -9,6 +9,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **`queue --lint` flags blockers listed under a heading.** A `## Blocked by` heading over `- #12`
+  items is not read, so such a ticket started before its blocker landed with nothing saying so;
+  the lint now names it under problems.
+- **The review agent checks the docs for old behaviour.** A change to what the project does now has
+  the reviewer grep the README, docs, agent instructions and skill files for wording that described
+  the old behaviour, and fix what is now false. The audit's docs lens checks the same.
+
 ### Changed
 
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a

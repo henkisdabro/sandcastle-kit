@@ -142,7 +142,7 @@ function animate($: EngineInterface, on: boolean) {
   }
   const show = (i: number) => {
     void update($, castle, () => i);
-    tick = $.clock.after(CASTLE_FRAMES[i].ms, () => show((i + 1) % CASTLE_FRAMES.length));
+    tick = $.clock.after(CASTLE_FRAMES[i]!.ms, () => show((i + 1) % CASTLE_FRAMES.length));
   };
   show(0);
 }

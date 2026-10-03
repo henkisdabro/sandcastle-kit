@@ -104,6 +104,13 @@ test("every blockerProblems line appears", async () => {
   assert.match(text, /problems:\n\s+shop-01 waits for shop-09, which does not exist/);
 });
 
+test("blockers listed under a Blocked by heading are a problem; on the line itself, or in code, they are not", async () => {
+  const text = await lint({ "01-a.md": ticket("A"), "02-b.md": ticket("B", "## Blocked by\n\n- #1\n") });
+  assert.match(text, /problems:\n\s+shop-02 lists its blockers under a "Blocked by" heading, which is not read/);
+  const fine = await lint({ "01-a.md": ticket("A"), "02-b.md": ticket("B", "Blocked by: 01\n\n```\n## Blocked by\n- #1\n```\n") });
+  assert.match(fine, /problems: none/);
+});
+
 test("a cycle does not hang the chain search", async () => {
   const text = await lint({ "01-a.md": ticket("A", "Blocked by: 02"), "02-b.md": ticket("B", "Blocked by: 01") });
   assert.match(text, /blocker depth: 2/);
