@@ -11,7 +11,7 @@ import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { hideFromGates, KIT_CREDENTIALS } from "./worktree-lock.ts";
+import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
 export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -88,6 +88,53 @@ export const reapOrphans = (project: Project) => {
       /* gone meanwhile */
     }
   }
+};
+
+export type CleanResult = {
+  /** Worktrees under `.sandcastle/worktrees/` that were removed. */
+  worktrees: string[];
+  /** Branches deleted; `unmerged` when `all` took one that still had commits off base. */
+  deleted: { branch: string; unmerged: boolean }[];
+  /** Agent branches kept because they hold work: `ahead` is the count of commits not on base. */
+  kept: { branch: string; ahead: number }[];
+};
+
+/**
+ * `sandcastle clean`: removes the worktrees under `.sandcastle/worktrees/` and deletes the agent
+ * branches that are finished (and, with `all`, the unmerged ones too). Call only while holding
+ * the project's run lock, and keep holding it until this returns: a run started meanwhile would
+ * lose the worktrees it had just made. A worktree's own git lock (worktree-lock.ts) is released
+ * just before that worktree is removed, never earlier and never for one outside the directory.
+ */
+export const cleanProject = (project: Project, all: boolean): CleanResult => {
+  const cwd = project.root;
+  reapOrphans(project);
+  const underWorktrees = join(project.root, ".sandcastle/worktrees/");
+  const worktrees = sh("git", ["worktree", "list", "--porcelain"], cwd)
+    .split("\n\n")
+    .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
+    .filter((p): p is string => !!p && p.startsWith(underWorktrees));
+  for (const path of worktrees) {
+    // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
+    unlockWorktree(path, cwd);
+    sh("git", ["worktree", "remove", "--force", path], cwd);
+  }
+  sh("git", ["worktree", "prune"], cwd);
+  const base = project.baseBranch;
+  const deleted: CleanResult["deleted"] = [];
+  const kept: CleanResult["kept"] = [];
+  for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"], cwd).split("\n").filter(Boolean)) {
+    // A base-gate or verify branch is always scratch. An agent branch is
+    // finished when every commit is on base, merged or as an equal patch.
+    const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch], cwd).split("\n").some((l) => l.startsWith("+"));
+    if (finished || all) {
+      sh("git", ["branch", "-D", branch], cwd);
+      deleted.push({ branch, unmerged: !finished });
+    } else {
+      kept.push({ branch, ahead: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], cwd)) });
+    }
+  }
+  return { worktrees, deleted, kept };
 };
 
 /** A failed command's own closing line (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */
