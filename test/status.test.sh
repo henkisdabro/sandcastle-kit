@@ -420,5 +420,16 @@ render ""
 hasnt 'run output'
 rm -f "$L/run-output.log" "$L/run.json"; if [ -f "$TMP/run.json.kept" ]; then mv "$TMP/run.json.kept" "$L/run.json"; fi
 
+# ---------------------------------------------------------------------------
+SCENARIO="short pane, one-row header"
+# The logo folds to one row in a short pane. A castle cut down to its battlements
+# read as a broken logo, so the fold draws no castle: the wordmark alone.
+SHOW=collapse ROWS=12 render "101 102 103"
+has '^│ +sandcastle-kit  fixture'
+hasnt '▄|█'
+SHOW=collapse ROWS=40 render "101 102 103"
+has 's a n d c a s t l e'
+has '█████'
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
