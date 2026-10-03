@@ -1119,7 +1119,8 @@ render() {
 }
 
 # The header bands into HDR (HDR_N lines): the logo cell, the run band, the
-# models and the queue error when there are any, and the table's headings.
+# models, the settings row and the queue error when there are any, and the
+# table's headings.
 # $1: the logo's rows, 3 or 1. Reads render's locals.
 build_header() {
   local l m=0 prev i j tb
