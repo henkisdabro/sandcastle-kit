@@ -2,7 +2,7 @@
 // preflight, prompts, the run record, the log archive and the status pane.
 
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
@@ -792,8 +792,34 @@ export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRe
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
 // patch is history, and moving it out keeps the status view down to live
 // work. Sandcastle appends each run to the same file name, so the archive
-// appends too rather than overwriting an earlier run's log.
+// appends too rather than overwriting an earlier run's log. The archive is
+// pruned by age each time, since nothing else ever deletes from it.
 // ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Archived files older than this are deleted. */
+export const ARCHIVE_KEEP_DAYS = 14;
+/** The raw `.jsonl` streams are the bulk of the archive, so they go sooner; the readable `.log` stays. */
+export const ARCHIVE_KEEP_RAW_DAYS = 2;
+
+/** Delete archived files past their age limit, by mtime (an append refreshes it). Returns how many went. */
+export const pruneArchive = (project: Project, now = Date.now()): number => {
+  const archive = join(project.root, ".sandcastle/logs/archive");
+  if (!existsSync(archive)) return 0;
+  let pruned = 0;
+  for (const name of readdirSync(archive)) {
+    const limit = name.endsWith(".jsonl") ? ARCHIVE_KEEP_RAW_DAYS : ARCHIVE_KEEP_DAYS;
+    try {
+      const stat = statSync(join(archive, name));
+      if (!stat.isFile() || now - stat.mtimeMs <= limit * DAY_MS) continue;
+      unlinkSync(join(archive, name));
+      pruned++;
+    } catch {
+      // Gone already (another run pruning at the same moment): nothing to do.
+    }
+  }
+  return pruned;
+};
 
 export const archiveFinishedLogs = (project: Project) => {
   const logs = join(project.root, ".sandcastle/logs");
@@ -824,6 +850,8 @@ export const archiveFinishedLogs = (project: Project) => {
     moved++;
   }
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
+  const pruned = pruneArchive(project);
+  if (pruned) console.log(`Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS}).`);
 };
 
 // ---------------------------------------------------------------------------

@@ -690,11 +690,11 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/run.json` | The live run's record: stage, versions, each ticket's state. The status view and `sandcastle report` read it |
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
-| `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged |
+| `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
-| `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts |
+| `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)) |
 | `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by, and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
