@@ -144,7 +144,7 @@ test("slots are counted per run: several of one, a lock that names no run, a dea
     assert.deepEqual([...slotsByRun("sandboxes")].sort(), [["aaaa", 2], [`pid:${other.pid}`, 1]].sort());
     assert.match(usage(), /^sandboxes 3\/\d+ · gates 0\/\d+$/);
     // The status view reads the pid on the line's first field only.
-    const shell = spawnSync("bash", ["-c", `source <(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh); load_pool; echo "$USED_sandboxes $USED_gates"`], {
+    const shell = spawnSync("bash", ["-c", `eval "\$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh)"; load_pool; echo "$USED_sandboxes $USED_gates"`], {
       cwd: join(import.meta.dirname, ".."),
       env: { ...process.env, XDG_CACHE_HOME: cache },
       encoding: "utf8",

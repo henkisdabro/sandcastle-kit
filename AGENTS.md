@@ -125,6 +125,8 @@ directory, never in a real project.
 ## Conventions
 
 - TypeScript run by `tsx`, ESM, `.ts` import extensions, strict mode. No build step.
+- A test that reads a function out of `status.sh` uses `eval "$(sed ...)"`, never `source <(sed ...)`:
+  macOS CI's bash is 3.2, which cannot source a process substitution (`test/bash32-source.test.ts` holds it).
 - Comments explain *why* - the failure a line prevents - not what the code does.
 - Every file write outside a temp dir targets the project root. Every shell call passes arguments
   as an array; an interpolated string is only for a script run inside the container.
