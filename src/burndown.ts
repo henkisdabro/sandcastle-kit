@@ -418,7 +418,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   console.log(versionsLine(versions));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, candidates.length, slots, blockerChain(project, tracker, candidates).length);
+  const rough = estimate(
+    project, candidates.length, slots, blockerChain(project, tracker, candidates).length,
+    candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
+  );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
