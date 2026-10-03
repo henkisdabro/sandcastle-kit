@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { Project } from "../src/config.ts";
+import { quietly } from "./quiet.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 import { agentLog, agentLogging, archiveFinishedLogs, logOwner, rawLog } from "../src/run.ts";
 
@@ -58,7 +59,7 @@ test("agentLogging appends raw events verbatim to the sidecar and leaves the rea
   assert.doesNotMatch(readable, /tool_use|tool_result/);
 });
 
-test("archiveFinishedLogs moves a sidecar with its log, unless the worktree is live", () => {
+test("archiveFinishedLogs moves a sidecar with its log, unless the worktree is live", async () => {
   const project = repo("archive");
   const logs = join(project.root, ".sandcastle/logs");
   writeFileSync(join(logs, "agent-issue-9-impl-9.log"), "readable\n");
@@ -68,7 +69,7 @@ test("archiveFinishedLogs moves a sidecar with its log, unless the worktree is l
   assert.ok(existsSync(join(logs, "agent-issue-9-impl-9.jsonl")));
   assert.ok(existsSync(join(logs, "agent-issue-9-impl-9.log")));
   rmSync(join(project.root, ".sandcastle/worktrees/agent-issue-9"), { recursive: true });
-  archiveFinishedLogs(project);
+  await quietly(() => archiveFinishedLogs(project));
   for (const [name, text] of [["agent-issue-9-impl-9.log", "readable\n"], ["agent-issue-9-impl-9.jsonl", '{"raw":1}\n']]) {
     assert.ok(!existsSync(join(logs, name)), `${name} still in logs/`);
     assert.equal(readFileSync(join(logs, "archive", name), "utf8"), text);

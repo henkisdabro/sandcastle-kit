@@ -33,6 +33,11 @@ export default {
   // Adds gitleaks: the repo's pre-commit hook refuses every commit without it.
   dockerfile: ".sandcastle/Dockerfile",
 
+  // Agents and gates get the latest Claude Code, not the stable channel: the mod's own tests
+  // (`pnpm test`) skip below the version `stable` carries, so a ticket that changes mod/ would
+  // land with them never run. Only this repo needs it; other projects keep the default.
+  claudeCode: "latest",
+
   // Models and effort differ from the kit's defaults only when set here, per agent.
   // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
   // review: { model: "claude-opus-5-5", effort: "medium" },

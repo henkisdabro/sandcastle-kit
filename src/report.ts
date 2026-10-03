@@ -18,6 +18,7 @@ import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
+import { isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { isTicketState, type OutcomeKind, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -59,7 +60,7 @@ export type Facts = {
   stopped?: string;
   /** Files changed per held branch. */
   changed: Record<string, number>;
-  /** Issues agents filed during the run, carrying the triage label and still open (GitHub only). */
+  /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
   filed?: { id: string; title: string }[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
   stage?: string;
@@ -70,8 +71,18 @@ export type Facts = {
   next?: { level: Level; turn: number; tickets: string[] };
 };
 
-/** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
-export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${paths.join(", ")}`;
+/**
+ * The one line the close comment and the closing report share for a diff that left its `Touches:` line.
+ * Test files only follow a refactor (a renamed import), so they fold into a count ("+7 test files")
+ * and the paths that stay listed are the source and docs a ticket's line missed. The run record keeps
+ * every path; only this line folds them.
+ */
+export const overrunLine = (paths: string[]) => {
+  const tests = paths.filter(isTestPath).length;
+  const listed = paths.filter((p) => !isTestPath(p));
+  const folded = tests ? [`+${tests} test file${tests === 1 ? "" : "s"}`] : [];
+  return `changed beyond its Touches line: ${[...listed, ...folded].join(", ")}`;
+};
 
 /**
  * The report's own sections, finer than the status view's groups: where a ticket's part in a run
@@ -95,6 +106,7 @@ const SECTIONS: Record<TicketState, Section> = {
   queued: "settled",
   setup: "working",
   implement: "working",
+  resolve: "working",
   review: "working",
   "cross-review": "working",
   gates: "working",
@@ -194,13 +206,20 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
 
-  // Agent-filed follow-ups: open, carrying the triage label, created since the run
-  // began. Dates are compared here, not with a shell `date`, which differs on macOS.
+  // Issues opened during the run: open, carrying the triage label, created between its start
+  // and its end. Agents file with the person's own token, so the author cannot say who opened
+  // one; the report says "opened", never "filed by an agent". A run still going has no end yet
+  // (each autonomy turn writes a finishedAt and the run goes on), and one that is only now
+  // summing itself up has not written its own, so the window closes only for a finished run:
+  // otherwise `sandcastle report` would list whatever a person opens afterwards, every time.
+  // Dates are compared here, not with a shell `date`, which differs on macOS.
   let filed: { id: string; title: string }[] = [];
   if (project.tracker.kind === "github") {
     try {
       const open = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", project.tracker.triage, "--limit", "500", "--json", "number,title,createdAt"], root)) as { number: number; title: string; createdAt: string }[];
-      filed = open.filter((i) => Date.parse(i.createdAt) >= Date.parse(run.startedAt)).map((i) => ({ id: String(i.number), title: i.title }));
+      const from = Date.parse(run.startedAt);
+      const to = alive.state === "finished" && run.finishedAt ? Date.parse(run.finishedAt) : Infinity;
+      filed = open.filter((i) => Date.parse(i.createdAt) >= from && Date.parse(i.createdAt) <= to).map((i) => ({ id: String(i.number), title: i.title }));
     } catch {
       filed = [];
     }
@@ -260,7 +279,9 @@ export const render = (f: Facts, plain = false): string => {
   const merged = ids(["merged"]);
   // Merged, but the tracker refused the close: the work is on base, the ticket still open.
   const notClosed = merged.filter((id) => f.tickets[id].closeFailed);
-  const closed = merged.filter((id) => !notClosed.includes(id));
+  // Merged with an acceptance criterion knowingly left undone: the ticket was left open on purpose.
+  const partly = merged.filter((id) => f.tickets[id].unmet);
+  const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
@@ -312,7 +333,9 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
+      `${(f.filed ?? []).length ? `${(f.filed ?? []).length} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -337,6 +360,8 @@ export const render = (f: Facts, plain = false): string => {
   if (closed.length) done.push(`${closed.length} merged and ${closedWhere}: ${list(closed)}`);
   // Merged with the close refused: done in git, still open in the tracker - not "closed on GitHub".
   if (notClosed.length) done.push(`${notClosed.length} merged, but still open in the tracker: ${list(notClosed)} (see Needs you)`);
+  // Merged, but not closed on purpose: a criterion is unmet, so the next run does the rest.
+  if (partly.length) done.push(`${partly.length} merged, partly done, and left open in the tracker: ${list(partly)} (see Needs you)`);
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
   if (wouldMerge.length) {
@@ -385,13 +410,20 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
+      // The criterion is the agent's own words, cut at the cap like an ungated note. The implementer may
+      // have said it, not a reviewer, so the pointer names every agent log of the ticket.
+      ...partly.map((id) => {
+        const note = f.tickets[id].unmet ?? "";
+        const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
+        return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open, and the next \`sandcastle run\` picks up the remainder`;
+      }),
       // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
       ...ungated.map((id) => {
         const note = f.tickets[id].ungated ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
         return `- ${name(id)} - merged - check by hand: ${note}${more}`;
       }),
-      ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - filed by an agent during this run: triage it, then queue or close it`),
+      ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
 
@@ -496,6 +528,7 @@ export const render = (f: Facts, plain = false): string => {
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
   if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
+  if (partly.length) next.push(`Read what is left on ${list(partly)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators

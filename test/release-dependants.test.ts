@@ -16,6 +16,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -340,7 +341,7 @@ test("a run that has stopped releases nothing, and still ends", async () => {
 });
 
 test("a dry run releases nothing: nothing lands", async () => {
-  const run = await runWith([ticket("1"), ticket("2", ["1"])], { dryRun: true });
+  const { result: run } = await quietly(() => runWith([ticket("1"), ticket("2", ["1"])], { dryRun: true }));
   assert.deepEqual(run.started, ["1"]);
   assert.deepEqual(run.landed, []);
 });

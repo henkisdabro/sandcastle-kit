@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "sandcastle-preflight-"));
 mkdirSync(join(tmp, "config/sandcastle-kit"), { recursive: true });
@@ -52,7 +53,7 @@ const project = { root: tmp, tracker: fakeTracker() } as unknown as Parameters<t
 test("both models are asked at once: two 2 s replies take well under 4 s", async () => {
   process.env.FAKE_MODE = "ok";
   const since = Date.now();
-  await preflight(project, "image");
+  await quietly(() => preflight(project, "image"));
   assert.ok(Date.now() - since < 3500, `took ${Date.now() - since} ms`);
 });
 

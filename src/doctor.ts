@@ -151,6 +151,26 @@ export const staleImageWarning = (created: string, now: Date, tag = "sandcastle-
   return `base image ${tag} was built ${days} days ago - \`sandcastle build --force\` pulls Debian and Node security updates`;
 };
 
+/**
+ * The info line for Docker's build cache, from `docker system df --format '{{json .}}'` (one JSON object
+ * per line): its size, how much of it is reclaimable and the command that frees it. Builds pile up here
+ * over days of runs (tens of GB) and nothing else prunes it. Undefined for output without a build-cache
+ * row, so a changed format stays silent.
+ */
+export const buildCacheNote = (df: string): string | undefined => {
+  for (const line of df.split("\n")) {
+    try {
+      const row = JSON.parse(line) as { Type?: unknown; Size?: unknown; Reclaimable?: unknown };
+      if (row.Type !== "Build Cache" || typeof row.Size !== "string") continue;
+      const reclaimable = typeof row.Reclaimable === "string" && row.Reclaimable ? ` (${row.Reclaimable} reclaimable)` : "";
+      return `Docker build cache is ${row.Size}${reclaimable} - \`docker builder prune\` frees it`;
+    } catch {
+      /* not a row */
+    }
+  }
+  return undefined;
+};
+
 /** Whether a directory is a checkout of the kit: its package name is the kit's, or it has the kit's entry script. */
 export const isKitCheckout = (dir: string) => {
   try {
@@ -302,18 +322,21 @@ export const doctor = async (repoRoot?: string, verify = false) => {
 
   // pool.ts reads the machine settings on first use, so a malformed file or a
   // bad limit lands here as a FIX line instead of crashing every command.
+  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsProblem = (() => {
     try {
       // limit() skips the file when an environment variable sets the limit, so read it here too.
       machineSettings();
       limit("sandboxes");
       limit("gates");
+      // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
+      const idleMark = machineSettings().idleMark;
+      if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
       return undefined;
     } catch (error) {
       return (error as Error).message;
     }
   })();
-  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsName = settingsProblem?.match(/^SANDCASTLE_MAX_\w+/)?.[0];
   check(
     !settingsProblem,
@@ -321,7 +344,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     `${settingsProblem} ` +
       (settingsName
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
-        : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
+        : settingsProblem?.startsWith('"idleMark"')
+          ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
   );
 
   const envFile = join(USER_CONFIG, ".env");
@@ -442,6 +467,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       }
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
+    // Info, never a FIX. Silent when Docker is down.
+    const cache = buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"]) ?? "");
+    if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
     // Ignoring a file does not untrack it: a .env added before the ignore line (or with -f) is in

@@ -171,8 +171,8 @@ const newLedger = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) =>
     line: (id: string) => outcomes.get(id)?.text,
     // The one comment the ticket gets after the schedule, in the ledger's words.
     comment: (id: string) => ledger.entries.get(id)?.said.tracker?.text,
-    // "2: requeued after conflict with #1", for each "runs again in this run" line.
-    sentBack: () => said.flatMap((line) => (/; its pipeline runs again in this run\.$/.test(line) ? [line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
+    // "2: requeued after conflict with #1", for each "tried again in this run" line.
+    sentBack: () => said.flatMap((line) => (/; it is tried again in this run\.$/.test(line) ? [line.replace("; it is tried again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
 };
 
@@ -366,7 +366,7 @@ test("after a usage stop a conflict at landing is not requeued, and a green tick
   const { root, r } = await stopMidRun({ kind: "not begun", why: usage });
   // One attempt, no requeue told, a conflicted ending.
   assert.equal(r.seen.told.some((c) => c.kind === "requeued"), false, "no requeue told");
-  assert.deepEqual(r.sentBack, [], "no 'runs again in this run' line");
+  assert.deepEqual(r.sentBack, [], "no 'tried again in this run' line");
   assert.equal(r.attempts.get("2"), 1);
   assert.deepEqual(r.endings.get("2"), { kind: "landing", green: outcome(root, "2"), landed: { kind: "conflict", files: ["shared.txt"], with: ["1"] }, attempts: 1 });
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "conflict"], ["3", "merged"]]);
@@ -522,7 +522,7 @@ test("conflict, requeued, merged: the second landing is the outcome and the stat
     },
   }));
   assert.ok(atSecond, "a second attempt began");
-  assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; its pipeline runs again in this run."]);
+  assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; it is tried again in this run."]);
   assert.deepEqual(atSecond.record, { ...atSecond.record, state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1" });
   assert.equal(atSecond.requeuedAs, "requeued after conflict with #1");
   assert.deepEqual(atSecond.recorded, [], "nothing is accounted while the second attempt is to come");

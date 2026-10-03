@@ -200,6 +200,11 @@ comments, and the gates can prove it.
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
+   When a ticket's body is written or rewritten here, its `Touches:` line names only files an agent
+   may edit under the project's rules, existing paths as they are; a new file is marked new in the
+   prose, not on that line (`(new)` would be read as part of the path). A run opens no pull request,
+   so evidence is asked for in the agent's final message or a ticket comment. `audit.md` step 10 has the full wording.
+
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
    question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
    theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
@@ -224,7 +229,12 @@ comments, and the gates can prove it.
    implementer shows `[implement <model>/<effort>]` after its title there), whether it is a dry
    run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
    guess how long it takes: once the project has run before, the run prints a rough estimate at
-   its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
+   its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. When
+   `sandcastle status 0`'s machine line shows another run live (its slots in use), say before confirming
+   that the start prints a line on how the machine is split - the other run's slots and demand, this
+   run's share and a rough wait for its first slot (an older kit's run is named as one that ignores
+   shares) - and quote that line to the user once the run has printed it, before the first ticket is
+   expected; the split applies by itself and asks nothing. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
    after labelling tickets on GitHub (or a `sandcastle requeue`), give GitHub a few seconds before `sandcastle run`: its label search can lag, and a run started at once may miss them. Then offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
@@ -288,7 +298,7 @@ separate pane or terminal). While a run is live, every ticket it holds is shown 
 own record (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run:
 working, ready to land, need you, queued, blocked, merged. The states:
 
-- **Working** - `setup`, `impl`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
+- **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
   has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
@@ -300,7 +310,8 @@ working, ready to land, need you, queued, blocked, merged. The states:
   but the run stopped before landing), `orphaned` (its run was killed and its container still
   works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed or unqueued
   during the run, or marked `ready-for-human` before it started) is greyed with the leftovers.
-- **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
+- **`queued`** (next to start, how many are ahead, or `waits for the run's share` while other
+  runs hold their part of the machine's sandbox slots), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**,
   **`no change`**, **`skipped`** (not started because the run stopped early).

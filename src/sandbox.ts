@@ -22,7 +22,7 @@ export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), "
 
 // Every key the personal config.json holds. An unknown one - a typo such as `keepawake` - was
 // ignored without a word, and the setting the person meant never applied.
-const MACHINE_KEYS = ["maxSandboxes", "maxGates", "keepAwake", "notify"];
+const MACHINE_KEYS = ["maxSandboxes", "maxGates", "keepAwake", "notify", "idleMark"];
 
 // Machine-wide settings from USER_CONFIG/config.json; empty when there is none.
 export const machineSettings = (): Record<string, unknown> => {
@@ -99,7 +99,73 @@ export const reapOrphans = (project: Project) => {
   }
 };
 
+const WORKTREE_MARK = ".sandcastle/worktrees/agent-issue-";
+
+/**
+ * Removes the exited sandbox containers a run left behind (`sandcastle-<uuid>`, exit 137 after a kill):
+ * running ones are reapOrphans' business. A container is ours when it mounts an agent worktree of this
+ * project, or one whose directory no longer exists (a project deleted since, which nothing else will
+ * ever clean up). One that mounts another project's worktree still on disk is left alone. Returns the
+ * ids removed. Call only while holding the project's run lock, like reapOrphans.
+ */
+export const removeExitedSandboxes = (project: Project): string[] => {
+  const root = realpathSync(project.root);
+  const prefixes = [...new Set([root, project.root])].map((r) => join(r, WORKTREE_MARK));
+  let ids: string[];
+  try {
+    ids = sh("docker", ["ps", "-aq", "--filter", "status=exited", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
+  } catch {
+    return []; // Docker not up: nothing to remove
+  }
+  const removed: string[] = [];
+  for (const id of ids) {
+    try {
+      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      // The worktree is the mount's path up to its `agent-issue-<n>` directory, which is what may be gone.
+      const worktrees = mounts.filter((m) => m.includes(WORKTREE_MARK)).map((m) => {
+        const end = m.indexOf("/", m.indexOf(WORKTREE_MARK) + WORKTREE_MARK.length);
+        return end === -1 ? m : m.slice(0, end);
+      });
+      if (!worktrees.some((w) => prefixes.some((p) => w.startsWith(p)) || !existsSync(w))) continue;
+      sh("docker", ["rm", id]);
+      removed.push(id);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
+  return removed;
+};
+
+/**
+ * Removes the kit's dangling images: a rebuilt image (a newer Claude Code, a changed Dockerfile) leaves
+ * its predecessor untagged, and `prune` below only finds tagged ones. Only images carrying the kit's
+ * label, so another project's dangling image is never touched; one still in use is refused by docker
+ * and kept. Returns the ids removed.
+ */
+export const removeDanglingImages = (): string[] => {
+  let ids: string[];
+  try {
+    ids = sh("docker", ["image", "ls", "-q", "--filter", "dangling=true", "--filter", `label=${KIT_LABEL}`]).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const id of new Set(ids)) {
+    try {
+      sh("docker", ["image", "rm", id]);
+      removed.push(id);
+    } catch {
+      /* in use */
+    }
+  }
+  return removed;
+};
+
 export type CleanResult = {
+  /** Exited sandbox containers that were removed (ids). */
+  containers: string[];
+  /** Dangling kit images that were removed (ids). */
+  images: string[];
   /** Worktrees under `.sandcastle/worktrees/` that were removed. */
   worktrees: string[];
   /** Branches deleted; `unmerged` when `all` took one that still had commits off base. */
@@ -118,6 +184,8 @@ export type CleanResult = {
 export const cleanProject = (project: Project, all: boolean): CleanResult => {
   const cwd = project.root;
   reapOrphans(project);
+  const containers = removeExitedSandboxes(project);
+  const images = removeDanglingImages();
   const underWorktrees = join(project.root, ".sandcastle/worktrees/");
   const worktrees = sh("git", ["worktree", "list", "--porcelain"], cwd)
     .split("\n\n")
@@ -143,7 +211,7 @@ export const cleanProject = (project: Project, all: boolean): CleanResult => {
       kept.push({ branch, ahead: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], cwd)) });
     }
   }
-  return { worktrees, deleted, kept };
+  return { containers, images, worktrees, deleted, kept };
 };
 
 /** A failed command's own closing line (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */
@@ -239,11 +307,15 @@ const imageExists = (tag: string) => {
   }
 };
 
+/** The label every image the kit builds carries, so `sandcastle clean` finds its dangling ones and no one else's. */
+export const KIT_LABEL = "sandcastle-kit=1";
+
 /** The `docker build` argv. `--pull` makes the daemon fetch the FROM image afresh instead of reusing its local copy. */
 export const buildArgs = (tag: string, args: Record<string, string>, pull: boolean): string[] => [
   "build",
   ...(pull ? ["--pull"] : []),
   "-t", tag,
+  "--label", KIT_LABEL,
   ...Object.entries(args).flatMap(([k, v]) => ["--build-arg", `${k}=${v}`]),
   "-",
 ];

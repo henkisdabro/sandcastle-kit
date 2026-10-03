@@ -9,6 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "sandcastle-ticket-model-"));
 mkdirSync(join(tmp, "config/sandcastle-kit"), { recursive: true });
@@ -115,6 +116,6 @@ test("preflight names the ticket behind an override model that fails", async () 
 
 test("with no extra, preflight probes only the two configured models", async () => {
   writeFileSync(dockerLog, "");
-  await preflight(project, "img");
+  await quietly(() => preflight(project, "img"));
   assert.deepEqual(readFileSync(dockerLog, "utf8").split("\n").filter(Boolean).sort(), ["model-a", "model-b"]);
 });

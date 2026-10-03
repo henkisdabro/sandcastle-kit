@@ -122,9 +122,10 @@ export const sandboxPanes = (project: Pick<Project, "herdr">, env: NodeJS.Proces
   return value;
 };
 
-// One run in the tab bar, which has more room: `name 4/9 · 2 working · 1 needs you`.
-export const lineText = (name: string, c: RunCounts) =>
-  [`${name} ${c.merged}/${c.total}`, ...(c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : [])].join(" · ");
+// One run in the tab bar, which has more room: `name 4/9 · 2 working · 1 needs you · share 3`, its
+// share of the machine's sandbox slots last (a record from an older kit has none).
+export const lineText = (name: string, c: RunCounts, share?: number) =>
+  [`${name} ${c.merged}/${c.total}`, ...(c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : []), ...(share === undefined ? [] : [`share ${share}`])].join(" · ");
 
 export const elapsed = (ms: number) => {
   const m = Math.max(0, Math.floor(ms / 60_000));
@@ -192,7 +193,7 @@ const TTL = "150000";
 // Phase -> the sandbox.run name its log is written under (burndown.ts).
 // Gates have one too: the orchestrator writes their output as it arrives
 // (burndown.ts), so a pane shows the test run instead of the review's closing lines.
-const LOG = { implement: "impl", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
+const LOG = { implement: "impl", resolve: "resolve", review: "review", "cross-review": "review-codex", repair: "repair", gates: "gates" } as const;
 
 export const openSandboxView = (
   project: Project,

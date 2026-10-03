@@ -17,6 +17,11 @@
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
 //   stop             stop the live run, as Ctrl-C does in its terminal
+//   cap [N | off] [--project NAME]
+//                    cap the live run's share of the machine's sandbox slots at N (at most
+//                    its concurrency), or lift the cap; bare, print its demand, share and
+//                    cap. The run keeps the slots it holds. The cap ends with the run;
+//                    --project acts on another project's run from any directory
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -48,8 +53,9 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
-//   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
-//                    and list unmerged ones; --all deletes those too, without asking
+//   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
+//                    sandbox worktrees and finished agent branches, and list unmerged ones;
+//                    --all deletes those too, without asking
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
@@ -73,7 +79,7 @@ import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
-import { limit } from "./pool.ts";
+import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
@@ -134,6 +140,17 @@ try {
     console.log(HELP.join("\n"));
     process.exit(0);
   }
+  if (command === "cap") {
+    // The run's project as live runs record it: `--project` from anywhere, else this repository's.
+    const given = parseCapArgs(args);
+    if (!given.project && !repoRoot) throw new OperatorError("Not inside a git repository. Give the project's name with `--project NAME`.");
+    const name = given.project ?? (await loadProject(repoRoot!)).name;
+    const now = given.cap === undefined ? standing(name) : setCap(name, given.cap);
+    if (given.cap === "off") console.log(`Cap lifted for ${name}.`);
+    else if (given.cap !== undefined) console.log(`Capped ${name} at ${given.cap} sandbox slot(s). It keeps the slots it holds, and takes no more while it holds ${given.cap} or more.`);
+    console.log(standingLine(now));
+    process.exit(0);
+  }
   if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");
   // Sandcastle resolves worktrees and logs from the working directory, so every
   // command runs from the repository root, wherever it was typed.
@@ -186,7 +203,8 @@ try {
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       // The run's settings, resolved once: every turn's record carries them.
-      const { autonomy: level } = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const settings = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const level = settings.autonomy;
       sandboxPanes(project);
       checkUsageSettings();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
@@ -204,7 +222,7 @@ try {
         } catch {}
       }
       for (let turn = 1; ; turn++) {
-        if (!(await burndown(project, { level, turn }))) {
+        if (!(await burndown(project, { settings, turn }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -283,7 +301,8 @@ try {
     case "status": {
       const project = await loadProject(root);
       // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
-      // AUTONOMY_LEVEL), so the view shows no row rather than the last run's as if they were next.
+      // AUTONOMY_LEVEL, or a bad USAGE_STOP with the guard on), so the view shows no row rather than
+      // the last run's as if they were next.
       let next = "{}";
       try {
         next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));
@@ -509,7 +528,9 @@ try {
       const project = await loadProject(root);
       pinHostGitConfig(project.root);
       lockRun(project);
-      const { worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      for (const id of containers) console.log(`removed exited sandbox container ${id}`);
+      for (const id of images) console.log(`removed dangling image ${id}`);
       for (const path of worktrees) console.log(`removed worktree ${path}`);
       for (const { branch, unmerged } of deleted) console.log(`deleted ${branch}${unmerged ? " (unmerged)" : ""}`);
       archiveFinishedLogs(project);
@@ -517,7 +538,7 @@ try {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
       break;
     }
     default:
