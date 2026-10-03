@@ -101,11 +101,14 @@ behaviour (grep them for its words, not only for the function's name), and all o
 pnpm exec tsc --noEmit
 pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls),
                      # with `bash -n` on every tracked shell script
-sandcastle doctor
-# from inside a test project (no model calls):
-sandcastle status 0
-sandcastle lean
+./bin/sandcastle doctor
+# from inside a test project (no model calls), giving the path to this checkout's bin/sandcastle:
+/path/to/this/checkout/bin/sandcastle status 0
+/path/to/this/checkout/bin/sandcastle lean
 ```
+
+Write `./bin/sandcastle`, not a bare `sandcastle`: from a clone or a worktree, the one on PATH is the
+installed kit, so those checks would never exercise the change (doctor notes this, it does not fail).
 
 A change to `mod/` has checks of its own, which `pnpm test` skips without a recent Claude Code:
 read the `mod/` section of `docs/architecture.md`.
