@@ -2,20 +2,24 @@
 // says about its ticket - the state the run record holds, the outcome `outcomes.json` keeps, the
 // word the view shows and the text the tracker gets. `describe` is pure and covers every `Ending`
 // kind; the type checker holds that. The writer (`createLedger`) records what it returns as burndown
-// is told each ending, and keeps each ticket's entry for the closing counts (`accountLanding`).
+// is told each ending, and keeps each ticket's entry for the closing counts (`accountLanding`). It
+// records a requeue as it is told, too: the scheduler's requeue-once rule (schedule.ts) sends the
+// ticket back, and the ledger writes it queued with the line its second attempt carries.
 //
 // One landing ending used to be translated five times - by landOne, the Landings lists, the outcome
 // lines, the view's loops and the tracker comments - and each new ending kind meant touching every
-// one of them. Posting stays where it happens: `landOne` closes and holds at landing time and asks
-// `describe` for the words; the burndown posts the comments after the schedule.
+// one of them. `landOne` writes no verdict, so a requeue has nothing to undo: a requeued ticket whose
+// second attempt never begins is recorded from the ending the scheduler makes of it. Posting stays
+// where it happens: `landOne` closes and holds at landing time and asks `describe` for the words;
+// the burndown posts the comments after the schedule.
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, STOPPED_GREEN, withdrawnRecord } from "./landing.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine, STOPPED_GREEN, withdrawnRecord } from "./landing.ts";
 import { overrunLine } from "./report.ts";
 import { errorLine } from "./sandbox.ts";
-import type { Ending } from "./schedule.ts";
+import type { Again, Change, Ending } from "./schedule.ts";
 import { refOf } from "./tracker.ts";
 
 /** What the ledger reads of a pipeline's result: burndown's own `Outcome` is one. */
@@ -54,6 +58,8 @@ export type Context = {
   hold?: "note" | "label";
   /** Why the run stopped, as a ticket it never started says it. */
   stopLine?: string;
+  /** The line this run requeued the ticket with (`requeuedLine`): its second attempt runs, or never began. */
+  requeued?: string;
 };
 
 /** What a run says about one ending: each is absent where the run says nothing of it. */
@@ -137,19 +143,20 @@ const comment = (text: string | undefined): Said["tracker"] => (text === undefin
 const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Context): Said => {
   const { green: g, landed } = e;
   const withOf = (w: string[]) => (w.length ? { with: w } : {});
+  const overrunOf = (o: string[] | undefined) => (o?.length ? { overrun: o } : {});
   const plain = comment(notLandedComment(c.report, undefined));
   const said = ((): Said => {
     switch (landed.kind) {
       case "merged":
         return {
-          record: { state: "merged", note: landed.regenerated ? "merged and closed (generated files regenerated)" : "merged and closed" },
+          record: { state: "merged", note: landed.regenerated ? "merged and closed (generated files regenerated)" : "merged and closed", ...overrunOf(landed.overrun) },
           outcome: { kind: "merged", text: "merged" },
           view: { word: "merged", landed: true },
           tracker: { kind: "close", text: closeComment({ ...g, regenerated: landed.regenerated, overrun: landed.overrun }, c.gateNames, c.report) },
         };
       case "close-failed":
         return {
-          record: { state: "merged", note: "merged; closing the ticket failed" },
+          record: { state: "merged", note: "merged; closing the ticket failed", closeFailed: landed.error, ...overrunOf(landed.overrun) },
           outcome: { kind: "merged", text: "merged (ticket not closed)" },
           view: { word: "merged, not closed", landed: true },
           tracker: { kind: "close", text: closeComment({ ...g, regenerated: landed.regenerated, overrun: landed.overrun }, c.gateNames, c.report) },
@@ -165,7 +172,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
         // A second conflict is held with the tickets of both attempts named.
         const line = e.again ? againNoteOf(landed) : conflictLine(landed);
         return {
-          record: { state: "conflict", note: line },
+          record: { state: "conflict", note: line, files: landed.files },
           outcome: { kind: "conflict", ...withOf(landed.with), text: `merge conflict: ${line}` },
           view: { word: "merge conflict", landed: false },
           tracker: comment(notLandedComment(c.report, { branch: g.branch, base: c.base, files: landed.files, with: landed.with })),
@@ -175,7 +182,11 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
         const refs = landed.with.map(refOf).join(", ");
         return {
           // The pair, named: which tickets this one is red with.
-          record: { state: "red", note: e.again ? againNoteOf(landed) : landed.with.length ? `red with ${refs}` : "red on the merged tree" },
+          record: {
+            state: "red",
+            note: e.again ? againNoteOf(landed) : landed.with.length ? `red with ${refs}` : "red on the merged tree",
+            ...(landed.failing?.length ? { failing: landed.failing } : {}),
+          },
           outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed) : `red when merged${landed.with.length ? ` with ${refs}` : ""}` },
           view: { word: "red when merged", landed: false },
           tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates })),
@@ -190,7 +201,12 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
             : landed.by === "large"
               ? `Gated green on \`${g.branch}\` (${c.gateNames}), but not merged automatically: it ${largeFilesNote(landed.paths)}.${also}`
               : `Gated green on \`${g.branch}\` after a repair, but not merged: ${UNREVIEWED}. Review the repair commits and merge by hand.`;
-        return { record: { state: "held", note: landed.reason }, outcome: { kind: "held", text: "needs a human merge" }, view: NEEDS_A_HUMAN, tracker: { kind: "hold", text } };
+        return {
+          record: { state: "held", note: landed.reason, ...(landed.paths.length ? { files: landed.paths } : {}) },
+          outcome: { kind: "held", text: "needs a human merge" },
+          view: NEEDS_A_HUMAN,
+          tracker: { kind: "hold", text },
+        };
       }
       case "withdrawn":
         return {
@@ -230,8 +246,13 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
       }
     }
   })();
+  // Requeued, and its second attempt never began: its first landing stands, or, withdrawn since,
+  // that - recorded as a ticket withdrawn before it started, never as the green the first pipeline
+  // left. Either way the record no longer promises a second attempt.
+  const unstarted = c.requeued !== undefined && e.attempts === 1;
+  const record = unstarted && said.record ? { ...(landed.kind === "withdrawn" ? withdrawnRecord(landed.reason) : said.record), requeued: null } : said.record;
   // A dry run lands nothing: every branch it gated green reads as one it would merge.
-  return c.dryRun && g.status === "green" ? { ...said, outcome: { kind: "green", text: "dry run: gated green, would merge" } } : said;
+  return { ...said, record, ...(c.dryRun && g.status === "green" && { outcome: { kind: "green", text: "dry run: gated green, would merge" } }) };
 };
 
 const describePipeline = (o: Finished, c: Context): Said => {
@@ -298,12 +319,14 @@ export const describe = (e: TicketEnding, c: Context): Said => {
 };
 
 /**
- * The endings whose ticket state the ledger writes. The others are still written where they are
- * decided: `landOne` and the requeue record at landing, the attempt as its pipeline ends, and the
+ * The endings whose ticket state the ledger writes: every landing, and the ones no attempt wrote.
+ * The others are still written where they are decided: the attempt as its pipeline ends, and the
  * burndown after the schedule for a ticket the run's stop left unstarted, in the run's last words.
  */
 const writesRecord = (e: TicketEnding) =>
-  (e.kind === "not begun" && (e.why.kind === "withdrawn" || e.why.kind === "refused label")) || ((e.kind === "stopped" || e.kind === "crashed") && e.green !== undefined);
+  e.kind === "landing" ||
+  (e.kind === "not begun" && (e.why.kind === "withdrawn" || e.why.kind === "refused label")) ||
+  ((e.kind === "stopped" || e.kind === "crashed") && e.green !== undefined);
 
 /** One ticket's entry: its ending, the context it was described in, and what was said. */
 export type Entry = { id: string; ending: TicketEnding; context: Context; said: Said };
@@ -314,6 +337,10 @@ export type Entry = { id: string; ending: TicketEnding; context: Context; said: 
  * the entry. An ending is recorded again when a fact about it is learnt later (the tracker's hold
  * label, read after the schedule). `bookkeep` keeps a write that throws (a full disk) from costing
  * the ticket its ending.
+ *
+ * A requeue is recorded as it is told, before the ticket is pushed back: queued, with the line its
+ * second attempt's setup carries (`requeuedAs`). A requeued ticket withdrawn before its second
+ * attempt began has `dropFirst` remove its first pipeline's entry from the per-issue lines.
  */
 export const createLedger = (d: {
   run: { ticket(id: string, fields: TicketRecord): void };
@@ -321,21 +348,46 @@ export const createLedger = (d: {
   view: { landed(issue: string, ok: boolean, word: string): void };
   context(id: string): Context;
   bookkeep(id: string, fn: () => void): void;
+  dropFirst(id: string): void;
+  ref(id: string): string;
+  say(line: string): void;
 }) => {
   const entries = new Map<string, Entry>();
+  // Every ticket this run requeued, with its line; `requeuedAs` only while its second attempt is to come.
+  const sentBack = new Map<string, string>();
+  const requeuedAs = new Map<string, string>();
+  const requeued = (id: string, again: Again) => {
+    const line = requeuedLine(again.kind, again.with);
+    sentBack.set(id, line);
+    requeuedAs.set(id, line);
+    d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
+    d.say(`${d.ref(id)}: ${line}; its pipeline runs again in this run.`);
+  };
+  const record = (id: string, ending: TicketEnding) => {
+    let said: Said = {};
+    d.bookkeep(id, () => {
+      const line = sentBack.get(id);
+      const context = { ...d.context(id), ...(line !== undefined && { requeued: line }) };
+      said = describe(ending, context);
+      entries.set(id, { id, ending, context, said });
+    });
+    const { record, outcome, view } = said;
+    if (record && writesRecord(ending)) d.bookkeep(id, () => d.run.ticket(id, record));
+    if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
+    if (view) d.bookkeep(id, () => d.view.landed(id, view.landed, view.word));
+    // Sent back, and its second attempt never began: withdrawn since, its first pipeline's line goes too.
+    if (ending.kind === "landing" && ending.attempts === 1 && requeuedAs.delete(id) && ending.landed.kind === "withdrawn") d.dropFirst(id);
+  };
   return {
     entries: entries as ReadonlyMap<string, Entry>,
-    record(id: string, ending: TicketEnding) {
-      let said: Said = {};
-      d.bookkeep(id, () => {
-        const context = d.context(id);
-        said = describe(ending, context);
-        entries.set(id, { id, ending, context, said });
-      });
-      const { record, outcome, view } = said;
-      if (record && writesRecord(ending)) d.bookkeep(id, () => d.run.ticket(id, record));
-      if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
-      if (view) d.bookkeep(id, () => d.view.landed(id, view.landed, view.word));
+    /** The line each requeued ticket's second attempt carries, by ticket. */
+    requeuedAs: requeuedAs as ReadonlyMap<string, string>,
+    requeued,
+    record,
+    /** What the scheduler tells that the ledger records: a requeue, and each ticket's ending. */
+    tell(c: Change<Landable, Finished>) {
+      if (c.kind === "requeued") requeued(c.id, c.again);
+      if (c.kind === "ended") record(c.id, c.ending);
     },
   };
 };

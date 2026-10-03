@@ -21,6 +21,7 @@ const { createSchedule } = await import("../src/schedule.ts");
 const { createHostGit, landingMade, landingWork, slotTurn, trackerMade } = await import("../src/landing.ts");
 const { assertGitUnchanged, gitFingerprint, pinHostGitConfig } = await import("../src/guard.ts");
 const { landInSandbox, plainMergeNote } = await import("../src/land.ts");
+const { createLedger } = await import("../src/ledger.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Landed = import("../src/landing.ts").Landed;
 type Waiting = import("../src/landing.ts").Waiting;
@@ -161,6 +162,17 @@ test("an unexpected error while landing costs that ticket only, and the others s
     landed: new Map(),
   };
   const settled: { issue: string; landed: Landed }[] = [];
+  // landOne writes no verdict: the ledger records each ending as the scheduler tells it.
+  const ledger = createLedger({
+    run: ctx.run,
+    outcomes: () => {},
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test" }),
+    bookkeep: (_id, fn) => fn(),
+    dropFirst: () => {},
+    ref: (id) => `#${id}`,
+    say: () => {},
+  });
   // Through the scheduler: both attempts are green at once, and land in order.
   const ports = landingWork(ctx);
   const { stop } = await createSchedule<{ id: string }, Waiting>({ tickets: [{ id: "1" }, { id: "2" }] }).run({
@@ -175,7 +187,7 @@ test("an unexpected error while landing costs that ticket only, and the others s
       return landed;
     },
     host: ports.host,
-    tell: () => {},
+    tell: ledger.tell,
   });
   assert.deepEqual(
     settled.map((s) => [s.issue, s.landed.kind]),
@@ -187,6 +199,7 @@ test("an unexpected error while landing costs that ticket only, and the others s
   assert.match(JSON.stringify(settled[0].landed), /ENOSPC/);
   assert.deepEqual(stop.causes, []);
   assert.equal(states["2"], "merged");
+  assert.equal(states["1"], "not landed");
 });
 
 test("a scratch ref repointed while the merge is gated lands nothing", async () => {

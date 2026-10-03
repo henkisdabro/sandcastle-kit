@@ -39,6 +39,8 @@ const REPORT = "Did the thing.";
 const CLOSE = "Merged locally, not yet pushed, by the Sandcastle loop from `agent/issue-2` (2 commit(s), 1 repair pass(es) after a red gate); test, lint all green before merge.";
 const REPORTED = `Sandcastle ran this ticket and did not land it. What the agents reported:\n\n${REPORT}`;
 const NEXT_RUN = "The next run merges `main` into the branch and tries again.";
+// The writer's ports for a requeue, where a test tells none.
+const NO_REQUEUE = { dropFirst: () => {}, ref: (id: string) => `#${id}`, say: () => {} };
 
 /** One ending, said four ways: the record ("state - note"), the outcome ("kind [with] - text"), the view's word and the tracker's text. */
 type Row = [name: string, ending: TicketEnding, context: Partial<Context>, record?: string, outcome?: string, view?: string, tracker?: string];
@@ -55,7 +57,7 @@ const ROWS: Row[] = [
     "merged (landed)",
     `close: ${CLOSE} Conflicts in generated files (out.css) were resolved by running \`make css\`.\n\nchanged beyond its Touches line: docs/x.md\n\n${REPORT}`,
   ],
-  ["merged, closing failed", landing({ kind: "close-failed" }), {}, "merged - merged; closing the ticket failed", "merged - merged (ticket not closed)", "merged, not closed (landed)", `close: ${CLOSE}`],
+  ["merged, closing failed", landing({ kind: "close-failed", error: "gh: HTTP 502" }), {}, "merged - merged; closing the ticket failed", "merged - merged (ticket not closed)", "merged, not closed (landed)", `close: ${CLOSE}`],
   [
     "merged by an earlier run",
     landing({ kind: "closed-earlier" }, "merged-earlier"),
@@ -267,7 +269,7 @@ test("the table has a row for every ending kind, every landing and every pipelin
   assert.deepEqual(statuses.filter((s) => !ended.some((e) => e.kind === "pipeline" && e.outcome.status === s)), []);
 });
 
-test("the writer records the outcome and the view's word of every ending, and only the states no one else writes yet", () => {
+test("the writer records the outcome and the view's word of every ending, and the state of every landing and of the endings no attempt wrote", () => {
   const states: [string, unknown][] = [];
   const outcomes: Record<string, unknown> = {};
   const views: [string, boolean, string][] = [];
@@ -278,13 +280,15 @@ test("the writer records the outcome and the view's word of every ending, and on
     view: { landed: (id, ok, word) => void views.push([id, ok, word]) },
     context: (id) => ({ ...BASE, ...(hold.has(id) && { hold: "label" as const }) }),
     bookkeep: (_id, fn) => fn(),
+    ...NO_REQUEUE,
   });
   ledger.record("1", landing({ kind: "merged" }));
   ledger.record("2", { kind: "not begun", why: { kind: "withdrawn", reason: "ticket closed during the run" } });
   ledger.record("3", pipeline({}));
   ledger.record("4", { kind: "crashed", error: new Error("ENOSPC"), attempts: 1, green: green() });
-  // landOne and the attempt still write the states of a landing and a pipeline; the ledger writes the rest.
+  // The attempt still writes the state of a pipeline as it ends; landOne writes no verdict, so the ledger writes a landing's.
   assert.deepEqual(states, [
+    ["1", { state: "merged", note: "merged and closed" }],
     ["2", { state: "withdrawn", note: "ticket closed - not started" }],
     ["4", { state: "crashed", note: "ENOSPC" }],
   ]);
@@ -318,16 +322,17 @@ test("a write that throws costs the ticket that write only", () => {
         failed.push(id);
       }
     },
+    ...NO_REQUEUE,
   });
   ledger.record("5", { kind: "crashed", error: new Error("x"), attempts: 1, green: green() });
   assert.deepEqual([failed, outcomes], [["5"], ["5"]]);
 });
 
 test("the closing counts come from the ledger's entries", () => {
-  const ledger = createLedger({ run: { ticket: () => {} }, outcomes: () => {}, view: { landed: () => {} }, context: () => BASE, bookkeep: (_id, fn) => fn() });
+  const ledger = createLedger({ run: { ticket: () => {} }, outcomes: () => {}, view: { landed: () => {} }, context: () => BASE, bookkeep: (_id, fn) => fn(), ...NO_REQUEUE });
   const ends: [string, TicketEnding][] = [
     ["1", landing({ kind: "merged", regenerated: { files: ["out.css"], regen: ["make css"] } })],
-    ["2", landing({ kind: "close-failed" })],
+    ["2", landing({ kind: "close-failed", error: "gh: HTTP 502" })],
     ["3", landing({ kind: "closed-earlier" }, "merged-earlier")],
     ["4", landing({ kind: "conflict", files: ["a"], with: [] })],
     ["5", landing({ kind: "red", with: [], gates: ["test"] })],

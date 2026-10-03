@@ -216,9 +216,10 @@ const play = async (seed: number) => {
         const end = s.lands[g.issue][n];
         switch (end) {
           case "merged":
-          case "close-failed":
           case "closed-earlier":
             return { kind: end };
+          case "close-failed":
+            return { kind: end, error: "gh: HTTP 502" };
           case "conflict":
             return { kind: "conflict", files: ["README.md"], with: [other] };
           case "red":

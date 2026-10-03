@@ -1,6 +1,7 @@
 // landOne (src/landing.ts) against temp git repos and a fake tracker: a clean merge, a conflict
 // that names the other merged ticket, a protected path held, a branch that moved after its gates,
-// a squash landing and a dry run. No Docker, no gh, no network.
+// a squash landing and a dry run. What the run record says of each is the ledger's (src/ledger.ts),
+// recorded as the scheduler tells the ending. No Docker, no gh, no network.
 //
 //   pnpm exec tsx --test test/landing.test.ts
 
@@ -17,6 +18,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const { landOne, createHostGit } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
+const { createLedger } = await import("../src/ledger.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Project = import("../src/config.ts").Project;
 
@@ -100,13 +102,29 @@ const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boole
     gate: async () => ({ gates: [], failures: [] }),
     landed: over.landed ?? new Map(),
   };
-  return { ctx, calls, states };
+  // landOne writes no verdict: the ledger records the ending, as burndown's `tell` hands it over.
+  const ledger = createLedger({
+    run: ctx.run,
+    outcomes: () => {},
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test" }),
+    bookkeep: (_id, fn) => fn(),
+    dropFirst: () => {},
+    ref: tracker.ref,
+    say: () => {},
+  });
+  const land = async (o: Parameters<typeof landOne>[1]) => {
+    const landed = await landOne(ctx, o);
+    ledger.record(o.issue, { kind: "landing", green: o, landed, attempts: 1 });
+    return landed;
+  };
+  return { ctx, calls, states, land };
 };
 
 test("a clean merge lands, closes the ticket and records it", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" } });
-  const { ctx, calls, states } = harness(root);
-  const landed = await landOne(ctx, outcome(root, "1"));
+  const { land, calls, states } = harness(root);
+  const landed = await land(outcome(root, "1"));
   assert.deepEqual(landed, { kind: "merged" });
   assert.equal(git(root, "show", "main:a.txt"), "a");
   assert.equal(git(root, "log", "-1", "--format=%s"), "Merge agent/issue-1 (closes #1)");
@@ -119,12 +137,12 @@ test("a conflict names the merged ticket it collides with and leaves a clean tre
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n" }, 3: { "c.txt": "c\n" } });
   const record = new Map();
   const first = harness(root, { landed: record });
-  assert.equal((await landOne(first.ctx, outcome(root, "1"))).kind, "merged");
+  assert.equal((await first.land(outcome(root, "1"))).kind, "merged");
   // 3 merged too, but touches nothing 2 does: not named.
   const second = harness(root, { landed: record });
-  assert.equal((await landOne(second.ctx, outcome(root, "3"))).kind, "merged");
+  assert.equal((await second.land(outcome(root, "3"))).kind, "merged");
   const third = harness(root, { landed: record });
-  const landed = await landOne(third.ctx, outcome(root, "2"));
+  const landed = await third.land(outcome(root, "2"));
   assert.deepEqual(landed, { kind: "conflict", files: ["shared.txt"], with: ["1"] });
   assert.equal(third.states["2"].state, "conflict");
   assert.match(third.states["2"].note ?? "", /with #1: shared\.txt/);
@@ -136,8 +154,8 @@ test("a conflict names the merged ticket it collides with and leaves a clean tre
 test("a protected path is held for a person, not merged", async () => {
   const root = makeRepo({ 1: { ".github/workflows/ci.yml": "on: push\n" } });
   const before = git(root, "rev-parse", "main");
-  const { ctx, calls, states } = harness(root);
-  const landed = await landOne(ctx, outcome(root, "1"));
+  const { land, calls, states } = harness(root);
+  const landed = await land(outcome(root, "1"));
   assert.equal(landed.kind, "held");
   assert.ok(landed.kind === "held" && landed.paths.includes(".github/workflows/ci.yml"));
   assert.deepEqual(calls, ["hold 1"]);
@@ -152,8 +170,8 @@ test("a branch that moved after its gates passed is skipped", async () => {
   commitFile(root, "late.txt", "late\n", "after the gates");
   git(root, "checkout", "-q", "main");
   const before = git(root, "rev-parse", "main");
-  const { ctx, calls } = harness(root);
-  const landed = await landOne(ctx, o);
+  const { land, calls } = harness(root);
+  const landed = await land(o);
   assert.deepEqual(landed, { kind: "skipped", reason: "agent/issue-1 moved after its gates passed" });
   assert.deepEqual(calls, []);
   assert.equal(git(root, "rev-parse", "main"), before);
@@ -161,8 +179,8 @@ test("a branch that moved after its gates passed is skipped", async () => {
 
 test("a squash landing is one commit and says so", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n", "b.txt": "b\n" } });
-  const { ctx, calls } = harness(root, { land: "squash" });
-  const landed = await landOne(ctx, outcome(root, "1"));
+  const { land, calls } = harness(root, { land: "squash" });
+  const landed = await land(outcome(root, "1"));
   assert.deepEqual(landed, { kind: "merged", squashed: true });
   assert.equal(git(root, "rev-list", "--parents", "-n", "1", "HEAD").split(" ").length, 2, "one parent");
   assert.equal(git(root, "log", "-1", "--format=%s"), "Merge agent/issue-1 (closes #1)");
@@ -172,10 +190,10 @@ test("a squash landing is one commit and says so", async () => {
 test("a dry run merges nothing and writes nothing to the tracker", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { ".github/workflows/ci.yml": "x\n" } });
   const before = git(root, "rev-parse", "main");
-  const { ctx, calls, states } = harness(root, { dryRun: true });
-  assert.deepEqual(await landOne(ctx, outcome(root, "1")), { kind: "dry-run" });
+  const { land, calls, states } = harness(root, { dryRun: true });
+  assert.deepEqual(await land(outcome(root, "1")), { kind: "dry-run" });
   assert.equal(states["1"].note, "dry run: would merge");
-  const held = await landOne(ctx, outcome(root, "2"));
+  const held = await land(outcome(root, "2"));
   assert.equal(held.kind, "held");
   assert.match(held.kind === "held" ? held.reason : "", /^dry run: would hold/);
   assert.deepEqual(calls, []);
@@ -185,12 +203,14 @@ test("a dry run merges nothing and writes nothing to the tracker", async () => {
 test("the tracker's word wins: withdrawn, taken back, and a failed close still counts as merged", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" }, 3: { "c.txt": "c\n" } });
   const gone = harness(root, { withdrawal: () => ({ held: false, reason: "ticket closed during the run" }) });
-  assert.deepEqual(await landOne(gone.ctx, outcome(root, "1")), { kind: "withdrawn", reason: "ticket closed during the run" });
+  assert.deepEqual(await gone.land(outcome(root, "1")), { kind: "withdrawn", reason: "ticket closed during the run" });
   const mine = harness(root, { withdrawal: () => ({ held: true, reason: "marked needs-human during the run" }) });
-  assert.deepEqual(await landOne(mine.ctx, outcome(root, "2")), { kind: "taken-back" });
+  assert.deepEqual(await mine.land(outcome(root, "2")), { kind: "taken-back" });
   const before = git(root, "rev-parse", "main");
   const broken = harness(root, { failClose: true });
-  assert.deepEqual(await landOne(broken.ctx, outcome(root, "3")), { kind: "close-failed" });
+  assert.deepEqual(await broken.land(outcome(root, "3")), { kind: "close-failed", error: "gh is down" });
   assert.notEqual(git(root, "rev-parse", "main"), before);
   assert.equal(broken.states["3"].note, "merged; closing the ticket failed");
+  // The error is a fact landing returns: the closing summary names it.
+  assert.equal((broken.states["3"] as { closeFailed?: string }).closeFailed, "gh is down");
 });

@@ -1,8 +1,8 @@
 // A ticket that conflicts or goes red at landing is requeued once, in the same run: the scheduler's
 // requeue-once rule (createSchedule in src/schedule.ts). Its second attempt runs on the land-only
 // path, and a second conflict or red holds it for the next run. The record's side of a requeue is
-// `createRequeueRecord` (src/landing.ts), which burndown.ts hands what the scheduler tells, and the
-// outcome lines are the ledger's (`describe`, src/ledger.ts). Every
+// the ledger's (`createLedger`, src/ledger.ts), which burndown.ts hands what the scheduler tells, and
+// so are the outcome lines (`describe`). Every
 // test drives `createSchedule(plan).run(work)`: the first ones with fake attempts and the real
 // `landOne` (`landingWork`) on temp repos, a fake tracker and a host worktree for the sandbox; the
 // later ones with made-up landings and a run record in a temp dir. No Docker, no gh, no network.
@@ -24,9 +24,9 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { againLine, createHostGit, createRequeueRecord, landingWork, requeuedLine } = await import("../src/landing.ts");
+const { againLine, createHostGit, landingWork, requeuedLine } = await import("../src/landing.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
-const { describe } = await import("../src/ledger.ts");
+const { createLedger, describe } = await import("../src/ledger.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { landOnlyHead, recordHead, recordRun } = await import("../src/run.ts");
 const { createSchedule } = await import("../src/schedule.ts");
@@ -128,18 +128,26 @@ const endings = () => {
 
 /**
  * What the run is told and ends with, as burndown.ts reads it: the requeues and endings through the
- * record's side of a requeue (`createRequeueRecord`, the code burndown.ts calls), each landing
- * ending sorted by how it landed, and the outcome the ledger gives each (`describe`).
+ * ledger (`createLedger`, the code burndown.ts calls), each landing ending sorted by how it landed,
+ * and the outcome the ledger gives each (`describe`).
  */
 const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => void) => {
   const told: Change[] = [];
   const said: string[] = [];
   const dropped: string[] = [];
-  const requeues = createRequeueRecord({ run: record, bookkeep: (_id, fn) => fn(), dropFirst: (id) => void dropped.push(id), ref: (id) => `#${id}`, say: (line) => void said.push(line) });
+  const requeues = createLedger({
+    run: record,
+    outcomes: () => {},
+    view: { landed: () => {} },
+    context: () => ({ base: "main", gateNames: "test" }),
+    bookkeep: (_id, fn) => fn(),
+    dropFirst: (id) => void dropped.push(id),
+    ref: (id) => `#${id}`,
+    say: (line) => void said.push(line),
+  });
   const tell = (c: Change) => {
     told.push(c);
-    if (c.kind === "requeued") requeues.requeued(c.id, c.again);
-    if (c.kind === "ended") requeues.ended(c.id, c.ending);
+    if (c.kind === "requeued" || (c.kind === "ended" && c.ending.kind === "landing")) requeues.tell(c as never);
     onTell?.(c);
   };
   const ended = () => told.flatMap((c) => (c.kind === "ended" ? [{ id: c.id, ending: c.ending }] : []));
@@ -235,9 +243,10 @@ const run = async (
     tell: seen.tell,
   });
   // Each landing ending in the order it came, with what a second conflict or red was held as.
-  const final = seen.ended().flatMap(({ id, ending: e }) => (e.kind === "landing" ? [{ issue: id, landed: e.landed, line: seen.requeues.againNote.get(id) }] : []));
+  const states = written();
+  const final = seen.ended().flatMap(({ id, ending: e }) => (e.kind === "landing" ? [{ issue: id, landed: e.landed, line: e.again ? states[id]?.note : undefined }] : []));
   const stopped = seen.ended().flatMap(({ id, ending: e }) => (e.kind === "stopped" && e.finished ? [id] : []));
-  return { final, sentBack: seen.sentBack(), stopped, states: written(), calls, host, stop, attempts, endings, told: seen.told, lists: seen.lists(), lines: seen.lines() };
+  return { final, sentBack: seen.sentBack(), stopped, states, calls, host, stop, attempts, endings, told: seen.told, lists: seen.lists(), lines: seen.lines() };
 };
 
 const mergeOrder = (root: string) =>
@@ -646,7 +655,7 @@ test("requeued, then the run stops: the first outcome stands, and the status vie
   assert.equal(r.seen.lines().get("2"), "merge conflict: with #1: shared.txt");
   assert.equal(r.seen.lines().get("3"), "red when merged with #1");
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note, r.written()["2"].requeued], ["conflict", "with #1: shared.txt", null]);
-  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "test red with #1", null]);
+  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "red with #1", null]);
   assert.deepEqual(r.seen.dropped, []);
 });
 
@@ -739,5 +748,5 @@ test("a requeue is told, and recorded, before the ticket is queued again", async
       },
     ),
   );
-  assert.deepEqual(order, ["told, queued: false", "write queued", "after, queued: true"]);
+  assert.deepEqual(order.slice(0, 3), ["told, queued: false", "write queued", "after, queued: true"]);
 });

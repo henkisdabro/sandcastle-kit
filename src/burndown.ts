@@ -53,10 +53,10 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, createRequeueRecord, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, STOPPED_GREEN, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, STOPPED_GREEN, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, pipelineOutcome } from "./ledger.ts";
-import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
 
@@ -1176,9 +1176,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       console.log(`${ref(id)}: could not record its state (${String(error).split("\n")[0].slice(0, 160)}); its outcome stands.`);
     }
   };
-  // The record's side of a requeue: the line the second attempt's setup carries (`requeuedAs`).
-  const requeues = createRequeueRecord({ run, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
-  const { requeuedAs } = requeues;
   // Tickets an agent handed back through the tracker's hold label, read after the schedule.
   const heldByLabel = new Set<string>();
   // What each ending is described with beyond itself: the agents' report, a kept worktree, a hold.
@@ -1187,8 +1184,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     const hold = heldByLabel.has(id) ? "label" : notes.some((n) => n.issue === id && n.kind === "hold") ? "note" : undefined;
     return { base, gateNames, report: reports.get(id), dryRun: DRY_RUN, ...(kept && { kept: keptPath(project.root, kept.path) }), ...(hold && { hold }) };
   };
-  // Every ending the scheduler tells, recorded in the ledger's words: the outcome, the view's word, and the states it owns.
-  const ledger = createLedger({ run, outcomes: (o) => recordOutcomes(project, runId, o), view, context, bookkeep });
+  // Every ending and requeue the scheduler tells, recorded in the ledger's words: the outcome, the view's word, and the states it owns.
+  const ledger = createLedger({ run, outcomes: (o) => recordOutcomes(project, runId, o), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
+  // The line a requeued ticket's second attempt's setup carries.
+  const { requeuedAs } = ledger;
 
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
@@ -1264,13 +1263,6 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return { kind: "crashed", error: reason, causes };
   };
 
-  // How each ticket's part in the run ended, as the scheduler tells it: the ledger records it.
-  const ended = (id: string, e: Ending<Outcome, Outcome>) => {
-    if (e.kind === "landing") requeues.ended(id, e);
-    // Its label refuses it, found as it would have started: that ticket only, never the run.
-    if (e.kind === "not begun" && e.why.kind === "refused label") console.log(`  ${e.why.reason}`);
-    ledger.record(id, e);
-  };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     switch (c.kind) {
       case "landing":
@@ -1279,9 +1271,12 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         return;
       case "requeued":
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
-        return requeues.requeued(c.id, c.again);
+        return ledger.tell(c);
       case "ended":
-        return ended(c.id, c.ending);
+        // Its label refuses it, found as it would have started: that ticket only, never the run.
+        if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
+        // How each ticket's part in the run ended: the ledger records it.
+        return ledger.tell(c);
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
