@@ -627,6 +627,55 @@ models_line() {
   fi
 }
 
+# The run settings the settings row shows, as "autonomy US turn US cap US mark" into SET_FIELDS:
+# a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
+# a settings group, the way it passes the models), else the last run's record. Only what the
+# source holds: a field it lacks stays empty and is never filled with a default, and a record
+# with no settings group gives no row. $1: a file holding a run record.
+read_settings() {
+  local f="$1"
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
+}
+settings_fields() {
+  SET_MARK=""; SET_FIELDS=""
+  if [ "$RUN_LIVE" = 1 ]; then SET_FIELDS=$(read_settings logs/run.json)
+  elif [ -n "${SANDCASTLE_SETTINGS+x}" ]; then SET_MARK="next run"; SET_FIELDS=$(read_settings <(printf '{"settings":%s}' "${SANDCASTLE_SETTINGS:-null}"))
+  elif [ -f logs/run.json ]; then SET_MARK="last run"; SET_FIELDS=$(read_settings logs/run.json)
+  fi
+}
+
+# The settings row into SETTINGS_ROW ("" for none), from the pane's width in $cols. Each item is
+# added with set_item: its text, the shorter text it has below 100 columns, and the narrowest pane
+# it stays in (0: always; 80 for an item marked ○ in the plan, which drops below 80 columns).
+SET_ITEMS=()
+set_item() { # full narrow min_cols
+  [ "$cols" -ge "${3:-0}" ] || return 0
+  if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
+}
+settings_row() {
+  local lvl turn cap l i levels="" sep="${rule} · ${off}"
+  SETTINGS_ROW=""; SET_ITEMS=()
+  settings_fields
+  [ -n "$SET_FIELDS" ] || return 0
+  IFS="$US" read -r lvl turn cap <<<"$SET_FIELDS"
+  # A level the record does not hold, or one outside the five, is not drawn.
+  case "$lvl" in
+    0|1|2|3|drain)
+      for l in 0 1 2 3 drain; do
+        if [ "$l" = "$lvl" ]; then levels="$levels ${bold}${accent}[${l}]${off}"; else levels="$levels ${gry}${l}${off}"; fi
+      done
+      set_item "${mute}autonomy${off}${levels}" "${mute}autonomy${off} ${bold}${accent}${lvl}${off}";;
+  esac
+  [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
+  [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
+  SETTINGS_ROW="${SET_ITEMS[0]}"
+  for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done
+  kvl settings "$SETTINGS_ROW"; SETTINGS_ROW="$REPLY"
+  [ -n "$SET_MARK" ] && SETTINGS_ROW="${SETTINGS_ROW} ${gry}(${SET_MARK})${off}"
+  return 0
+}
+
 # How many commits a merged ticket landed: once merged, its branch has none
 # left over the base, and a 0 read as "merged nothing". Its merge commit's
 # second parent says (a squash is the one commit); "-" when none is found.
@@ -937,7 +986,7 @@ render() {
   fi
   # Tickets queued for a gates slot: gates are what the machine is busy with
   # while the table stands still.
-  local gate_wait models mprefix part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
+  local gate_wait models mprefix SETTINGS_ROW part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
   local -a LG=() MAC=() MOD=() LEG=() NOTE=()
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
   run_cell
@@ -957,6 +1006,7 @@ render() {
     case "$part" in *" · "*) part="${part#* · }";; *) part="";; esac
   done
   [ -n "$mprefix" ] && [ -n "${MOD[0]:-}" ] && MOD[0]="${MOD[0]} ${gry}(${mprefix})${off}"
+  settings_row
 
   # The header, with the logo in 3 rows or, in a short pane, 1.
   build_header 3
@@ -1080,7 +1130,8 @@ render() {
 }
 
 # The header bands into HDR (HDR_N lines): the logo cell, the run band, the
-# models and the queue error when there are any, and the table's headings.
+# models, the settings row and the queue error when there are any, and the
+# table's headings.
 # $1: the logo's rows, 3 or 1. Reads render's locals.
 build_header() {
   local l m=0 prev i j tb
@@ -1129,6 +1180,13 @@ build_header() {
       kvl models "${mute}${mprefix:+${mprefix}: }${models}${off}"; CELL=("$REPLY"); cells_line; put "$REPLY"
       BARS=""
     fi
+  fi
+  # The run settings, one full-width row under the run band.
+  if [ -n "$SETTINGS_ROW" ]; then
+    prev="$BARS"; split_cols 1; AL=(l)
+    junction '├' '┤' '─' "$prev" ""; put "$REPLY"
+    CELL=("$SETTINGS_ROW"); cells_line; put "$REPLY"
+    BARS=""
   fi
   prev="$BARS"
   # An unreadable queue is not an empty one: say so, under the run band.

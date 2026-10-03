@@ -47,6 +47,7 @@ import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxCo
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
+import { settingsGroup } from "./run-settings.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
@@ -457,6 +458,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     waiting,
     stage: "starting",
     concurrency: slots,
+    ...(turn ? { settings: settingsGroup({ autonomy: turn.level }, turn.turn) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
