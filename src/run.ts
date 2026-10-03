@@ -336,6 +336,16 @@ export const toolFailureLine = (line: string): string | undefined => {
   return lines.length ? lines.join("\n") : undefined;
 };
 
+/** A line `toolFailureLine` wrote. It quotes a tool's output, so a check of what the library or the agent said skips it. */
+export const isToolFailureLine = (line: string) => /^! (error|exit -?\d+)(: |$)/.test(line);
+
+// What a spent plan allowance leaves at the end of an agent's log.
+const LIMIT = /out of usage credits|usage limit|limit reached/i;
+
+/** Whether a readable log ends saying the plan allowance is spent. Not a failed tool's line: a test or a file can say "usage limit". */
+export const logSaysLimit = (text: string) =>
+  LIMIT.test(text.split("\n").filter((l) => !isToolFailureLine(l)).slice(-8).join("\n"));
+
 /**
  * The library ends each pass with "Context window: Nk", which is the sum of input, cache-write and cache-read
  * tokens over every turn - tokens processed, not a window. Rewritten once the pass has returned; safe to repeat.

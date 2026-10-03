@@ -38,7 +38,7 @@ import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, relabelContextWindow,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, relabelContextWindow,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -157,9 +157,6 @@ export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
   ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
-
-// What a spent plan allowance leaves at the end of an agent's log.
-const LIMIT = /out of usage credits|usage limit|limit reached/i;
 
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
@@ -1151,7 +1148,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return readdirSync(logs)
       // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
       .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-      .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
+      .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
   };
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
