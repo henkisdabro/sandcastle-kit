@@ -213,7 +213,7 @@ export const slotsByRun = (pool: PoolName): Map<string, number> => {
 
 type Wait = { file: string; pid: number; run: string; since: number };
 
-/** The live waits for `pool`; an entry left by a dead process, or half-written for too long, is removed. */
+/** The live waits for `pool`; an entry left by a dead process is removed, one that cannot be read is skipped. */
 const waits = (pool: PoolName): Wait[] => {
   if (!existsSync(WAITS)) return [];
   return readdirSync(WAITS)
