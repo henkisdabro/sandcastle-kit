@@ -135,7 +135,7 @@ test("a first conflict is told as requeued before its second attempt, which carr
   });
   assert.deepEqual(order, ["attempt 2#1", "land 2", "attempt 2#2", "land 2"]);
   assert.deepEqual(
-    told.filter((c) => c.kind !== "landing").map((c) => c.kind),
+    told.filter((c) => c.kind !== "landing" && c.kind !== "demand").map((c) => c.kind),
     ["requeued", "ended"],
   );
   assert.deepEqual(told.find((c) => c.kind === "requeued"), { kind: "requeued", id: "2", again: { kind: "conflict", with: ["1"] } });

@@ -27,7 +27,6 @@ import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
-import type { Level } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
@@ -36,10 +35,10 @@ import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLine
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
+import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -47,13 +46,14 @@ import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxCo
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
+import { type ResolvedSettings, settingsGroup } from "./run-settings.ts";
 import { usageLine, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -89,6 +89,8 @@ type Outcome = {
   unreviewed?: boolean;
   /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
   ungated?: string;
+  /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
+  unmet?: string;
 };
 
 /**
@@ -157,9 +159,6 @@ export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get
 const finishWord = (o: Outcome) =>
   ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
 
-// What a spent plan allowance leaves at the end of an agent's log.
-const LIMIT = /out of usage credits|usage limit|limit reached/i;
-
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
 const fence = (text: string) => {
@@ -180,11 +179,14 @@ export const cutAtWord = (text: string, max: number): string => {
   const space = head.lastIndexOf(" ");
   return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
 };
-export const ungatedOf = (text: string): string | undefined => {
-  const last = [...text.matchAll(/<ungated>([\s\S]*?)<\/ungated>/g)].at(-1);
+const lineOf = (tag: string) => (text: string): string | undefined => {
+  const last = [...text.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))].at(-1);
   const said = last?.[1].replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
+export const ungatedOf = lineOf("ungated");
+// An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
+export const unmetOf = lineOf("unmet");
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
@@ -302,7 +304,7 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
 let unlockOnExit = false;
 
 /** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
-export const burndown = async (project: Project, turn?: { level: Level; turn: number }): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
@@ -418,9 +420,20 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   console.log(versionsLine(versions));
+  // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
+  const others = otherRuns();
+  const split = others.length ? splitAtStart(workers, others) : undefined;
+  for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, others.map((m) => {
+    const found = recordOfRun(m.pid);
+    const name = m.project || found?.record.orchestrator;
+    return { project: name, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
+  }))) console.log(line);
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
-  const slots = Math.min(workers, limit("sandboxes"));
-  const rough = estimate(project, candidates.length, slots, blockerChain(project, tracker, candidates).length);
+  const slots = estimateSlots(workers, split);
+  const rough = estimate(
+    project, candidates.length, slots, blockerChain(project, tracker, candidates).length,
+    candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
+  );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${keepAwake()}`);
@@ -457,11 +470,30 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     waiting,
     stage: "starting",
     concurrency: slots,
+    ...(turn ? { settings: settingsGroup(turn.settings, turn.turn) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
   registerRun(project.root);
+  // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
+  // until the scheduler tells its own demand, for the base gates that come first.
+  joinPool(project.name, CONCURRENCY, 1);
+  // The run record's live values (not settings): what the run wants and its share of the pool now.
+  // The share moves as other runs begin and end, so it is read again as well as on a demand change.
+  let shown: { demand: number; share: number; cap?: number } = { demand: -1, share: -1 };
+  const poolValues = () => {
+    // A finished record is the next turn's to replace: a timer writing to it would undo that.
+    if (run.finished) return clearInterval(poolWatch);
+    const mine = myShare();
+    if (!mine || (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap)) return;
+    // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
+    shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
+    run.update(shown);
+  };
+  const poolWatch: ReturnType<typeof setInterval> = setInterval(poolValues, 5000);
+  poolWatch.unref();
+  poolValues();
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
@@ -680,7 +712,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -712,6 +744,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
     });
+
+    // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
+      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
@@ -810,10 +846,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // not resolve it without changing what the ticket does, so the full
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
-        await timed(issue.id, "implement", () => {
-          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
-            name: `impl-${issue.id}`,
+        await timed(issue.id, "resolve", () => {
+          const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
+          return pass({
+            name: `resolve-${issue.id}`,
             logging,
             agent: implAgent(own),
             promptFile: prompts.resolve,
@@ -850,7 +886,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // ride the same gates as the implementer's, so a review that breaks the
       // build cannot merge either. Log names keep `-review-` for status.sh.
       const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
-        sandbox.run({
+        pass({
           name,
           logging: agentLogging(project, issue.id, name, runId),
           agent,
@@ -877,23 +913,32 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           () => narrowModel,
         );
       };
-      let reviewCommits = 0;
+      // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
+      let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
+      // What the agents knowingly left undone. The implementer's word stands only until a full
+      // review has read the branch after it: the reviewer may have finished the criterion.
+      // A land-only branch runs no implementer or review: what its agents said stands from its head record.
+      let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
+      let reviewed = false;
+      const unmet: string[] = [];
       if (landOnly && mergeConflicted && greenHead !== undefined) {
         // The resolver finished the merge on a branch reviewed and green at greenHead:
         // nobody has seen its resolution. A clean land-only merge needs no review.
         console.log(`${ref(issue.id)}: conflict resolved - reviewing the resolution only.`);
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-        reviewCommits = resolved.commits.length;
+        reviewCommits += resolved.commits.length;
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
+        const u = unmetOf(resolved.stdout);
+        if (u) unmet.push(u);
       }
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `impl-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -915,6 +960,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
+        implUnmet = unmetOf(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
         // different cases: the agent found nothing to do, and the agent found the
@@ -940,6 +986,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           reviewCommits = merged.commits.length;
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
+          const u = unmetOf(merged.stdout);
+          if (u) unmet.push(u);
         } else {
           let reviewModel: string | undefined;
           const review = await timed(
@@ -967,9 +1015,12 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
             : undefined;
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+          reviewed = true;
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
             if (u) ungated.push(u);
+            const m = r && unmetOf(r.stdout);
+            if (m) unmet.push(m);
           }
           if (!tracker.agentsWrite) {
             for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
@@ -1032,7 +1083,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         // allowance still has to stop the queue, so that one is rethrown.
         const fixed = await timed(issue.id, "repair", () => {
           const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `repair-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -1097,14 +1148,19 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           reviewCommits += after.commits.length;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
+          const m = unmetOf(after.stdout);
+          if (m) unmet.push(m);
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
           if (after.commits.length) gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
         }
       }
 
+      const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
       const head = sh("git", ["rev-parse", branch]);
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head });
+      const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
+      // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote });
       return {
         issue: issue.id,
         branch,
@@ -1120,6 +1176,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        unmet: unmetNote,
       };
     } finally {
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
@@ -1145,7 +1202,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return readdirSync(logs)
       // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
       .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-      .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
+      .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
   };
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
@@ -1217,8 +1274,16 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
+    // A ticket that waits for the run's share, not only for a slot, says so; the note goes with its next state.
+    let shareNote = false;
+    const waitNote = (why: WaitReason) =>
+      bookkeep(issue.id, () => {
+        if (why === "share") run.ticket(issue.id, { note: "waits for the run's share" });
+        else if (shareNote) run.ticket(issue.id, { note: null });
+        shareNote = why === "share";
+      });
     const result = await slotTurn(slotWanted)
-      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)))
+      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue), waitNote))
       .then(
         (value) => ({ status: "fulfilled", value }) as const,
         (reason: unknown) => ({ status: "rejected", reason }) as const,
@@ -1243,6 +1308,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
+          ...(value.unmet ? { unmet: value.unmet } : {}),
         });
         run.update({ typical: typicalTimes(project, [...took.values()]) });
         // With nothing left to start, the pane closes: five panes each
@@ -1280,6 +1346,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
         return ledger.tell(c);
+      case "demand":
+        // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
+        setDemand(c.n);
+        return poolValues();
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
@@ -1300,7 +1370,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, attempt, ...landingWork(ctx), tell })
+    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       return stopLanding(error);
@@ -1346,7 +1416,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
 
   let verify: Gate[] | undefined;
   if (merged.length > 1 || regenerated > 0) {
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify"));
+    // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
+    setDemand(1);
+    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify")).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);
@@ -1391,7 +1463,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({ verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify) } : null, keptWorktrees, dryRunCheck });
-  console.log(`\n${await closingReport(project, turn)}\n`);
+  console.log(`\n${await closingReport(project, turn && { level: turn.settings.autonomy, turn: turn.turn })}\n`);
   view.close(
     `merged ${merged.length}` +
       (notLanded ? `, not landed ${notLanded}` : "") +

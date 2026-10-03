@@ -17,6 +17,11 @@
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
 //   stop             stop the live run, as Ctrl-C does in its terminal
+//   cap [N | off] [--project NAME]
+//                    cap the live run's share of the machine's sandbox slots at N (at most
+//                    its concurrency), or lift the cap; bare, print its demand, share and
+//                    cap. The run keeps the slots it holds. The cap ends with the run;
+//                    --project acts on another project's run from any directory
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -48,8 +53,9 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
-//   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
-//                    and list unmerged ones; --all deletes those too, without asking
+//   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
+//                    sandbox worktrees and finished agent branches, and list unmerged ones;
+//                    --all deletes those too, without asking
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
@@ -64,7 +70,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
@@ -73,12 +79,13 @@ import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
-import { limit } from "./pool.ts";
+import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
-import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
+import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { cleanProject, ensureImage, KIT } from "./sandbox.ts";
+import { cleanProject, ensureImage, KIT, machineSettings } from "./sandbox.ts";
+import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -133,6 +140,17 @@ try {
     console.log(HELP.join("\n"));
     process.exit(0);
   }
+  if (command === "cap") {
+    // The run's project as live runs record it: `--project` from anywhere, else this repository's.
+    const given = parseCapArgs(args);
+    if (!given.project && !repoRoot) throw new OperatorError("Not inside a git repository. Give the project's name with `--project NAME`.");
+    const name = given.project ?? (await loadProject(repoRoot!)).name;
+    const now = given.cap === undefined ? standing(name) : setCap(name, given.cap);
+    if (given.cap === "off") console.log(`Cap lifted for ${name}.`);
+    else if (given.cap !== undefined) console.log(`Capped ${name} at ${given.cap} sandbox slot(s). It keeps the slots it holds, and takes no more while it holds ${given.cap} or more.`);
+    console.log(standingLine(now));
+    process.exit(0);
+  }
   if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");
   // Sandcastle resolves worktrees and logs from the working directory, so every
   // command runs from the repository root, wherever it was typed.
@@ -155,7 +173,7 @@ try {
       // before a process starts; the child (SANDCASTLE_DETACHED) runs the checks again for itself.
       if ((given.detach || process.env.SANDCASTLE_DETACH === "1") && process.env.SANDCASTLE_DETACHED !== "1") {
         const project = await loadProject(root);
-        if (autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy) === 1) {
+        if (resolveSettings({ env: process.env, project, machine: machineSettings() }).autonomy === 1) {
           throw new OperatorError("Autonomy level 1 asks a question at the end of each turn, which a detached run cannot. Use level 2 or 3, or run attached.");
         }
         sandboxPanes(project);
@@ -184,7 +202,9 @@ try {
       rewordLibraryLines();
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
-      const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
+      // The run's settings, resolved once: every turn's record carries them.
+      const settings = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const level = settings.autonomy;
       sandboxPanes(project);
       checkUsageSettings();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
@@ -202,7 +222,7 @@ try {
         } catch {}
       }
       for (let turn = 1; ; turn++) {
-        if (!(await burndown(project, { level, turn }))) {
+        if (!(await burndown(project, { settings, turn }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -280,6 +300,12 @@ try {
     }
     case "status": {
       const project = await loadProject(root);
+      // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
+      // AUTONOMY_LEVEL), so the view shows no row rather than the last run's as if they were next.
+      let next = "{}";
+      try {
+        next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));
+      } catch {}
       const r = spawnSync(join(KIT, "status.sh"), args, {
         stdio: "inherit",
         env: {
@@ -291,6 +317,7 @@ try {
           // What the next run would use: between runs the view showed the last
           // run's models, which read as the current setting.
           SANDCASTLE_MODELS: MODELS_LINE,
+          SANDCASTLE_SETTINGS: next,
           SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
           SANDCASTLE_MAX_GATES: String(limit("gates")),
         },
@@ -396,8 +423,9 @@ try {
       const tracker = makeTracker(project);
       // A ticket-file requeue commits to the base branch, and a live run that sees the base move lands nothing.
       if (tracker.kind === "files") lockRun(project);
-      const message = requeueTicket(tracker, project.label, args);
+      const { message, relabelled } = requeueTicketWithEffect(tracker, project.label, args);
       console.log(message);
+      if (relabelled) console.log(LABEL_LAG_REMINDER);
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
       const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
@@ -499,7 +527,9 @@ try {
       const project = await loadProject(root);
       pinHostGitConfig(project.root);
       lockRun(project);
-      const { worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      for (const id of containers) console.log(`removed exited sandbox container ${id}`);
+      for (const id of images) console.log(`removed dangling image ${id}`);
       for (const path of worktrees) console.log(`removed worktree ${path}`);
       for (const { branch, unmerged } of deleted) console.log(`deleted ${branch}${unmerged ? " (unmerged)" : ""}`);
       archiveFinishedLogs(project);
@@ -507,7 +537,7 @@ try {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
       break;
     }
     default:

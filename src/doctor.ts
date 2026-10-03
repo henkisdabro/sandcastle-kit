@@ -4,14 +4,14 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
-import { baseImage, KIT, USER_CONFIG } from "./sandbox.ts";
+import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { probeOAuth } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
@@ -151,6 +151,26 @@ export const staleImageWarning = (created: string, now: Date, tag = "sandcastle-
   return `base image ${tag} was built ${days} days ago - \`sandcastle build --force\` pulls Debian and Node security updates`;
 };
 
+/**
+ * The info line for Docker's build cache, from `docker system df --format '{{json .}}'` (one JSON object
+ * per line): its size, how much of it is reclaimable and the command that frees it. Builds pile up here
+ * over days of runs (tens of GB) and nothing else prunes it. Undefined for output without a build-cache
+ * row, so a changed format stays silent.
+ */
+export const buildCacheNote = (df: string): string | undefined => {
+  for (const line of df.split("\n")) {
+    try {
+      const row = JSON.parse(line) as { Type?: unknown; Size?: unknown; Reclaimable?: unknown };
+      if (row.Type !== "Build Cache" || typeof row.Size !== "string") continue;
+      const reclaimable = typeof row.Reclaimable === "string" && row.Reclaimable ? ` (${row.Reclaimable} reclaimable)` : "";
+      return `Docker build cache is ${row.Size}${reclaimable} - \`docker builder prune\` frees it`;
+    } catch {
+      /* not a row */
+    }
+  }
+  return undefined;
+};
+
 /** Whether a directory is a checkout of the kit: its package name is the kit's, or it has the kit's entry script. */
 export const isKitCheckout = (dir: string) => {
   try {
@@ -172,6 +192,18 @@ export const otherKitCheckoutNote = (repoRoot: string, kit = KIT) => {
   const running = realpathSync(kit);
   if (here === running) return undefined;
   return `info This project is a different checkout of the kit (${here}) than the one running (${running}): \`sandcastle ...\` runs the other one; \`./bin/sandcastle\` runs this checkout.`;
+};
+
+/** The kit checkout a `sandcastle` on PATH resolves to (the parent of its bin/), or undefined for none or a non-kit. */
+export const kitCheckoutOnPath = (onPath: string | undefined) => {
+  if (!onPath) return undefined;
+  try {
+    const root = dirname(dirname(realpathSync(onPath)));
+    // isKitCheckout alone would accept any script named bin/sandcastle, as it exists by construction here.
+    return isKitCheckout(root) && existsSync(join(root, "src/cli.ts")) ? root : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 export const doctor = async (repoRoot?: string, verify = false) => {
@@ -247,7 +279,11 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   // With no `sandcastle` on PATH, "run `sandcastle setup`" cannot work: name the kit's own script.
   const bin = shellQuote(join(KIT, "bin/sandcastle"));
   const setup = linked ? "sandcastle setup" : `${bin} setup`;
-  check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
+  // Another kit checkout on PATH (the installed kit, while this one is a clone or worktree) is a
+  // fact, not a fault: relinking PATH to a development checkout would hijack the installed kit.
+  const pathKit = linked ? undefined : kitCheckoutOnPath(onPath);
+  if (pathKit) console.log(`info \`sandcastle\` on PATH runs another kit checkout (${pathKit}), not this one (${realpathSync(KIT)}): \`./bin/sandcastle\` runs this checkout.`);
+  else check(linked, "`sandcastle` on PATH points at this kit", `\`${bin} setup\` (or: \`mkdir -p ~/.local/bin && ln -sf ${bin} ~/.local/bin/sandcastle\`, and put ~/.local/bin on PATH)`);
 
   const skill = join(homedir(), ".claude/skills/sandcastle");
   const skillOk = (() => {
@@ -286,16 +322,21 @@ export const doctor = async (repoRoot?: string, verify = false) => {
 
   // pool.ts reads the machine settings on first use, so a malformed file or a
   // bad limit lands here as a FIX line instead of crashing every command.
+  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsProblem = (() => {
     try {
+      // limit() skips the file when an environment variable sets the limit, so read it here too.
+      machineSettings();
       limit("sandboxes");
       limit("gates");
+      // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
+      const idleMark = machineSettings().idleMark;
+      if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
       return undefined;
     } catch (error) {
       return (error as Error).message;
     }
   })();
-  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsName = settingsProblem?.match(/^SANDCASTLE_MAX_\w+/)?.[0];
   check(
     !settingsProblem,
@@ -303,7 +344,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     `${settingsProblem} ` +
       (settingsName
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
-        : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
+        : settingsProblem?.startsWith('"idleMark"')
+          ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
   );
 
   const envFile = join(USER_CONFIG, ".env");
@@ -424,6 +467,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       }
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
+    // Info, never a FIX. Silent when Docker is down.
+    const cache = buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"]) ?? "");
+    if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
     // Ignoring a file does not untrack it: a .env added before the ignore line (or with -f) is in

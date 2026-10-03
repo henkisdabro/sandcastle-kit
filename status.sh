@@ -352,9 +352,16 @@ load_queue() {
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+# Whether a readable log ends saying the plan allowance is spent (run.ts logSaysLimit). A `! error`
+# or `! exit N` line quotes a failed tool's output, which can say "usage limit" too, so it is skipped.
+# No grep -q at the end: under pipefail, an early exit can fail the pipeline through a writer's SIGPIPE.
+log_says_limit() {
+  tail -12 "$1" 2>/dev/null | grep -vE '^! (error|exit -?[0-9]+)(: |$)' | tail -5 \
+    | grep -iE "out of usage credits|usage limit|limit reached" >/dev/null
+}
 # The .jsonl sidecars (each pass's raw agent stream) are deliberately not matched here or by any log glob below.
 # Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log
-# (phase impl, review, review-codex, repair, or gates - the orchestrator's gate output):
+# (phase impl, resolve, review, review-codex, repair, or gates - the orchestrator's gate output):
 # the id appears twice, and the repeat tells a ticket called "code-review-01" from the
 # phase "review". Logs of hand-suffixed branches (agent-issue-12-closeout-impl-12)
 # fall back to the first phase word. (BSD sed has no back-references in -E; awk does it.)
@@ -362,9 +369,9 @@ log_ids() {
   awk '{ f=$0; sub(/^.*\//, "", f); if (f !~ /^agent-issue-/) next
     s=substr(f, 13); sub(/\.log$/, "", s); n=length(s); found=""
     for (i=1; i<n; i++) { rest=substr(s, i+1)
-      if (rest ~ /^-(impl|review-codex|review|repair|gates)-/) { t=rest; sub(/^-(impl|review-codex|review|repair|gates)-/, "", t)
+      if (rest ~ /^-(impl|resolve|review-codex|review|repair|gates)-/) { t=rest; sub(/^-(impl|resolve|review-codex|review|repair|gates)-/, "", t)
         if (t == substr(s, 1, i)) { found=substr(s, 1, i); break } } }
-    if (found == "" && match(s, /-(impl|review|repair|gates)-/)) found=substr(s, 1, RSTART-1)
+    if (found == "" && match(s, /-(impl|resolve|review|repair|gates)-/)) found=substr(s, 1, RSTART-1)
     if (found != "") print found }'
 }
 # A ticket as a person names it: "#12", a suffixed branch "#12" (its suffix is
@@ -373,7 +380,7 @@ legacy_id() { [[ "$1" =~ ^[0-9]+(-[a-z]+)*$ ]]; }
 disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1"; fi; }
 
 # Machine-wide slots (pool.ts): one lock file per slot, holding its owner's
-# pid. Counts live ones only; the limits come from the CLI.
+# pid first (then token, run and label, which this ignores). Counts live ones only; the limits come from the CLI.
 # A slot's owner is a process of the kit, the rule of src/pool.ts `holderRunning`: a pid that
 # `ps` shows as some other process is a killed run's, whose pid came round. When `ps` cannot say
 # (BusyBox has no -p) the pid still counts if the process exists, as a signal of 0 shows.
@@ -430,7 +437,7 @@ WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
@@ -441,6 +448,11 @@ load_run() {
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
+  # This run's demand and share of the machine pool, live values the run rewrites; an older kit's record has neither.
+  # The cap (`sandcastle cap`) is a person's, and absent when there is none.
+  read -r POOL_DEMAND POOL_SHARE POOL_CAP < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")' "$f" 2>/dev/null)
+  [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
+  [[ "$POOL_CAP" =~ ^[0-9]+$ ]] || POOL_CAP=""
   RUN_ISSUES=$(jq -r '(.issues // [])[] | tostring' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
@@ -453,7 +465,7 @@ load_run() {
   # Sandboxes the run has yet to fill: queued tickets that fit in them start
   # at once, so none of them is "behind" another. A ticket that is landing holds
   # no slot: its merge runs on the host, or in the landing worker's own box.
-  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
+  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
   [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
   TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
   # When the run ends: the queued tickets at a typical issue's length
@@ -466,7 +478,7 @@ load_run() {
     (.typical.issue // null) as $t
     | if $t == null or (.stage // "") != "running" then empty else
       ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
-      | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "review", "cross-review", "gates", "repair")))
+      | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair")))
           | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
       | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) | floor end' "$f" 2>/dev/null)
   return 0
@@ -545,7 +557,7 @@ outcome_state() {
 # header count and the overflow line).
 style_of() {
   case "$1" in
-    setup|impl|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
+    setup|impl|resolve|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
     stalled|orphaned|stopped|"gate red"|conflict|held|uncommitted|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
     ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
     queued|requeued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
@@ -627,12 +639,75 @@ models_line() {
   fi
 }
 
+# The run settings the settings row shows, as "autonomy US turn US cap US cross US model US effort" into SET_FIELDS:
+# a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
+# a settings group, the way it passes the models), else the last run's record. Only what the
+# source holds: a field it lacks stays empty and is never filled with a default, and a record
+# with no settings group gives no row. $1: a file holding a run record.
+read_settings() {
+  local f="$1"
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring),
+    (if .crossReview == true then "on" elif .crossReview == false then "off" else "" end),
+    (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
+    (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end)] | join("\u001f") else "" end' "$f" 2>/dev/null
+}
+settings_fields() {
+  SET_MARK=""; SET_FIELDS=""
+  if [ "$RUN_LIVE" = 1 ]; then SET_FIELDS=$(read_settings logs/run.json)
+  elif [ -n "${SANDCASTLE_SETTINGS+x}" ]; then SET_MARK="next run"; SET_FIELDS=$(read_settings <(printf '{"settings":%s}' "${SANDCASTLE_SETTINGS:-null}"))
+  elif [ -f logs/run.json ]; then SET_MARK="last run"; SET_FIELDS=$(read_settings logs/run.json)
+  fi
+}
+
+# The settings row into SETTINGS_ROW ("" for none), from the pane's width in $cols. Each item is
+# added with set_item: its text, the shorter text it has below 100 columns, and the narrowest pane
+# it stays in (0: always; 80 for an item marked ○ in the plan, which drops below 80 columns).
+SET_ITEMS=()
+set_item() { # full narrow min_cols
+  [ "$cols" -ge "${3:-0}" ] || return 0
+  if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
+}
+settings_row() {
+  local lvl turn cap cross xmodel xeffort l i levels="" sep="${rule} · ${off}"
+  SETTINGS_ROW=""; SET_ITEMS=(); CROSS_SET=""
+  settings_fields
+  [ -n "$SET_FIELDS" ] || return 0
+  IFS="$US" read -r lvl turn cap cross xmodel xeffort <<<"$SET_FIELDS"
+  CROSS_SET="$cross"
+  # A level the record does not hold, or one outside the five, is not drawn.
+  case "$lvl" in
+    0|1|2|3|drain)
+      for l in 0 1 2 3 drain; do
+        if [ "$l" = "$lvl" ]; then levels="$levels ${bold}${accent}[${l}]${off}"; else levels="$levels ${gry}${l}${off}"; fi
+      done
+      set_item "${mute}autonomy${off}${levels}" "${mute}autonomy${off} ${bold}${accent}${lvl}${off}";;
+  esac
+  [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
+  [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  # The record is a file in a repository: a model or effort that is not plain text is left out,
+  # never drawn into the terminal.
+  case "$cross" in
+    on)
+      [[ "$xmodel" =~ ^[A-Za-z0-9._:/-]+$ ]] || xmodel=""
+      case "$xeffort" in low|medium|high|xhigh) ;; *) xeffort="";; esac
+      set_item "${accent}●${off} ${mute}cross-review${off}${xmodel:+ ${head}${xmodel}${xeffort:+ ${xeffort}}${off}}";;
+    off) set_item "${gry}○ cross-review${off}" "" 80;;
+  esac
+  [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
+  SETTINGS_ROW="${SET_ITEMS[0]}"
+  for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done
+  kvl settings "$SETTINGS_ROW"; SETTINGS_ROW="$REPLY"
+  [ -n "$SET_MARK" ] && SETTINGS_ROW="${SETTINGS_ROW} ${gry}(${SET_MARK})${off}"
+  return 0
+}
+
 # How many commits a merged ticket landed: once merged, its branch has none
 # left over the base, and a 0 read as "merged nothing". Its merge commit's
-# second parent says (a squash is the one commit); "-" when none is found.
+# second parent says (a squash is the one commit); "-" when none is found. A merge that left a
+# criterion unmet is "part of" its ticket, not "closes" it.
 landed_commits() {
   local p
-  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" 2>/dev/null)
+  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
   case "$p" in
     *' '*) git rev-list --count "${p%% *}..${p#* }" 2>/dev/null || echo -;;
     ?*) echo 1;;
@@ -747,9 +822,11 @@ render() {
         # Next to start first: the run takes its queue in this order.
         pos=$(printf '%s\n' "$TICKETS" | awk -F"$US" -v o="${order:-0}" '$2=="queued" && $5+0 < o+0 {c++} END{print c+1}')
         key=$(( 1000000 - ${order:-0} )); age="-"
-        if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi;;
+        if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi
+        # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
+        case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
-      implement|review|cross-review|repair|gates)
+      implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
         if [ -f "$log" ]; then
           quiet=$(( now_s - $(mtime_of "$log") ))
@@ -781,7 +858,7 @@ render() {
     style_of "$state"
     # A spent plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
-    if [ "$grp" = working ] && [ -n "${log:-}" ] && [ -f "$log" ] && tail -5 "$log" 2>/dev/null | grep -qiE "out of usage credits|usage limit|limit reached"; then
+    if [ "$grp" = working ] && [ -n "${log:-}" ] && [ -f "$log" ] && log_says_limit "$log"; then
       activity="USAGE LIMIT REACHED - $state model"; glyph='!'; colour="$hot"
     fi
     log=""
@@ -816,9 +893,9 @@ render() {
   # all of them once the run has ended. Their state is inferred.
   for n in $issues; do
     in_record "$n" && continue
-    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log logs/agent-issue-"$n"-gates-*.log 2>/dev/null | head -1)
+    log=$(ls -t logs/agent-issue-"$n"-impl-*.log logs/agent-issue-"$n"-resolve-*.log logs/agent-issue-"$n"-review-*.log logs/agent-issue-"$n"-repair-*.log logs/agent-issue-"$n"-gates-*.log 2>/dev/null | head -1)
     [ -z "$log" ] && continue
-    case "$log" in *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *-gates-*) phase="gates";; *) phase="impl";; esac
+    case "$log" in *-resolve-*) phase="resolve";; *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *-gates-*) phase="gates";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
     # AGE is how long a working row has been at its phase, from an older
@@ -859,9 +936,9 @@ render() {
       state="$phase"
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
-      # A squash-landed branch is deleted at landing, so its subject on the base is the proof.
-      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" 2>/dev/null)" ]; then
-        state="merged"; activity_note="squashed into $BASE"
+      # A landed branch is deleted at landing (merge or squash), so its subject on the base is the proof.
+      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" --grep="Merge agent/issue-$n (part of $(disp "$n"))" 2>/dev/null)" ]; then
+        state="merged"; activity_note="landed on $BASE"
       else
         state="no branch"
       fi
@@ -919,7 +996,7 @@ render() {
       act_col="$hot"
     fi
     # Only on an unfinished row: a merged branch's old log keeps the line.
-    if [ "$prio" -le 1 ] && tail -5 "$log" 2>/dev/null | grep -qiE "out of usage credits|usage limit|limit reached"; then
+    if [ "$prio" -le 1 ] && log_says_limit "$log"; then
       activity="USAGE LIMIT REACHED - $phase model"
       glyph='!'; colour="$hot"
     fi
@@ -937,18 +1014,39 @@ render() {
   fi
   # Tickets queued for a gates slot: gates are what the machine is busy with
   # while the table stands still.
-  local gate_wait models mprefix part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
+  local gate_wait models mprefix SETTINGS_ROW part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
   local -a LG=() MAC=() MOD=() LEG=() NOTE=()
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
   run_cell
   load_pool
   gauge "$USED_sandboxes" "$LIM_sandboxes"; kvl sandboxes "$REPLY"; MAC[0]="$REPLY"
-  gauge "$USED_gates" "$LIM_gates"; kvl gates "$REPLY"; MAC[1]="$REPLY"
-  if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
+  gauge "$USED_gates" "$LIM_gates"
+  if [ "$RUN_LIVE" = 1 ] && [ -n "$POOL_SHARE" ]; then
+    # This run's demand (slots it could use now) and share (its part of the machine pool) take the
+    # third row, so the gates queue, when there is one, moves onto the gates row.
+    [ "$gate_wait" -gt 0 ] && REPLY="$REPLY ${hot}· ${gate_wait} waiting${off}"
+    kvl gates "$REPLY"; MAC[1]="$REPLY"
+    kvl "this run" "${head}wants ${POOL_DEMAND}${gry} · share ${head}${POOL_SHARE}${off}${POOL_CAP:+${gry} · cap ${head}${POOL_CAP}${off}}"
+  else
+    kvl gates "$REPLY"; MAC[1]="$REPLY"
+    if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
+  fi
   MAC[2]="$REPLY"
   # "implement X · review Y", one row each in the models cell.
+  settings_row
   models=$(models_line); mprefix=""
   case "$models" in "next run: "*|"last run: "*) mprefix="${models%%: *}"; models="${models#*: }";; esac
+  # A record that carries cross-review as a setting shows it in the settings row, so the models cell
+  # drops that part of the string; an older record's string is shown as written.
+  case "$CROSS_SET" in
+    on|off)
+      case "$models" in
+        *" · cross-review "*)
+          part="${models#* · cross-review }"
+          case "$part" in *" · "*) part=" · ${part#* · }";; *) part="";; esac
+          models="${models%% · cross-review *}${part}";;
+      esac;;
+  esac
   part="$models"; i=0
   while [ -n "$part" ] && [ "$i" -lt 3 ]; do
     item="${part%% · *}"
@@ -1011,7 +1109,8 @@ render() {
   fi
   FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the rule that opens it
 
-  # A short pane: the logo folds to one row, so the table keeps some rows.
+  # A short pane: the logo folds to one row - the wordmark alone, since a castle cut
+  # to its battlements reads as a broken logo - so the table keeps some rows.
   if [ "$SHOW_ALL" != all ] && [ $(( rows - HDR_N - ftr_n - 1 )) -lt 5 ]; then build_header 1; fi
   hdr_n="$HDR_N"
 
@@ -1080,7 +1179,8 @@ render() {
 }
 
 # The header bands into HDR (HDR_N lines): the logo cell, the run band, the
-# models and the queue error when there are any, and the table's headings.
+# models, the settings row and the queue error when there are any, and the
+# table's headings.
 # $1: the logo's rows, 3 or 1. Reads render's locals.
 build_header() {
   local l m=0 prev i j tb
@@ -1092,7 +1192,7 @@ build_header() {
       " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
       " ${deep}██▀██${off} ${star}·${off}   ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
   else
-    LG=("${moon}▄▄▄${off} ${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+    LG=("${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
   fi
   # Every logo line padded to the widest, so centring keeps the castle's shape.
   for l in "${LG[@]}"; do vlen "$l"; [ "$VN" -gt "$m" ] && m=$VN; done
@@ -1129,6 +1229,13 @@ build_header() {
       kvl models "${mute}${mprefix:+${mprefix}: }${models}${off}"; CELL=("$REPLY"); cells_line; put "$REPLY"
       BARS=""
     fi
+  fi
+  # The run settings, one full-width row under the run band.
+  if [ -n "$SETTINGS_ROW" ]; then
+    prev="$BARS"; split_cols 1; AL=(l)
+    junction '├' '┤' '─' "$prev" ""; put "$REPLY"
+    CELL=("$SETTINGS_ROW"); cells_line; put "$REPLY"
+    BARS=""
   fi
   prev="$BARS"
   # An unreadable queue is not an empty one: say so, under the run band.
