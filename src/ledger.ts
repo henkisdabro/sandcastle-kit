@@ -104,6 +104,23 @@ export const closeComment = (
   (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
   (report ? `\n\n${report}` : "");
 
+// A merged ticket left open, an acceptance criterion undone: the comment says what, and that the
+// next run picks up the remainder. Posted after the schedule, as the comment on any ticket not closed.
+export const partlyDoneComment = (
+  o: { branch: string; commits: number; repairs: number; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
+  gateNames: string,
+  report?: string,
+): string =>
+  `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
+  (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
+  `); ${gateNames} all green before merge. **Left open: an acceptance criterion is unmet.** ${o.unmet}\n\n` +
+  "The next run picks up the remainder." +
+  (o.regenerated
+    ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
+    : "") +
+  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
+  (report ? `\n\n${report}` : "");
+
 // The one comment a ticket that did not land gets: the conflict (the other
 // ticket and the files), the agents' report, or both - never two comments.
 export const notLandedComment = (
@@ -175,6 +192,13 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
           outcome: { kind: "merged", text: "merged (ticket not closed)" },
           view: { word: "merged, not closed", landed: true },
           tracker: { kind: "close", text: closeComment({ ...g, regenerated: landed.regenerated, overrun: landed.overrun }, c.gateNames, c.report) },
+        };
+      case "partly-done":
+        return {
+          record: { state: "merged", note: "merged; ticket left open (a criterion is unmet)", unmet: landed.unmet, ...overrunOf(landed.overrun) },
+          outcome: { kind: "merged", text: "merged (partly done)" },
+          view: { word: "merged, partly done", landed: true },
+          tracker: comment(partlyDoneComment({ ...g, unmet: landed.unmet, regenerated: landed.regenerated, overrun: landed.overrun }, c.gateNames, c.report)),
         };
       case "closed-earlier":
         return {
@@ -460,6 +484,7 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
     switch (landed.kind) {
       case "merged":
       case "close-failed":
+      case "partly-done":
         l.merged.push(id);
         if (landed.regenerated) l.regenerated++;
         break;
