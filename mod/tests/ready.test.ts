@@ -38,10 +38,10 @@ const world = (on: Parameters<TestBody>[1], store: Record<string, unknown> = {})
     if (e.argv.includes("queue")) {
       w.reads.push({ argv: e.argv, cwd: e.init?.cwd, timeoutMs: e.init?.timeoutMs });
       if (w.hang) {
-        // As the engine does: a child still running at its timeout is killed, and a signal reads as exit 1.
+        // As the engine does: a child still running at its timeout is killed and the call rejects.
         const limit = e.init?.timeoutMs ?? 30000;
         await w.clock.sleep(Math.min(w.hang, limit));
-        if (w.hang > limit) return { value: { exitCode: 1, stdout: "", ...RESULT } };
+        if (w.hang > limit) throw new Error(`timed out after ${limit} ms`);
       }
       return { value: { exitCode: w.exit, stdout: w.out, ...RESULT } };
     }
