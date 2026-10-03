@@ -148,6 +148,9 @@ const clean = (t: string) => t.replace(/[\x00-\x1f\x7f]/g, "");
 // repo is one fetch.
 // ---------------------------------------------------------------------------
 
+// Not under refs/heads: `restoreBranch` and the "no agent branch left" check read only branches.
+const BASE_REF = "refs/base";
+
 export const backupRepo = (project: Project) => join(project.root, ".sandcastle", "backup.git");
 
 // `--git-dir` explicit: no discovery of the enclosing project (its config is the sandboxes' to
@@ -173,15 +176,29 @@ export const backupBranch = (project: Project, branch: string) => {
     // the checkout would make `git status` dirty: the repo ignores itself.
     writeFileSync(join(dir, ".gitignore"), "*\n");
   }
-  backupGit(project, ["fetch", "-q", "--no-tags", "--no-write-fetch-head", project.root, `+refs/heads/${branch}:refs/heads/${branch}`]);
+  // The base branch rides along under `refs/base`: with no ref the backup advertises nothing as
+  // already held, and every fetch sends the whole history as a pack of its own. It is a copy, not
+  // an alternate: the backup must outlive a `gc --prune=now` in the shared `.git`, which an
+  // alternates link would take its commits down with.
+  backupGit(project, [
+    "fetch", "-q", "--no-tags", "--no-write-fetch-head", project.root,
+    `+refs/heads/${branch}:refs/heads/${branch}`,
+    `+refs/heads/${project.baseBranch}:${BASE_REF}`,
+  ]);
 };
 
-/** Drop a branch's entry once its ticket has landed. Never throws: a copy left behind costs nothing. */
+/**
+ * Drop a branch's entry once its ticket has landed. Never throws: a failure leaves the entry
+ * (and its objects) for the next drop, which the next run's check does not look at.
+ * With no agent branch left the backup is pruned (`gc --prune=now`, in the backup only, never the
+ * shared `.git`): a deleted ref alone frees nothing, and every run's packs would stay for good.
+ */
 export const dropBackup = (project: Project, branch: string) => {
   try {
     if (backupTip(project, branch)) backupGit(project, ["update-ref", "-d", `refs/heads/${branch}`]);
+    if (existsSync(join(backupRepo(project), "HEAD")) && !backupGit(project, ["for-each-ref", "--count=1", "refs/heads/"])) backupGit(project, ["gc", "-q", "--prune=now"]);
   } catch {
-    /* the entry stays; the next run's check does not look at it */
+    /* the entry or its objects stay */
   }
 };
 
