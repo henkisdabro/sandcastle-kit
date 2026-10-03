@@ -20,6 +20,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The `/sandcastle` skill loads only what the action needs.** `SKILL.md` is now a short router
+  and each action's steps live in a file of their own (`init.md`, `queue.md`, `run.md`,
+  `status.md` beside `audit.md` and `update.md`), so a `status` check no longer loads the
+  init, queue and run instructions. The ticket-body rules (blocker line, `Touches:`, evidence)
+  are written once, in `queue.md`, and the audit follows them; long steps such as the run's
+  pre-start check are broken into checklists. An open session keeps the skill it loaded, so
+  start a new one after updating.
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
   terminal draws it - in place of the plain heading.
 - **Each outcome in `.sandcastle/logs/outcomes.json` carries a kind** (merged, conflict, red, held

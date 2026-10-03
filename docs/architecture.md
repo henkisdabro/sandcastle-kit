@@ -135,7 +135,7 @@ Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `sr
 
 ## `test/*.test.ts`
 
-One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
+One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
 
 ## `skill/`
 
@@ -145,7 +145,7 @@ The skill serves three harnesses. The directory (not the file - `src/setup.ts` l
 - `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger: Codex and OpenCode never see Claude Code's `when_to_use`.
 - `argument-hint` and `arguments: [action]` are Claude Code's; the body handles an unfilled `$action` for the other two.
 - Name harness-specific tools by what they do, with the Claude Code name as an example ("the harness's question tool (`AskUserQuestion` in Claude Code)").
-- `SKILL.md` loads whole for every action, so a long section that only one action needs lives in a sibling file that `SKILL.md` names in prose ("read run.md in this skill's directory") - Codex and OpenCode do not fill `$action`, so they find the file from the text.
+- `SKILL.md` loads whole for every action, so it stays a router: each action's steps live in a sibling file that `SKILL.md` names in prose, and reference two actions share lives once, in the file of the action that owns it (queue.md's "Writing a ticket body") ("read run.md in this skill's directory") - Codex and OpenCode do not fill `$action`, so they find the file from the text.
 
 ## `mod/`
 
