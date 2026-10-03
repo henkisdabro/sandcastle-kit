@@ -90,3 +90,19 @@ _Avoid_: migration, upgrade step
 **Update record**:
 What a project keeps, on one machine, of the Upgrading notes it has acted on.
 _Avoid_: marker, kit-updated (the file's name, not the concept)
+
+### Between runs
+
+**Idle mark**:
+The Claude Code mod's status line in a set-up project while no run is live: it says the project
+is ready for runs, and how many ready tickets wait. The live band replaces it while a run is alive.
+_Avoid_: indicator, badge
+
+**Ready ticket**:
+A queued ticket with no open blocker - one a run would start now.
+_Avoid_: queued (which counts blocked tickets too)
+
+**Dismissal**:
+A person's "seen these" on the idle mark's count, which holds until a ticket not in it becomes
+ready. Hiding the mark is a separate, lasting switch.
+_Avoid_: snooze, hide
