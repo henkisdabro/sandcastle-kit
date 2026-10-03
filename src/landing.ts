@@ -581,6 +581,3 @@ export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }
   const line = againLine(landed.kind, landed.with);
   return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
 };
-
-/** The record of a ticket the tracker withdrew before its attempt began. */
-export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "withdrawn", note: `${reason.replace(" during the run", "")} - not started` });

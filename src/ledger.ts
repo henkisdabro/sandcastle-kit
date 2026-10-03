@@ -19,8 +19,10 @@
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine, withdrawnRecord } from "./landing.ts";
+import type { Project } from "./config.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine } from "./landing.ts";
 import { overrunLine } from "./report.ts";
+import { recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending } from "./schedule.ts";
 import { refOf } from "./tracker.ts";
@@ -141,6 +143,9 @@ export const pipelineOutcome = (o: Pick<Finished, "status" | "gates" | "heldNote
 
 /** A ticket its label refuses, found as it would have started: skipped, saying why. */
 export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
+
+/** The record of a ticket the tracker withdrew before its attempt began. */
+export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "withdrawn", note: `${reason.replace(" during the run", "")} - not started` });
 
 /** Marked for a human by a person during the run: the tracker's word, as landing reads it. */
 const TAKEN_BACK = "marked for a human during the run";
@@ -342,6 +347,9 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
 /** Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. */
 const unstarted = (e: TicketEnding) =>
   e.kind === "not begun" && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
+
+/** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
+export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);
 
 /** One ticket's entry: its ending, the context it was described in, and what was said. */
 export type Entry = { id: string; ending: TicketEnding; context: Context; said: Said };

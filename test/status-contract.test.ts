@@ -2,8 +2,9 @@
 // group stored in the run record would go stale once a run dies). These tests hold it to the
 // shared run record schema instead, reading status.sh and its fixtures as text the way
 // test/mod.test.ts reads its glyphs and colours: a field it reads is a run record field, its
-// grouping puts every ticket state where the shared table does, no grouping arm is dead, and no
-// fixture records a ticket state the kit never writes. No session, no model calls.
+// grouping puts every ticket state where the shared table does, no grouping arm is dead, its
+// outcome_state has a case for every outcome kind and none beside, and no fixture records a ticket
+// state the kit never writes. No session, no model calls.
 //
 //   pnpm exec tsx --test test/status-contract.test.ts
 
@@ -12,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { DERIVED_STATES, GROUPS, isTicketState, TICKET_STATES, WORDS, type Group, type TicketState } from "../mod/hooks/run-record.ts";
+import { DERIVED_STATES, GROUPS, isTicketState, OUTCOME_KINDS, TICKET_STATES, WORDS, type Group, type TicketState } from "../mod/hooks/run-record.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
@@ -133,6 +134,56 @@ test("every arm of the status view's grouping is a ticket state's word or a deri
     assert.ok(!seen.has(word), `status.sh groups "${word}" in two arms of style_of; the later one never matches`);
     seen.add(word);
   }
+});
+
+/**
+ * The patterns of status.sh's outcome_state, the case that turns this run's outcome kind into the
+ * word its row shows. Every line of the case is an arm or a comment: a line read as neither fails,
+ * so an arm the harvest cannot parse is never skipped as silence.
+ */
+const outcomeArms = (sh: string): string[] => {
+  const body = sh.match(/^outcome_state\(\) \{\n  case "\$1" in\n([\s\S]*?)\n  esac\n\}/m)?.[1];
+  assert.ok(body !== undefined, "status.sh has an outcome_state case");
+  return body.split("\n").flatMap((line) => {
+    if (/^\s*(#|$)/.test(line)) return [];
+    const arm = line.match(/^    (.+?)\) printf '[^']*';;$/);
+    assert.ok(arm, `an outcome_state line that is neither an arm nor a comment: ${line}`);
+    return arm[1].split("|").map((p) => p.replace(/^"|"$/g, ""));
+  });
+};
+
+/** Where status.sh's outcome_state and the closed set of outcome kinds disagree, each way. */
+const outcomeContract = (arms: string[], kinds: readonly string[]) => ({
+  /** An outcome kind the view has no case for: its row would read as an earlier run's leftover. */
+  missing: kinds.filter((k) => !arms.includes(k)),
+  /** A case for no outcome kind: never matched, or matched by a kind the kit does not write. */
+  extra: arms.filter((a) => !kinds.includes(a)),
+});
+
+test("status.sh's outcome_state has a case for every outcome kind, and every case is one", () => {
+  const arms = outcomeArms(status);
+  const { missing, extra } = outcomeContract(arms, OUTCOME_KINDS);
+  assert.deepEqual(missing, [], "outcome kinds (mod/hooks/run-record.ts) with no case in status.sh's outcome_state");
+  assert.deepEqual(extra, [], "cases in status.sh's outcome_state that are no outcome kind (mod/hooks/run-record.ts)");
+  // A case takes its first match, so a kind named again in a later arm is dead there.
+  assert.equal(new Set(arms).size, arms.length, "status.sh names an outcome kind in two arms of outcome_state");
+});
+
+test("the outcome_state contract fails in both directions", () => {
+  const arms = outcomeArms(status);
+  // A kind added on the run record's side only.
+  assert.deepEqual(outcomeContract(arms, [...OUTCOME_KINDS, "shipped"]), { missing: ["shipped"], extra: [] });
+  // A case added on status.sh's side only, as its own arm or beside a kind.
+  const added = status.replace(/^(outcome_state\(\) \{\n  case "\$1" in\n)/m, "$1    shipped) printf 'merged';;\n");
+  assert.deepEqual(outcomeContract(outcomeArms(added), OUTCOME_KINDS), { missing: [], extra: ["shipped"] });
+  const beside = status.replace("    merged) printf 'merged';;", "    merged|\"merged earlier\") printf 'merged';;");
+  assert.deepEqual(outcomeContract(outcomeArms(beside), OUTCOME_KINDS), { missing: [], extra: ["merged earlier"] });
+  // A case dropped from status.sh: its kind is missing.
+  const dropped = status.replace("    crashed) printf 'crashed';;\n", "");
+  assert.deepEqual(outcomeContract(outcomeArms(dropped), OUTCOME_KINDS), { missing: ["crashed"], extra: [] });
+  for (const changed of [added, beside, dropped]) assert.notEqual(changed, status, "the self-check's edit of status.sh applies");
+  // An arm the harvest cannot read fails rather than passing unseen.
+  assert.throws(() => outcomeArms(status.replace("    crashed) printf 'crashed';;", "    crashed) echo crashed;;")), /neither an arm nor a comment/);
 });
 
 test("every ticket state in the status view's shell fixtures is a ticket state", () => {

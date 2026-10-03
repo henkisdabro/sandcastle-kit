@@ -140,10 +140,3 @@ test("no reader in src/, mod/ or status.sh matches an outcome's text with a rege
   for (const p of shPrefixes(readFileSync(join(KIT, "status.sh"), "utf8")).filter(matchesALine)) found.push(`status.sh: ${p}`);
   assert.deepEqual(found, [], "read the outcome's kind (mod/hooks/run-record.ts), not its line");
 });
-
-test("status.sh's outcome_state has a case for every outcome kind, and every case is one", () => {
-  const sh = readFileSync(join(KIT, "status.sh"), "utf8");
-  const body = sh.slice(sh.indexOf("outcome_state() {"), sh.indexOf("\n}", sh.indexOf("outcome_state() {")));
-  const cases = [...body.matchAll(/^[ \t]+([^#\s(][^)\n]*)\)\s/gm)].flatMap((m) => m[1].split("|").map((c) => c.trim().replace(/^"|"$/g, "")));
-  assert.deepEqual([...cases].sort(), [...OUTCOME_KINDS].sort());
-});
