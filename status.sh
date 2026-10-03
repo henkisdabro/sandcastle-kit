@@ -685,10 +685,11 @@ settings_row() {
 
 # How many commits a merged ticket landed: once merged, its branch has none
 # left over the base, and a 0 read as "merged nothing". Its merge commit's
-# second parent says (a squash is the one commit); "-" when none is found.
+# second parent says (a squash is the one commit); "-" when none is found. A merge that left a
+# criterion unmet is "part of" its ticket, not "closes" it.
 landed_commits() {
   local p
-  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" 2>/dev/null)
+  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
   case "$p" in
     *' '*) git rev-list --count "${p%% *}..${p#* }" 2>/dev/null || echo -;;
     ?*) echo 1;;
@@ -916,7 +917,7 @@ render() {
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
       # A landed branch is deleted at landing (merge or squash), so its subject on the base is the proof.
-      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" 2>/dev/null)" ]; then
+      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" --grep="Merge agent/issue-$n (part of $(disp "$n"))" 2>/dev/null)" ]; then
         state="merged"; activity_note="landed on $BASE"
       else
         state="no branch"

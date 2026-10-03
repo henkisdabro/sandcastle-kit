@@ -59,6 +59,15 @@ const ROWS: Row[] = [
   ],
   ["merged, closing failed", landing({ kind: "close-failed", error: "gh: HTTP 502" }), {}, "merged - merged; closing the ticket failed", "merged - merged (ticket not closed)", "merged, not closed (landed)", `close: ${CLOSE}`],
   [
+    "merged, a criterion left unmet",
+    landing({ kind: "partly-done", unmet: "the export module does not use the new rule" }),
+    { report: REPORT },
+    "merged - merged; ticket left open (a criterion is unmet)",
+    "merged - merged (partly done)",
+    "merged, partly done (landed)",
+    `comment: ${CLOSE} **Left open: an acceptance criterion is unmet.** the export module does not use the new rule\n\nThe next run picks up the remainder.\n\n${REPORT}`,
+  ],
+  [
     "merged by an earlier run",
     landing({ kind: "closed-earlier" }, "merged-earlier"),
     {},
@@ -270,6 +279,7 @@ test("the table has a row for every ending kind, every landing and every pipelin
     skipped: true,
     "not-landed": true,
     "close-failed": true,
+    "partly-done": true,
     "dry-run": true,
   };
   const ended = ROWS.map(([, e]) => e);

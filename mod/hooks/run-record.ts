@@ -153,6 +153,8 @@ export type TicketRecord = {
   closeFailed?: string;
   /** What the reviewer said no gate exercises; a merged ticket with one needs a person. */
   ungated?: string;
+  /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */
+  unmet?: string;
   /** Paths the branch changed beyond its ticket's `Touches:` line. */
   overrun?: string[];
 };

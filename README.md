@@ -309,6 +309,15 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. The next run
+picks up the remainder.
+
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -617,7 +626,8 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 ### 📊 After a run
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
-branches, merged tickets the reviewer says no gate proves, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
+branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
+undone, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
@@ -663,8 +673,9 @@ A queued ticket with a branch from an earlier run builds on that branch:
 - A branch that was reviewed and green, and has not moved since, skips implement and review: a clean
   base merge goes straight to the gates, a conflicted one gets a short resolver prompt first. A
   re-run whose only change since its last review is the base merge gets a review of the merge
-  alone. The record behind both is `.sandcastle/logs/heads.json`; `sandcastle requeue` clears a
-  ticket's entry.
+  alone. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+  agents left undone, so a branch that skips them still lands as partly done; `sandcastle requeue`
+  clears a ticket's entry.
 - When the short resolver prompt resolves a conflicted base merge, the kit checks the result
   against git's own automatic merge: a resolution may change only the files git could not
   merge itself (and [`generated`](#-a-gate-for-generated-files) paths). If it also edits a file git
@@ -691,7 +702,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs), and each branch's last outcome |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with any criterion left undone, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
