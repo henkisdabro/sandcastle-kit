@@ -374,6 +374,17 @@ disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1";
 
 # Machine-wide slots (pool.ts): one lock file per slot, holding its owner's
 # pid. Counts live ones only; the limits come from the CLI.
+# A slot's owner is a process of the kit, the rule of src/pool.ts `holderRunning`: a pid that
+# `ps` shows as some other process is a killed run's, whose pid came round. When `ps` cannot say
+# (BusyBox has no -p) the pid still counts if the process exists, as a signal of 0 shows.
+slot_alive() {
+  local command
+  case "$1" in ''|*[!0-9]*) return 1;; esac
+  command=$(ps -p "$1" -o command= 2>/dev/null)
+  [ -n "$command" ] && { [[ "$command" == *"$RUN_COMMAND"* ]]; return; }
+  kill -0 "$1" 2>/dev/null
+}
+
 load_pool() {
   local dir="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/slots" pool used f pid
   for pool in sandboxes gates; do
@@ -381,7 +392,7 @@ load_pool() {
     for f in "$dir/$pool"-*.lock; do
       [ -f "$f" ] || continue
       pid=$(cut -d' ' -f1 "$f")
-      kill -0 "$pid" 2>/dev/null && used=$((used+1))
+      slot_alive "$pid" && used=$((used+1))
     done
     case "$pool" in sandboxes) lim="${SANDCASTLE_MAX_SANDBOXES:-6}";; gates) lim="${SANDCASTLE_MAX_GATES:-2}";; esac
     printf -v "USED_$pool" '%s' "$used"; printf -v "LIM_$pool" '%s' "$lim"

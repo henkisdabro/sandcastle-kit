@@ -31,7 +31,7 @@ test("status.sh and the mod read the command line with the same ps call", () => 
 });
 
 test("no run's pid is judged by `kill -0` alone in status.sh", () => {
-  // The slot locks (load_pool) are not runs: their owners are any process of the kit.
+  // The slot locks (load_pool) are not runs: `slot_alive` falls back to a signal of 0 when `ps` cannot answer.
   const outsidePool = status.replace(/^load_pool\(\) \{[\s\S]*?\n\}$/m, "");
   assert.doesNotMatch(outsidePool, /kill -0 "\$pid"/);
 });

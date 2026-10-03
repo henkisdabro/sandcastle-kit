@@ -14,14 +14,19 @@
 // still applies inside the machine-wide cap.
 //
 // A slot is a lock file holding the owner's pid, created with O_EXCL. A slot
-// whose pid is gone is stale and taken over, so a killed run never leaks one.
-// The run lock (guard.ts) is the same kind of file, taken the same way.
+// whose owner is gone is stale and taken over, so a killed run never leaks one.
+// The run lock (guard.ts) is the same kind of file, taken the same way. An owner
+// is a process of the kit (its command line holds RUN_COMMAND, as for a run):
+// a killed run's pid comes round as some other process, and the lock would
+// otherwise be held for as long as that one lasts.
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import { OperatorError } from "./errors.ts";
+import { commandOf } from "./live-runs.ts";
 import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
@@ -57,13 +62,25 @@ export const limit = (pool: PoolName): number => {
   return (settings[pool] ??= wholeNumber(fromEnv ? s.env : s.key, fromEnv ? process.env[s.env] : (machineSettings()[s.key] ?? s.fallback), 1));
 };
 
-export const alive = (pid: number) => {
+const exists = (pid: number) => {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+};
+
+/**
+ * The lock's owner is still running: a process of the kit holds the pid. When `ps` cannot say
+ * what the pid is (no `-p`, as in BusyBox, or `ps` failing) but the process exists, the lock is
+ * kept: a live run misread as gone would let a second one take the same project, while a
+ * recycled pid kept for want of an answer only waits for a later look.
+ */
+export const holderRunning = (pid: number, probe: Probe = commandOf): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  const command = probe(pid);
+  return command === undefined ? exists(pid) : isKit(command);
 };
 
 // A lock that vanished between two calls reads as undefined: its owner
@@ -89,12 +106,13 @@ const WEDGED_MS = 10_000;
 
 /**
  * Takes the lock `file` for this process: `mine` (its content, to release it
- * with) if taken, `owner` if a live process holds it, neither if it is busy for
+ * with) if taken, `owner` if a live process of the kit holds it, neither if it is busy for
  * a moment (being written or taken over) - try again later.
  *
  * The content is "<pid> <token> <label>": the pid first, which status.sh reads;
  * the token, so a release never removes a lock someone else took since. A lock
- * whose pid is dead is taken over under `<file>.takeover`, and only if it still
+ * whose owner is gone (`holderRunning`: its pid is dead, or is some other process
+ * now) is taken over under `<file>.takeover`, and only if it still
  * holds the same stale content: two runs that both saw it stale once both
  * unlinked it, the second removing the first's fresh lock, and both ran.
  */
@@ -112,7 +130,7 @@ export const takeLock = (file: string, label: string): { mine?: string; owner?: 
     // Empty is a lock being written, unless it has been empty for too long.
     if (!stale && age(file) < WEDGED_MS) return {};
     const pid = Number(stale.split(" ")[0]);
-    if (stale && alive(pid)) return { owner: pid };
+    if (stale && holderRunning(pid)) return { owner: pid };
     const guard = `${file}.takeover`;
     try {
       writeFileSync(guard, `${process.pid}\n`, { flag: "wx" });
@@ -185,7 +203,7 @@ export const usage = () =>
             // Not a `.takeover` guard: that is a slot changing hands, not a second one.
             if (!f.startsWith(`${pool}-`) || !f.endsWith(".lock")) return false;
             const content = read(join(DIR, f));
-            return !!content && alive(Number(content.split(" ")[0]));
+            return !!content && holderRunning(Number(content.split(" ")[0]));
           }).length
         : 0;
       return `${pool} ${used}/${limit(pool)}`;

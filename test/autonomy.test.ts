@@ -13,6 +13,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { OutcomeEntry, RunRecord } from "../mod/hooks/run-record.ts";
+import { kitLikeProcess } from "./kit-process.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -197,12 +198,17 @@ test("recordRun twice in one process: the first run is finished in history, the 
 test("lockRun held by another live process refuses with what to do", () => {
   const p = project();
   mkdirSync(join(p.root, ".sandcastle/logs"), { recursive: true });
-  // This process's parent: alive for the whole test, and not this process.
-  writeFileSync(join(p.root, ".sandcastle/logs/run.lock"), `${process.ppid} x t\n`);
-  assert.throws(
-    () => lockRun(p),
-    (e: Error) => e instanceof OperatorError && /is live \(pid \d+\)\. One run per project at a time: wait for it to end \(`sandcastle status` shows it\), or stop it with Ctrl-C/.test(e.message),
-  );
+  // A process of the kit, alive for the whole test, and not this process.
+  const kit = kitLikeProcess();
+  try {
+    writeFileSync(join(p.root, ".sandcastle/logs/run.lock"), `${kit.pid} x t\n`);
+    assert.throws(
+      () => lockRun(p),
+      (e: Error) => e instanceof OperatorError && /is live \(pid \d+\)\. One run per project at a time: wait for it to end \(`sandcastle status` shows it\), or stop it with Ctrl-C/.test(e.message),
+    );
+  } finally {
+    kit.kill();
+  }
 });
 
 test("lockRun twice in one process does not refuse its own lock", () => {
