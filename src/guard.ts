@@ -154,8 +154,12 @@ const BASE_REF = "refs/base";
 export const backupRepo = (project: Project) => join(project.root, ".sandcastle", "backup.git");
 
 // `--git-dir` explicit: no discovery of the enclosing project (its config is the sandboxes' to
-// write), and `safe.bareRepository=explicit` in a user's config does not refuse it.
-const backupGit = (project: Project, args: string[]) => sh("git", ["--git-dir", backupRepo(project), ...args], join(project.root, ".sandcastle"));
+// write), and `safe.bareRepository=explicit` in a user's config does not refuse it. Auto
+// maintenance off: every fetch starts `git maintenance run --auto --detach`, which repacks the
+// backup behind the kit's back and can hold the lock `dropBackup`'s own gc needs, so the prune
+// fails silently and packs pile up.
+const backupGit = (project: Project, args: string[]) =>
+  sh("git", ["-c", "maintenance.auto=false", "-c", "gc.auto=0", "--git-dir", backupRepo(project), ...args], join(project.root, ".sandcastle"));
 
 const backupTip = (project: Project, branch: string) => {
   if (!existsSync(join(backupRepo(project), "HEAD"))) return "";

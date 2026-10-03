@@ -55,10 +55,9 @@ test("init prints the pointer to the three questions", (t) => {
   assert.ok(logs.includes("answer the three questions in .sandcastle/rules.md"));
 });
 
-const skill = read(join(kit, "skill/SKILL.md"));
-const initSection = skill.match(/^## init[\s\S]*?(?=^## |(?![\s\S]))/m)?.[0] ?? "";
+const initSection = read(join(kit, "skill/init.md"));
 
-test("the skill's init section asks the questions and keeps its eight numbered steps", () => {
+test("init.md asks the questions and keeps its eight numbered steps", () => {
   assert.ok(initSection.length > 0, "init section not found");
   const flat = initSection.replace(/\s+/g, " ");
   for (const word of ["generated", "protectedPaths", "A gate for generated files", "question tool"]) {
@@ -69,6 +68,6 @@ test("the skill's init section asks the questions and keeps its eight numbered s
 
 test("update.md still points at init steps 4 and 6", () => {
   const update = read(join(kit, "skill/update.md"));
-  assert.match(update, /as in SKILL\.md's init step 4/);
-  assert.match(update, /as in SKILL\.md's init step 6/);
+  assert.match(update, /as in init\.md step 4/);
+  assert.match(update, /as in init\.md step 6/);
 });

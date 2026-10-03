@@ -20,6 +20,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The `/sandcastle` skill loads only what the action needs.** `SKILL.md` is now a short router
+  and each action's steps live in a file of their own (`init.md`, `queue.md`, `run.md`,
+  `status.md` beside `audit.md` and `update.md`), so a `status` check no longer loads the
+  init, queue and run instructions. The ticket-body rules (blocker line, `Touches:`, evidence)
+  are written once, in `queue.md`, and the audit follows them; long steps such as the run's
+  pre-start check are broken into checklists. An open session keeps the skill it loaded, so
+  start a new one after updating.
 - **The idle mark is drawn in sand above the prompt, not pinned in the status line.** Claude Code gives
   every pinned status line a warning triangle and its notice colour, which a mod cannot change, so
   the quiet `sandcastle · 3 ready` read as a warning and clashed with its own indicators. The mod
@@ -36,6 +43,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The tip backup is pruned reliably.** Every fetch into `.sandcastle/backup.git` started git's
+  background auto maintenance, which repacked it behind the kit's back and could hold the lock the
+  kit's own prune needs, so the prune failed silently and packs piled up. The kit now runs its
+  git calls there with auto maintenance off. Nothing to do.
 - **A branch red at landing no longer shows as ready after the run.** The status view read the
   outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
   row as ready to land; it now shows gate red, like a red pipeline.
