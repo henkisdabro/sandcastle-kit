@@ -437,7 +437,7 @@ WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
@@ -448,6 +448,9 @@ load_run() {
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
+  # This run's demand and share of the machine pool, live values the run rewrites; an older kit's record has neither.
+  read -r POOL_DEMAND POOL_SHARE < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring)] | join(" ")' "$f" 2>/dev/null)
+  [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
   RUN_ISSUES=$(jq -r '(.issues // [])[] | tostring' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
@@ -803,7 +806,9 @@ render() {
         # Next to start first: the run takes its queue in this order.
         pos=$(printf '%s\n' "$TICKETS" | awk -F"$US" -v o="${order:-0}" '$2=="queued" && $5+0 < o+0 {c++} END{print c+1}')
         key=$(( 1000000 - ${order:-0} )); age="-"
-        if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi;;
+        if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi
+        # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
+        case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
       implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
@@ -999,8 +1004,17 @@ render() {
   run_cell
   load_pool
   gauge "$USED_sandboxes" "$LIM_sandboxes"; kvl sandboxes "$REPLY"; MAC[0]="$REPLY"
-  gauge "$USED_gates" "$LIM_gates"; kvl gates "$REPLY"; MAC[1]="$REPLY"
-  if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
+  gauge "$USED_gates" "$LIM_gates"
+  if [ "$RUN_LIVE" = 1 ] && [ -n "$POOL_SHARE" ]; then
+    # This run's demand (slots it could use now) and share (its part of the machine pool) take the
+    # third row, so the gates queue, when there is one, moves onto the gates row.
+    [ "$gate_wait" -gt 0 ] && REPLY="$REPLY ${hot}· ${gate_wait} waiting${off}"
+    kvl gates "$REPLY"; MAC[1]="$REPLY"
+    kvl "this run" "${head}wants ${POOL_DEMAND}${gry} · share ${head}${POOL_SHARE}${off}"
+  else
+    kvl gates "$REPLY"; MAC[1]="$REPLY"
+    if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
+  fi
   MAC[2]="$REPLY"
   # "implement X · review Y", one row each in the models cell.
   models=$(models_line); mprefix=""

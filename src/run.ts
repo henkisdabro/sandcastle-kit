@@ -501,6 +501,10 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   }
   return {
     startedAt: run.startedAt!,
+    /** The record is finished: nothing writes to it any more, and a timer that did should stop. */
+    get finished() {
+      return finished;
+    },
     /** `stage` is what the status view's run line shows while the run is live. */
     update(fields: RunRecord) {
       run = { ...run, ...fields };
