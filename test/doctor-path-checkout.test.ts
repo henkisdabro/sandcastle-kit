@@ -6,9 +6,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 
 const KIT = join(import.meta.dirname, "..");
@@ -27,12 +27,13 @@ const onPath = (files: Record<string, string>) => {
 };
 const doctor = (pathDir?: string) => {
   const cwd = scratch();
-  const base = process.env.PATH ?? "";
+  // Without the host's own `sandcastle` (an installed kit), which would stand in for "nothing on PATH".
+  const base = (process.env.PATH ?? "").split(delimiter).filter((d) => !existsSync(join(d, "sandcastle"))).join(delimiter);
   return spawnSync(process.execPath, ["--import", join(KIT, "node_modules/tsx/dist/loader.mjs"), join(KIT, "src/cli.ts"), "doctor"], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PATH: pathDir ? `${pathDir}:${base}` : base, XDG_CONFIG_HOME: scratch(), GIT_CEILING_DIRECTORIES: tmpdir() },
+    env: { ...process.env, PATH: pathDir ? `${pathDir}${delimiter}${base}` : base, XDG_CONFIG_HOME: scratch(), GIT_CEILING_DIRECTORIES: tmpdir() },
   }).stdout;
 };
 const fix = /^FIX\s+`sandcastle` on PATH points at this kit/m;
