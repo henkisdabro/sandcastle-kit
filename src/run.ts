@@ -294,11 +294,60 @@ export const agentLogging = (project: Project, id: string, name: string, runId: 
       if (event.type !== "raw") return;
       try {
         appendFileSync(raw, event.line + "\n");
+        // The library's parser drops every tool result, so a failed call left no trace in the readable log.
+        const failure = toolFailureLine(event.line);
+        if (failure) appendFileSync(log, failure + "\n");
       } catch {
         // A full disk must not fail an agent pass; the library swallows a throwing callback too.
       }
     },
   };
+};
+
+/**
+ * `! error: <first line>` (or `! exit N: <first line>` for a command's non-zero exit) for each failed tool
+ * result in one raw stream line, else undefined. A result is failed when it says `is_error`, as a call to a
+ * tool that does not exist does, or when its text opens with Claude Code's `Exit code N`.
+ */
+export const toolFailureLine = (line: string): string | undefined => {
+  if (!line.includes("tool_result")) return undefined;
+  let event: { type?: string; message?: { content?: unknown } };
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const content = event.message?.content;
+  if (event.type !== "user" || !Array.isArray(content)) return undefined;
+  const lines: string[] = [];
+  for (const part of content as { type?: string; is_error?: boolean; content?: unknown }[]) {
+    if (part?.type !== "tool_result") continue;
+    const body = typeof part.content === "string"
+      ? part.content
+      : Array.isArray(part.content) ? part.content.map((c: { text?: unknown }) => (typeof c?.text === "string" ? c.text : "")).join("\n") : "";
+    const code = body.match(/^\s*Exit code (-?\d+)/)?.[1];
+    if (!part.is_error && (code === undefined || code === "0")) continue;
+    // Claude Code wraps its own refusals in a <tool_use_error> tag, and a failed command's output follows its
+    // `Exit code N` line: the first line that says something is the one to show.
+    const said = body.replace(/<\/?tool_use_error>/g, "").split("\n").map((l) => l.trim()).filter((l) => l !== "");
+    const text = (code === undefined ? said[0] : said[0]?.replace(/^Exit code -?\d+\s*:?\s*/, "") || said[1]) ?? "";
+    lines.push(`! ${code === undefined || code === "0" ? "error" : `exit ${code}`}${text ? `: ${text.slice(0, 300)}` : ""}`);
+  }
+  return lines.length ? lines.join("\n") : undefined;
+};
+
+/**
+ * The library ends each pass with "Context window: Nk", which is the sum of input, cache-write and cache-read
+ * tokens over every turn - tokens processed, not a window. Rewritten once the pass has returned; safe to repeat.
+ */
+export const relabelContextWindow = (log: string) => {
+  try {
+    const text = readFileSync(log, "utf8");
+    const out = text.replace(/^Context window: (\d+k)$/gm, "Tokens processed (all turns): $1");
+    if (out !== text) writeFileSync(log, out);
+  } catch {
+    // No log to rewrite (the pass died before writing one) is not a failure of the pass.
+  }
 };
 
 // Local time with its offset, built by hand: toLocaleString varies by locale,

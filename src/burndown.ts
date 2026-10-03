@@ -38,7 +38,7 @@ import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, relabelContextWindow,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -715,6 +715,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       throw error;
     });
 
+    // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
+      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+
     try {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
@@ -814,7 +818,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       if (landOnly && mergeConflicted) {
         await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `impl-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -852,7 +856,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // ride the same gates as the implementer's, so a review that breaks the
       // build cannot merge either. Log names keep `-review-` for status.sh.
       const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
-        sandbox.run({
+        pass({
           name,
           logging: agentLogging(project, issue.id, name, runId),
           agent,
@@ -895,7 +899,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `impl-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -1034,7 +1038,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         // allowance still has to stop the queue, so that one is rethrown.
         const fixed = await timed(issue.id, "repair", () => {
           const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `repair-${issue.id}`,
             logging,
             agent: implAgent(own),
