@@ -34,21 +34,21 @@ afterEach(() => {
 });
 after(() => rmSync(cache, { recursive: true, force: true }));
 
-const member = (o: Partial<Member>): Member => ({ run: "other", project: "agencyos", pid: 1, demand: 5, held: 6, share: 3, registered: true, since: 1, ...o });
-const other = (o: Partial<Neighbour> = {}): Neighbour => ({ project: "agencyos", registered: true, held: 6, demand: 5, wait: 12 * 60, ...o });
+const member = (o: Partial<Member>): Member => ({ run: "other", project: "webshop", pid: 1, demand: 5, held: 6, share: 3, registered: true, since: 1, ...o });
+const other = (o: Partial<Neighbour> = {}): Neighbour => ({ project: "webshop", registered: true, held: 6, demand: 5, wait: 12 * 60, ...o });
 
 test("the line names the other run, its slots and demand, this run's share and the wait for the first slot", () => {
   const others = [member({})];
   const split = splitAtStart(5, others);
   assert.deepEqual(split, { share: 3, free: 0 });
   assert.deepEqual(startLines(split, [other()]), [
-    "agencyos is live (6 slots, demand 5): this run's share is 3; it starts as agencyos's tickets finish, the first likely in ~12m",
+    "webshop is live (6 slots, demand 5): this run's share is 3; it starts as webshop's tickets finish, the first likely in ~12m",
   ]);
 });
 
 test("the wait is left out when there is no history for it", () => {
   const [line] = startLines({ share: 3, free: 0 }, [other({ wait: undefined })]);
-  assert.equal(line, "agencyos is live (6 slots, demand 5): this run's share is 3; it starts as agencyos's tickets finish");
+  assert.equal(line, "webshop is live (6 slots, demand 5): this run's share is 3; it starts as webshop's tickets finish");
   assert.doesNotMatch(line, /likely|~/);
 });
 
@@ -58,25 +58,25 @@ test("an hour or more is said as the estimate says it", () => {
 
 test("some free slots: it starts with those and waits for the rest; enough free: it starts at once", () => {
   const some = startLines(splitAtStart(5, [member({ held: 4, demand: 5 })]), [other({ held: 4 })]);
-  assert.equal(some[0], "agencyos is live (4 slots, demand 5): this run's share is 3; it starts with 2 slots now and takes the rest as agencyos's tickets finish, the first likely in ~12m");
+  assert.equal(some[0], "webshop is live (4 slots, demand 5): this run's share is 3; it starts with 2 slots now and takes the rest as webshop's tickets finish, the first likely in ~12m");
   const one = startLines({ share: 3, free: 1 }, [other({ held: 5 })]);
   assert.match(one[0], /it starts with 1 slot now and takes the rest/);
   const plenty = startLines(splitAtStart(5, [member({ held: 1, demand: 1, share: 1 })]), [other({ held: 1, demand: 1 })]);
-  assert.equal(plenty[0], "agencyos is live (1 slot, demand 1): this run's share is 5; it starts at once");
+  assert.equal(plenty[0], "webshop is live (1 slot, demand 1): this run's share is 5; it starts at once");
 });
 
 test("two other runs are both named, and the first slot is the sooner wait", () => {
   const [line] = startLines({ share: 2, free: 0 }, [other({ held: 3, demand: 3, wait: 20 * 60 }), other({ project: "web", held: 3, demand: 4, wait: 7 * 60 })]);
-  assert.equal(line, "agencyos is live (3 slots, demand 3) and web is live (3 slots, demand 4): this run's share is 2; it starts as agencyos's and web's tickets finish, the first likely in ~7m");
+  assert.equal(line, "webshop is live (3 slots, demand 3) and web is live (3 slots, demand 4): this run's share is 2; it starts as webshop's and web's tickets finish, the first likely in ~7m");
 });
 
 test("a run from an older kit is named as one that ignores shares, and does not stop the run starting", () => {
-  assert.deepEqual(startLines({ share: 3, free: 0 }, [other({ registered: false, wait: undefined })]), ["agencyos's run predates shares: it keeps taking free slots until it ends"]);
+  assert.deepEqual(startLines({ share: 3, free: 0 }, [other({ registered: false, wait: undefined })]), ["webshop's run predates shares: it keeps taking free slots until it ends"]);
   assert.deepEqual(startLines({ share: 3, free: 0 }, [other({ registered: false, project: undefined })]), ["another project's run predates shares: it keeps taking free slots until it ends"]);
   const both = startLines({ share: 2, free: 0 }, [other({ project: "web", held: 3, demand: 3 }), other({ registered: false, held: 3 })]);
   assert.equal(both.length, 2);
-  assert.match(both[0], /^web is live \(3 slots, demand 3\): this run's share is 2; it starts as web's and agencyos's tickets finish/);
-  assert.equal(both[1], "agencyos's run predates shares: it keeps taking free slots until it ends");
+  assert.match(both[0], /^web is live \(3 slots, demand 3\): this run's share is 2; it starts as web's and webshop's tickets finish/);
+  assert.equal(both[1], "webshop's run predates shares: it keeps taking free slots until it ends");
 });
 
 test("no other live run: no line, and the share is the whole limit", () => {
@@ -126,10 +126,10 @@ test("the record behind a live run is found by its pid through the live-runs dir
   kits.push(kit);
   const root = mkdtempSync(join(tmpdir(), "sandcastle-root-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  writeFileSync(join(root, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "agencyos", pid: kit.pid, concurrency: 4 }));
+  writeFileSync(join(root, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "webshop", pid: kit.pid, concurrency: 4 }));
   mkdirSync(join(cache, "sandcastle-kit", "runs"), { recursive: true });
   writeFileSync(join(cache, "sandcastle-kit", "runs", "abc"), root);
-  assert.equal(recordOfRun(kit.pid)?.record.orchestrator, "agencyos");
+  assert.equal(recordOfRun(kit.pid)?.record.orchestrator, "webshop");
   assert.equal(recordOfRun(kit.pid)?.root, root);
   assert.equal(recordOfRun(kit.pid + 100000), undefined);
 });

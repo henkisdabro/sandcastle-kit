@@ -543,10 +543,10 @@ ticket's branch also changes. Then come the image check, preflight, the hook che
 gates; a red one stops the run before any agent starts.
 
 When another run is live and holds or wants sandbox slots, the start also says how the machine is
-split, before the estimate: `agencyos is live (6 slots, demand 5): this run's share is 3; it starts
-as agencyos's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
+split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3; it starts
+as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
 time for an issue and the ages of its working tickets, so it is left out where that project has no
-history. A run from an older kit is named as one that ignores shares (`agencyos's run predates
+history. A run from an older kit is named as one that ignores shares (`webshop's run predates
 shares: it keeps taking free slots until it ends`); the run still starts. Nothing is asked: the
 split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share, not the
 machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`.
