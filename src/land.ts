@@ -269,14 +269,12 @@ export const landTicket = async (
       const squash = project.land === "squash";
       const how = squash ? "squashed" : "merged";
       dropBackup(project, branch);
-      // A squashed branch's commits never reach the base, so it is deleted as a run deletes it.
+      // Deleted as a run deletes it: a squashed branch would read as unmerged work, a merged one is clutter.
       let kept = "";
-      if (squash) {
-        try {
-          sh("git", ["branch", "-D", branch], project.root);
-        } catch {
-          kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
-        }
+      try {
+        sh("git", ["branch", squash ? "-D" : "-d", branch], project.root);
+      } catch {
+        kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
       }
       const comment =
         `${squash ? "Squashed" : "Merged"} locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +

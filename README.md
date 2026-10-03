@@ -958,7 +958,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
-| `land` | `"merge"` | How green work lands: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`; the agent branch is deleted once landed). A landing resolved by regenerating `generated` paths and `sandcastle land` follow it too. Held branches are never landed either way |
+| `land` | `"merge"` | How green work lands: `"merge"` (a merge commit; the branch's commits kept) or `"squash"` (one commit per ticket, subject `Merge agent/issue-N (closes #N)`). Either way the agent branch is deleted once landed. A landing resolved by regenerating `generated` paths and `sandcastle land` follow it too. Held branches are never landed either way |
 | `generated` | `[]` | `[{ paths, regen }]` - committed files a command writes. A merge that conflicts only in these paths - a re-run's base merge, or a landing - takes either side, reruns `setup`, runs `regen` in a sandbox and commits; any other conflict is left for the implementer (at landing, as a conflict). See [A gate for generated files](#-a-gate-for-generated-files) |
 | `implement` / `review` | kit models, `high` effort, 8 / 3 iterations, 2400 s idle | `{ model, effort, maxIterations, idleTimeoutSeconds }` per agent. The `IMPL_*` / `REVIEW_*` env vars override `model` and `effort` for one run |
 | `repair` | 1 attempt, 4 iterations, 2400 s idle | `{ attempts, maxIterations, idleTimeoutSeconds }` - passes the implementer's model gets to fix a red gate from its output; up to two more while each pass turns up a different failure, never the same one twice. `attempts: 0` turns it off. A gate that timed out is never repaired. A repair that commits and turns the gates green is followed by a second review pass (the review model, on the repair commits) and, if that commits, one more gate run. `maxIterations` and `idleTimeoutSeconds` also bound the resolver that finishes a re-run's conflicted base merge (see [Re-runs](#-re-runs)) |
@@ -1116,7 +1116,7 @@ and the kit narrows what can cross it:
   that copy with a warning line; a tip that moves for a ticket that is not running stops the run. A
   base that was deleted or moved stops it with the exact `git update-ref` that puts it back, and a
   sandbox's worktree record rewritten to a container path (`git worktree repair`) is named. A branch
-  the kit deletes itself, a squash landing's, is never restored.
+  the kit deletes itself, a landed one, is never restored.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `push`,
   `reflog expire`, `worktree prune` and `repair`, deleting an `agent/*` branch, `rm` or `mv` inside

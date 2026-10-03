@@ -80,7 +80,7 @@ export const pinHostGitConfig = (root: string) => {
 // `branches` is the tip of every `agent/issue-*` branch the run expects, and `flying` the ones whose
 // pipeline runs now (the agent is committing): a branch in it may move, and only has to exist. The
 // kit moves both with its own writes - `begin`, `settle` and `forget` in landing.ts - so a branch
-// it deleted itself (a squash landing) is never "restored". Every pipeline and the landing worker
+// it deleted itself (a landed branch) is never "restored". Every pipeline and the landing worker
 // check the same two objects, hence the sharing in `gitFingerprint`.
 export type Fingerprint = { files: Record<string, string>; base: string; branches: Record<string, string>; flying: Set<string> };
 

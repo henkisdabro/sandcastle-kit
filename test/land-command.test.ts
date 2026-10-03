@@ -127,6 +127,8 @@ test("a clean, green branch is merged with the kit's message, then its ticket is
   assert.equal(readFileSync(f.marker, "utf8"), "the feature\n");
   assert.equal(scratchBranches(f.root), "");
   assert.equal(git(f.root, "status", "--porcelain").out, "");
+  // Landed, so deleted as a squash's is: a merged branch left behind piles up until a clean.
+  assert.equal(git(f.root, "branch", "--list", BRANCH).out, "");
 });
 
 test("a red gate merges nothing and leaves the ticket alone", async () => {
