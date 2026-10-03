@@ -12,7 +12,7 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
-import { isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
@@ -580,6 +580,21 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
   return out;
+};
+
+/**
+ * Seconds until the first ticket of another live run is likely to end, for the start line of a run
+ * that has to wait for a slot: this project's usual time for one issue (`typicalTimes`, the history
+ * the estimate reads) less each working ticket's age, a minute at least, as the status view counts
+ * it. Undefined with no history or no working ticket - the line then leaves the wait out.
+ */
+export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.now()): number | undefined => {
+  const typical = typicalTimes(project).issue;
+  if (typical === undefined) return undefined;
+  const left = Object.values(record.tickets ?? {}).flatMap((t) =>
+    t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof t.started === "number" ? [Math.max(typical - (nowMs / 1000 - t.started), 60)] : [],
+  );
+  return left.length ? Math.min(...left) : undefined;
 };
 
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
