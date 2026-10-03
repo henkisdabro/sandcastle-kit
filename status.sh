@@ -1061,7 +1061,8 @@ render() {
   fi
   FTR="$BUF"; ftr_n=$(( BUF_N + 1 ))   # and the rule that opens it
 
-  # A short pane: the logo folds to one row, so the table keeps some rows.
+  # A short pane: the logo folds to one row - the wordmark alone, since a castle cut
+  # to its battlements reads as a broken logo - so the table keeps some rows.
   if [ "$SHOW_ALL" != all ] && [ $(( rows - HDR_N - ftr_n - 1 )) -lt 5 ]; then build_header 1; fi
   hdr_n="$HDR_N"
 
@@ -1143,7 +1144,7 @@ build_header() {
       " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
       " ${deep}██▀██${off} ${star}·${off}   ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
   else
-    LG=("${moon}▄▄▄${off} ${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+    LG=("${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
   fi
   # Every logo line padded to the widest, so centring keeps the castle's shape.
   for l in "${LG[@]}"; do vlen "$l"; [ "$VN" -gt "$m" ] && m=$VN; done
