@@ -185,7 +185,18 @@ const ROWS: Row[] = [
   ],
   ["nothing to change", pipeline({}), {}, "nochange - nothing to change", "no change - nochange"],
   ["handed back with a hold note", pipeline({}), { hold: "note" }, "held - handed back - for a human", "no change - nochange", "needs a human (a person acts)"],
-  ["handed back with the tracker's hold label", pipeline({}), { hold: "label" }, "held - handed back - for a human", "held - needs a human: handed back", "needs a human (a person acts)"],
+  ["handed back with the tracker's hold label", pipeline({ handedBack: true }), {}, "held - handed back - for a human", "held - needs a human: handed back", "needs a human (a person acts)"],
+  [
+    "handed back with the tracker's hold label, with a report",
+    pipeline({ handedBack: true }),
+    { report: REPORT },
+    "held - handed back - for a human",
+    "held - needs a human: handed back",
+    "needs a human (a person acts)",
+    `comment: ${REPORTED}`,
+  ],
+  ["handed back with a hold note, with a report: the note, never a second comment", pipeline({}), { hold: "note", report: REPORT }, "held - handed back - for a human", "no change - nochange", "needs a human (a person acts)"],
+  ["crashed after a hold note: the note, never a second comment", { kind: "crashed", error: new Error("x"), attempts: 1 }, { hold: "note", report: REPORT }, "crashed - Error: x", "crashed - crashed"],
   ["work left uncommitted", pipeline({}), { kept: ".sandcastle/worktrees/agent-issue-2" }, "uncommitted - work left uncommitted in .sandcastle/worktrees/agent-issue-2", "uncommitted - uncommitted"],
   ["handed back, its work uncommitted", pipeline({}), { kept: ".sandcastle/worktrees/agent-issue-2", hold: "note" }, "uncommitted - work left uncommitted in .sandcastle/worktrees/agent-issue-2", "uncommitted - uncommitted"],
   [
@@ -269,38 +280,94 @@ test("the table has a row for every ending kind, every landing and every pipelin
   assert.deepEqual(statuses.filter((s) => !ended.some((e) => e.kind === "pipeline" && e.outcome.status === s)), []);
 });
 
-test("the writer records the outcome and the view's word of every ending, and the state of every landing and of the endings no attempt wrote", () => {
+// The writer's ports over memory: the states, outcomes and view words it wrote.
+const memory = (context: (id: string) => Context = () => BASE) => {
   const states: [string, unknown][] = [];
   const outcomes: Record<string, unknown> = {};
   const views: [string, boolean, string][] = [];
-  const hold = new Set<string>();
   const ledger = createLedger({
     run: { ticket: (id, fields) => void states.push([id, fields]) },
     outcomes: (o) => Object.assign(outcomes, o),
     view: { landed: (id, ok, word) => void views.push([id, ok, word]) },
-    context: (id) => ({ ...BASE, ...(hold.has(id) && { hold: "label" as const }) }),
+    context,
     bookkeep: (_id, fn) => fn(),
     ...NO_REQUEUE,
   });
+  return { ledger, states, outcomes, views };
+};
+
+test("the writer records the state, the outcome and the view's word of every ending", () => {
+  const { ledger, states, outcomes, views } = memory();
   ledger.record("1", landing({ kind: "merged" }));
   ledger.record("2", { kind: "not begun", why: { kind: "withdrawn", reason: "ticket closed during the run" } });
-  ledger.record("3", pipeline({}));
+  ledger.record("3", pipeline({ handedBack: true }));
   ledger.record("4", { kind: "crashed", error: new Error("ENOSPC"), attempts: 1, green: green() });
-  // The attempt still writes the state of a pipeline as it ends; landOne writes no verdict, so the ledger writes a landing's.
+  ledger.record("5", pipeline({ status: "gate-failed", gates: [{ name: "test", pass: false }] }));
+  ledger.record("6", { kind: "crashed", error: new Error("idle timeout"), attempts: 1 });
+  ledger.record("7", { kind: "stopped", cause: { kind: "tampered", error: new Error("moved") }, finished: false });
+  // Nothing in the attempt, the scheduler's glue or after the schedule writes these: the ledger does, from the ending.
   assert.deepEqual(states, [
     ["1", { state: "merged", note: "merged and closed" }],
     ["2", { state: "withdrawn", note: "ticket closed - not started" }],
+    ["3", { state: "held", note: "handed back - for a human" }],
     ["4", { state: "crashed", note: "ENOSPC" }],
+    ["5", { state: "red", note: "test red" }],
+    ["6", { state: "crashed", note: "Error: idle timeout" }],
+    ["7", { state: "stopped", note: "finished before the run stopped - lands on a later run" }],
   ]);
-  assert.deepEqual(Object.keys(outcomes), ["1", "3", "4"]);
-  assert.deepEqual(views, [["1", true, "merged"]]);
-  // Recorded again once the tracker's hold label is read: the outcome and the view say so, the entry too.
-  hold.add("3");
-  ledger.record("3", pipeline({}));
+  assert.deepEqual(Object.keys(outcomes), ["1", "3", "4", "5", "6", "7"]);
   assert.deepEqual(outcomes["3"], { kind: "held", text: "needs a human: handed back" });
-  assert.deepEqual(views.at(-1), ["3", false, "needs a human"]);
-  assert.deepEqual([...ledger.entries.keys()], ["1", "2", "3", "4"]);
+  assert.deepEqual(views, [
+    ["1", true, "merged"],
+    ["3", false, "needs a human"],
+  ]);
+  assert.deepEqual([...ledger.entries.keys()], ["1", "2", "3", "4", "5", "6", "7"]);
   assert.equal(accountLanding(ledger.entries.values()).needsHuman, 1);
+});
+
+test("a ticket the run's stop left unstarted is recorded once the schedule is over, in the run's last words", () => {
+  const { ledger, states } = memory();
+  const unstarted: TicketEnding = { kind: "not begun", why: { kind: "usage limit", line: "usage at 95%" } };
+  ledger.tell({ kind: "ended", id: "8", ending: unstarted });
+  // Told as it happened, the run's stop line could still change: nothing is written yet.
+  assert.deepEqual(states, []);
+  const refused: TicketEnding = { kind: "not begun", why: { kind: "refused label", reason: "NOT STARTED: #9 carries the hold label" } };
+  ledger.close(
+    new Map<string, TicketEnding>([
+      ["8", unstarted],
+      ["9", refused],
+      ["10", { kind: "waiting", on: "file" }],
+    ]),
+    "#3 hit the plan's usage limit",
+  );
+  assert.deepEqual(states, [["8", { state: "skipped", note: "not started: #3 hit the plan's usage limit" }]]);
+  assert.equal(ledger.entries.get("8")?.context.stopLine, "#3 hit the plan's usage limit");
+});
+
+test("with no stop line, a ticket left unstarted says the run stopped", () => {
+  const { ledger, states } = memory();
+  ledger.close(new Map<string, TicketEnding>([["8", { kind: "not begun", why: { kind: "usage limit", line: "x" } }]]), undefined);
+  assert.deepEqual(states, [["8", { state: "skipped", note: "not started: the run stopped" }]]);
+});
+
+test("a green branch waiting to land is ready, with its outcome now, and says what will hold it", () => {
+  const { ledger, states, outcomes, views } = memory();
+  const finished = (o: Partial<Extract<TicketEnding, { kind: "pipeline" }>["outcome"]>) => ({ ...green(), gates: [], ...o }) as Extract<TicketEnding, { kind: "pipeline" }>["outcome"];
+  ledger.ready("1", finished({}), []);
+  ledger.ready("2", finished({}), [".github/workflows/ci.yml"]);
+  ledger.ready("3", finished({ status: "merged-earlier" }), []);
+  assert.deepEqual(states, [
+    ["1", { state: "ready", note: "gates green, 1 repair(s)" }],
+    ["2", { state: "ready", note: "human merge: .github/workflows/ci.yml" }],
+    ["3", { state: "ready", note: "merged earlier (abc1234) - to close" }],
+  ]);
+  assert.deepEqual(outcomes, {
+    "1": { kind: "green", text: "green - waiting to land" },
+    "2": { kind: "green", text: "green - waiting to land" },
+    "3": { kind: "merged", text: "merged-earlier" },
+  });
+  // Not an ending: the view's word, and the entry, wait for its landing.
+  assert.deepEqual([views, ledger.entries.size], [[], 0]);
 });
 
 test("a write that throws costs the ticket that write only", () => {

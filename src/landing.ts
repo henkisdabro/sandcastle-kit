@@ -20,7 +20,7 @@ import { type GateRun, failingTests } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
+import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
@@ -584,12 +584,3 @@ export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }
 
 /** The record of a ticket the tracker withdrew before its attempt began. */
 export const withdrawnRecord = (reason: string): TicketRecord => ({ state: "withdrawn", note: `${reason.replace(" during the run", "")} - not started` });
-
-/**
- * Green before the base moved: finished, and landing on a later run like the ones whose own check
- * failed - not "ready", which says this run lands it. `outcome` is what the status view shows of it.
- */
-export const STOPPED_GREEN = {
-  record: { state: "stopped", note: "finished before the run stopped - lands on a later run" } satisfies TicketRecord,
-  outcome: { kind: "stopped", text: "stopped: the run stopped before landing" } satisfies Outcome,
-};

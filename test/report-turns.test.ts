@@ -15,7 +15,7 @@ import { test } from "node:test";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { afterTurn } = await import("../src/autonomy.ts");
-const { settledUnlanded } = await import("../src/burndown.ts");
+const { describe } = await import("../src/ledger.ts");
 const { closingReport, operatorSteps, render } = await import("../src/report.ts");
 const { recordRun } = await import("../src/run.ts");
 const { strayChanges, strayNote } = await import("../src/resolution.ts");
@@ -178,15 +178,21 @@ test("a resolution strayChanges holds is held with its note from the first write
   const why = strayNote(stray!);
   assert.equal(why, "conflict resolution changed clean.txt, which merged cleanly - check no other ticket's lines were lost");
 
-  const held = settledUnlanded({ status: "held", heldNote: why }, true);
+  // The state the ledger ends the pipeline on, with the hold note the kit posts beside it.
+  const settled = (status: "held" | "nochange", note: boolean) =>
+    describe(
+      { kind: "pipeline", outcome: { issue: "5", branch: "agent/issue-5", status, ...(status === "held" && { heldNote: why }), commits: 0, repairs: 0, gates: [] }, attempts: 1 },
+      { base: "main", gateNames: "test", ...(note && { hold: "note" as const }) },
+    ).record!;
+  const held = settled("held", true);
   assert.deepEqual(held, { state: "held", note: why });
   // The agent handed nothing back, so even with a hold note on file it is not "handed back".
   assert.doesNotMatch(held.note ?? "", /handed back/);
   assert.notEqual(held.state, "nochange");
 
   // What an agent hands back itself is still said so; no note at all is still "nothing to change".
-  assert.deepEqual(settledUnlanded({ status: "nochange" }, true), { state: "nochange", note: "handed back - for a human" });
-  assert.deepEqual(settledUnlanded({ status: "nochange" }, false), { state: "nochange", note: "nothing to change" });
+  assert.deepEqual(settled("nochange", true), { state: "held", note: "handed back - for a human" });
+  assert.deepEqual(settled("nochange", false), { state: "nochange", note: "nothing to change" });
 });
 
 test("closingReport marks a turn the loop continues from, and only that one", async () => {
