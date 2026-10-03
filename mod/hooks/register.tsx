@@ -260,7 +260,7 @@ async function discover($: EngineInterface, root: string) {
   }
 }
 
-/** The session root's store entry and `/sandcastle-status`, once `.sandcastle/` exists. */
+/** The session root's store entry, `/sandcastle-status` and `/sandcastle-mark`, once `.sandcastle/` exists. */
 async function adopt($: EngineInterface, root: string) {
   if (adopted || !(await isProject($, root))) return;
   adopted = true;
