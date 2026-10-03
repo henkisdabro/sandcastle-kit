@@ -200,6 +200,11 @@ comments, and the gates can prove it.
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
+   When a ticket's body is written or rewritten here, its `Touches:` line names only files an agent
+   may edit under the project's rules, existing paths as they are; a new file is marked new in the
+   prose, not on that line (`(new)` would be read as part of the path). A run opens no pull request,
+   so evidence is asked for in the agent's final message or a ticket comment. `audit.md` step 10 has the full wording.
+
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
    question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
    theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
