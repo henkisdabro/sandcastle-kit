@@ -35,7 +35,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLine
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
+import { joinPool, limit, myShare, setDemand, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
@@ -468,6 +468,23 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   }, notify && ((r) => runNotify(notify, project.name, r)));
   // The machine-wide list of live runs (the Herdr tab bar, the Claude Code mod), Herdr or not.
   registerRun(project.root);
+  // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
+  // until the scheduler tells its own demand, for the base gates that come first.
+  joinPool(project.name, CONCURRENCY, 1);
+  // The run record's live values (not settings): what the run wants and its share of the pool now.
+  // The share moves as other runs begin and end, so it is read again as well as on a demand change.
+  let shown = { demand: -1, share: -1 };
+  const poolValues = () => {
+    // A finished record is the next turn's to replace: a timer writing to it would undo that.
+    if (run.finished) return clearInterval(poolWatch);
+    const mine = myShare();
+    if (!mine || (mine.demand === shown.demand && mine.share === shown.share)) return;
+    shown = { demand: mine.demand, share: mine.share };
+    run.update(shown);
+  };
+  const poolWatch: ReturnType<typeof setInterval> = setInterval(poolValues, 5000);
+  poolWatch.unref();
+  poolValues();
   // Released on any exit, Ctrl-C included, so the clean-up command Sandcastle
   // prints for a kept worktree works as printed.
   // Once per process: each turn of an autonomy run would add another listener.
@@ -1248,8 +1265,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
+    // A ticket that waits for the run's share, not only for a slot, says so; the note goes with its next state.
+    let shareNote = false;
+    const waitNote = (why: WaitReason) =>
+      bookkeep(issue.id, () => {
+        if (why === "share") run.ticket(issue.id, { note: "waits for the run's share" });
+        else if (shareNote) run.ticket(issue.id, { note: null });
+        shareNote = why === "share";
+      });
     const result = await slotTurn(slotWanted)
-      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue)))
+      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue), waitNote))
       .then(
         (value) => ({ status: "fulfilled", value }) as const,
         (reason: unknown) => ({ status: "rejected", reason }) as const,
@@ -1312,6 +1337,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
         return ledger.tell(c);
+      case "demand":
+        // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
+        setDemand(c.n);
+        return poolValues();
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
@@ -1332,7 +1361,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, attempt, ...landingWork(ctx), tell })
+    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       return stopLanding(error);
@@ -1378,7 +1407,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   let verify: Gate[] | undefined;
   if (merged.length > 1 || regenerated > 0) {
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify"));
+    // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
+    setDemand(1);
+    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify")).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);

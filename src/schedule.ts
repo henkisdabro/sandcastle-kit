@@ -511,6 +511,8 @@ export type Change<G, O, B = unknown> =
   | { kind: "ended"; id: string; ending: Ending<G, O> }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
   | { kind: "landing"; at: number; of: number }
+  /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
+  | { kind: "demand"; n: number }
   | HoldChange
   | BlockerChange<B>;
 
@@ -544,6 +546,8 @@ export type Plan<T extends { id: string }, B = unknown> = {
 export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /** Pipelines at once. */
   workers: number;
+  /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
+  concurrency?: number;
   /**
    * One attempt of a ticket: `n` is 2 for a requeued ticket, which carries `again`. `last()` says
    * nothing more will start after it - none queued, none that may be freed, or a stopped run - so a
@@ -628,7 +632,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let pushed = 0;
       let dealt = 0;
       const pipelines = createQueue<T>();
+      // The sandbox slots the run could use now (the machine pool's demand): the tickets in a
+      // pipeline or ready for one, plus one while a green branch waits to land or is landing,
+      // never more than the concurrency. A ticket held for a blocker or a file adds nothing until
+      // it starts, so a run with two startable tickets left asks for two. Told when the count changes.
+      const cap = Math.max(0, work.concurrency ?? work.workers);
+      // Counted from the push to the end of the attempt, so a ticket a worker has taken but not yet begun still counts.
+      let inPipeline = 0;
+      let demanded: number | undefined;
+      const demand = () => {
+        const n = Math.min(cap, inPipeline + (dealt < pushed ? 1 : 0));
+        if (n === demanded) return;
+        demanded = n;
+        tell({ kind: "demand", n });
+      };
       const stage = () => {
+        demand();
         if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
       // Tickets without their ending. The queues stay open until none is left: a landing can send
@@ -667,7 +686,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         behind.delete(t.id);
         byId.set(t.id, t);
         open++;
+        inPipeline++;
         pipelines.push(t);
+        demand();
       };
       /**
        * The ticket landed or left the run: its files are free. Each parked ticket that no longer
@@ -748,7 +769,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         first.set(t.id, again);
         sentBack.set(t.id, { green: g, landed });
         tell({ kind: "requeued", id: t.id, again });
+        inPipeline++;
         pipelines.push(t);
+        demand();
         return true;
       };
 
@@ -819,12 +842,15 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           }
         } finally {
           working--;
+          inPipeline--;
           stage();
         }
       };
 
       if (open <= 0) closeAll();
+      inPipeline = now.length;
       for (const c of now) pipelines.push(c.ticket);
+      demand();
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
       const fanOut = pipelines.run(work.workers, attempt).finally(() => {

@@ -24,6 +24,15 @@
 // entry whose process is gone is ignored and removed, by the same rule as a stale slot.
 // Within one run nothing is ordered here: its own waiters poll as they always did, and
 // `slotTurn` (landing.ts) puts a landing before the run's next pipeline.
+//
+// Shares (docs/adr/0001): live runs split the sandbox slots equally between them, up to each
+// run's demand. A run registers (`joinPool`: `runs/<id>.run`, written whole and renamed in) with
+// its project, its demand and that it knows shares; liveness is the stale-lock rule. A run at or
+// above its share (the slots it holds count) takes no new sandbox slot while another run below
+// its share wants one, and never loses one it holds. A run with slots and no registration is from an
+// older kit: it is counted as wanting its concurrency (its run record's), or the slots it holds.
+// The gates pool has no shares.
+//
 // The run lock (guard.ts) is the same kind of file, taken the same way. An owner
 // is a process of the kit (its command line holds RUN_COMMAND, as for a run):
 // a killed run's pid comes round as some other process, and the lock would
@@ -35,7 +44,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import { OperatorError } from "./errors.ts";
-import { commandOf } from "./live-runs.ts";
+import { commandOf, RUNS_DIR } from "./live-runs.ts";
 import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
@@ -43,6 +52,7 @@ export type PoolName = "sandboxes" | "gates";
 const DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "slots");
 // A subdirectory, so status.sh's `<pool>-*.lock` glob and `usage` never see an entry.
 const WAITS = join(DIR, "waits");
+const RUNS = join(DIR, "runs");
 
 /** This process's run, as its slot locks and wait entries name it: one id per process, never reused. */
 export const RUN_ID = randomUUID().slice(0, 8);
@@ -95,6 +105,14 @@ export const holderRunning = (pid: number, probe: Probe = commandOf): boolean =>
   if (!Number.isInteger(pid) || pid <= 0) return false;
   const command = probe(pid);
   return command === undefined ? exists(pid) : isKit(command);
+};
+
+/** Pids already asked about, so one look at the pool asks `ps` once per process, not once per file. */
+type Seen = Map<number, boolean>;
+const alive = (pid: number, seen?: Seen) => {
+  if (!seen) return holderRunning(pid);
+  if (!seen.has(pid)) seen.set(pid, holderRunning(pid));
+  return seen.get(pid)!;
 };
 
 // A lock that vanished between two calls reads as undefined: its owner
@@ -175,9 +193,11 @@ export const releaseLock = (file: string, mine: string) => {
 
 const held = new Map<string, string>();
 const waiting = new Set<string>();
+let joined: Joined | undefined;
 process.on("exit", () => {
   for (const [file, mine] of held) releaseLock(file, mine);
   for (const file of waiting) rmSync(file, { force: true });
+  if (joined) rmSync(joined.file, { force: true });
 });
 
 export type SlotLock = { pid: number; run: string; label: string };
@@ -193,14 +213,14 @@ const parseLock = (content: string): SlotLock => {
 };
 
 /** The pool's slots held by a live run now. */
-export const liveSlots = (pool: PoolName): SlotLock[] => {
+export const liveSlots = (pool: PoolName, seen?: Seen): SlotLock[] => {
   if (!existsSync(DIR)) return [];
   return readdirSync(DIR)
     .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".lock")) // not a `.takeover` guard: that is a slot changing hands
     .flatMap((f) => {
       const content = read(join(DIR, f));
       const lock = content ? parseLock(content) : undefined;
-      return lock && holderRunning(lock.pid) ? [lock] : [];
+      return lock && alive(lock.pid, seen) ? [lock] : [];
     });
 };
 
@@ -214,7 +234,7 @@ export const slotsByRun = (pool: PoolName): Map<string, number> => {
 type Wait = { file: string; pid: number; run: string; since: number };
 
 /** The live waits for `pool`; an entry left by a dead process is removed, one that cannot be read is skipped. */
-const waits = (pool: PoolName): Wait[] => {
+const waits = (pool: PoolName, seen?: Seen): Wait[] => {
   if (!existsSync(WAITS)) return [];
   return readdirSync(WAITS)
     .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".wait"))
@@ -222,7 +242,7 @@ const waits = (pool: PoolName): Wait[] => {
       const file = join(WAITS, f);
       const [pid, run, since] = (read(file) ?? "").split(" ");
       if (!since) return [];
-      if (!holderRunning(Number(pid))) {
+      if (!alive(Number(pid), seen)) {
         rmSync(file, { force: true });
         return [];
       }
@@ -230,9 +250,156 @@ const waits = (pool: PoolName): Wait[] => {
     });
 };
 
-/** Another live run has waited for this pool longer than `mine` (ties go to the lower run id). */
-const olderWait = (pool: PoolName, mine: Wait) =>
-  waits(pool).some((w) => w.run !== mine.run && (w.since < mine.since || (w.since === mine.since && w.run < mine.run)));
+/** A live run's registration: who it is and how many sandbox slots it could use now. */
+export type Registration = { pid: number; run: string; project: string; demand: number; concurrency: number; since: number };
+
+type Joined = { file: string; registration: Registration };
+
+const parseRegistration = (text: string | undefined): Registration | undefined => {
+  try {
+    const r = JSON.parse(text ?? "") as Partial<Registration> & { shares?: boolean };
+    // `shares` is the mark of a kit that knows them; a file without it is not one of ours.
+    if (r.shares !== true || typeof r.run !== "string" || !Number.isInteger(r.pid) || !Number.isInteger(r.demand) || !Number.isInteger(r.since)) return undefined;
+    return { pid: r.pid!, run: r.run, project: String(r.project ?? ""), demand: Math.max(0, r.demand!), concurrency: Number(r.concurrency) || 0, since: r.since! };
+  } catch {
+    return undefined;
+  }
+};
+
+/** The live registrations; one left by a dead process is removed, one that cannot be read is skipped. */
+const registrations = (seen?: Seen): (Registration & { file: string })[] => {
+  if (!existsSync(RUNS)) return [];
+  return readdirSync(RUNS)
+    .filter((f) => f.endsWith(".run"))
+    .flatMap((f) => {
+      const file = join(RUNS, f);
+      const r = parseRegistration(read(file));
+      if (!r) return [];
+      if (!alive(r.pid, seen)) {
+        rmSync(file, { force: true });
+        return [];
+      }
+      return [{ ...r, file }];
+    });
+};
+
+const writeRegistration = (j: Joined) => {
+  writeFileSync(`${j.file}.tmp`, JSON.stringify({ ...j.registration, shares: true }) + "\n");
+  renameSync(`${j.file}.tmp`, j.file);
+};
+
+/**
+ * Registers this process's run in the pool, beside the slot locks, so the other live runs can
+ * work out their shares. Once per process: an autonomy run's next turn is the same run and
+ * updates its demand. The registration goes when the process does. Every sandbox slot this
+ * process takes after it stays within the run's share.
+ */
+export const joinPool = (project: string, concurrency: number, demand = 0) => {
+  mkdirSync(RUNS, { recursive: true });
+  joined ??= { file: join(RUNS, `${RUN_ID}.run`), registration: { pid: process.pid, run: RUN_ID, project, demand, concurrency, since: Date.now() } };
+  joined.registration = { ...joined.registration, project, concurrency, demand };
+  writeRegistration(joined);
+};
+
+/** Updates the run's demand, when it changed. Not registered: nothing to update. */
+export const setDemand = (demand: number) => {
+  if (!joined || joined.registration.demand === demand) return;
+  joined.registration = { ...joined.registration, demand };
+  writeRegistration(joined);
+};
+
+/** A kit that wrote no registration is told by its pid: the concurrency its run record holds, if the live-runs directory leads to it. */
+const concurrencyOfRun = (pid: number): number | undefined => {
+  try {
+    for (const f of readdirSync(RUNS_DIR)) {
+      const root = read(join(RUNS_DIR, f))?.trim();
+      if (!root) continue;
+      let record: { pid?: unknown; concurrency?: unknown };
+      try {
+        record = JSON.parse(read(join(root, ".sandcastle/logs/run.json")) ?? "");
+      } catch {
+        continue;
+      }
+      if (record.pid === pid && Number.isInteger(record.concurrency) && (record.concurrency as number) > 0) return record.concurrency as number;
+    }
+  } catch {
+    /* no live-runs directory, or one that cannot be read: the slots held stand in */
+  }
+  return undefined;
+};
+
+/** One live run as the pool sees it: what it wants, what it holds and, for the sandbox pool, its share. */
+export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number };
+
+/**
+ * The limit split equally between the runs that want slots, none above its demand: a run that
+ * needs less than an equal part releases the rest to the others, again equally, until the pool
+ * or every demand is met. Whole slots: the earlier of two equal runs (`since`, then `run`) gets
+ * the odd one, so every run works out the same split from the same files.
+ */
+export const splitShares = (total: number, wants: { run: string; demand: number; since: number }[]): Map<string, number> => {
+  const shares = new Map<string, number>();
+  let remaining = total;
+  const asking = wants.filter((w) => w.demand > 0).sort((a, b) => a.demand - b.demand || a.since - b.since || (a.run < b.run ? -1 : 1));
+  asking.forEach((w, i) => {
+    const share = Math.min(w.demand, Math.ceil(remaining / (asking.length - i)));
+    shares.set(w.run, share);
+    remaining -= share;
+  });
+  for (const w of wants) if (!shares.has(w.run)) shares.set(w.run, 0);
+  return shares;
+};
+
+/**
+ * Every live run that is registered or holds a sandbox slot, with its share of the pool.
+ * A run with slots and no registration is from an older kit (or a command that is no run): it
+ * wants its concurrency from its run record, or the slots it holds, and takes no share on trust.
+ */
+export const members = (pool: PoolName = "sandboxes", seen?: Seen): Member[] => {
+  const registered = registrations(seen);
+  const locks = liveSlots(pool, seen);
+  const heldBy = new Map<string, number>();
+  for (const { run } of locks) heldBy.set(run, (heldBy.get(run) ?? 0) + 1);
+  const rows: Omit<Member, "share">[] = registered.map((r) => ({ run: r.run, project: r.project, pid: r.pid, demand: r.demand, held: heldBy.get(r.run) ?? 0, registered: true, since: r.since }));
+  const known = new Set(registered.map((r) => r.run));
+  for (const [run, count] of heldBy) {
+    if (known.has(run)) continue;
+    const pid = locks.find((l) => l.run === run)!.pid;
+    rows.push({ run, pid, demand: concurrencyOfRun(pid) ?? count, held: count, registered: false, since: 0 });
+  }
+  const shares = splitShares(limit(pool), rows);
+  return rows.map((r) => ({ ...r, share: shares.get(r.run) ?? 0 }));
+};
+
+/** This run's demand and share, or undefined when it has not joined the pool. */
+export const myShare = (): { demand: number; share: number; held: number } | undefined => {
+  if (!joined) return undefined;
+  const me = members().find((m) => m.run === RUN_ID);
+  return me && { demand: me.demand, share: me.share, held: me.held };
+};
+
+/** A run that could take a slot if one were free: one that knows no shares, or holds fewer than its share. */
+const below = (m: Member | undefined) => !m || !m.registered || m.held < m.share;
+
+/** Another live run has waited for this pool longer than `mine` (ties go to the lower run id), and could take a slot. */
+const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen) =>
+  waits(pool, seen).some(
+    (w) => w.run !== mine.run && (w.since < mine.since || (w.since === mine.since && w.run < mine.run)) && (pool !== "sandboxes" || below(ms.find((m) => m.run === w.run))),
+  );
+
+/**
+ * This run is at or above its share of the sandbox pool and another run below its share wants a
+ * slot: a registered run below its share does (its demand is what it will ask for next, so a run
+ * between two of its tickets is not mistaken for one that wants nothing), and so does any other
+ * run with a wait entry. Not registered, or the gates pool: no shares. With no other run
+ * wanting one, a free slot is taken as before.
+ */
+const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
+  if (pool !== "sandboxes" || !joined) return false;
+  if (below(ms.find((m) => m.run === RUN_ID))) return false;
+  if (ms.some((m) => m.run !== RUN_ID && m.registered && m.held < m.share)) return true;
+  return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
+};
 
 let sequence = 0;
 // Written whole, then renamed in: a reader never sees an entry half-written.
@@ -260,24 +427,39 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
   return undefined;
 };
 
+/** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own. */
+export type WaitReason = "slots" | "share";
+
 /**
- * Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free. The slot
- * goes to the run that has waited longest; `pollMs` is how often a wait looks again.
+ * Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free, and why
+ * (again when the reason changes). The slot goes to the run that has waited longest, within each
+ * run's share; `pollMs` is how often a wait looks again.
  */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: () => void, pollMs = 5000): Promise<T> => {
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000): Promise<T> => {
   const wait = beginWait(pool, label);
   let slot: ReturnType<typeof tryAcquire>;
   try {
-    let yielded = olderWait(pool, wait);
-    slot = yielded ? undefined : tryAcquire(pool, `run=${RUN_ID} ${label}`);
-    if (!slot) {
-      console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${yielded ? "another run has waited longer" : `${limit(pool)} in use`})`);
-      onWait?.();
-    }
-    while (!slot) {
+    let told: WaitReason | undefined;
+    let yielded = false;
+    const attempt = (): WaitReason | undefined => {
+      const seen: Seen = new Map();
+      const ms = pool === "sandboxes" ? members(pool, seen) : [];
+      yielded = false;
+      if (overShare(pool, ms, seen)) return "share";
+      if (olderWait(pool, wait, ms, seen)) return (yielded = true), "slots";
+      slot = tryAcquire(pool, `run=${RUN_ID} ${label}`);
+      return slot ? undefined : "slots";
+    };
+    for (let why = attempt(); !slot; why = attempt()) {
+      if (why !== told) {
+        told = why;
+        const me = why === "share" ? myShare() : undefined;
+        console.log(
+          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, another run waits below its own` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
+        );
+        onWait?.(why!);
+      }
       await new Promise((r) => setTimeout(r, pollMs));
-      yielded = olderWait(pool, wait);
-      slot = yielded ? undefined : tryAcquire(pool, `run=${RUN_ID} ${label}`);
     }
   } finally {
     endWait(wait);

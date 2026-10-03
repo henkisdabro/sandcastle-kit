@@ -570,7 +570,7 @@ and draws no row.
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person; `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
+| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
 
@@ -1166,7 +1166,24 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`).
+
+Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
+slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch
+waits to land, never more than its concurrency; a ticket held for a blocker adds nothing until the
+blocker lands, and a run that has drained its queue asks for none. The pool is divided equally
+between the runs that ask for slots, and a run that needs less than an equal part releases the rest
+to the others, again equally. A run's share is its part: with two runs wanting 5 each on 6 slots,
+each gets 3; a run wanting 1 leaves 5 to the other; a run alone gets everything it asks for, as
+before. A run at or above its share (the slots it holds count) takes no new slot while another run
+below its share wants one; with no one wanting one, a free slot is taken as usual. Nothing is stopped:
+a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
+that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
+fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
+and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
+wait. The status header's `this run` row shows the run's demand and share, and a ticket held back
+by its share says `waits for the run's share`. A run started by an older kit knows no shares and
+ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 
