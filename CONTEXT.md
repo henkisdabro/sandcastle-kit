@@ -77,6 +77,34 @@ _Avoid_: result, the prose line alone
 The module that turns endings and told changes into the run record's verdicts, outcomes, view
 words and tracker text.
 
+### Sharing the machine
+
+**Machine pool**:
+The sandboxes and gate runs one machine allows at once, across every project's runs - a sandbox
+limit and a gate limit, set per machine, never per project.
+_Avoid_: pool (alone), concurrency (a run's own cap)
+
+**Slot**:
+One place in the machine pool, which a run holds while one ticket's sandbox or gate run lives.
+_Avoid_: lock (the file that records it), worker
+
+**Demand**:
+How many sandbox slots a live run could use now: the tickets it could start at once, plus a
+landing that waits, never more than its concurrency. Blocked tickets add nothing until their
+blocker lands.
+_Avoid_: want, need, queue length (which counts blocked tickets)
+
+**Share**:
+How many of the machine pool's sandbox slots one live run may hold now, its landing included:
+the pool split equally between live runs, none given more than its demand or cap. Unlike a run
+setting it changes during the run; a run above its share takes no new slot, and never loses one
+it holds.
+_Avoid_: quota, allocation, concurrency (the most a run ever wants, a run setting)
+
+**Cap**:
+A person's limit on one live run's share, set while it runs and gone when it ends.
+_Avoid_: weight (a lasting per-project setting, which this is not), override
+
 ### Keeping a project up to date
 
 **Kit version**:
