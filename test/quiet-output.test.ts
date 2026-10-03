@@ -32,7 +32,8 @@ for (const file of files) {
     // so the child prints as it would on its own.
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    const r = spawnSync(process.execPath, [tsx, "--test", file], { cwd: kit, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    // Spec named: Node 22 defaults a piped run to TAP, whose every line the pattern above would refuse.
+    const r = spawnSync(process.execPath, [tsx, "--test", "--test-reporter=spec", file], { cwd: kit, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const noisy = `${r.stdout}\n${r.stderr}`.split("\n").filter((l) => l.trim() !== "" && !reporterLine.test(l));
     assert.deepEqual(noisy, []);
