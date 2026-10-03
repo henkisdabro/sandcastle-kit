@@ -391,7 +391,7 @@ load_pool() {
 # A run's pid is the run only while it is a process of the kit: a pid comes round again as some
 # other process, and a run that was killed would read as live. The same rule as
 # mod/hooks/run-live.ts (`RUN_COMMAND`, and `ps -p <pid> -o command=`, the flags BSD and procps
-# share), in bash: a node start on each redraw is too slow. test/status-contract.test.ts holds
+# share), in bash: a node start on each redraw is too slow. test/run-live-contract.test.ts holds
 # the two together.
 RUN_COMMAND="src/cli.ts"
 run_alive() {
