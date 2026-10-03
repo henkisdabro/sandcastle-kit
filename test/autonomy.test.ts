@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { RunRecord } from "../mod/hooks/run-record.ts";
+import type { OutcomeEntry, RunRecord } from "../mod/hooks/run-record.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -130,14 +130,16 @@ test("drainStop: no progress, and the same ticket conflicting in two turns runni
   assert.match(drainStop(turn(5, ["9"], ["1"]), turn(1, [], ["1"]), refOf)!, /^#1 conflicted/);
 });
 
-test("conflictedIn: the tickets this run's outcomes record as a conflict", () => {
+test("conflictedIn: the tickets this run's outcomes record as a conflict, by kind", () => {
   const outcomes = {
-    1: { run: "r2", outcome: "merge conflict: src/a.ts" },
-    2: { run: "r2", outcome: "merged" },
-    3: { run: "r1", outcome: "merge conflict: src/b.ts" },
-    4: { run: "r2", outcome: "merge conflict: conflicted again after a requeue" },
+    1: { run: "r2", kind: "conflict", text: "merge conflict: src/a.ts" },
+    2: { run: "r2", kind: "merged", text: "merged" },
+    3: { run: "r1", kind: "conflict", text: "merge conflict: src/b.ts" },
+    4: { run: "r2", kind: "conflict", with: ["1", "3"], text: "merge conflict: conflicted again with #1, #3 after a requeue" },
     5: { run: "r2" },
-  };
+    // The line is never read: one with no kind is no conflict, whatever it says.
+    6: { run: "r2", text: "merge conflict: src/c.ts" },
+  } satisfies Record<string, OutcomeEntry>;
   assert.deepEqual(conflictedIn(outcomes, "r2"), ["1", "4"]);
   assert.deepEqual(conflictedIn({}, "r2"), []);
 });

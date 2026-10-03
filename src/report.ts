@@ -15,10 +15,10 @@ import { join } from "node:path";
 import { afterTurn, DRAIN_CAP, type Level, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, NO_TOKENS, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { sh } from "./sandbox.ts";
 import { makeTracker, refOf } from "./tracker.ts";
-import { isTicketState, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+import { isTicketState, type OutcomeKind, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 export type Facts = {
   base: string;
@@ -37,6 +37,8 @@ export type Facts = {
   verify?: { green: boolean; line: string } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
+  /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
+  outcomes?: Record<string, OutcomeKind>;
   /** Blocked tickets whose blockers are all closed now, after landing. */
   runnable: string[];
   /** Blocked tickets still waiting, with each open blocker's label. */
@@ -103,9 +105,9 @@ const statesIn = (section: Section) => TICKET_STATES.filter((s) => SECTIONS[s] =
 const sectionOf = (state: string | undefined) => (isTicketState(state) ? SECTIONS[state] : undefined);
 export const NEEDS_FIXING = statesIn("needs fixing");
 const LEFT = statesIn("left");
-// A ticket the landing worker found green alone and red once merged says so in its note (src/landing.ts);
-// a red gate in its own pipeline names the failing gates instead. The difference is the pair, not the gate.
-const redTogether = (t: TicketRecord) => t.state === "red" && /^red (with|on the merged)/.test(t.note ?? "");
+// A ticket the landing worker found green alone and red once merged has the outcome `red`; a red gate
+// in its own pipeline has `gate red`. The difference is the pair, not the gate.
+const redTogether = (f: Facts, id: string) => f.tickets[id]?.state === "red" && f.outcomes?.[id] === "red";
 
 // A run that started agents owes a summary (due); an exit before it is printed
 // (Ctrl-C, a crash) says where to find one instead of ending silently.
@@ -206,6 +208,11 @@ export const gather = async (project: Project): Promise<Facts> => {
     }
   }
 
+  // Only this run's: an entry an earlier run wrote says nothing about this run's tickets.
+  const outcomes = Object.fromEntries(
+    Object.entries(readOutcomes(root)).flatMap(([id, o]) => (o.run === run.startedAt && o.kind ? [[id, o.kind]] : [])),
+  );
+
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
@@ -223,6 +230,7 @@ export const gather = async (project: Project): Promise<Facts> => {
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
+    outcomes,
     runnable,
     blocked,
     blockCheck,
@@ -263,8 +271,7 @@ export const render = (f: Facts, plain = false): string => {
   // it before any commit. There is nothing to review or merge - only a question.
   const handedBack = held.filter((id) => f.changed[id] === 0);
   // Marked for a human by a person mid-run: they took it; the branch is only there if it helps.
-  // "marked needs-human" is the same note in a record written before the hold label was renamed.
-  const takenBack = held.filter((id) => !handedBack.includes(id) && /^marked (for a human|needs-human)/.test(f.tickets[id].note ?? ""));
+  const takenBack = held.filter((id) => !handedBack.includes(id) && f.outcomes?.[id] === "taken back");
   const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id));
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
@@ -385,7 +392,7 @@ export const render = (f: Facts, plain = false): string => {
     const t = f.tickets[id];
     const what = t.state === "conflict"
       ? `merge conflict: ${t.note ?? ""}`
-      : redTogether(t)
+      : redTogether(f, id)
         // Its gates passed on its own branch: the fix is in how it meets the tickets named, not in its own tests.
         ? `${t.note!.replace(/^red /, "red together ")} (green on its own branch)`
         : t.state === "red" ? `gate ${t.note ?? "red"}` : `${t.state}: ${t.note ?? ""}`;
@@ -414,7 +421,7 @@ export const render = (f: Facts, plain = false): string => {
   const ticketState = (label: string) => {
     const id = Object.keys(f.tickets).find((k) => refOf(k) === label || k === label);
     const s = id ? f.tickets[id].state : undefined;
-    return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f.tickets[id!]) ? "red together" : "gate red") : s})` : "";
+    return s && s !== "merged" ? ` (${s === "red" ? (redTogether(f, id!) ? "red together" : "gate red") : s})` : "";
   };
   const skipped = ids(["skipped"]);
   // Why each one can run, from the record: a ticket held for an overlap says which ticket it waited

@@ -54,6 +54,41 @@ export const readTickets = (record: unknown): Record<string, TicketRecord> => {
 };
 
 /**
+ * What a run says became of one ticket, as `.sandcastle/logs/outcomes.json` holds it beside the
+ * line: every reader (the status view, the report, the autonomy loop) decides on the kind, never
+ * on the line's words, so a new ending cannot read as "ready" for want of a prefix. `red` is red
+ * once merged with other tickets at landing; `gate red` is red in the ticket's own pipeline.
+ * `taken back` is a ticket a person marked for a human during the run; `green` is a branch gated
+ * green that this run has not (or, in a dry run, would have) landed.
+ */
+export const OUTCOME_KINDS = [
+  "green",
+  "merged",
+  "conflict",
+  "red",
+  "gate red",
+  "held",
+  "taken back",
+  "uncommitted",
+  "crashed",
+  "not landed",
+  "withdrawn",
+  "stopped",
+  "no change",
+] as const;
+
+export type OutcomeKind = (typeof OUTCOME_KINDS)[number];
+
+/** Tells an outcome kind from any other value: outcomes.json is a file in a repository, and an older run's entries carry none. */
+export const isOutcomeKind = (s: unknown): s is OutcomeKind => typeof s === "string" && (OUTCOME_KINDS as readonly string[]).includes(s);
+
+/** One ticket's outcome as a run writes it: the kind, the tickets it collided with, and the line a person reads. */
+export type Outcome = { kind: OutcomeKind; with?: string[]; text: string };
+
+/** One entry of outcomes.json as read: the run that wrote it, and no kind when an older kit did. */
+export type OutcomeEntry = Partial<Outcome> & { run?: string; at?: string };
+
+/**
  * The states the status view works out for itself and no run record holds: a run that died
  * (`stalled`, `orphaned`), a branch of an earlier run (`left over`), a branch of this run that
  * waits for landing to decide it (`finished`), and `requeued`, the word it gives an older run's

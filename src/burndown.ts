@@ -35,7 +35,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
+import { isTicketState, type Outcome as RecordedOutcome, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, recordOutcomes,
@@ -111,15 +111,19 @@ export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">,
   return { state: "nochange", note: handedBack ? "handed back - for a human" : "nothing to change" };
 };
 
-// A branch's outcome as the status view's row shows it, before landing.
-const outcomeText = (o: Outcome) =>
-  o.status === "gate-failed"
-    ? `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}`
-    : o.status === "green"
-      ? "green - waiting to land"
-      : o.status === "held"
-        ? `needs a human: ${o.heldNote ?? "held"}`
-        : o.status;
+// A branch's outcome as the status view's row shows it, before landing. `uncommitted`: its finished work sits in a kept worktree.
+const pipelineOutcome = (o: Outcome, uncommitted: boolean): RecordedOutcome =>
+  uncommitted
+    ? { kind: "uncommitted", text: "uncommitted" }
+    : o.status === "gate-failed"
+      ? { kind: "gate red", text: `gate red: ${gateLine(o.gates.filter((g) => !g.pass))}` }
+      : o.status === "green"
+        ? { kind: "green", text: "green - waiting to land" }
+        : o.status === "merged-earlier"
+          ? { kind: "green", text: o.status }
+          : o.status === "held"
+            ? { kind: "held", text: `needs a human: ${o.heldNote ?? "held"}` }
+            : { kind: "no change", text: o.status };
 
 // The ticket's state for a pipeline that ended without a green branch or a red gate. A ticket the
 // kit held says so from the first write; "handed back" is only for an agent that handed it back.
@@ -1259,7 +1263,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         // Recorded now, not only at the report: a branch waiting for
         // landing had no outcome for this run, and its row read as an
         // earlier run's leftover. Landing overwrites it.
-        recordOutcomes(project, runId, { [issue.id]: uncommittedWork(value) ? "uncommitted" : outcomeText(value) });
+        recordOutcomes(project, runId, { [issue.id]: pipelineOutcome(value, !!uncommittedWork(value)) });
       });
       // To the landing worker as it ends, not when the slowest pipeline does.
       return value.status === "green" || value.status === "merged-earlier" ? { kind: "green", green: value } : { kind: "pipeline", outcome: value };
@@ -1446,15 +1450,15 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   run.update({ stage: "report" });
 
   // Each branch's outcome, for the status view's rows (run.ts).
-  const outcome = new Map<string, string>();
+  const outcome = new Map<string, RecordedOutcome>();
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
-    outcome.set(r.value.issue, uncommittedWork(r.value) ? "uncommitted" : outcomeText(r.value));
+    outcome.set(r.value.issue, pipelineOutcome(r.value, !!uncommittedWork(r.value)));
   }
-  for (const [id, line] of landingLines(landings, againNote)) outcome.set(id, line);
-  for (const id of handedBack) outcome.set(id, "needs a human: handed back");
-  if (DRY_RUN) for (const r of results) if (r.status === "fulfilled" && r.value.status === "green") outcome.set(r.value.issue, "dry run: gated green, would merge");
-  for (const [n] of crashed) outcome.set(n, "crashed");
+  for (const [id, o] of landingLines(landings, againNote)) outcome.set(id, o);
+  for (const id of handedBack) outcome.set(id, { kind: "held", text: "needs a human: handed back" });
+  if (DRY_RUN) for (const r of results) if (r.status === "fulfilled" && r.value.status === "green") outcome.set(r.value.issue, { kind: "green", text: "dry run: gated green, would merge" });
+  for (const [n] of crashed) outcome.set(n, { kind: "crashed", text: "crashed" });
   recordOutcomes(project, runId, Object.fromEntries(outcome));
 
   // -------------------------------------------------------------------------

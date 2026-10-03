@@ -55,6 +55,12 @@ A state the status view works out for itself and no run record holds - a run tha
 landing to decide it (finished), or an older run's branch whose ticket was labelled again
 (requeued).
 
+**Outcome**:
+What a run says became of one ticket, as a kind from a closed set (merged, conflict, red, gate
+red ...) and its line, kept in `outcomes.json` across runs. Every view decides on the kind; the
+line is only for a person to read.
+_Avoid_: result, the prose line alone
+
 ### Keeping a project up to date
 
 **Kit version**:

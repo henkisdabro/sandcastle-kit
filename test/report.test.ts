@@ -175,9 +175,9 @@ test("a run stopped before landing says so first, with why", () => {
   assert.doesNotMatch(out, /Run finished/);
 });
 
-test("a ticket a person marked needs-human mid-run is theirs: no merge commands", () => {
-  const out = render(facts({ tickets: { "21": { state: "held", title: "t", note: "marked needs-human during the run" } }, changed: { "21": 2 } }));
-  assert.match(body(out, "## 🙋 Needs you"), /#21 t - marked needs-human during the run - branch agent\/issue-21 has the agents' work, if it helps/);
+test("a ticket a person marked for a human mid-run is theirs: no merge commands", () => {
+  const out = render(facts({ tickets: { "21": { state: "held", title: "t", note: "marked for a human during the run" } }, outcomes: { "21": "taken back" }, changed: { "21": 2 } }));
+  assert.match(body(out, "## 🙋 Needs you"), /#21 t - marked for a human during the run - branch agent\/issue-21 has the agents' work, if it helps/);
   assert.doesNotMatch(out, /git merge|held branch/);
 });
 

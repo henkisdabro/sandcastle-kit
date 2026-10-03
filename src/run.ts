@@ -12,7 +12,7 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
-import { type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
@@ -582,22 +582,30 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
 // from this run's.
 // ---------------------------------------------------------------------------
 
-export type Outcomes = Record<string, { run?: string; outcome?: string; at?: string }>;
+export type Outcomes = Record<string, OutcomeEntry>;
 
-/** A missing or broken file is no outcomes. */
+/** A missing or broken file is no outcomes; a kind outside the set (an older kit's entry, a hand edit) is dropped, so no reader takes a state from it. */
 export const readOutcomes = (root: string): Outcomes => {
+  let raw: unknown;
   try {
-    return JSON.parse(readFileSync(join(root, ".sandcastle/logs/outcomes.json"), "utf8"));
+    raw = JSON.parse(readFileSync(join(root, ".sandcastle/logs/outcomes.json"), "utf8"));
   } catch {
     return {};
   }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).map(([id, o]) => {
+      const { kind, ...rest } = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+      return [id, (isOutcomeKind(kind) ? { ...rest, kind } : rest) as OutcomeEntry];
+    }),
+  );
 };
 
-export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, string>) => {
+export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
   const all = readOutcomes(project.root);
   const at = new Date().toISOString();
-  for (const [slug, outcome] of Object.entries(outcomes)) all[slug] = { run, outcome, at };
+  for (const [slug, o] of Object.entries(outcomes)) all[slug] = { run, kind: o.kind, ...(o.with?.length ? { with: o.with } : {}), text: o.text, at };
   writeFileSync(file, JSON.stringify(all, null, 2) + "\n");
 };
 

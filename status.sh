@@ -409,9 +409,10 @@ load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
   TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
   local f=logs/run.json pid
-  # What each branch's last run decided: "slug|run|outcome" lines. A row
-  # shows it, and one whose run is not the recorded run is a leftover.
-  [ -f logs/outcomes.json ] && OUTCOMES=$(jq -r 'to_entries[] | "\(.key)|\(.value.run)|\(.value.outcome)"' logs/outcomes.json 2>/dev/null)
+  # What each branch's last run decided: "slug|run|kind|text" lines. A row
+  # shows it, and one whose run is not the recorded run is a leftover. An
+  # older kit's entry has no kind, and its line under "outcome".
+  [ -f logs/outcomes.json ] && OUTCOMES=$(jq -r 'to_entries[] | "\(.key)|\(.value.run // "")|\(.value.kind // "")|\(.value.text // .value.outcome // "")"' logs/outcomes.json 2>/dev/null)
   [ -f "$f" ] || return 0
   RUN_STARTED=$(jq -r '.startedAt // empty' "$f" 2>/dev/null)
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
@@ -493,24 +494,26 @@ blocked_on() {
   printf '%s' "$on"
 }
 
-# "run|outcome" for a branch slug, from OUTCOMES.
-outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3; exit}'; }
-# The row state for a recorded outcome, in the words the live view uses.
+# "run|kind|text" for a branch slug, from OUTCOMES.
+outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3 "|" $4; exit}'; }
+# The row state for a recorded outcome's kind (mod/hooks/run-record.ts), in
+# the words the live view uses. Never the line's words: a line the case did
+# not foresee once read as ready. No kind, or one this view does not know,
+# is no state, and the row is worked out as if no outcome were recorded.
 outcome_state() {
   case "$1" in
-    # Red at landing ("red when merged", "red again ... after a requeue") is
-    # as red as a pipeline's gate: falling through would read it as ready.
-    "gate red"*|"red when merged"*|"red again"*) printf 'gate red';;
-    "merge conflict"*) printf 'conflict';;
-    "needs a human"*) printf 'held';;
-    uncommitted*) printf 'uncommitted';;
-    crashed*) printf 'crashed';;
-    "failed to land"*|"not merged"*) printf 'not landed';;
-    withdrawn*) printf 'withdrawn';;
-    merged*) printf 'merged';;
-    stopped*) printf 'stopped';;
-    nochange) printf 'no change';;
-    *) printf 'ready';;
+    green) printf 'ready';;
+    merged) printf 'merged';;
+    conflict) printf 'conflict';;
+    # Red at landing, once or again after a requeue, is as red as a pipeline's gate.
+    red|"gate red") printf 'gate red';;
+    held|"taken back") printf 'held';;
+    uncommitted) printf 'uncommitted';;
+    crashed) printf 'crashed';;
+    "not landed") printf 'not landed';;
+    withdrawn) printf 'withdrawn';;
+    stopped) printf 'stopped';;
+    "no change") printf 'no change';;
   esac
 }
 
@@ -655,7 +658,7 @@ render() {
   local merged_list cols rows prio cpu mem cpu_col budget hidden key wide WIN BUF BUF_N
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
-  local grp oc oc_run oc_text hidden_list group summary act since
+  local grp oc oc_run oc_text oc_kind oc_state hidden_list group summary act since
   local tstate started order note typ pos upstream ahead unpushed=
   local -a out=() TW=() TAL=() OW=() CELL=() AL=() RUNC=() WRAPPED=()
   local n_out=0
@@ -848,9 +851,10 @@ render() {
       # A finished branch left standing. Its run's outcome says why - a
       # sandbox's last log line ("nothing to sync out") does not. One left by
       # an earlier run is a leftover, not this run's work waiting on you.
-      oc=$(outcome_of "$n"); oc_run="${oc%%|*}"; oc_text="${oc#*|}"
-      if [ -n "$oc" ] && [ "$oc_run" = "$RUN_STARTED" ]; then
-        state=$(outcome_state "$oc_text"); activity_note="$oc_text"
+      oc=$(outcome_of "$n"); oc_run="${oc%%|*}"; oc_text="${oc#*|}"; oc_kind="${oc_text%%|*}"; oc_text="${oc_text#*|}"
+      oc_state=""; [ -n "$oc" ] && [ "$oc_run" = "$RUN_STARTED" ] && oc_state=$(outcome_state "$oc_kind")
+      if [ -n "$oc_state" ]; then
+        state="$oc_state"; activity_note="$oc_text"
       elif [ "$RUN_LIVE" = 1 ] && grep -qx "$n" <<<"$RUN_ISSUES"; then
         # This run's branch under an older orchestrator, which records no
         # outcome until landing: finished, and landing decides the rest.
@@ -858,11 +862,12 @@ render() {
       else
         state="left over"; activity_note="earlier run${oc_text:+: $oc_text} - sandcastle clean"
       fi
-    elif oc=$(outcome_of "$n") && [ -n "$oc" ] && [ "${oc%%|*}" = "$RUN_STARTED" ]; then
+    elif oc=$(outcome_of "$n") && [ -n "$oc" ] && [ "${oc%%|*}" = "$RUN_STARTED" ] && oc_text="${oc#*|}" \
+      && oc_state=$(outcome_state "${oc_text%%|*}") && [ -n "$oc_state" ]; then
       # No commits, but this run said what became of it: handed back, or
       # nothing to change. A branch with no commits is "merged" by git's
       # reckoning, and a question for a human read as done.
-      state=$(outcome_state "${oc#*|}"); activity_note="${oc#*|}"
+      state="$oc_state"; activity_note="${oc_text#*|}"
     elif grep -q "agent/issue-${n}$" <<<"$merged_list"; then
       state="merged"
     else
