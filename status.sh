@@ -222,9 +222,10 @@ gauge() {
 put() { BUF="${BUF}$1
 "; BUF_N=$((BUF_N+1)); }
 # Items joined by " · " into as few lines of $1 columns as they fit, into the
-# WRAPPED array: the note's last clause was cut off in a narrow pane.
+# WRAPPED array: the note's last clause was cut off in a narrow pane. A caller's
+# own WRAP_SEP keeps its row's separator colour.
 wrap_items() {
-  local w="$1" sep="${gry} · ${off}" line="" item; shift
+  local w="$1" sep="${WRAP_SEP:-${gry} · ${off}}" line="" item; shift
   WRAPPED=()
   for item in "$@"; do
     vlen "$line$sep$item"
@@ -662,7 +663,7 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap guard stop reading l i n levels=""
+  local lvl turn cap guard stop reading l i n levels="" WRAP_SEP="${rule} · ${off}"
   SETTINGS_ROWS=(); SET_ITEMS=()
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
