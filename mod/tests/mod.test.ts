@@ -385,7 +385,7 @@ test("a project set up mid-session is watched from the next use of the skill, by
   w.project = true;
   const both = await Promise.all([$.skill.prompt(SKILL), $.skill.prompt(SKILL)]);
   expect(both.map((s) => s.text.includes("The sandcastle mod is loaded"))).toEqual([true, true]);
-  expect(w.commands).toEqual(["sandcastle-status"]);
+  expect(w.commands).toEqual(["sandcastle-status", "sandcastle-mark"]);
   const before = w.reads;
   await w.clock.advance(60000);
   expect(w.reads - before).toBe(4);
@@ -411,7 +411,7 @@ test("/sandcastle-status prints the run as text, tickets in the status view's or
     { stage: "landing 1/2", tokens: "1.2M in / 20k out" },
   );
   await $.session.start(START);
-  expect(w.commands).toEqual(["sandcastle-status"]);
+  expect(w.commands).toEqual(["sandcastle-status", "sandcastle-mark"]);
   const live = await $.command.run(STATUS);
   expect(live.text).toBe(
     [
