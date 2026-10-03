@@ -25,7 +25,9 @@ This continues the run steps 1-3 in SKILL.md.
       under Runnable now for the next `sandcastle run` to pick up.
    2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the tickets are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
-      facts operators most often misread.
+      facts operators most often misread. When it lists `Changelog lines the agents suggested`
+      (the project has `changelog: true`), carry those lines into your message, grouped Added,
+      Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from them.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, and anything that needs a decision - and each
       ticket listed `merged - check by hand`: what the reviewer said to check, and offer to check it

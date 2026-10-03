@@ -26,6 +26,10 @@ export default {
 
   rules: ".sandcastle/rules.md",
 
+  // rules.md keeps agents out of CHANGELOG.md: they give each line in a <changelog> tag instead,
+  // and the closing summary lists the lines of the tickets that merged.
+  changelog: true,
+
   // Adds gitleaks: the repo's pre-commit hook refuses every commit without it.
   dockerfile: ".sandcastle/Dockerfile",
 

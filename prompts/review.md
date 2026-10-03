@@ -77,7 +77,7 @@ with your sentence in place of the dots. The branch still merges if its gates ar
 line puts it in front of a person afterwards. Leave it out when a gate runs the changed code,
 even indirectly.
 
-If you committed a fix, make sure the gates it touches pass and everything is committed, then output
+{{KIT_CHANGELOG}}If you committed a fix, make sure the gates it touches pass and everything is committed, then output
 `<promise>COMPLETE</promise>`.
 
 If you found nothing worth changing, commit nothing and output `<promise>COMPLETE</promise>`.

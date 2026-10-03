@@ -101,6 +101,12 @@ export type ProjectConfig = {
   /** Markdown added to the implement, review and repair prompts under "Project rules", relative to the repo root. */
   rules?: string;
   /**
+   * For a project whose rules keep agents out of its changelog: the implement and review prompts
+   * ask for each changelog line in a `<changelog>` tag, and the closing summary gathers the lines
+   * of the tickets that merged, grouped Added / Changed / Fixed. Default false.
+   */
+  changelog?: boolean;
+  /**
    * `model` and `effort` replace the kit's defaults for this project; the
    * IMPL_* / REVIEW_* env vars still override them for one run. Repair uses
    * the implementer's model and effort.
@@ -114,15 +120,15 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "changelog">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
 const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "lean", "gates",
-  "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "implement", "review", "repair"];
+  "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
   implement: ["model", "effort", "maxIterations", "idleTimeoutSeconds"],
@@ -160,6 +166,7 @@ const checkShape = (config: ProjectConfig) => {
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
   if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
+  if (config.changelog !== undefined && typeof config.changelog !== "boolean") refuse(`\`changelog\` must be true or false, not ${JSON.stringify(config.changelog)}.`);
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {
     refuse(`\`herdr.panes\` must be "none" or "all", not ${JSON.stringify(config.herdr.panes)}.`);

@@ -90,6 +90,8 @@ type Outcome = {
   unreviewed?: boolean;
   /** What a reviewer said no gate exercises (its <ungated> line), for the closing summary. */
   ungated?: string;
+  /** The `<changelog>` lines of the implementer and reviewers (`changelog: true`), for the closing summary. */
+  changelog?: string[];
 };
 
 /**
@@ -183,6 +185,16 @@ export const ungatedOf = (text: string): string | undefined => {
   const said = last?.[1].replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
+
+// The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
+// Unlike `<ungated>` every tag counts, not the last alone: a ticket may need several lines. An
+// empty tag or the echoed placeholder "..." does not count; a line is cut at CHANGELOG_MAX.
+export const CHANGELOG_MAX = 500;
+export const changelogOf = (text: string): string[] =>
+  [...text.matchAll(/<changelog>([\s\S]*?)<\/changelog>/g)]
+    .map((m) => m[1].replace(/\s+/g, " ").trim())
+    .filter((said) => said && said !== "...")
+    .map((said) => cutAtWord(said, CHANGELOG_MAX));
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
@@ -883,6 +895,11 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       let reviewCommits = 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
+      // The lines of every agent's final message, only when the project asked for them.
+      const changelog: string[] = [];
+      const noteChangelog = (text: string | undefined) => {
+        if (project.changelog && text) changelog.push(...changelogOf(text));
+      };
       if (landOnly && mergeConflicted && greenHead !== undefined) {
         // The resolver finished the merge on a branch reviewed and green at greenHead:
         // nobody has seen its resolution. A clean land-only merge needs no review.
@@ -890,6 +907,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
         reviewCommits = resolved.commits.length;
+        noteChangelog(resolved.stdout);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
       }
@@ -918,6 +936,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
+        noteChangelog(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
         // different cases: the agent found nothing to do, and the agent found the
@@ -941,6 +960,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
           reviewCommits = merged.commits.length;
+          noteChangelog(merged.stdout);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
         } else {
@@ -973,6 +993,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
             if (u) ungated.push(u);
+            noteChangelog(r?.stdout);
           }
           if (!tracker.agentsWrite) {
             for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
@@ -1100,6 +1121,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           reviewCommits += after.commits.length;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
+          noteChangelog(after.stdout);
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
           if (after.commits.length) gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
@@ -1123,6 +1145,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        changelog: changelog.length ? [...new Set(changelog)] : undefined,
       };
     } finally {
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
@@ -1246,6 +1269,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
+          ...(value.changelog?.length ? { changelog: value.changelog } : {}),
         });
         run.update({ typical: typicalTimes(project, [...took.values()]) });
         // With nothing left to start, the pane closes: five panes each

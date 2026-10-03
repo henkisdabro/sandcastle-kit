@@ -72,7 +72,7 @@ Before you finish, run these in the repo root and make them pass:
 
 {{KIT_RECORD}}
 
-The same gates are re-run by the orchestrator after you exit, and your work is only merged if all
+{{KIT_CHANGELOG}}The same gates are re-run by the orchestrator after you exit, and your work is only merged if all
 of them are green. You cannot talk your way past them, so do not report success you have not
 observed.
 
