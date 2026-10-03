@@ -82,9 +82,9 @@ test("Codex has no max effort: a bad one is an OperatorError", () => {
 
 test("the settings group carries cross-review, and its model and effort only when it is on", () => {
   const on = resolveSettings({ env: { CROSS_REVIEW: "1" }, project: {}, machine: {} });
-  assert.deepEqual(settingsGroup(on, 1), { autonomy: 0, turn: 1, cap: 1, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high" });
+  assert.deepEqual(settingsGroup(on, 1), { autonomy: 0, turn: 1, cap: 1, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high", usageGuard: false });
   const off = resolveSettings({ env: {}, project: {}, machine: {} });
-  assert.deepEqual(settingsGroup(off, 1), { autonomy: 0, turn: 1, cap: 1, crossReview: false });
+  assert.deepEqual(settingsGroup(off, 1), { autonomy: 0, turn: 1, cap: 1, crossReview: false, usageGuard: false });
 });
 
 const MODELS = "implement claude-sonnet-5-5/high · review claude-opus-5-5/high";

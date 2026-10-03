@@ -47,7 +47,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, settingsGroup } from "./run-settings.ts";
-import { usageLine, usageStop } from "./usage.ts";
+import { usageLine, usageReadingLost, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -470,7 +470,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     waiting,
     stage: "starting",
     concurrency: slots,
-    ...(turn ? { settings: settingsGroup(turn.settings, turn.turn) } : {}),
+    ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),
   }, notify && ((r) => runNotify(notify, project.name, r)));
@@ -571,7 +571,15 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   });
   await timed("", "preflight", () => preflight(project, image, extraModels));
   const env = credentials(project);
+  // The guard's reading is the one settings field a turn may change: it is recorded as a fact beside the setting, when it is lost or back.
+  let readingNoted = usageReadingLost();
+  const noteReading = () => {
+    if (!turn || usageReadingLost() === readingNoted) return;
+    readingNoted = usageReadingLost();
+    run.update({ settings: settingsGroup(turn.settings, turn.turn, readingNoted) });
+  };
   const usageNote = await usageLine(env);
+  noteReading();
   if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
   // Written next to the prompts; the worktree hook applies it to each sandbox.
@@ -1264,6 +1272,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
   const attempt = async (issue: Issue, { last }: { last(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
     const line = await usageStop(env);
+    noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
     // A tracker that cannot be read is no reason to skip: the check before landing asks again.
     const called = (() => {

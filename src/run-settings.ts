@@ -6,6 +6,7 @@
 import type { RunSettings } from "../mod/hooks/run-record.ts";
 import { type CrossReviewSetting, crossReviewSetting } from "./agents.ts";
 import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
+import { parseUsageStop } from "./usage.ts";
 
 export type SettingsSources = {
   env: Record<string, string | undefined>;
@@ -16,15 +17,30 @@ export type SettingsSources = {
 };
 
 /** What a run resolves once, at its start. */
-export type ResolvedSettings = { autonomy: Level; crossReview: CrossReviewSetting };
+export type ResolvedSettings = {
+  autonomy: Level;
+  crossReview: CrossReviewSetting;
+  /** Whether the usage guard was asked for (`USAGE_CHECK=1`). */
+  usageGuard: boolean;
+  /** The guard's stop threshold in percent; only when it is on. */
+  usageStop?: number;
+};
 
-export const resolveSettings = ({ env, project }: SettingsSources): ResolvedSettings => ({
-  autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
-  crossReview: crossReviewSetting(env),
-});
+export const resolveSettings = ({ env, project }: SettingsSources): ResolvedSettings => {
+  const usageGuard = env.USAGE_CHECK === "1";
+  return {
+    autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
+    crossReview: crossReviewSetting(env),
+    usageGuard,
+    ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
+  };
+};
 
-/** The settings group of one turn's run record: the run's settings, this turn's number and the level's cap. */
-export const settingsGroup = (settings: ResolvedSettings, turn: number): RunSettings => {
+/**
+ * The settings group of one turn's run record: the run's settings, this turn's number and the
+ * level's cap. `noReading` is the guard's reading as a fact beside its setting, not part of it.
+ */
+export const settingsGroup = (settings: ResolvedSettings, turn: number, noReading = false): RunSettings => {
   const cap = turnCap(settings.autonomy);
   const cross = settings.crossReview;
   return {
@@ -33,5 +49,8 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number): RunSett
     ...(cap === undefined ? {} : { cap }),
     crossReview: cross.on,
     ...(cross.on ? { crossReviewModel: cross.model, crossReviewEffort: cross.effort } : {}),
+    usageGuard: settings.usageGuard,
+    ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
+    ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
   };
 };
