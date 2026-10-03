@@ -48,8 +48,9 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
-//   clean [--all]    remove leftover sandbox worktrees and finished agent branches,
-//                    and list unmerged ones; --all deletes those too, without asking
+//   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
+//                    sandbox worktrees and finished agent branches, and list unmerged ones;
+//                    --all deletes those too, without asking
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
@@ -509,7 +510,9 @@ try {
       const project = await loadProject(root);
       pinHostGitConfig(project.root);
       lockRun(project);
-      const { worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      for (const id of containers) console.log(`removed exited sandbox container ${id}`);
+      for (const id of images) console.log(`removed dangling image ${id}`);
       for (const path of worktrees) console.log(`removed worktree ${path}`);
       for (const { branch, unmerged } of deleted) console.log(`deleted ${branch}${unmerged ? " (unmerged)" : ""}`);
       archiveFinishedLogs(project);
@@ -517,7 +520,7 @@ try {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
       break;
     }
     default:

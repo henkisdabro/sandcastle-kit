@@ -17,8 +17,8 @@ test("buildArgs adds --pull only when asked", () => {
 });
 
 test("buildArgs keeps the tag, build args and the stdin Dockerfile", () => {
-  assert.deepEqual(buildArgs("t:1", { A: "1" }, true), ["build", "--pull", "-t", "t:1", "--build-arg", "A=1", "-"]);
-  assert.deepEqual(buildArgs("t:1", { A: "1" }, false), ["build", "-t", "t:1", "--build-arg", "A=1", "-"]);
+  assert.deepEqual(buildArgs("t:1", { A: "1" }, true), ["build", "--pull", "-t", "t:1", "--label", "sandcastle-kit=1", "--build-arg", "A=1", "-"]);
+  assert.deepEqual(buildArgs("t:1", { A: "1" }, false), ["build", "-t", "t:1", "--label", "sandcastle-kit=1", "--build-arg", "A=1", "-"]);
 });
 
 test("staleImageWarning is silent at 29 days", () => {

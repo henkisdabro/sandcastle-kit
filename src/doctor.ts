@@ -151,6 +151,26 @@ export const staleImageWarning = (created: string, now: Date, tag = "sandcastle-
   return `base image ${tag} was built ${days} days ago - \`sandcastle build --force\` pulls Debian and Node security updates`;
 };
 
+/**
+ * The info line for Docker's build cache, from `docker system df --format '{{json .}}'` (one JSON object
+ * per line): its size, how much of it is reclaimable and the command that frees it. Builds pile up here
+ * over days of runs (tens of GB) and nothing else prunes it. Undefined for output without a build-cache
+ * row, so a changed format stays silent.
+ */
+export const buildCacheNote = (df: string): string | undefined => {
+  for (const line of df.split("\n")) {
+    try {
+      const row = JSON.parse(line) as { Type?: unknown; Size?: unknown; Reclaimable?: unknown };
+      if (row.Type !== "Build Cache" || typeof row.Size !== "string") continue;
+      const reclaimable = typeof row.Reclaimable === "string" && row.Reclaimable ? ` (${row.Reclaimable} reclaimable)` : "";
+      return `Docker build cache is ${row.Size}${reclaimable} - \`docker builder prune\` frees it`;
+    } catch {
+      /* not a row */
+    }
+  }
+  return undefined;
+};
+
 /** Whether a directory is a checkout of the kit: its package name is the kit's, or it has the kit's entry script. */
 export const isKitCheckout = (dir: string) => {
   try {
@@ -442,6 +462,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       }
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
+    // Info, never a FIX. Silent when Docker is down.
+    const cache = buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"]) ?? "");
+    if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));
     // Ignoring a file does not untrack it: a .env added before the ignore line (or with -f) is in
