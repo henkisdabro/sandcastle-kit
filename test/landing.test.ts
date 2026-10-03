@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 // sandbox.ts derives USER_CONFIG from this at import: nothing here may read the user's real config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -191,7 +192,7 @@ test("a dry run merges nothing and writes nothing to the tracker", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { ".github/workflows/ci.yml": "x\n" } });
   const before = git(root, "rev-parse", "main");
   const { land, calls, states } = harness(root, { dryRun: true });
-  assert.deepEqual(await land(outcome(root, "1")), { kind: "dry-run" });
+  assert.deepEqual((await quietly(() => land(outcome(root, "1")))).result, { kind: "dry-run" });
   assert.equal(states["1"].note, "dry run: would merge");
   const held = await land(outcome(root, "2"));
   assert.equal(held.kind, "held");
