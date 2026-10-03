@@ -22,12 +22,29 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
   terminal draws it - in place of the plain heading.
+- **Each outcome in `.sandcastle/logs/outcomes.json` carries a kind** (merged, conflict, red, held
+  and so on) beside its line, and the status view, the closing summary and the autonomy loop read
+  the kind rather than matching the wording. What a run says about each ticket is now worded in
+  one place, so the run record, the status view, the summary and the tracker comment cannot
+  disagree. Nothing to do: an older run's entries are shown with their line as before.
 
 ### Fixed
 
 - **A branch red at landing no longer shows as ready after the run.** The status view read the
   outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
   row as ready to land; it now shows gate red, like a red pipeline.
+- **A red or no-change ticket is no longer recorded as "lands on a later run".** When the `.git`
+  check failed just as a pipeline ended, the check's error replaced the pipeline's result, and the
+  ticket was recorded as a finished green waiting to land. It now keeps its own ending.
+- **The summary of a run that stops during landing says "red together" and gives no merge commands
+  for a ticket a person took back.** Landing outcomes are recorded as each ticket lands, not only
+  when the run ends.
+- **A run killed with its process id reused no longer reads as live.** The status view, the Herdr
+  tab bar, the closing summary and `sandcastle wait` checked only that the pid existed, so a
+  recycled pid kept a dead run "live" (and `sandcastle wait` waited on an unrelated process). Every
+  view now also checks that the process is the kit's.
+- **`sandcastle clean` unlocks each sandbox worktree only as it removes it**, and only those under
+  `.sandcastle/worktrees/`, instead of unlocking every live sandbox's worktree before it starts.
 
 ## [0.5.0] - 2026-10-02
 
