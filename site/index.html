@@ -71,7 +71,7 @@
         "@type": "FAQPage",
         "mainEntity": [
           { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and USAGE_CHECK=1 stops it starting tickets before then." } },
-          { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label changes one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
+          { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label sets the implementer's model or effort for one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
           { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed." } },
           { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake until it ends (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A ticket whose blocker lands starts in the same run, and with autonomy: \"drain\" one run keeps going until the queue is drained or something stops it, and says what." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
@@ -203,7 +203,7 @@
         </li>
         <li>
           <h3>Queue tickets</h3>
-          <p>Label a GitHub issue <code>ready-for-agent</code>, or give a ticket file that status. Ask your agent for <code>/sandcastle queue</code> to tighten the vague ones first.</p>
+          <p>Label a GitHub issue <code>ready-for-agent</code>, or give a ticket file that status. Ask your agent for <code>/sandcastle queue</code> to tighten the vague ones first, or <code>/sandcastle audit</code> to find work in a repo with no tickets yet.</p>
         </li>
         <li>
           <h3>Run</h3>
@@ -214,6 +214,58 @@
           <p><code>sandcastle report</code> prints the summary again. <code>land</code> merges a branch you fixed, <code>requeue</code> sends a ticket back. Then you push.</p>
         </li>
       </ol>
+    </section>
+
+    <section class="safety skill" id="skill" aria-labelledby="skill-title">
+      <h2 id="skill-title">Or ask your agent</h2>
+      <p class="section-lede">Setup installs an agent skill: <code>/sandcastle</code> in Claude Code, <code>$sandcastle</code> in Codex, and OpenCode reads it too. It asks before anything that spends allowance, starts a run, or files, closes or splits a ticket.</p>
+      <div class="bounds">
+        <div class="bound">
+          <h3>Before the first run</h3>
+          <ul>
+            <li><b><code>init</code></b> reads your CI, sets up the gate commands and rules for agents, agrees with you which skills and MCP servers agents see, and checks that every hook runs in the sandbox. It ends with your gates green on <code>main</code>.</li>
+            <li><b><code>audit</code></b> has read-only agents check the repo for bugs, security issues, missing tests and stale docs, and files what they can prove as tickets once you have approved the list.</li>
+            <li><b><code>queue</code></b> walks every open ticket with you. A ticket is queued only when an agent with no chat context could finish it; for the rest you get one question each, with a recommended answer.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>Every run after</h3>
+          <ul>
+            <li><b><code>run</code></b> shows the queue and models, asks before starting, and leaves the run working in the background. When it ends, you get the summary: what merged, what needs you, what to push.</li>
+            <li><b><code>status</code></b> reads a live run, or the last one, and the log behind any red row.</li>
+            <li><b><code>update</code></b> pulls the latest kit, rebuilds the project's image and walks you through what the new version changes for it.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="safety long" id="long-runs" aria-labelledby="long-title">
+      <h2 id="long-title">Built for long runs</h2>
+      <p class="section-lede">A run checks what could stop it before it spends anything, and keeps what each sandbox loads small.</p>
+      <div class="bounds">
+        <div class="bound">
+          <h3>Fails early</h3>
+          <ul>
+            <li><b>Your gates on <code>main</code> first.</b> If one fails there, the run stops before any agent starts.</li>
+            <li><b>Preflight.</b> One short reply from every model, so an exhausted plan or an old CLI stops the run at the start, not halfway through.</li>
+            <li><b>Hooks proven.</b> The kit checks that your Claude Code hooks run inside the sandbox, and a test can prove a blocking hook still blocks.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>Spends less</h3>
+          <ul>
+            <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins: each one costs context on every turn.</li>
+            <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
+          </ul>
+        </div>
+        <div class="bound">
+          <h3>Shares the machine</h3>
+          <ul>
+            <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other.</li>
+            <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
+          </ul>
+        </div>
+      </div>
     </section>
 
     <section class="safety herdr" id="herdr" aria-labelledby="herdr-title">
@@ -231,7 +283,7 @@
           <h3>In the sidebar</h3>
           <ul>
             <li><b>The run at a glance.</b> The run is one entry in the sidebar, and its workspace reads <code>🏰 4/9 · 1 needs you</code>, red when something needs you. The tab bar lists every live run on the machine.</li>
-            <li><b>Each sandbox, if you want them.</b> With sandbox panes on (<code>SANDBOX_PANES=all</code>), each one is named after its ticket with its step and time in it: <code>review · 12m</code>.</li>
+            <li><b>Each sandbox, if you want them.</b> With sandbox panes on (<code>herdr: { panes: "all" }</code> in the project config, or <code>SANDBOX_PANES=all</code> for one run), each one is named after its ticket with its step and time in it: <code>review · 12m</code>.</li>
           </ul>
         </div>
         <div class="bound">
@@ -258,11 +310,19 @@
         <div class="bound">
           <h3>When it ends</h3>
           <ul>
-            <li><b>A closing prompt.</b> When the run's process is gone, the session where you used <code>/sandcastle</code> gets a prompt and writes the closing summary, even if you quit Claude Code and came back in between.</li>
+            <li><b>A closing prompt.</b> When the run's process is gone, the session where you used <code>/sandcastle</code> gets a prompt and writes the closing summary, even if you quit Claude Code and resumed that session in between.</li>
             <li><b>Ticket status on demand.</b> <code>/sandcastle-status</code> lists every ticket and where it is, without a model turn.</li>
           </ul>
         </div>
+        <div class="bound">
+          <h3>Between runs</h3>
+          <ul>
+            <li><b>Ready tickets.</b> Between runs, the status line shows how many tickets a run would start now: <code>sandcastle · 4 ready - /sandcastle run</code>. The count is read in the background, at most once every ten minutes per project.</li>
+            <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready; <code>hide</code> turns the mark off for the project.</li>
+          </ul>
+        </div>
       </div>
+      <p class="after">Claude Code mods are in early access. Without this one, <code>/sandcastle</code> still waits for a run and writes the summary when it ends.</p>
     </section>
 
     <section class="safety" id="safety" aria-labelledby="safety-title">
@@ -280,15 +340,15 @@
           <h3>Before a merge</h3>
           <ul>
             <li><b>Review, then your gates.</b> A second agent reviews every branch against its ticket and fixes what it finds. Then the orchestrator, never the agent, runs your lint, tests and build. Only a green branch merges, and the merged branch is gated again.</li>
-            <li><b>Risky changes wait.</b> A green branch that touches hooks, CI, agent settings, package-manager config or install scripts is labelled <code>ready-for-human</code> and left for you.</li>
+            <li><b>Risky changes wait.</b> A green branch that changes hooks, CI, agent settings, package-manager config, install scripts or a path you protect is labelled <code>ready-for-human</code> and left for you. So is one that adds a file over 50 MB, a repair whose review failed, and a conflict resolution that drops lines git had merged.</li>
           </ul>
         </div>
         <div class="bound">
           <h3>On your machine</h3>
           <ul>
             <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it only labels, comments on and closes issues.</li>
-            <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, the run stops before your machine runs another git command there.</li>
-            <li><b>Host hooks stay off.</b> During a run your own git calls ignore hooks, so a branch that adds one cannot run it on your machine as it lands.</li>
+            <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there.</li>
+            <li><b>Host hooks stay off.</b> During a run the kit's own git calls on your machine ignore hooks, so a branch that adds one cannot run it as it lands.</li>
           </ul>
         </div>
       </div>
@@ -310,7 +370,7 @@
           <div class="cmd" data-copy><code><span class="c-mute">$</span> DRY_RUN=1 sandcastle run</code><button type="button" class="copy">Copy</button></div>
         </li>
       </ol>
-      <p class="req">Needs macOS or Linux, Node 22+, pnpm, git, the GitHub CLI signed in (skippable with ticket files) and a container runtime. <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md">Full requirements</a>.</p>
+      <p class="req">Needs macOS or Linux, Node 22+, pnpm, git, jq, the GitHub CLI signed in (skippable with ticket files) and a container runtime. <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md">Full requirements</a>.</p>
     </section>
 
     <section class="faq" aria-labelledby="faq-title">
@@ -321,7 +381,7 @@
       </details>
       <details>
         <summary>Which models does it use?</summary>
-        <p>By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A <code>model:</code> or <code>effort:</code> label changes one ticket, and <code>CROSS_REVIEW=1</code> adds a third review by an OpenAI model through Codex.</p>
+        <p>By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A <code>model:</code> or <code>effort:</code> label sets the implementer's model or effort for one ticket, and <code>CROSS_REVIEW=1</code> adds a third review by an OpenAI model through Codex.</p>
       </details>
       <details>
         <summary>Does it push to GitHub?</summary>
