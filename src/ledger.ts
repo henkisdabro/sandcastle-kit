@@ -4,19 +4,22 @@
 // kind; the type checker holds that. The writer (`createLedger`) records what it returns as burndown
 // is told each ending, and keeps each ticket's entry for the closing counts (`accountLanding`). It
 // records a requeue as it is told, too: the scheduler's requeue-once rule (schedule.ts) sends the
-// ticket back, and the ledger writes it queued with the line its second attempt carries.
+// ticket back, and the ledger writes it queued with the line its second attempt carries. Beside the
+// endings it writes a green branch as it waits to land (`ready`), and, once the schedule is over,
+// the tickets the run's stop left unstarted, in the run's last words (`close`).
 //
 // One landing ending used to be translated five times - by landOne, the Landings lists, the outcome
 // lines, the view's loops and the tracker comments - and each new ending kind meant touching every
 // one of them. `landOne` writes no verdict, so a requeue has nothing to undo: a requeued ticket whose
 // second attempt never begins is recorded from the ending the scheduler makes of it. Posting stays
 // where it happens: `landOne` closes and holds at landing time and asks `describe` for the words;
-// the burndown posts the comments after the schedule.
+// the burndown posts the hold notes and the comments after the schedule. An ending arrives
+// complete - the agent's hand-back is on its pipeline's result - so nothing is patched in later.
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine, STOPPED_GREEN, withdrawnRecord } from "./landing.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine, withdrawnRecord } from "./landing.ts";
 import { overrunLine } from "./report.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending } from "./schedule.ts";
@@ -29,6 +32,12 @@ export type Finished = {
   status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held";
   /** Why the kit held a finished branch for a person (`held`). */
   heldNote?: string;
+  /**
+   * The agent handed the ticket back itself (`nochange`): the tracker's hold label on it, read in
+   * the attempt as its pipeline ended. Said "nothing to change", a question for a human read as a
+   * ticket that needed no work.
+   */
+  handedBack?: boolean;
   commits: number;
   head?: string;
   repairs: number;
@@ -52,10 +61,11 @@ export type Context = {
   /** Where Sandcastle kept the pipeline's worktree, as the record shows it: its uncommitted files. */
   kept?: string;
   /**
-   * A hold the ticket has besides its ending: a hold note the run posts after the schedule (the
-   * agent's `<blocked>`, or the kit's own hold), or the tracker's hold label an agent put on itself.
+   * A hold note the run posts after the schedule (the agent's `<blocked>`, or the kit's own hold):
+   * the ticket gets that note, never a second comment. A hold label the agent put on the ticket
+   * itself is on its pipeline's result instead (`Finished.handedBack`).
    */
-  hold?: "note" | "label";
+  hold?: "note";
   /** Why the run stopped, as a ticket it never started says it. */
   stopLine?: string;
   /** The line this run requeued the ticket with (`requeuedLine`): its second attempt runs, or never began. */
@@ -260,7 +270,7 @@ const describePipeline = (o: Finished, c: Context): Said => {
   // A pipeline that ended with no commits, its worktree kept: the agent's commit was refused, and the work exists.
   const uncommitted = o.status === "nochange" && o.commits === 0 && c.kept !== undefined;
   // A hold note on a ticket whose finished work sits uncommitted keeps its own state: the work exists.
-  const held = c.hold === "label" || (c.hold === "note" && c.kept === undefined);
+  const held = o.handedBack === true || (c.hold === "note" && c.kept === undefined);
   const record = ((): TicketRecord => {
     switch (o.status) {
       case "green":
@@ -279,10 +289,9 @@ const describePipeline = (o: Finished, c: Context): Said => {
   })();
   return {
     record,
-    outcome: c.hold === "label" ? { kind: "held", text: "needs a human: handed back" } : pipelineOutcome(o, uncommitted),
+    outcome: o.handedBack ? { kind: "held", text: "needs a human: handed back" } : pipelineOutcome(o, uncommitted),
     ...(held && { view: NEEDS_A_HUMAN }),
-    // A ticket with a hold note gets that note, never a second comment.
-    tracker: c.hold === "note" ? undefined : comment(notLandedComment(c.report, undefined)),
+    tracker: comment(notLandedComment(c.report, undefined)),
   };
 };
 
@@ -292,6 +301,12 @@ const describePipeline = (o: Finished, c: Context): Said => {
  * the file hold or its blockers wrote.
  */
 export const describe = (e: TicketEnding, c: Context): Said => {
+  const said = describeEnding(e, c);
+  // A ticket with a hold note gets that note, never a second comment.
+  return c.hold === "note" && said.tracker?.kind === "comment" ? { ...said, tracker: undefined } : said;
+};
+
+const describeEnding = (e: TicketEnding, c: Context): Said => {
   switch (e.kind) {
     case "landing":
       return describeLanding(e, c);
@@ -305,7 +320,13 @@ export const describe = (e: TicketEnding, c: Context): Said => {
         tracker: comment(notLandedComment(c.report, undefined)),
       };
     case "stopped":
-      return { record: STOPPED_GREEN.record, outcome: STOPPED_GREEN.outcome, tracker: comment(notLandedComment(c.report, undefined)) };
+      // Green before the base moved, or green when its own `.git` check failed: finished, and
+      // landing on a later run - not "ready", which says this run lands it.
+      return {
+        record: { state: "stopped", note: "finished before the run stopped - lands on a later run" },
+        outcome: { kind: "stopped", text: "stopped: the run stopped before landing" },
+        tracker: comment(notLandedComment(c.report, undefined)),
+      };
     case "not begun": {
       const { why } = e;
       const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
@@ -318,25 +339,19 @@ export const describe = (e: TicketEnding, c: Context): Said => {
   }
 };
 
-/**
- * The endings whose ticket state the ledger writes: every landing, and the ones no attempt wrote.
- * The others are still written where they are decided: the attempt as its pipeline ends, and the
- * burndown after the schedule for a ticket the run's stop left unstarted, in the run's last words.
- */
-const writesRecord = (e: TicketEnding) =>
-  e.kind === "landing" ||
-  (e.kind === "not begun" && (e.why.kind === "withdrawn" || e.why.kind === "refused label")) ||
-  ((e.kind === "stopped" || e.kind === "crashed") && e.green !== undefined);
+/** Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. */
+const unstarted = (e: TicketEnding) =>
+  e.kind === "not begun" && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
 
 /** One ticket's entry: its ending, the context it was described in, and what was said. */
 export type Entry = { id: string; ending: TicketEnding; context: Context; said: Said };
 
 /**
- * The writer: records what `describe` says of each ending as burndown is told it - the outcome
- * (it is the only writer of an ending's outcome), the view's word and the ticket state - and keeps
- * the entry. An ending is recorded again when a fact about it is learnt later (the tracker's hold
- * label, read after the schedule). `bookkeep` keeps a write that throws (a full disk) from costing
- * the ticket its ending.
+ * The writer: records what `describe` says of each ending as burndown is told it - the ticket state
+ * the run ends on, the outcome and the view's word; it is the only writer of each - and keeps the
+ * entry. An ending arrives complete (a hand-back is on the pipeline's result), so each is recorded
+ * once; only a ticket the run's stop left unstarted waits for the run's last words (`close`).
+ * `bookkeep` keeps a write that throws (a full disk) from costing the ticket its ending.
  *
  * A requeue is recorded as it is told, before the ticket is pushed back: queued, with the line its
  * second attempt's setup carries (`requeuedAs`). A requeued ticket withdrawn before its second
@@ -356,6 +371,8 @@ export const createLedger = (d: {
   // Every ticket this run requeued, with its line; `requeuedAs` only while its second attempt is to come.
   const sentBack = new Map<string, string>();
   const requeuedAs = new Map<string, string>();
+  // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
+  let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
     const line = requeuedLine(again.kind, again.with);
     sentBack.set(id, line);
@@ -367,12 +384,12 @@ export const createLedger = (d: {
     let said: Said = {};
     d.bookkeep(id, () => {
       const line = sentBack.get(id);
-      const context = { ...d.context(id), ...(line !== undefined && { requeued: line }) };
+      const context = { ...d.context(id), ...(line !== undefined && { requeued: line }), ...(last?.stopLine !== undefined && { stopLine: last.stopLine }) };
       said = describe(ending, context);
       entries.set(id, { id, ending, context, said });
     });
     const { record, outcome, view } = said;
-    if (record && writesRecord(ending)) d.bookkeep(id, () => d.run.ticket(id, record));
+    if (record && (!unstarted(ending) || last)) d.bookkeep(id, () => d.run.ticket(id, record));
     if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
     if (view) d.bookkeep(id, () => d.view.landed(id, view.landed, view.word));
     // Sent back, and its second attempt never began: withdrawn since, its first pipeline's line goes too.
@@ -384,10 +401,30 @@ export const createLedger = (d: {
     requeuedAs: requeuedAs as ReadonlyMap<string, string>,
     requeued,
     record,
+    /**
+     * A green branch as its pipeline ends, before the scheduler makes an ending of it: ready, and
+     * its outcome now - a branch waiting for landing had none for this run, and its row read as an
+     * earlier run's leftover. `held`: what will hold it for a person at landing, said now rather
+     * than only at the end of the run.
+     */
+    ready(id: string, o: Finished, held: string[]) {
+      const { record, outcome } = describePipeline(o, d.context(id));
+      const human = held.length && o.status === "green";
+      if (record) d.bookkeep(id, () => d.run.ticket(id, human ? { state: "ready", note: `human merge: ${held.join(", ")}` } : record));
+      if (outcome) d.bookkeep(id, () => d.outcomes({ [id]: outcome }));
+    },
     /** What the scheduler tells that the ledger records: a requeue, and each ticket's ending. */
     tell(c: Change<Landable, Finished>) {
       if (c.kind === "requeued") requeued(c.id, c.again);
       if (c.kind === "ended") record(c.id, c.ending);
+    },
+    /**
+     * The schedule is over: each ticket the run's stop left unstarted is recorded in the run's last
+     * words, `stopLine` - the most severe cause, which a ticket told earlier could not know yet.
+     */
+    close(endings: ReadonlyMap<string, TicketEnding>, stopLine: string | undefined) {
+      last = { stopLine };
+      for (const [id, e] of endings) if (unstarted(e)) record(id, e);
     },
   };
 };
@@ -408,8 +445,8 @@ export type Landings = {
 /** The landings counted from the ledger's entries. */
 export const accountLanding = (entries: Iterable<Entry>): Landings => {
   const l: Landings = { merged: [], regenerated: 0, notLanded: 0, needsHuman: 0, withdrawn: 0 };
-  for (const { id, ending: e, context } of entries) {
-    if (e.kind === "pipeline" && context.hold === "label") l.needsHuman++;
+  for (const { id, ending: e } of entries) {
+    if (e.kind === "pipeline" && e.outcome.handedBack) l.needsHuman++;
     if (e.kind !== "landing") continue;
     const landed: Landed = e.landed;
     switch (landed.kind) {

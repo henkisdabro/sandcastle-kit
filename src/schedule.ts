@@ -448,8 +448,11 @@ export type Withdrawn = { kind: "withdrawn"; reason: string };
 export type Attempted<G, O> =
   /** Gated green: on to the landing worker. */
   | { kind: "green"; green: G }
-  /** Ended in its pipeline: a red gate, nothing to change, held by the kit, work left uncommitted. */
-  | { kind: "pipeline"; outcome: O }
+  /**
+   * Ended in its pipeline: a red gate, nothing to change, held by the kit, work left uncommitted.
+   * `causes`: the `.git` check after it failed - the run stops, and the ticket keeps its own ending.
+   */
+  | { kind: "pipeline"; outcome: O; causes?: StopCause[] }
   /** `causes`: a plan limit its agent hit, a `.git` check that failed after it. */
   | { kind: "crashed"; error: unknown; causes?: StopCause[] }
   /** Its pipeline ran, then the `.git` check after it failed: the run stops. */
@@ -805,6 +808,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               landing.push(r.green);
               return;
             case "pipeline":
+              for (const c of r.causes ?? []) stop.add(c);
               return await end(t.id, { kind: "pipeline", outcome: r.outcome, attempts: n });
             case "crashed":
               for (const c of r.causes ?? []) stop.add(c);
