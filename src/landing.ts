@@ -725,6 +725,13 @@ export const landingLines = (lists: Landings, againNote: Map<string, string>): M
   return out;
 };
 
+/** One landing ending's outcome, as `landingLines` gives it at the end of the run; none for a dry run or an earlier merge closed. */
+export const landingOutcome = (o: { issue: string; branch: string }, landed: Landed, againNote: Map<string, string>): Outcome | undefined => {
+  const one = newLandings();
+  accountLanding(one, o, landed);
+  return landingLines(one, againNote).get(o.issue);
+};
+
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {
   const line = againLine(landed.kind, landed.with);

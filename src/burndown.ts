@@ -53,7 +53,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  accountLanding, carriedBranch, carriedMergeLine, conflictLine, createHostGit, createRequeueRecord, greenCarriedLine, type LandContext, landingLines, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
+  accountLanding, carriedBranch, carriedMergeLine, conflictLine, createHostGit, createRequeueRecord, greenCarriedLine, type LandContext, landingLines, landingOutcome, landingWork, newLandings, pipelineWorkers, slotTurn, STOPPED_GREEN,
   trackerMade, withdrawnRecord,
 } from "./landing.ts";
 import { type Attempted, type Change, createSchedule, type Ending, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -112,7 +112,7 @@ export const noCommitRecord = (o: Pick<Outcome, "issue" | "status" | "commits">,
 };
 
 // A branch's outcome as the status view's row shows it, before landing. `uncommitted`: its finished work sits in a kept worktree.
-const pipelineOutcome = (o: Outcome, uncommitted: boolean): RecordedOutcome =>
+export const pipelineOutcome = (o: Outcome, uncommitted: boolean): RecordedOutcome =>
   uncommitted
     ? { kind: "uncommitted", text: "uncommitted" }
     : o.status === "gate-failed"
@@ -120,7 +120,7 @@ const pipelineOutcome = (o: Outcome, uncommitted: boolean): RecordedOutcome =>
       : o.status === "green"
         ? { kind: "green", text: "green - waiting to land" }
         : o.status === "merged-earlier"
-          ? { kind: "green", text: o.status }
+          ? { kind: "merged", text: o.status }
           : o.status === "held"
             ? { kind: "held", text: `needs a human: ${o.heldNote ?? "held"}` }
             : { kind: "no change", text: o.status };
@@ -1300,6 +1300,12 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   const ended = (id: string, e: Ending<Outcome, Outcome>) => {
     if (e.kind === "landing") {
       requeues.ended(id, e);
+      // Its outcome now, not only after the schedule: a report printed before then (the run
+      // stopped at landing, `sandcastle report` mid-run) reads red together and taken back from it.
+      bookkeep(id, () => {
+        const o = landingOutcome(e.green, e.landed, againNote);
+        if (o) recordOutcomes(project, runId, { [id]: o });
+      });
     } else if (e.kind === "not begun" && e.why.kind === "withdrawn") {
       const { reason } = e.why;
       bookkeep(id, () => run.ticket(id, withdrawnRecord(reason)));
