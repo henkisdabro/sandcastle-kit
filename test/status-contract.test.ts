@@ -27,6 +27,7 @@ const fieldsOf = (name: string): string[] => {
 };
 const RUN_FIELDS = fieldsOf("RunRecord");
 const TICKET_FIELDS = fieldsOf("TicketRecord");
+const SETTINGS_FIELDS = fieldsOf("RunSettings");
 // A waiting entry is declared inline on the run record: `waiting?: { issue: string; on: string[] }[]`.
 const WAITING_FIELDS = [...(record.match(/^  waiting\?: \{([^}]*)\}/m)?.[1] ?? "").matchAll(/(\w+)\??:/g)].map((m) => m[1]);
 
@@ -50,7 +51,7 @@ const chains = (program: string): string[][] =>
 const strays = (program: string): string[] => {
   // The collections the program walks: `(.tickets // {})[]`, `(.waiting // [])[]`, `.tickets[]`.
   const walked = [...program.matchAll(/\(\.(\w+) \/\/ [{[]/g)].map((m) => m[1]);
-  const itemFields = walked.flatMap((c) => (c === "tickets" ? TICKET_FIELDS : c === "waiting" ? WAITING_FIELDS : c === "active" ? LEGACY_ACTIVE_FIELDS : []));
+  const itemFields = walked.flatMap((c) => (c === "tickets" ? TICKET_FIELDS : c === "waiting" ? WAITING_FIELDS : c === "settings" ? SETTINGS_FIELDS : c === "active" ? LEGACY_ACTIVE_FIELDS : []));
   const out: string[] = [];
   for (const [first, second] of chains(program)) {
     if (first === "key") continue;
@@ -70,10 +71,13 @@ test("every field the status view reads from the run record is a run record fiel
   const programs = runRecordPrograms();
   assert.ok(programs.length >= 10, `found the run record reads in status.sh (${programs.length})`);
   const read = new Set(programs.flatMap((p) => chains(p).map((c) => c[0])));
-  for (const field of ["tickets", "pid", "startedAt", "finishedAt", "concurrency", "typical", "stage", "models", "tokens", "dryRun"]) {
+  for (const field of ["tickets", "pid", "startedAt", "finishedAt", "concurrency", "typical", "stage", "models", "tokens", "dryRun", "settings"]) {
     assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
   }
   assert.ok(RUN_FIELDS.includes("tickets") && TICKET_FIELDS.includes("state") && WAITING_FIELDS.includes("on"), "the schema's fields were found");
+  // The settings group's own fields: the row reads each of them, and each is one the record holds.
+  assert.deepEqual(SETTINGS_FIELDS, ["autonomy", "turn", "cap"], "the settings group's fields were found");
+  for (const field of SETTINGS_FIELDS) assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
   for (const p of programs) assert.deepEqual(strays(p), [], `status.sh reads fields the run record does not hold, in: ${p.replace(/\s+/g, " ").trim()}`);
   // The legacy field stays a known exception only while the view still reads it.
   for (const f of LEGACY_RUN_FIELDS) assert.ok(read.has(f), `status.sh no longer reads .${f}: drop it from LEGACY_RUN_FIELDS`);

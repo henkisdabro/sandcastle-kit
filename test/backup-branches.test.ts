@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { after, test } from "node:test";
+import { quietly as logged } from "./quiet.ts";
 
 // pool.ts and sandbox.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -65,20 +66,11 @@ const destroy = (root: string, branch: string) => {
 };
 const resolves = (root: string, sha: string) => {
   try {
-    git(root, "cat-file", "-e", `${sha}^{commit}`);
+    // stderr piped: git names the missing object there, and a passing test should not print it.
+    execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root, stdio: "pipe" });
     return true;
   } catch {
     return false;
-  }
-};
-const logged = async <T>(fn: () => Promise<T> | T): Promise<{ result: T; lines: string[] }> => {
-  const lines: string[] = [];
-  const real = console.log;
-  console.log = (...a: unknown[]) => void lines.push(a.join(" "));
-  try {
-    return { result: await fn(), lines };
-  } finally {
-    console.log = real;
   }
 };
 

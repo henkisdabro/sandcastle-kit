@@ -131,8 +131,9 @@ last update, and `sandcastle run` warns about them in one line, until `/sandcast
 working - a new field is always optional, with a default - but a new default can change what a
 run does or spends, and a key the kit does not know (a typo an older version ignored) is now
 refused with the nearest real one: fix the key it names. The skill updates with the pull, since it
-is a link into the kit: Claude Code picks up the change in an open session (`/reload-skills`
-forces it); in another harness, start a new session.
+is a link into the kit, but a session that was already open keeps the skill it loaded at its
+start: after pulling, start a new session (Claude Code, Codex or OpenCode) before the next
+`/sandcastle` action. A mod linked by the update loads only in a new session too.
 
 The sandbox image picks up new Claude Code and Codex releases by itself (README,
 [The image's agent versions](../README.md#-the-images-agent-versions)), but not Debian and Node

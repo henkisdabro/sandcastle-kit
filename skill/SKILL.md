@@ -200,6 +200,11 @@ comments, and the gates can prove it.
    | Epic or too big for one agent run | propose child tickets; ask before creating them |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
+   When a ticket's body is written or rewritten here, its `Touches:` line names only files an agent
+   may edit under the project's rules, existing paths as they are; a new file is marked new in the
+   prose, not on that line (`(new)` would be read as part of the path). A run opens no pull request,
+   so evidence is asked for in the agent's final message or a ticket comment. `audit.md` step 10 has the full wording.
+
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
    question tool (`AskUserQuestion` in Claude Code): up to four questions a round, grouped by
    theme. Each question stands alone - enough context to decide without opening GitHub, the ticket
@@ -226,7 +231,7 @@ comments, and the gates can prove it.
    guess how long it takes: once the project has run before, the run prints a rough estimate at
    its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
-   offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
+   after labelling tickets on GitHub (or a `sandcastle requeue`), give GitHub a few seconds before `sandcastle run`: its label search can lag, and a run started at once may miss them. Then offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
    shows tickets waiting for others (`[waits for ...]`), say that a chain whose links are all queued
    drains in one run: each ticket starts once its last blocker lands and closes. With no autonomy
@@ -288,7 +293,7 @@ separate pane or terminal). While a run is live, every ticket it holds is shown 
 own record (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run:
 working, ready to land, need you, queued, blocked, merged. The states:
 
-- **Working** - `setup`, `impl`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
+- **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
   has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
@@ -309,7 +314,7 @@ After a run, or for a ticket outside it, the state is inferred from branches and
 over` is a branch from an earlier run, for `sandcastle clean`. Each ticket's agent and gate logs
 are `.sandcastle/logs/agent-issue-<n>-*.log` (a merged ticket's move to `.sandcastle/logs/archive/`
 at the next run or `sandcastle clean`; the `-gates-` one is the orchestrator's gate
-output; each pass's raw stream - every tool call and result - is the `.jsonl` beside its `.log`, so read that to check a reviewer's claim); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
+output; each pass's raw stream - every tool call and result - is the `.jsonl` beside its `.log`, so read that to check a reviewer's claim; the `.log` marks a failed tool result as `! error: ...` or `! exit N: ...`); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
 a "trust dialog" error). The live view fits its pane and summarises the rows that do not fit on
 one line (`sandcastle status 10 all` shows them all). How long each step took, and each agent
 pass's tokens, is in `.sandcastle/logs/timings.jsonl`.

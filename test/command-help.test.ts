@@ -1,5 +1,5 @@
 // `sandcastle <command> --help` (and `-h`) prints help and changes nothing: `clean --help` once ran
-// the clean and deleted the agent branches. Each command is run against a temp repo holding a
+// the clean and deleted the agent branches. A command is run against a temp repo holding a
 // merged `agent/issue-1` branch, which must still be there afterwards. No Docker, model calls or
 // network.
 //
@@ -37,8 +37,6 @@ const project = () => {
   return dir;
 };
 
-const COMMANDS = ["setup", "doctor", "run", "wait", "stop", "report", "status", "build", "preflight", "queue", "requeue", "blockers", "gates", "land", "preview", "lean", "init", "updated", "clean", "lean-apply", "herdr"];
-
 test("clean --help prints the clean entry and leaves a merged agent branch alone", () => {
   const dir = project();
   const config = mkdtempSync(join(tmpdir(), "sandcastle-cmdhelp-cfg-"));
@@ -49,18 +47,17 @@ test("clean --help prints the clean entry and leaves a merged agent branch alone
   assert.match(git(dir, "branch", "--list", "agent/issue-1"), /agent\/issue-1/);
 });
 
+// One command per flag, spawned: every command's own entry is checked in process, in
+// test/command-help-inprocess.test.ts.
 for (const flag of ["--help", "-h"]) {
-  test(`every command given ${flag} prints help and changes nothing`, () => {
+  test(`a command given ${flag} prints help and changes nothing`, () => {
     const dir = project();
     const config = mkdtempSync(join(tmpdir(), "sandcastle-cmdhelp-cfg-"));
     const before = git(dir, "for-each-ref");
     const files = readdirSync(dir).sort();
-    for (const command of COMMANDS) {
-      const r = cli("src/cli.ts", [command, flag], dir, config);
-      assert.equal(r.status, 0, `${command} ${flag}: ${r.stderr}`);
-      // `lean-apply` is internal and unlisted, so it gets the whole text.
-      assert.match(r.stdout, command === "lean-apply" ? /^ {2}setup /m : new RegExp(`^ {2}${command} `, "m"), `${command} ${flag} prints help`);
-    }
+    const r = cli("src/cli.ts", ["queue", flag], dir, config);
+    assert.equal(r.status, 0, `queue ${flag}: ${r.stderr}`);
+    assert.match(r.stdout, /^ {2}queue /m, `queue ${flag} prints help`);
     assert.equal(git(dir, "for-each-ref"), before, "no ref changed");
     assert.deepEqual(readdirSync(dir).sort(), files, "no file added to the project");
     assert.deepEqual(readdirSync(config), [], "nothing written to the user's config");

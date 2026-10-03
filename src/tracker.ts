@@ -515,19 +515,25 @@ export const parseRequeueArgs = (args: string[]): { id: string; note?: string } 
 };
 
 /** Puts a ticket back in the queue, or only adds the note to one still queued. Returns what to tell the operator. */
-export const requeueTicket = (tracker: Tracker, label: string, args: string[]): string => {
+export const requeueTicket = (tracker: Tracker, label: string, args: string[]): string => requeueTicketWithEffect(tracker, label, args).message;
+
+/** What a GitHub label change leaves behind: `gh issue list --label` can miss the ticket for a few seconds. */
+export const LABEL_LAG_REMINDER = "GitHub's label search can lag a few seconds: give it a moment before `sandcastle run`, or a run started now may miss this ticket.";
+
+/** `requeueTicket`, and whether it changed the queue label: only that change can leave a search stale. */
+export const requeueTicketWithEffect = (tracker: Tracker, label: string, args: string[]): { message: string; relabelled: boolean } => {
   const { id, note } = parseRequeueArgs(args);
   const t = tracker.get(id);
   const ref = tracker.ref(id);
   if (!t.open) throw new OperatorError(`${ref} is closed. Reopen it first if it needs more work.`);
   const text = note && `Note for the next run, from \`sandcastle requeue\`:\n\n${note}`;
   if (t.status === label && !t.held) {
-    if (!text) return `${ref} is still in the queue; nothing to change. Add --note "..." to leave the next run a note.`;
+    if (!text) return { message: `${ref} is still in the queue; nothing to change. Add --note "..." to leave the next run a note.`, relabelled: false };
     tracker.comment(id, text);
-    return `${ref} is still in the queue; added your note.`;
+    return { message: `${ref} is still in the queue; added your note.`, relabelled: false };
   }
   tracker.requeue(id, text);
-  return `${ref} is back in the queue (${label})${t.held ? ", no longer held" : ""}${note ? ", with your note" : ""}.`;
+  return { message: `${ref} is back in the queue (${label})${t.held ? ", no longer held" : ""}${note ? ", with your note" : ""}.`, relabelled: tracker.kind === "github" };
 };
 
 // ---------------------------------------------------------------------------

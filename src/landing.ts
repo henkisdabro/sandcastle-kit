@@ -39,7 +39,8 @@ export const conflictLine = (c: { files: string[]; with: string[] }) =>
  * has, so it is read against the branch head (a new file the glob covers) as well as the base (a
  * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
  * A file the branch adds under a conventional test path is never an overrun (`isTestPath`): its name
- * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is.
+ * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is
+ * returned here; `overrunLine` folds the test paths into a count when the overrun is reported.
  * Nor is a change to an agent-instructions file (`isAgentDoc`) when the branch adds any file: the
  * new module's row in the layout table is expected. On a branch that adds nothing it still counts.
  */
@@ -86,11 +87,11 @@ export const mergeBranch = (root: string, branch: string, head: string, ticket: 
   );
 };
 
-// Every place that decides "landed", and why each works with a squash (whose commits are not
-// ancestors of the base, and whose branch is deleted once the loop has landed everything):
+// Every place that decides "landed", and why each works with a landed branch deleted (a squash's
+// commits are not ancestors of the base; a merge's branch is deleted too, so both read alike):
 // - `mergedEarlier`, burndown.ts: a subject `--grep` on the base - works unchanged.
 // - carried / nochange, burndown.ts (`rev-list --count base..branch`): only for a branch that
-//   exists; a squashed branch is deleted, so a reopened ticket starts fresh from the base, which
+//   exists; a landed branch is deleted, so a reopened ticket starts fresh from the base, which
 //   holds its work - correct.
 // - `sandcastle clean`, cli.ts (`git cherry`): the deleted branch is not listed - correct.
 // - the closing summary's "Agent branches with unmerged work", report.ts (`git cherry`): not listed.
@@ -493,14 +494,14 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // restore, and a person deleting a merged branch is no alarm.
   host.forget(o.branch);
   // A squash's commits are not ancestors of the base, so a kept branch would read as unmerged
-  // work in `sandcastle clean`, the closing summary and the status view. Nothing needs the branch
-  // now: a conflict is attributed to the landing record, not to branches.
-  if (squash) {
-    try {
-      await host.write(() => sh("git", ["branch", "-D", o.branch], root));
-    } catch {
-      console.log(`${o.branch}: squashed into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
-    }
+  // work in `sandcastle clean`, the closing summary and the status view; a merged branch is only
+  // clutter, piling up in `git branch` until a clean. Nothing needs the branch now: a conflict is
+  // attributed to the landing record, not to branches. A merge's delete is `-d`, which refuses a
+  // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
+  try {
+    await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
+  } catch {
+    console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
   }
   // The merge stands whatever the tracker says next: a failed close is a
   // merged ticket still open, not one that failed to land - calling it "not
@@ -572,6 +573,17 @@ export const greenCarriedLine = (who: string, head: string, requeued: boolean) =
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
   `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
   (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
+
+/**
+ * The review commits a requeued ticket's first attempt made, which stay on its branch when the
+ * second attempt lands it: `commits` is the branch's total, so `reviewCommits` must keep them or the
+ * two disagree about one branch. Review commits carry no marker, so a branch kept from an
+ * earlier `sandcastle run` has no record here and counts 0.
+ */
+export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult<{ issue: string; reviewCommits: number }>[], id: string) => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
+};
 
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);

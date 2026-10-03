@@ -13,6 +13,7 @@ export const TICKET_STATES = [
   "blocked",
   "setup",
   "implement",
+  "resolve",
   "review",
   "cross-review",
   "gates",
@@ -105,6 +106,7 @@ export type Group = "working" | "needs you" | "ready" | "queued" | "blocked" | "
 export const GROUPS: Record<TicketState, Group> = {
   setup: "working",
   implement: "working",
+  resolve: "working",
   review: "working",
   "cross-review": "working",
   gates: "working",
@@ -162,6 +164,21 @@ export type TicketRecord = {
  */
 export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
 
+/**
+ * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
+ * level, the turn this record is, and the level's cap. Each field is optional and a reader shows
+ * only what is there - an older kit's record has no group at all, and level 1 has no cap (it asks
+ * after every turn).
+ */
+export type RunSettings = {
+  /** The level, resolved once per run. */
+  autonomy?: 0 | 1 | 2 | 3 | "drain";
+  /** This record's turn, 1-based. */
+  turn?: number;
+  /** The most turns the level allows. */
+  cap?: number;
+};
+
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
 export type RunRecord = {
   /** The project's name. */
@@ -182,6 +199,8 @@ export type RunRecord = {
   /** What the run line shows while the run is live. */
   stage?: string;
   concurrency?: number;
+  /** The run settings: what the status view's settings row shows. */
+  settings?: RunSettings;
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */

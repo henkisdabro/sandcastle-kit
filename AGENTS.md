@@ -44,6 +44,7 @@ read a module's section there before changing it.
 | `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, and `createQueue` |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
+| `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out; for now the autonomy level) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
@@ -100,11 +101,14 @@ behaviour (grep them for its words, not only for the function's name), and all o
 pnpm exec tsc --noEmit
 pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls),
                      # with `bash -n` on every tracked shell script
-sandcastle doctor
-# from inside a test project (no model calls):
-sandcastle status 0
-sandcastle lean
+./bin/sandcastle doctor
+# from inside a test project (no model calls), giving the path to this checkout's bin/sandcastle:
+/path/to/this/checkout/bin/sandcastle status 0
+/path/to/this/checkout/bin/sandcastle lean
 ```
+
+Write `./bin/sandcastle`, not a bare `sandcastle`: from a clone or a worktree, the one on PATH is the
+installed kit, so those checks would never exercise the change (doctor notes this, it does not fail).
 
 A change to `mod/` has checks of its own, which `pnpm test` skips without a recent Claude Code:
 read the `mod/` section of `docs/architecture.md`.
