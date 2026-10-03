@@ -54,7 +54,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -880,7 +880,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
           () => narrowModel,
         );
       };
-      let reviewCommits = 0;
+      // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
+      let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
       if (landOnly && mergeConflicted && greenHead !== undefined) {
@@ -889,7 +890,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         console.log(`${ref(issue.id)}: conflict resolved - reviewing the resolution only.`);
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-        reviewCommits = resolved.commits.length;
+        reviewCommits += resolved.commits.length;
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
       }

@@ -573,6 +573,17 @@ export const carriedMergeLine = (who: string, base: string, behind: number, requ
   `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
   (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
 
+/**
+ * The review commits a requeued ticket's first attempt made, which stay on its branch when the
+ * second attempt lands it: `commits` is the branch's total, so `reviewCommits` must keep them or the
+ * two disagree about one branch. Review commits carry no marker, so a branch kept from an
+ * earlier `sandcastle run` has no record here and counts 0.
+ */
+export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult<{ issue: string; reviewCommits: number }>[], id: string) => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
+};
+
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);
 
