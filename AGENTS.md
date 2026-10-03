@@ -76,13 +76,13 @@ read a module's section there before changing it.
 | `test/fixtures.ts` | `fakeTracker(overrides?)`: a project's `tracker` from `resolveTracker`'s own defaults. A test builds its `tracker` with it, never a full literal (`test/fixtures.test.ts` holds that); import it after `XDG_CONFIG_HOME` is set, like `src/` |
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`ls test/` first: a test file a ticket names may not exist). The `skill*` tests read SKILL.md, run.md, update.md and this table's `skill/` row |
-| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action) |
+| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router and every short action), run.md (closing a run), update.md (the update action) and audit.md (the audit action). Before editing it, read its portability rules in `docs/architecture.md` |
 | `mod/` | The optional Claude Code mod: `hooks/register.tsx` (the hooks), `hooks/run-record.ts` (the run record's types, imported by `src/` too), `hooks/run-state.ts` (the drawing). Runs inside Claude Code, imports nothing from `src/` |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |
 | `docs/INSTALL.md` | Requirements, what `setup` does, the manual install, updating |
-| `docs/img/` | The README's pictures: `logo.svg` (the pixel castle and wordmark), `status.gif` (the website's status window playing its scripted night) and `mod.gif` (the mod's band, recorded from the animated `terminal-logo.svg`). GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
-| `docs/architecture.md` | What each larger module owns, in more detail than this table |
+| `docs/img/` | The README's pictures. GitHub plays no SVG animation in a README, so the moving ones are GIFs, rebuilt by `record-gifs.sh` there; the castle's colours are the status view's |
+| `docs/releasing.md` | Version bumps, the tag and the release notes' shape |
 | `test/full-check.sh` | Every check below on this machine, then in a Linux container, then the outbound scan of the commits not yet on `origin/main` |
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
@@ -90,27 +90,10 @@ read a module's section there before changing it.
 `@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in
 `node_modules/@ai-hero/sandcastle/dist` - read the source there when unsure.
 
-## The skill serves three harnesses
-
-The `skill/` directory (not the file - `src/setup.ts` links the directory) is symlinked into
-`~/.claude/skills/sandcastle` (Claude Code, also scanned by OpenCode) and
-`~/.agents/skills/sandcastle` (Codex). `SKILL.md` works in all three because each ignores
-frontmatter it does not know. Keep it portable:
-
-- `name` stays `sandcastle`, matching the directory the user links it as.
-- `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger:
-  Codex and OpenCode never see Claude Code's `when_to_use`.
-- `argument-hint` and `arguments: [action]` are Claude Code's; the body handles an unfilled
-  `$action` for the other two.
-- Name harness-specific tools by what they do, with the Claude Code name as an example
-  ("the harness's question tool (`AskUserQuestion` in Claude Code)").
-- `SKILL.md` loads whole for every action, so a long section that only one action needs lives in a
-  sibling file that `SKILL.md` names in prose ("read run.md in this skill's directory") - Codex and
-  OpenCode do not fill `$action`, so they find the file from the text.
-
 ## Verifying a change
 
-A change is ready to commit when all of these pass:
+A change is ready to commit when `README.md`, `skill/` and `docs/` no longer describe the old
+behaviour (grep them for its words, not only for the function's name), and all of these pass:
 
 ```bash
 pnpm exec tsc --noEmit
@@ -122,16 +105,8 @@ sandcastle status 0
 sandcastle lean
 ```
 
-A change to `mod/` also needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs
-`claude plugin validate` and the mod's own tests (`test/mod.test.ts`), and skips them without it,
-as CI and the sandboxes do. That checks the hooks and the tree they return, never the paint: look
-at a changed drawing in a real session, `claude --plugin-dir mod` from a project with a run
-record. The mod's API is early access, and its types are the authority, not memory. That session
-writes them to `mod/.claude-plugin/types/` with a `mod/tsconfig.json` (both gitignored; they are
-absent until then, and `mod/types/index.d.ts` holds only the band's own types); from then on
-`pnpm test` type-checks the mod too, which the kit's own `tsc` does not cover. Grep the types for the
-member you need rather than reading them: they run to thousands of lines. `claude plugin test mod`
-reporting "hooks modules are turned off" is Claude Code's rollout switch, not the mod.
+A change to `mod/` has checks of its own, which `pnpm test` skips without a recent Claude Code:
+read the `mod/` section of `docs/architecture.md`.
 
 Before a branch's work is pushed, `bash test/full-check.sh` repeats the checks on this machine and
 in Linux (agents' sandboxes are Linux, so BSD tools and macOS's bash 3.2 break only here), and
@@ -157,28 +132,10 @@ directory, never in a real project.
   convention, anything `sandcastle init` now writes differently - also gets an **Upgrading**
   note, and if a project needs a check or a fix, a step in the skill's `update` action (`skill/update.md`). Write
   that step as a check that is safe to repeat, never as "since version X".
-- A change to what the kit does is not done until `README.md`, `skill/` and `docs/` no longer
-  describe the old behaviour: grep them for its words, not only for the function's name.
 
-## GitHub releases
+## Releases
 
-A release bumps `version` in `package.json`, `herdr/herdr-plugin.toml` and `site/index.html`'s
-`data-version` with its changelog heading (tests check all four agree), then tags `vX.Y.Z`: the kit version counts a clone's
-distance from that tag.
-
-The release notes are a short, emoji-led summary, never the changelog pasted in. Copy the shape of
-the latest release (`gh release view`) and keep it:
-
-- Title: `🏰 sandcastle-kit vX.Y.Z - <tagline>`, a short lowercase phrase saying what the release
-  is about.
-- Body opens with `## 🏰 vX.Y.Z - <tagline>`, then one bold sentence and a short paragraph on
-  where the release came from.
-- Then `### ✨ New`, `### 🐛 Fixed` (a `### 🔒 Security` section before it when there is any),
-  `### ⬆️ Upgrading` (starting with `/sandcastle update`), `### 🙏 Built on Sandcastle` (the
-  thanks to Matt Pocock), and `**Full diff:**` with the compare link.
-- Each bullet starts with an emoji and a bold or short lead, then a dash and one line. Pick the
-  handful of changes a user notices, and end Fixed and Upgrading with a link to the changelog's
-  version anchor for the rest.
+Releasing - a version bump, a tag, release notes - follows `docs/releasing.md`: read it first.
 
 ## Agent skills
 

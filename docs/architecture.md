@@ -106,9 +106,21 @@ Mounted read-only at `/etc/claude-code` in every sandbox (`sandboxMounts` in `sr
 
 One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and sections, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
 
+## `skill/`
+
+The skill serves three harnesses. The directory (not the file - `src/setup.ts` links the directory) is symlinked into `~/.claude/skills/sandcastle` (Claude Code, also scanned by OpenCode) and `~/.agents/skills/sandcastle` (Codex). `SKILL.md` works in all three because each ignores frontmatter it does not know. Keep it portable:
+
+- `name` stays `sandcastle`, matching the directory the user links it as.
+- `description` stays under 1,024 characters (OpenCode rejects longer) and carries every trigger: Codex and OpenCode never see Claude Code's `when_to_use`.
+- `argument-hint` and `arguments: [action]` are Claude Code's; the body handles an unfilled `$action` for the other two.
+- Name harness-specific tools by what they do, with the Claude Code name as an example ("the harness's question tool (`AskUserQuestion` in Claude Code)").
+- `SKILL.md` loads whole for every action, so a long section that only one action needs lives in a sibling file that `SKILL.md` names in prose ("read run.md in this skill's directory") - Codex and OpenCode do not fill `$action`, so they find the file from the text.
+
 ## `mod/`
 
 The optional Claude Code mod, a plugin linked as `~/.claude/skills/sandcastle-mod`: `hooks/register.tsx` (the hooks: watch `run.json`, the band above the prompt, the needs-you line and notice, the prompt when the run's process is gone, `/sandcastle-status`), `hooks/run-record.ts` (pure, imports nothing: the run record and ticket record types, the closed list of ticket states, the derived states, and the tables from ticket state to group and word; the kit's own `src/` imports it too, so every write is typed by it, and `readTickets` passes each state read from disk through the guard), and `hooks/run-state.ts` (pure: the record read as groups, glyphs and colours, the palette and castle, and the band cut to its width - `test/mod.test.ts` holds both to `src/run.ts` and `status.sh`). It runs inside Claude Code, not under `tsx`, and imports nothing from `src/`. Its own tests are `mod/tests/`, run by `claude plugin test mod`
+
+Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test` then runs `claude plugin validate` and the mod's own tests (`test/mod.test.ts`), and skips them without it, as CI and the sandboxes do. That checks the hooks and the tree they return, never the paint: look at a changed drawing in a real session, `claude --plugin-dir mod` from a project with a run record. The mod's API is early access, and its types are the authority, not memory. That session writes them to `mod/.claude-plugin/types/` with a `mod/tsconfig.json` (both gitignored; they are absent until then, and `mod/types/index.d.ts` holds only the band's own types); from then on `pnpm test` type-checks the mod too, which the kit's own `tsc` does not cover. Grep the types for the member you need rather than reading them: they run to thousands of lines. `claude plugin test mod` reporting "hooks modules are turned off" is Claude Code's rollout switch, not the mod.
 
 ## `site/`
 
