@@ -264,8 +264,8 @@ export const preflight = async (project: Project, image: string, extra: { model:
 // from hand-suffixed branches (agent-issue-12-closeout-impl-...) fall back
 // to the first phase word.
 export const logOwner = (name: string) =>
-  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair|gates)-\1\.(?:log|jsonl)$/)?.[1] ??
-  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair|gates)-/)?.[1];
+  name.match(/^agent-issue-(.+)-(?:impl|resolve|review-codex|review|repair|gates)-\1\.(?:log|jsonl)$/)?.[1] ??
+  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|resolve|review|repair|gates)-/)?.[1];
 
 /** Where the orchestrator writes an issue's gate output as it runs; named like an agent log so it is archived with them. */
 export const gatesLog = (project: Project, id: string) => join(project.root, `.sandcastle/logs/agent-issue-${id}-gates-${id}.log`);

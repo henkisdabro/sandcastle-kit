@@ -106,6 +106,7 @@ const SECTIONS: Record<TicketState, Section> = {
   queued: "settled",
   setup: "working",
   implement: "working",
+  resolve: "working",
   review: "working",
   "cross-review": "working",
   gates: "working",

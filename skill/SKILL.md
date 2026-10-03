@@ -293,7 +293,7 @@ separate pane or terminal). While a run is live, every ticket it holds is shown 
 own record (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run:
 working, ready to land, need you, queued, blocked, merged. The states:
 
-- **Working** - `setup`, `impl`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
+- **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
   has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
