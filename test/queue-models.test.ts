@@ -5,13 +5,13 @@
 //   pnpm exec tsx --test test/queue-models.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = join(import.meta.dirname, "..");
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { init } = await import("../src/init.ts");
@@ -35,7 +35,7 @@ test("queue adds [implement model/effort] for a label, and names a bad label wit
   const list = `[${[issue(1, ["model:claude-opus-5-5", "effort:max"]), issue(2, []), issue(3, ["effort:turbo"]), issue(4, ["effort:low"])].join(",")}]`;
   writeFileSync(join(bin, "gh"), `#!/bin/sh\ncase "$*" in\n  *"issue list"*) cat <<'EOF'\n${list}\nEOF\n  ;;\n  *) echo '[]' ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
-  const r = spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "queue"], {
+  const r = runKit(["queue"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, IMPL_MODEL: "claude-sonnet-5-5", IMPL_EFFORT: "high", PATH: [bin, process.env.PATH].join(delimiter) },

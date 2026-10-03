@@ -12,11 +12,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { startKit } from "./cli-spawn.ts";
 
-const KIT = fileURLToPath(new URL("..", import.meta.url));
-// The kit's own tsx loader through node itself, never `bin/sandcastle` or `.bin/tsx` (see detach.test.ts).
-const TSX = join(KIT, "node_modules/tsx/dist/cli.mjs");
 
 // Plain JS stand-in for a run. It takes the lock and writes its record; when `release` appears it
 // drops the lock, then holds the gap open until `record` appears, writes the exit code and ends.
@@ -90,13 +87,13 @@ test("wait started in the gap (lock gone, no exitCode, pid alive) waits for the 
   await until("the gap to open", () => existsSync(join(root, "gap")));
   assert.equal(existsSync(join(root, ".sandcastle/logs/run.lock")), false, "the lock is already released");
 
-  const child = spawn(process.execPath, [TSX, join(KIT, "src/cli.ts"), "wait"], {
+  const child = startKit(["wait"], {
     cwd: root,
     env: { ...process.env, HERDR_ENV: "", SANDCASTLE_DETACH: "", AUTONOMY_LEVEL: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let err = "";
-  child.stderr.on("data", (d) => (err += d));
+  child.stderr!.on("data", (d) => (err += d));
   const done = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
   let early = false;
   child.on("exit", () => (early = true));

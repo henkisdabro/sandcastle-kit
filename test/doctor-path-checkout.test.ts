@@ -5,11 +5,11 @@
 //   pnpm exec tsx --test test/doctor-path-checkout.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
 const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-pathkit-")));
@@ -29,7 +29,7 @@ const doctor = (pathDir?: string) => {
   const cwd = scratch();
   // Without the host's own `sandcastle` (an installed kit), which would stand in for "nothing on PATH".
   const base = (process.env.PATH ?? "").split(delimiter).filter((d) => !existsSync(join(d, "sandcastle"))).join(delimiter);
-  return spawnSync(process.execPath, ["--import", join(KIT, "node_modules/tsx/dist/loader.mjs"), join(KIT, "src/cli.ts"), "doctor"], {
+  return runKit(["doctor"], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

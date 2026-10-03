@@ -5,12 +5,13 @@
 //   pnpm exec tsx --test test/lock.test.ts
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
+import { startNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 // Importing pool.ts must not touch the real slots.
@@ -57,7 +58,6 @@ test("a release removes only the lock it took", () => {
 test("eight processes racing one stale lock: exactly one takes it", async () => {
   const file = join(dir, "race.lock");
   writeFileSync(file, `${deadPid()} old-token killed run\n`);
-  const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
   const pool = join(import.meta.dirname, "../src/pool.ts");
   // All start at the same instant, and stay alive until every one has
   // answered: a winner that exits early is a dead pid, fairly taken over.
@@ -74,10 +74,10 @@ test("eight processes racing one stale lock: exactly one takes it", async () => 
     { length: 8 },
     () =>
       new Promise<string>((resolve, reject) => {
-        const child = spawn(process.execPath, [tsx, "--input-type=module", "-e", script], { env: process.env });
+        const child = startNode(["--input-type=module", "-e", script], { env: process.env });
         let out = "";
-        child.stdout.on("data", (d) => (out += d));
-        child.stderr.on("data", (d) => (out += d));
+        child.stdout!.on("data", (d) => (out += d));
+        child.stderr!.on("data", (d) => (out += d));
         child.on("exit", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(out))));
       }),
   );

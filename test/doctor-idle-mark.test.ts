@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-idle-mark-"));
@@ -32,7 +33,7 @@ const doctor = (settings: string | undefined) => {
     mkdirSync(join(config, "sandcastle-kit"), { recursive: true });
     writeFileSync(join(config, "sandcastle-kit", "config.json"), settings);
   }
-  const r = spawnSync(process.execPath, [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, "src/cli.ts"), "doctor"], {
+  const r = runKit(["doctor"], {
     cwd: home,
     encoding: "utf8",
     env: {

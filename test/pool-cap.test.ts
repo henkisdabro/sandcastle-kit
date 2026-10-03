@@ -6,19 +6,18 @@
 //   pnpm exec tsx --test test/pool-cap.test.ts
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
+import { startNode } from "./cli-spawn.ts";
 
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = cache;
 process.env.SANDCASTLE_MAX_SANDBOXES = "6";
 const { members, parseCapArgs, setCap, slotsByRun, splitShares, standing } = await import("../src/pool.ts");
 
-const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
 const pool = join(import.meta.dirname, "../src/pool.ts");
 const slots = join(cache, "sandcastle-kit", "slots");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -46,7 +45,9 @@ const run = (dir: string, body: string) => {
     `const sleep = (ms) => new Promise((r) => setTimeout(r, ms));` +
     `const mark = (name) => fs.appendFileSync(dir + "/" + name, "x"); const has = (name) => fs.existsSync(dir + "/" + name);` +
     body;
-  const child = spawn(process.execPath, [tsx, "--input-type=module", "-e", script], {
+  const child = startNode(["--input-type=module", "-e", script], {
+    // Longer than the helper's 60 s: a child here lives as long as its test, which a busy machine stretches.
+    timeoutMs: 240_000,
     env: { ...process.env, SANDCASTLE_MAX_SANDBOXES: "6", SANDCASTLE_MAX_GATES: "1" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -59,8 +60,8 @@ const run = (dir: string, body: string) => {
     }
   };
   let out = "";
-  child.stdout.on("data", (d) => (out += d));
-  child.stderr.on("data", (d) => (out += d));
+  child.stdout!.on("data", (d) => (out += d));
+  child.stderr!.on("data", (d) => (out += d));
   const done = new Promise<void>((resolve, reject) => child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(out)))));
   done.catch(() => {});
   runs.push(kill);

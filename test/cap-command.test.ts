@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runKit } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
@@ -20,7 +21,7 @@ const runs = join(cache, "sandcastle-kit", "slots", "runs");
 mkdirSync(runs, { recursive: true });
 
 const cap = (cwd: string, ...args: string[]) =>
-  spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, "src/cli.ts"), "cap", ...args], {
+  runKit(["cap", ...args], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

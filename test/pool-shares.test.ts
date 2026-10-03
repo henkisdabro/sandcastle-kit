@@ -7,12 +7,13 @@
 //   pnpm exec tsx --test test/pool-shares.test.ts
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
+import { startNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -20,7 +21,6 @@ process.env.XDG_CACHE_HOME = cache;
 process.env.SANDCASTLE_MAX_SANDBOXES = "6";
 const { members, slotsByRun, splitShares } = await import("../src/pool.ts");
 
-const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
 const pool = join(import.meta.dirname, "../src/pool.ts");
 const slots = join(cache, "sandcastle-kit", "slots");
 const registrations = join(slots, "runs");
@@ -58,10 +58,12 @@ const run = (dir: string, body: string) => {
     `const mark = (name) => fs.appendFileSync(dir + "/" + name, "x"); const has = (name) => fs.existsSync(dir + "/" + name);` +
     `const log = (line) => fs.appendFileSync(dir + "/log", line + "\\n");` +
     body;
-  const child = spawn(process.execPath, [tsx, "--input-type=module", "-e", script], {
+  const child = startNode(["--input-type=module", "-e", script], {
+    // Longer than the helper's 60 s: a child here lives as long as its test, which a busy machine stretches.
+    timeoutMs: 240_000,
     env: { ...process.env, SANDCASTLE_MAX_SANDBOXES: "6", SANDCASTLE_MAX_GATES: "1" },
     stdio: ["ignore", "pipe", "pipe"],
-    // Its own process group: tsx runs the script in a child, and killing the wrapper alone leaves that child holding slots.
+    // Its own process group, so the kill reaches anything the script started.
     detached: true,
   });
   const kill = () => {
@@ -72,8 +74,8 @@ const run = (dir: string, body: string) => {
     }
   };
   let out = "";
-  child.stdout.on("data", (d) => (out += d));
-  child.stderr.on("data", (d) => (out += d));
+  child.stdout!.on("data", (d) => (out += d));
+  child.stderr!.on("data", (d) => (out += d));
   const done = new Promise<void>((resolve, reject) => child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(out)))));
   // A failure is reported where it is awaited; an unwatched one must not end the test run.
   done.catch(() => {});

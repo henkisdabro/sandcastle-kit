@@ -19,9 +19,9 @@ import { followable, parse, parseRegistry, REGISTRY_SCRIPT, startedBy } from "..
 import { liveRuns } from "../src/herdr-plugin.ts";
 import { everyPidIsTheKit } from "./kit-process.ts";
 import { registerRun, runFile } from "../src/live-runs.ts";
+import { runKit, runNode } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
-const TSX = join(KIT, "node_modules/tsx/dist/cli.mjs");
 const href = (f: string) => JSON.stringify(pathToFileURL(join(KIT, f)).href);
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-live-runs-")));
 let n = 0;
@@ -51,7 +51,7 @@ const runFixture = (root: string, cache: string, env: Record<string, string | un
   const clean: NodeJS.ProcessEnv = { ...process.env, XDG_CACHE_HOME: cache, FIXTURE_ROOT: root };
   // The harness running these tests may itself be a Claude Code session, and may be in Herdr.
   for (const k of ["CLAUDE_CODE_SESSION_ID", "HERDR_ENV", "HERDR_PANE_ID"]) delete clean[k];
-  const res = spawnSync(process.execPath, [TSX, fixture], { encoding: "utf8", env: { ...clean, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const res = runKit([], { script: fixture, encoding: "utf8", env: { ...clean, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(res.status, 0, res.stderr);
   return res.stdout.trim();
 };
@@ -176,7 +176,7 @@ test("with XDG_CACHE_HOME unset or empty the script reads ~/.cache, as the kit w
   writeFileSync(join(dir, "one"), other);
   for (const env of [{ HOME: home }, { HOME: home, XDG_CACHE_HOME: "" }] as Record<string, string>[]) assert.deepEqual(followable(listing(project, env)), [other], JSON.stringify(env));
   // Written there too: an empty XDG_CACHE_HOME is unset for the kit as well.
-  const res = spawnSync(process.execPath, [TSX, "-e", `import { RUNS_DIR } from ${href("src/live-runs.ts")}; console.log(RUNS_DIR)`], {
+  const res = runNode(["-e", `import { RUNS_DIR } from ${href("src/live-runs.ts")}; console.log(RUNS_DIR)`], {
     encoding: "utf8",
     env: { ...process.env, HOME: home, XDG_CACHE_HOME: "" },
     stdio: ["ignore", "pipe", "pipe"],

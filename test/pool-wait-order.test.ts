@@ -6,19 +6,19 @@
 //   pnpm exec tsx --test test/pool-wait-order.test.ts
 
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RUN_COMMAND } from "../mod/hooks/run-live.ts";
+import { startNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = cache;
 const { liveSlots, slotsByRun, usage } = await import("../src/pool.ts");
 
-const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
 const pool = join(import.meta.dirname, "../src/pool.ts");
 const slots = join(cache, "sandcastle-kit", "slots");
 const waits = join(slots, "waits");
@@ -38,13 +38,15 @@ const run = (dir: string, body: string) => {
     `const mark = (name) => fs.appendFileSync(dir + "/" + name, "x"); const has = (name) => fs.existsSync(dir + "/" + name);` +
     `const log = (line) => fs.appendFileSync(dir + "/log", line + "\\n");` +
     body;
-  const child = spawn(process.execPath, [tsx, "--input-type=module", "-e", script], {
+  const child = startNode(["--input-type=module", "-e", script], {
+    // Longer than the helper's 60 s: a child here lives as long as its test, which a busy machine stretches.
+    timeoutMs: 240_000,
     env: { ...process.env, SANDCASTLE_MAX_SANDBOXES: "1", SANDCASTLE_MAX_GATES: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";
-  child.stdout.on("data", (d) => (out += d));
-  child.stderr.on("data", (d) => (out += d));
+  child.stdout!.on("data", (d) => (out += d));
+  child.stderr!.on("data", (d) => (out += d));
   return new Promise<void>((resolve, reject) => child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(out)))));
 };
 const logOf = (dir: string) => readFileSync(join(dir, "log"), "utf8").trim().split("\n");

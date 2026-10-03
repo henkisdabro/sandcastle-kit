@@ -12,6 +12,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runNode } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 // Importing pool.ts must not touch the real slots.
@@ -60,9 +61,8 @@ test("a ps that fails keeps the lock of a live owner, end to end", () => {
   const file = join(dir, "no-ps.lock");
   writeFileSync(file, `${process.pid} token run\n`);
   const pool = join(import.meta.dirname, "../src/pool.ts");
-  const tsx = join(import.meta.dirname, "../node_modules/tsx/dist/cli.mjs");
   const script = `const { takeLock } = await import(${JSON.stringify(pool)}); console.log(JSON.stringify(takeLock(${JSON.stringify(file)}, "me")));`;
-  const out = spawnSync(process.execPath, [tsx, "--input-type=module", "-e", script], {
+  const out = runNode(["--input-type=module", "-e", script], {
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

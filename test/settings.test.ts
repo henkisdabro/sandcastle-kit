@@ -5,20 +5,20 @@
 //   pnpm exec tsx --test test/settings.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { OperatorError } from "../src/errors.ts";
+import { runKit, runNode } from "./cli-spawn.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-settings-"));
 
 // Each case runs in a child process: the settings are read once per process.
 const probe = (env: Record<string, string>, code: string) => {
-  const r = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], {
+  const r = runNode(["--input-type=module", "-e", code], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, XDG_CACHE_HOME: temp(), XDG_CONFIG_HOME: temp(), ...env },
@@ -89,7 +89,7 @@ test("doctor reports a malformed config.json as a FIX line instead of crashing",
   // asdf shim there reads its own config from XDG_CONFIG_HOME, which this test
   // points at a temp dir - the shim then exits before the kit runs. Both agent versions pinned:
   // doctor resolves them, and unpinned that is a fetch of the release channel and npm.
-  const r = spawnSync(process.execPath, [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, "src/cli.ts"), "doctor"], {
+  const r = runKit(["doctor"], {
     cwd: temp(),
     encoding: "utf8",
     env: { ...process.env, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: temp(), CLAUDE_CODE_VERSION: "2.1.0", CODEX_VERSION: "0.1.0" },

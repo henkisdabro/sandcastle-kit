@@ -12,11 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
-// Not bin/sandcastle or node_modules/.bin/tsx: those find `node` on PATH.
+// runKit, not bin/sandcastle or the tsx binary: those find `node` on PATH.
 const cli = (file: string, args: string[], cwd: string, config: string) =>
-  spawnSync(process.execPath, [join(kit, "node_modules/tsx/dist/cli.mjs"), join(kit, file), ...args], {
+  runKit(args, {
+    script: join(kit, file),
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],

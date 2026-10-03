@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import type { OutcomeEntry, RunRecord } from "../mod/hooks/run-record.ts";
+import { runKit } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -25,7 +25,6 @@ const { refOf } = await import("../src/tracker.ts");
 type Facts = Parameters<typeof rerunnable>[0];
 type Project = Parameters<typeof recordRun>[0];
 
-const KIT = fileURLToPath(new URL("..", import.meta.url));
 
 test("autonomyLevel: the env wins over config, unset is 0", () => {
   assert.equal(autonomyLevel(undefined, undefined), 0);
@@ -223,7 +222,7 @@ test("the CLI refuses a bad AUTONOMY_LEVEL with a message and no stack, before a
   spawnSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd });
   mkdirSync(join(cwd, ".sandcastle"));
   writeFileSync(join(cwd, ".sandcastle/config.ts"), 'export default { name: "t", gates: [{ name: "g", command: "true" }] };\n');
-  const r = spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "run"], {
+  const r = runKit(["run"], {
     cwd,
     env: { ...process.env, AUTONOMY_LEVEL: "7", XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },
     stdio: ["ignore", "pipe", "pipe"],

@@ -5,12 +5,11 @@
 //   pnpm exec tsx --test test/quiet-output.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runNode } from "./cli-spawn.ts";
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
-const tsx = fileURLToPath(new URL("../node_modules/tsx/dist/cli.mjs", import.meta.url));
 
 // node:test's reporter lines: a result (pass, fail, skip, cancel), a suite or the ℹ summary.
 const reporterLine = /^\s*[✔✖﹣▶ℹ]/;
@@ -33,7 +32,7 @@ for (const file of files) {
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
     // Spec named: Node 22 defaults a piped run to TAP, whose every line the pattern above would refuse.
-    const r = spawnSync(process.execPath, [tsx, "--test", "--test-reporter=spec", file], { cwd: kit, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const r = runNode(["--test", "--test-reporter=spec", file], { cwd: kit, env, encoding: "utf8", timeoutMs: 180_000 });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const noisy = `${r.stdout}\n${r.stderr}`.split("\n").filter((l) => l.trim() !== "" && !reporterLine.test(l));
     assert.deepEqual(noisy, []);

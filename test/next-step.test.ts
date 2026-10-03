@@ -6,13 +6,13 @@
 //   pnpm exec tsx --test test/next-step.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const KIT = join(import.meta.dirname, "..");
 // Importing init.ts must not read the real user config or take real cache slots.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -63,9 +63,9 @@ esac
   );
   chmodSync(join(bin, "gh"), 0o755);
   const run = (...args: string[]) =>
-    // This node, not .bin/tsx: that finds `node` on PATH, and a mise or asdf shim there reads
-    // its config from the XDG_CONFIG_HOME this file points at a temp dir, then exits.
-    spawnSync(process.execPath, [join(KIT, "node_modules/tsx/dist/cli.mjs"), join(KIT, "src/cli.ts"), "queue", ...args], {
+    // runKit starts this node, not the tsx binary: that finds `node` on PATH, and a mise or asdf shim there
+    // reads its config from the XDG_CONFIG_HOME this file points at a temp dir, then exits.
+    runKit(["queue", ...args], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, PATH: [bin, process.env.PATH].join(delimiter), XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_CACHE_HOME: process.env.XDG_CACHE_HOME },

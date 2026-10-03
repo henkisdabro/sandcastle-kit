@@ -6,18 +6,16 @@
 //   pnpm exec tsx --test test/detach.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { livePid, OUTPUT_LOG, startDetached } from "../src/detach.ts";
+import { startKit } from "./cli-spawn.ts";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
-// The kit's own tsx loader through node itself: `bin/sandcastle` and `.bin/tsx` find `node` on PATH,
-// which on a Mac is often a version manager's shim that fails once XDG_CONFIG_HOME moves.
-const TSX = join(KIT, "node_modules/tsx/dist/cli.mjs");
 
 // The stand-in for the run. Plain JS, so it starts without a loader. It holds the run lock as the
 // real run does, records SIGINT, and ends when a `release` file appears (its content is the exit
@@ -94,15 +92,15 @@ const alive = (pid: number) => {
 
 /** The real CLI, started and left running: `done` resolves with its exit code and output. */
 const cli = (root: string, args: string[], env: Record<string, string> = {}) => {
-  const child = spawn(process.execPath, [TSX, join(KIT, "src/cli.ts"), ...args], {
+  const child = startKit(args, {
     cwd: root,
     env: { ...process.env, HERDR_ENV: "", SANDCASTLE_DETACH: "", AUTONOMY_LEVEL: "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";
   let err = "";
-  child.stdout.on("data", (d) => (out += d));
-  child.stderr.on("data", (d) => (err += d));
+  child.stdout!.on("data", (d) => (out += d));
+  child.stderr!.on("data", (d) => (err += d));
   const done = new Promise<{ code: number | null; out: string; err: string }>((resolve) => child.on("close", (code) => resolve({ code, out, err })));
   return { child, done, exited: () => child.exitCode !== null || child.signalCode !== null };
 };
@@ -267,9 +265,9 @@ test("a detached run ignores SIGHUP; an attached one still ends on it", async ()
   );
   const run = (env: Record<string, string>) =>
     new Promise<{ code: number | null; out: string }>((resolve) => {
-      const child = spawn(process.execPath, [TSX, probe], { env: { ...process.env, SANDCASTLE_DETACHED: "", ...env }, stdio: ["ignore", "pipe", "ignore"] });
+      const child = startKit([], { script: probe, env: { ...process.env, SANDCASTLE_DETACHED: "", ...env }, stdio: ["ignore", "pipe", "ignore"] });
       let out = "";
-      child.stdout.on("data", (d) => (out += d));
+      child.stdout!.on("data", (d) => (out += d));
       child.on("close", (code) => resolve({ code, out }));
     });
   const detached = await run({ SANDCASTLE_DETACHED: "1" });

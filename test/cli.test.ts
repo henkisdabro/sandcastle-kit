@@ -4,15 +4,13 @@
 //   pnpm exec tsx --test test/cli.test.ts
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
-const tsx = join(kit, "node_modules", ".bin", "tsx");
 
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-cli-"));
 const repo = () => {
@@ -21,7 +19,7 @@ const repo = () => {
   return root;
 };
 const sandcastle = (cwd: string, ...args: string[]) =>
-  spawnSync(tsx, [join(kit, "src/cli.ts"), ...args], {
+  runKit([...args], {
     cwd,
     encoding: "utf8",
     // Never discover a repository above the throwaway directory.

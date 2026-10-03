@@ -4,12 +4,12 @@
 //   pnpm exec tsx --test test/machine-settings-keys.test.ts
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { runKit, runNode } from "./cli-spawn.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-keys-"));
@@ -23,7 +23,7 @@ const configWith = (body: string) => {
 
 // Each case runs in a child process: the settings are read once per process.
 const read = (config: string) =>
-  spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
+  runNode(["--input-type=module", "-e",
     `const { machineSettings } = await import("./src/sandbox.ts"); try { console.log(JSON.stringify(machineSettings())); } catch (e) { console.log(e.constructor.name, e.message); }`], {
     cwd: root,
     encoding: "utf8",
@@ -48,7 +48,7 @@ test("every documented key is accepted", () => {
 
 test("doctor reports an unknown key as a FIX line, with the limits set in the environment", () => {
   const { config } = configWith('{"keepawake": false}');
-  const r = spawnSync(process.execPath, [join(root, "node_modules/tsx/dist/cli.mjs"), join(root, "src/cli.ts"), "doctor"], {
+  const r = runKit(["doctor"], {
     cwd: temp(),
     encoding: "utf8",
     env: { ...process.env, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: temp(), SANDCASTLE_MAX_SANDBOXES: "3", SANDCASTLE_MAX_GATES: "1", CLAUDE_CODE_VERSION: "2.1.0", CODEX_VERSION: "0.1.0" },
