@@ -226,7 +226,7 @@ comments, and the gates can prove it.
    guess how long it takes: once the project has run before, the run prints a rough estimate at
    its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
-   offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
+   after labelling tickets on GitHub (or a `sandcastle requeue`), give GitHub a few seconds before `sandcastle run`: its label search can lag, and a run started at once may miss them. Then offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
    shows tickets waiting for others (`[waits for ...]`), say that a chain whose links are all queued
    drains in one run: each ticket starts once its last blocker lands and closes. With no autonomy

@@ -76,7 +76,7 @@ import { lintQueue } from "./lint.ts";
 import { limit } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
-import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
+import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { cleanProject, ensureImage, KIT, machineSettings } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
@@ -405,8 +405,9 @@ try {
       const tracker = makeTracker(project);
       // A ticket-file requeue commits to the base branch, and a live run that sees the base move lands nothing.
       if (tracker.kind === "files") lockRun(project);
-      const message = requeueTicket(tracker, project.label, args);
+      const { message, relabelled } = requeueTicketWithEffect(tracker, project.label, args);
       console.log(message);
+      if (relabelled) console.log(LABEL_LAG_REMINDER);
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
       const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
