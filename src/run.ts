@@ -2,7 +2,7 @@
 // preflight, prompts, the run record, the log archive and the status pane.
 
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
@@ -12,7 +12,7 @@ import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
-import { isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
@@ -264,8 +264,8 @@ export const preflight = async (project: Project, image: string, extra: { model:
 // from hand-suffixed branches (agent-issue-12-closeout-impl-...) fall back
 // to the first phase word.
 export const logOwner = (name: string) =>
-  name.match(/^agent-issue-(.+)-(?:impl|review-codex|review|repair|gates)-\1\.(?:log|jsonl)$/)?.[1] ??
-  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|review|repair|gates)-/)?.[1];
+  name.match(/^agent-issue-(.+)-(?:impl|resolve|review-codex|review|repair|gates)-\1\.(?:log|jsonl)$/)?.[1] ??
+  name.match(/^agent-issue-([a-z0-9][a-z0-9-]*?)-(?:impl|resolve|review|repair|gates)-/)?.[1];
 
 /** Where the orchestrator writes an issue's gate output as it runs; named like an agent log so it is archived with them. */
 export const gatesLog = (project: Project, id: string) => join(project.root, `.sandcastle/logs/agent-issue-${id}-gates-${id}.log`);
@@ -294,11 +294,70 @@ export const agentLogging = (project: Project, id: string, name: string, runId: 
       if (event.type !== "raw") return;
       try {
         appendFileSync(raw, event.line + "\n");
+        // The library's parser drops every tool result, so a failed call left no trace in the readable log.
+        const failure = toolFailureLine(event.line);
+        if (failure) appendFileSync(log, failure + "\n");
       } catch {
         // A full disk must not fail an agent pass; the library swallows a throwing callback too.
       }
     },
   };
+};
+
+/**
+ * `! error: <first line>` (or `! exit N: <first line>` for a command's non-zero exit) for each failed tool
+ * result in one raw stream line, else undefined. A result is failed when it says `is_error`, as a call to a
+ * tool that does not exist does, or when its text opens with Claude Code's `Exit code N`.
+ */
+export const toolFailureLine = (line: string): string | undefined => {
+  if (!line.includes("tool_result")) return undefined;
+  let event: { type?: string; message?: { content?: unknown } };
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const content = event.message?.content;
+  if (event.type !== "user" || !Array.isArray(content)) return undefined;
+  const lines: string[] = [];
+  for (const part of content as { type?: string; is_error?: boolean; content?: unknown }[]) {
+    if (part?.type !== "tool_result") continue;
+    const body = typeof part.content === "string"
+      ? part.content
+      : Array.isArray(part.content) ? part.content.map((c: { text?: unknown }) => (typeof c?.text === "string" ? c.text : "")).join("\n") : "";
+    const code = body.match(/^\s*Exit code (-?\d+)/)?.[1];
+    if (!part.is_error && (code === undefined || code === "0")) continue;
+    // Claude Code wraps its own refusals in a <tool_use_error> tag, and a failed command's output follows its
+    // `Exit code N` line: the first line that says something is the one to show.
+    const said = body.replace(/<\/?tool_use_error>/g, "").split("\n").map((l) => l.trim()).filter((l) => l !== "");
+    const text = (code === undefined ? said[0] : said[0]?.replace(/^Exit code -?\d+\s*:?\s*/, "") || said[1]) ?? "";
+    lines.push(`! ${code === undefined || code === "0" ? "error" : `exit ${code}`}${text ? `: ${text.slice(0, 300)}` : ""}`);
+  }
+  return lines.length ? lines.join("\n") : undefined;
+};
+
+/** A line `toolFailureLine` wrote. It quotes a tool's output, so a check of what the library or the agent said skips it. */
+export const isToolFailureLine = (line: string) => /^! (error|exit -?\d+)(: |$)/.test(line);
+
+// What a spent plan allowance leaves at the end of an agent's log.
+const LIMIT = /out of usage credits|usage limit|limit reached/i;
+
+/** Whether a readable log ends saying the plan allowance is spent. Not a failed tool's line: a test or a file can say "usage limit". */
+export const logSaysLimit = (text: string) =>
+  LIMIT.test(text.split("\n").filter((l) => !isToolFailureLine(l)).slice(-8).join("\n"));
+
+/**
+ * The library ends each pass with "Context window: Nk", which is the sum of input, cache-write and cache-read
+ * tokens over every turn - tokens processed, not a window. Rewritten once the pass has returned; safe to repeat.
+ */
+export const relabelContextWindow = (log: string) => {
+  try {
+    const text = readFileSync(log, "utf8");
+    const out = text.replace(/^Context window: (\d+k)$/gm, "Tokens processed (all turns): $1");
+    if (out !== text) writeFileSync(log, out);
+  } catch {
+    // No log to rewrite (the pass died before writing one) is not a failure of the pass.
+  }
 };
 
 // Local time with its offset, built by hand: toLocaleString varies by locale,
@@ -442,6 +501,10 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   }
   return {
     startedAt: run.startedAt!,
+    /** The record is finished: nothing writes to it any more, and a timer that did should stop. */
+    get finished() {
+      return finished;
+    },
     /** `stage` is what the status view's run line shows while the run is live. */
     update(fields: RunRecord) {
       run = { ...run, ...fields };
@@ -519,6 +582,21 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   return out;
 };
 
+/**
+ * Seconds until the first ticket of another live run is likely to end, for the start line of a run
+ * that has to wait for a slot: this project's usual time for one issue (`typicalTimes`, the history
+ * the estimate reads) less each working ticket's age, a minute at least, as the status view counts
+ * it. Undefined with no history or no working ticket - the line then leaves the wait out.
+ */
+export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.now()): number | undefined => {
+  const typical = typicalTimes(project).issue;
+  if (typical === undefined) return undefined;
+  const left = Object.values(record.tickets ?? {}).flatMap((t) =>
+    t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof t.started === "number" ? [Math.max(typical - (nowMs / 1000 - t.started), 60)] : [],
+  );
+  return left.length ? Math.min(...left) : undefined;
+};
+
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 
 /**
@@ -530,16 +608,25 @@ const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n
  * recorded tokens, so a new project prints nothing rather than a guess. It
  * covers the tickets' own pipelines only - not the image check, preflight,
  * base gates, landing or verify. A line that does not parse is skipped.
+ *
+ * `models` is the implement model of each ticket in the run (its `model:`
+ * label, else the default): each is estimated from the history of tickets
+ * that model implemented, as an Opus ticket takes several times a Sonnet one.
+ * A history ticket's model is the one on its implement or repair lines; lines
+ * with none (older ones) count as the default model. A model with no history
+ * falls back to the median of all of them, and the line says it is low.
+ * Without `models` every ticket is estimated from the one median.
  */
-export const estimate = (project: Project, tickets: number, slots: number, chain = 0): string | undefined => {
+export const estimate = (project: Project, tickets: number, slots: number, chain = 0, models?: string[]): string | undefined => {
   let text: string;
   try {
     text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  const groups = new Map<string, { ms: number; tokened: boolean; inTokens: number; out: number }>();
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Group = { ms: number; tokened: boolean; inTokens: number; out: number; model?: string };
+  const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
     let l: Line;
@@ -556,6 +643,8 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0 };
     g.ms += l.ms as number;
+    // The review lines name the reviewer's model: only the steps the implementer ran say who implemented.
+    if ((l.phase === "implement" || l.phase === "repair") && typeof l.model === "string" && l.model) g.model ??= l.model;
     if (l.tokens && typeof l.tokens === "object") {
       g.tokened = true;
       g.inTokens += (l.tokens.input ?? 0) + (l.tokens.cacheWrite ?? 0) + (l.tokens.cacheRead ?? 0);
@@ -565,13 +654,29 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
   }
   const counted = [...groups.values()].filter((g) => g.tokened);
   if (!counted.length) return undefined;
-  const inAll = median(counted.map((g) => g.inTokens))! * tickets;
-  const outAll = median(counted.map((g) => g.out))! * tickets;
+  const medians = (gs: Group[]) => ({ inTokens: median(gs.map((g) => g.inTokens))!, out: median(gs.map((g) => g.out))!, ms: median(gs.map((g) => g.ms))! });
+  const overall = medians(counted);
+  let inAll = overall.inTokens * tickets;
+  let outAll = overall.out * tickets;
+  let msAll = overall.ms * tickets;
+  let unknown = 0;
+  if (models) {
+    inAll = outAll = msAll = 0;
+    for (const model of models) {
+      const same = counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
+      if (!same.length) unknown++;
+      const m = same.length ? medians(same) : overall;
+      inAll += m.inTokens;
+      outAll += m.out;
+      msAll += m.ms;
+    }
+  }
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots.
   const rounds = Math.max(chain, Math.ceil(tickets / slots));
-  const m = Math.round((median(counted.map((g) => g.ms))! * rounds) / 60_000);
+  const m = Math.round(((msAll / Math.max(tickets, 1)) * rounds) / 60_000);
   const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (a chain of ${chain} runs in order)` : ""}.`;
+  const low = unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "";
+  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (${chain} tickets in sequence)` : ""}.${low}`;
 };
 
 // ---------------------------------------------------------------------------
@@ -622,6 +727,8 @@ export type BranchHead = {
   reviewed?: string;
   /** The tip a pipeline ended green on, not held as unreviewed. */
   green?: string;
+  /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
+  unmet?: string;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -638,7 +745,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
@@ -733,8 +840,34 @@ export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRe
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
 // patch is history, and moving it out keeps the status view down to live
 // work. Sandcastle appends each run to the same file name, so the archive
-// appends too rather than overwriting an earlier run's log.
+// appends too rather than overwriting an earlier run's log. The archive is
+// pruned by age each time, since nothing else ever deletes from it.
 // ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Archived files older than this are deleted. */
+export const ARCHIVE_KEEP_DAYS = 14;
+/** The raw `.jsonl` streams are the bulk of the archive, so they go sooner; the readable `.log` stays. */
+export const ARCHIVE_KEEP_RAW_DAYS = 2;
+
+/** Delete archived files past their age limit, by mtime (an append refreshes it). Returns how many went. */
+export const pruneArchive = (project: Project, now = Date.now()): number => {
+  const archive = join(project.root, ".sandcastle/logs/archive");
+  if (!existsSync(archive)) return 0;
+  let pruned = 0;
+  for (const name of readdirSync(archive)) {
+    const limit = name.endsWith(".jsonl") ? ARCHIVE_KEEP_RAW_DAYS : ARCHIVE_KEEP_DAYS;
+    try {
+      const stat = statSync(join(archive, name));
+      if (!stat.isFile() || now - stat.mtimeMs <= limit * DAY_MS) continue;
+      unlinkSync(join(archive, name));
+      pruned++;
+    } catch {
+      // Gone already (another run pruning at the same moment): nothing to do.
+    }
+  }
+  return pruned;
+};
 
 export const archiveFinishedLogs = (project: Project) => {
   const logs = join(project.root, ".sandcastle/logs");
@@ -765,6 +898,8 @@ export const archiveFinishedLogs = (project: Project) => {
     moved++;
   }
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
+  const pruned = pruneArchive(project);
+  if (pruned) console.log(`Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS}).`);
 };
 
 // ---------------------------------------------------------------------------

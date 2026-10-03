@@ -19,7 +19,8 @@ export const SAND = { top: "#e8d6b4", mid: "#cdb894", base: "#705c42", name: "#c
 export type Castle = { top: string; mid: string; base: string };
 
 // The status view's three-row castle: the battlements stand a row above the text beside it.
-// Its one-row fold (a bare slab) reads as no castle at all.
+// A castle cut to one row (a bare slab) reads as no castle at all, so the view's one-row fold
+// draws none, only the wordmark.
 export const CASTLE: Castle = { top: "▄ ▄ ▄", mid: "█████", base: "██▀██" };
 
 // While a ticket is in work the castle builds from level sand, half a row at a time, and holds

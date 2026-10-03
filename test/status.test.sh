@@ -109,6 +109,7 @@ branch 109 1; log 109 impl 'done'
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "implement live-model/high",
   "stage": "landing 2/4", "concurrency": 2, "tokens": "1.2M in / 30k out",
+  "settings": { "autonomy": 2, "turn": 2, "cap": 2 },
   "typical": { "implement": 600, "gates": 60, "issue": 900 },
   "issues": ["101","102","103","104","105","106","108","109","110"],
   "tickets": {
@@ -128,6 +129,9 @@ render "101 102 103 104 105 106 107 108 109 110 120"
 # The first column is headed TICKET (6 characters), not the GitHub word; the widths are sized for it.
 has '^│ +TICKET +│ +STATE +│'
 hasnt 'ISSUE'
+# A live run's settings come from its record: no (next run) or (last run) mark, whatever the pane's width.
+has '^│ settings +autonomy (0 1 \[2\] 3 drain|2) · turn 2/2 +│'
+hasnt '\((next|last) run\)'
 row '#101' impl 'Bash|\$ pnpm test'
 row '#102' gates 'usually 1m - 2/3 pytest'
 row '#103' ready 'gates green'
@@ -168,6 +172,39 @@ sed -i.bak 's/"concurrency": 4/"concurrency": 3/' "$L/run.json"
 render "101 102 103 104 105 106 107 108 109 110 120"
 row '#106' queued 'next to start'
 sed -i.bak 's/"concurrency": 3/"concurrency": 2/' "$L/run.json"
+
+# ---------------------------------------------------------------------------
+SCENARIO="live run, sharing the machine pool"
+# The run's own demand and share, live values in its record, beside the pool's use in the
+# machine cell. #106 is held back by the run's share (a free slot is another run's): its row says
+# so, where #105 only waits its turn. An older kit's record has neither value, and the cell shows none.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m",
+  "stage": "running", "concurrency": 4, "demand": 4, "share": 3,
+  "issues": ["105","106"],
+  "tickets": {
+    "105": { "state": "queued", "order": 5, "since": $now },
+    "106": { "state": "queued", "order": 6, "since": $now, "note": "waits for the run's share" }
+  } }
+EOF
+render "105 106"
+has 'this run +wants 4 · share 3'
+row '#105' queued 'next to start'
+row '#106' queued "waits for the run's share"
+sed -i.bak 's/"demand": 4, "share": 3,//' "$L/run.json"
+render "105 106"
+has 'sandboxes +[█░ ]*[0-9]+/[0-9]+'
+hasnt 'wants [0-9]|share [0-9]'
+has 'waiting +none'
+
+# A person's cap (`sandcastle cap`) sits beside the demand and the share; a lifted cap leaves the record.
+sed -i.bak 's/"concurrency": 4,/"concurrency": 4, "demand": 4, "share": 2, "cap": 2,/' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2 · cap 2'
+sed -i.bak 's/"cap": 2,//' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2'
+hasnt 'cap [0-9]'
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
@@ -415,6 +452,17 @@ EOF
 render ""
 hasnt 'run output'
 rm -f "$L/run-output.log" "$L/run.json"; if [ -f "$TMP/run.json.kept" ]; then mv "$TMP/run.json.kept" "$L/run.json"; fi
+
+# ---------------------------------------------------------------------------
+SCENARIO="short pane, one-row header"
+# The logo folds to one row in a short pane. A castle cut down to its battlements
+# read as a broken logo, so the fold draws no castle: the wordmark alone.
+SHOW=collapse ROWS=12 render "101 102 103"
+has '^│ +sandcastle-kit  fixture'
+hasnt '▄|█'
+SHOW=collapse ROWS=40 render "101 102 103"
+has 's a n d c a s t l e'
+has '█████'
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"

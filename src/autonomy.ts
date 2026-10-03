@@ -56,11 +56,14 @@ export const rerunnable = (facts: Facts): Rerun | undefined => {
   };
 };
 
+/** The most turns a level allows, or undefined for level 1, which asks after every turn and has no cap. */
+export const turnCap = (level: Level): number | undefined => (level === 0 ? 1 : level === 1 ? undefined : level === "drain" ? DRAIN_CAP : level);
+
 /** `turn` is the number of the turn that just ended (1-based). */
 export const nextTurn = (level: Level, turn: number, again: Rerun | undefined): "stop" | "ask" | "run" | "cap" => {
   if (!again || level === 0 || again.conflicted.length + again.unblocked.length === 0) return "stop";
   if (level === 1) return "ask";
-  return turn < (level === "drain" ? DRAIN_CAP : level) ? "run" : "cap";
+  return turn < turnCap(level)! ? "run" : "cap";
 };
 
 /** The last turn's line when tickets could still run again: the ids' own command, and the bare one, as the freed tickets are in the queue anyway. */

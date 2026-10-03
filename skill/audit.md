@@ -85,11 +85,17 @@ action's categories and its closed-spec test, so keep that section of SKILL.md t
     - The `Touches:` line is one line in plain text, outside code (the kit ignores fences and
       backticks): `Touches: <path or glob>, <path or glob>, ...`, with repo-relative paths and
       `*` (within a directory) or `**` (across directories) globs. A directory path covers
-      everything under it. Name a file the fix will create too, and list a lockfile or generated
-      file if the fix will rewrite it. A second `Touches:` line is merged into the first. Example:
+      everything under it. Name only files an agent may edit under the project's rules: a file the
+      rules forbid (a changelog the maintainer writes, say) is no ticket's, and listing it makes a
+      false overlap line at the run's start. Write an existing file's path as it is. Name a file the
+      fix will create too, and list a lockfile or generated file if the fix will rewrite it. Mark a
+      new file as new in the ticket's prose (under `## Fix`), never on the `Touches:` line, where
+      "(new)" would be read as part of the path. A second `Touches:` line is merged into the first. Example:
       `Touches: src/pages/pricing.tsx, src/components/**/*.tsx, public/pricing.css` written as a
       bare line (no backticks) in the body. The kit reads it as a scheduling hint and a warning
       of tickets that will meet at landing, never as a limit on what the agent may change.
+    - A run opens no pull request: ask for evidence (a failing test's output, say) in the agent's
+      final message or a ticket comment, never "in the PR description".
     - Apply only labels that already exist in the repo's vocabulary (area, severity). Create none
       except the queue label (`gh label create`, as the queue action does).
     - A ready or decided finding gets the queue label. Human-only, parked and declined findings

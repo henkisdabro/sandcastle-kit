@@ -41,9 +41,10 @@ read a module's section there before changing it.
 | `src/landing.ts` | Landing one green branch (`landOne`, which returns facts and writes no verdict), the scheduler's land and host ports, and `createHostGit`, the mutex every host git write goes through |
 | `src/ledger.ts` | The ticket ledger: `describe(ending)`, pure and exhaustive - the ticket state, outcome, view word and tracker text of every ending - and the writer that records it, and each requeue, as the scheduler tells them |
 | `src/resolution.ts` | `strayChanges`: a conflict resolution checked against git's own automatic merge, so a resolution that dropped another ticket's lines is held |
-| `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, and `createQueue` |
+| `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, the run's demand for slots, and `createQueue` |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
+| `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out; for now the autonomy level) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
@@ -61,7 +62,7 @@ read a module's section there before changing it.
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/detach.ts` | `sandcastle run --detach` (output to `.sandcastle/logs/run-output.log`), `wait` and `stop` |
 | `src/guard.ts` | Host safety: git hooks and auto-gc off, the `.git` fingerprint and branch-tip backup (`.sandcastle/backup.git`), protected paths, the run lock |
-| `src/pool.ts` | Machine-wide sandbox and gate slots, and the lock-file helper the run lock shares (pid and token, guarded takeover) |
+| `src/pool.ts` | Machine-wide sandbox and gate slots (a freed slot goes to the longest wait across runs; a slot names its run; live runs register and split the sandbox slots by share, up to each run's demand), and the lock-file helper the run lock shares (pid and token, guarded takeover) |
 | `src/run.ts` | Preconditions, prompt rendering, agent logs, the run record (`.sandcastle/logs/run.json`) and history, the estimate, the status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates, run without the kit's tokens and with their values redacted from the output |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
@@ -101,11 +102,14 @@ behaviour (grep them for its words, not only for the function's name), and all o
 pnpm exec tsc --noEmit
 pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls),
                      # with `bash -n` on every tracked shell script
-sandcastle doctor
-# from inside a test project (no model calls):
-sandcastle status 0
-sandcastle lean
+./bin/sandcastle doctor
+# from inside a test project (no model calls), giving the path to this checkout's bin/sandcastle:
+/path/to/this/checkout/bin/sandcastle status 0
+/path/to/this/checkout/bin/sandcastle lean
 ```
+
+Write `./bin/sandcastle`, not a bare `sandcastle`: from a clone or a worktree, the one on PATH is the
+installed kit, so those checks would never exercise the change (doctor notes this, it does not fail).
 
 A change to `mod/` has checks of its own, which `pnpm test` skips without a recent Claude Code:
 read the `mod/` section of `docs/architecture.md`.

@@ -28,6 +28,15 @@ const world = (on: Parameters<TestBody>[1], start: { project?: boolean; store?: 
     session: "session-1",
     file: record({ 105: { state: "implement" }, 106: { state: "queued" } }),
     link: false,
+    // `.sandcastle/config.ts` is a plain file: `sandcastle init` ran here.
+    setUp: true,
+    // The personal machine settings, as `cat` prints them; empty is no file.
+    settings: "",
+    // What the registry script prints, and the record of a run in another directory.
+    registry: undefined as string | undefined,
+    other: undefined as string | undefined,
+    // Which pids `ps` knows while `pid` is true; every one when unset.
+    only: undefined as string | undefined,
     pid: true,
     // What `ps` prints for the run's process, as bin/sandcastle starts it.
     command: "node --import /kit/node_modules/tsx/dist/loader.mjs /kit/src/cli.ts run",
@@ -43,9 +52,20 @@ const world = (on: Parameters<TestBody>[1], start: { project?: boolean; store?: 
   on("session.root", () => ({ value: w.root }));
   on("session.id", () => ({ value: w.session }));
   on("fs.exists", () => ({ value: w.project }));
-  on("fs.stat", () => ({ value: { kind: "file", size: w.file.length, mtimeMs: 0, isLink: w.link } }));
-  on("fs.read", () => ((w.reads += 1), { value: w.file }));
-  on("process.run", () => ({ value: { exitCode: w.pid ? 0 : 1, stdout: w.pid ? `${w.command}\n` : "", stderr: "", isStdoutTruncated: false, isStderrTruncated: false } }));
+  on("fs.stat", ($, e) =>
+    String(e.path).endsWith("/.sandcastle/config.ts")
+      ? { value: { kind: w.setUp ? "file" : "directory", size: 0, mtimeMs: 0, isLink: false } }
+      : { value: { kind: "file", size: w.file.length, mtimeMs: 0, isLink: w.link } },
+  );
+  on("fs.read", ($, e) => ((w.reads += 1), { value: String(e.path).startsWith("/elsewhere/") ? (w.other ?? w.file) : w.file }));
+  on("process.run", ($, e) =>
+    // The settings read is a `sh -c` of its own, answered apart from the process check.
+    e.argv[0] === "sh" && String(e.argv[2]).includes("sandcastle-kit/config.json")
+      ? { value: { exitCode: 0, stdout: w.settings, stderr: "", isStdoutTruncated: false, isStderrTruncated: false } }
+      : e.argv[0] === "sh" && w.registry !== undefined
+        ? { value: { exitCode: 0, stdout: w.registry, stderr: "", isStdoutTruncated: false, isStderrTruncated: false } }
+        : { value: { exitCode: w.pid && (w.only === undefined || w.only === e.argv[2]) ? 0 : 1, stdout: w.pid && (w.only === undefined || w.only === e.argv[2]) ? `${w.command}\n` : "", stderr: "", isStdoutTruncated: false, isStderrTruncated: false } },
+  );
   on("command.register", ($, e) => (w.commands.push(e.name), { value: { command: e.name } }));
   on("store.get", ($, e) => ({ value: w.store.get(e.key) }));
   on("store.set", ($, e) => (w.store.set(e.key, e.value), { value: undefined }));
@@ -191,7 +211,7 @@ test("a run met part-way pins what needs a person without announcing it", async 
 test("the end of a run is announced, and the prompt goes only to a session that used the skill", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
-  w.file = record({ 105: { state: "merged" } }, FINISHED);
+  w.file = record({ 105: { state: "merged" } }, { startedAt: "2026-01-02T00:00:00.000Z", ...FINISHED });
   w.pid = false;
   await w.clock.advance(3000);
   expect(w.toasts).toEqual(["run ended (exit 0)"]);
@@ -227,7 +247,8 @@ test("the skill's text says the mod is loaded, and that session gets one prompt 
   await w.clock.advance(3000);
   await w.clock.advance(60000);
   expect(w.prompts).toEqual([CLOSE("ended (exit 0)")]);
-  expect(w.statuses[w.statuses.length - 1]).toBeUndefined();
+  // The mark returns once the run is over.
+  expect(w.statuses[w.statuses.length - 1]).toBe("sandcastle");
 });
 
 test("a run that starts and dies between two idle looks is still closed", async ($, on) => {
@@ -405,4 +426,89 @@ test("/sandcastle-status prints the run as text, tickets in the status view's or
   // A run that is over has no stage.
   expect(ended.text).toMatch(/^ended without a clean exit · ● working 1 · /);
   expect(ended.text).toMatch(/`sandcastle report` prints the closing summary\.$/);
+});
+
+test("between runs a set-up project shows the idle mark, and a project without config.ts shows nothing", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  await $.session.start(START);
+  expect(w.statuses).toEqual(["sandcastle"]);
+  await w.clock.advance(60000);
+  expect(w.statuses).toEqual(["sandcastle"]);
+});
+
+test("a project with only a .sandcastle/ directory shows no mark", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  // As the skill's logs leave it: no config.ts.
+  w.setUp = false;
+  await $.session.start(START);
+  await w.clock.advance(60000);
+  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
+});
+
+test("the machine switch turns the idle mark off, and a value that is not false leaves it on", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  w.settings = JSON.stringify({ idleMark: false, maxSandboxes: 4 });
+  await $.session.start(START);
+  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
+  w.settings = JSON.stringify({ idleMark: true });
+  await w.clock.advance(15000);
+  expect(w.statuses).toEqual([undefined, "sandcastle"]);
+  w.settings = JSON.stringify({ idleMark: "no" });
+  await w.clock.advance(15000);
+  expect(w.statuses).toEqual([undefined, "sandcastle"]);
+  w.settings = JSON.stringify({ idleMark: false });
+  await w.clock.advance(15000);
+  expect(w.statuses).toEqual([undefined, "sandcastle", undefined]);
+});
+
+test("the band replaces the idle mark while a run is alive, and the mark returns when it ends", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  await $.session.start(START);
+  expect(w.statuses).toEqual(["sandcastle"]);
+  // A run starts by hand: the next idle look finds it.
+  w.pid = true;
+  w.file = record({ 105: { state: "implement" } }, { startedAt: "2026-01-02T00:00:00.000Z" });
+  await w.clock.advance(15000);
+  expect(w.statuses).toEqual(["sandcastle", undefined]);
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  expect(await ui.find({ type: "Text", text: "demo" })).toBeDefined();
+  await ui.unmount();
+  w.file = record({ 105: { state: "merged" } }, { startedAt: "2026-01-02T00:00:00.000Z", ...FINISHED });
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.toasts).toEqual(["run ended (exit 0)"]);
+  expect(w.statuses).toEqual(["sandcastle", undefined, "sandcastle"]);
+});
+
+test("a needs-you line keeps its place in the status line, and the mark follows it", async ($, on) => {
+  const w = world(on);
+  w.file = record({ 105: { state: "conflict" } });
+  await $.session.start(START);
+  expect(w.statuses).toEqual(["#105 conflict - /sandcastle-status"]);
+  w.pid = false;
+  await w.clock.advance(3000);
+  expect(w.statuses).toEqual(["#105 conflict - /sandcastle-status", "sandcastle"]);
+});
+
+test("a followed run in another directory leaves the mark about the session's own project", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  w.file = record({ 105: { state: "merged" } }, { startedAt: OLD, ...FINISHED });
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  expect(w.statuses).toEqual(["sandcastle"]);
+  // The session started a run in /elsewhere: the registry lists it, its record names this session, its process is alive.
+  w.registry = "/work\n/elsewhere\n";
+  w.other = record({ 7: { state: "implement" } }, { session: "session-1", pid: 43 });
+  w.pid = true;
+  w.only = "43";
+  await w.clock.advance(15000);
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  expect(await ui.find({ type: "Text", text: "demo" })).toBeDefined();
+  await ui.unmount();
+  expect(w.statuses).toEqual(["sandcastle"]);
 });

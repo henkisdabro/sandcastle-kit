@@ -89,9 +89,8 @@ One place in the machine pool, which a run holds while one ticket's sandbox or g
 _Avoid_: lock (the file that records it), worker
 
 **Demand**:
-How many sandbox slots a live run could use now: the tickets it could start at once, plus a
-landing that waits, never more than its concurrency. Blocked tickets add nothing until their
-blocker lands.
+How many sandbox slots a live run could use now: the tickets in a sandbox or ready to start,
+plus a landing that waits, never more than its concurrency. Blocked tickets add nothing until their blocker lands.
 _Avoid_: want, need, queue length (which counts blocked tickets)
 
 **Share**:

@@ -38,8 +38,9 @@ ticket names. The project rules below say what else to read.
 
 # Rules
 
-- **Scope is the ticket and nothing else.** Anything you discover that is out of scope becomes a new
-  {{KIT_NEW_TICKET}}, never a TODO comment and never scope creep.
+- **Scope is the ticket and nothing else.** Every acceptance criterion the ticket lists is in scope,
+  and so is a regression your change causes: fix both here, never "for the next ticket". Anything you
+  discover that is out of scope becomes a new {{KIT_NEW_TICKET}}, never a TODO comment and never scope creep.
 - **Never remove a safety guard to make something pass.** A failing assertion, a blocking lint rule
   or a type error is a signal to fix the cause. Deleting the guard is a blocked outcome, not a fix -
   unless the ticket itself names that guard as the defect *and* you can show what independently
@@ -54,6 +55,15 @@ ticket names. The project rules below say what else to read.
   "Not followed:", so a person sees the ticket asked for it.
 - Dependencies are already installed. If you add one, use the project's package manager and commit
   the lockfile.
+- **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
+  outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
+  long suite is run once and not again to find the line you wanted. Give the command a timeout long enough for the whole suite
+  (other sandboxes run at the same moment and slow it); never start it in the background and poll it
+  with `sleep`, which the sandbox blocks. Look in the project rules for how the test runner reports a
+  pass and a failure, and grep for that, not for another runner's format.
+- **Prefer the Edit tool to scripted replacements.** A `sed -i` or a `python3` heredoc that does a
+  string replace does nothing when the text does not match, and says nothing. If you do script an
+  edit, assert that each replacement matched.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
@@ -80,6 +90,17 @@ observed.
 
 **If you completed the ticket:** make sure the gates pass, make sure everything is committed, then
 output `<promise>COMPLETE</promise>`.
+
+**If you knowingly leave an acceptance criterion undone** (you could not do it, or it needs a decision
+that is not yours), commit the rest and say which one, in one sentence, on a line of its own in your
+final message:
+
+<unmet>...</unmet>
+
+with your sentence in place of the dots. The branch still merges if its gates are green, but the ticket
+stays open with that criterion named, and the next run picks up the remainder. Leave the line out when
+every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
+to omit it.
 
 **If the ticket turns out to be already fixed, false, or latent:** commit nothing. {{KIT_NOCHANGE}}
 Then output `<promise>COMPLETE</promise>`.
