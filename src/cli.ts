@@ -187,7 +187,8 @@ try {
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       // The run's settings, resolved once: every turn's record carries them.
-      const { autonomy: level } = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const settings = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const level = settings.autonomy;
       sandboxPanes(project);
       checkUsageSettings();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
@@ -205,7 +206,7 @@ try {
         } catch {}
       }
       for (let turn = 1; ; turn++) {
-        if (!(await burndown(project, { level, turn }))) {
+        if (!(await burndown(project, { settings, turn }))) {
           drain.cause ??= "no ticket could start";
           break;
         }

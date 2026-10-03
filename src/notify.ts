@@ -27,7 +27,7 @@ export const endSummary = (run: RunRecord): string => {
   const tickets = all.filter((t) => t.state !== "blocked");
   const count = (states: TicketState[]) => tickets.filter((t) => t.state && states.includes(t.state)).length;
   const merged = count(["merged"]);
-  const needYou = count(["held"]) + tickets.filter((t) => t.state === "merged" && t.closeFailed).length;
+  const needYou = count(["held"]) + tickets.filter((t) => t.state === "merged" && (t.closeFailed || t.unmet)).length;
   const fixing = count(NEEDS_FIXING);
   const head =
     (run.stopped ? "run STOPPED before landing" : run.exitCode === 0 ? "run finished" : `run ended with exit ${run.exitCode}`) +

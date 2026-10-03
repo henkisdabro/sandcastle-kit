@@ -30,18 +30,30 @@ import { OperatorError } from "./errors.ts";
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type Effort = (typeof EFFORTS)[number];
 
-const effort = (name: string, configured?: string, allowed: readonly string[] = EFFORTS): Effort => {
-  const value = process.env[name] ?? configured ?? "high";
+const effort = (name: string, configured?: string, allowed: readonly string[] = EFFORTS, env: Record<string, string | undefined> = process.env): Effort => {
+  const value = env[name] ?? configured ?? "high";
   if (!allowed.includes(value)) {
     throw new OperatorError(`${name}=${value} (env or .sandcastle/config.ts) - expected one of ${allowed.join(", ")}.`);
   }
   return value as Effort;
 };
 
-export const CROSS_REVIEW = process.env.CROSS_REVIEW === "1";
+/** The cross-review run setting: off, or on with the model and effort it uses. */
+export type CrossReviewSetting = { on: false } | { on: true; model: string; effort: Exclude<Effort, "max"> };
+
+// The settings resolver (src/run-settings.ts) calls this with its own environment, and so does
+// this module with the process's: one reading of CROSS_REVIEW and its two companions. The
+// companions are read, and a bad effort refused, whether or not the pass is on.
+export const crossReviewSetting = (env: Record<string, string | undefined>): CrossReviewSetting => {
+  const model = env.CROSS_REVIEW_MODEL ?? "gpt-6-astra";
+  // Codex has no `max`.
+  const level = effort("CROSS_REVIEW_EFFORT", undefined, EFFORTS.slice(0, 4), env) as Exclude<Effort, "max">;
+  return env.CROSS_REVIEW === "1" ? { on: true, model, effort: level } : { on: false };
+};
+const CROSS = crossReviewSetting(process.env);
+export const CROSS_REVIEW = CROSS.on;
 export const CROSS_REVIEW_MODEL = process.env.CROSS_REVIEW_MODEL ?? "gpt-6-astra";
-// Codex has no `max`.
-const CROSS_REVIEW_EFFORT = effort("CROSS_REVIEW_EFFORT", undefined, EFFORTS.slice(0, 4)) as Exclude<Effort, "max">;
+const CROSS_REVIEW_EFFORT = CROSS.on ? CROSS.effort : "high";
 
 export let IMPL_MODEL: string;
 export let REVIEW_MODEL: string;

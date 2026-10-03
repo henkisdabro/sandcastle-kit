@@ -13,6 +13,7 @@ export const TICKET_STATES = [
   "blocked",
   "setup",
   "implement",
+  "resolve",
   "review",
   "cross-review",
   "gates",
@@ -105,6 +106,7 @@ export type Group = "working" | "needs you" | "ready" | "queued" | "blocked" | "
 export const GROUPS: Record<TicketState, Group> = {
   setup: "working",
   implement: "working",
+  resolve: "working",
   review: "working",
   "cross-review": "working",
   gates: "working",
@@ -151,6 +153,8 @@ export type TicketRecord = {
   closeFailed?: string;
   /** What the reviewer said no gate exercises; a merged ticket with one needs a person. */
   ungated?: string;
+  /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */
+  unmet?: string;
   /** Paths the branch changed beyond its ticket's `Touches:` line. */
   overrun?: string[];
 };
@@ -164,8 +168,8 @@ export const sessionId = (value: unknown): string | undefined => (typeof value =
 
 /**
  * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
- * level, the turn this record is, the level's cap, the repair attempts and the concurrency (asked
- * and effective). Each field is optional and a reader shows
+ * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
+ * and effective) and whether cross-review runs. Each field is optional and a reader shows
  * only what is there - an older kit's record has no group at all, and level 1 has no cap (it asks
  * after every turn).
  */
@@ -182,6 +186,12 @@ export type RunSettings = {
   concurrency?: number;
   /** The tickets at once the run asked for; the view shows it only when it differs from `concurrency`. */
   asked?: number;
+  /** Whether cross-review runs, resolved once per run. */
+  crossReview?: boolean;
+  /** Cross-review's model: written only when it is on. */
+  crossReviewModel?: string;
+  /** Cross-review's effort: written only when it is on. */
+  crossReviewEffort?: string;
 };
 
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
