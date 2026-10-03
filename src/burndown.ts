@@ -38,7 +38,7 @@ import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, relabelContextWindow,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -684,7 +684,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -890,7 +890,8 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       const ungated: string[] = [];
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
-      let implUnmet: string | undefined;
+      // A land-only branch runs no implementer or review: what its agents said stands from its head record.
+      let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
       let reviewed = false;
       const unmet: string[] = [];
       if (landOnly && mergeConflicted && greenHead !== undefined) {
@@ -1128,7 +1129,9 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
 
       const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
       const head = sh("git", ["rev-parse", branch]);
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head });
+      const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
+      // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote });
       return {
         issue: issue.id,
         branch,
@@ -1144,7 +1147,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
-        unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
+        unmet: unmetNote,
       };
     } finally {
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.

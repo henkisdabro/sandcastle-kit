@@ -379,10 +379,11 @@ export const render = (f: Facts, plain = false): string => {
       ...notClosed.map(
         (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
       ),
-      // The criterion is the agent's own words, cut at the cap like an ungated note.
+      // The criterion is the agent's own words, cut at the cap like an ungated note. The implementer may
+      // have said it, not a reviewer, so the pointer names every agent log of the ticket.
       ...partly.map((id) => {
         const note = f.tickets[id].unmet ?? "";
-        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+        const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
         return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open, and the next \`sandcastle run\` picks up the remainder`;
       }),
       // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.

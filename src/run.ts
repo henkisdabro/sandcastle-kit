@@ -681,6 +681,8 @@ export type BranchHead = {
   reviewed?: string;
   /** The tip a pipeline ended green on, not held as unreviewed. */
   green?: string;
+  /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
+  unmet?: string;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -697,7 +699,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
