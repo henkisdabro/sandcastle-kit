@@ -242,6 +242,9 @@ branch 111 1; log 111 impl 'done'
 git_ branch agent/issue-112 main; log 112 impl 'done'
 # Finished, its commit refused: the outcome says so, and it is not "no change".
 git_ branch agent/issue-113 main; log 113 impl 'done'
+# Red at landing, once and again after a requeue: red, not ready.
+branch 114 1; log 114 impl 'done'
+branch 115 1; log 115 impl 'done'
 rm -rf "$REPO/.sandcastle/worktrees/agent-issue-101"
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0,
@@ -253,6 +256,8 @@ cat >"$L/outcomes.json" <<EOF
   "111": { "run": "$started", "outcome": "withdrawn: taken out of the queue during the run" },
   "112": { "run": "$started", "outcome": "needs a human: handed back" },
   "113": { "run": "$started", "outcome": "uncommitted" },
+  "114": { "run": "$started", "outcome": "red when merged with #110" },
+  "115": { "run": "$started", "outcome": "red again with #110 after a requeue" },
   "110": { "run": "$started", "outcome": "merged" },
   "103": { "run": "earlier", "outcome": "gate red: ruff=FAIL" } }
 EOF
@@ -266,7 +271,9 @@ has 'CPU in cores'
 row '#111' withdrawn
 row '#112' held 'handed back'
 row '#113' uncommitted
-git_ branch -q -D agent/issue-112 agent/issue-113 # only this scenario's
+row '#114' 'gate red' 'red when merged'
+row '#115' 'gate red' 'red again'
+git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 # only this scenario's
 row '#103' 'left over' 'earlier run'
 has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
 hasnt 'old-model'
