@@ -2,8 +2,8 @@
 // word (withdrawn, taken back), the head the gates vouched for, what a person must merge, then
 // the merge and the closing comment. A branch that already holds the base lands as it is; any
 // other is merged and gated in a sandbox first (the tree no gate has seen). `landOne` returns
-// what happened and writes the ticket's state to the run record; the caller keeps the lists the
-// closing report is built from.
+// what happened and writes the ticket's state to the run record; what the tracker is told, it
+// takes from the ledger (ledger.ts), which also records the ending the scheduler makes of it.
 //
 // A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
 // (the scheduler's requeue-once rule, schedule.ts); a second one holds it for the next run.
@@ -16,13 +16,13 @@
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { type GateRun, failingTests } from "./gates.ts";
-import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, largeFilesNote, protectedChanges, tipOf } from "./guard.ts";
+import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import type { Outcome, TicketRecord, TicketState } from "../mod/hooks/run-record.ts";
+import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
-import { overrunLine } from "./report.ts";
 import type { Again, Ending, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -55,22 +55,6 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
     .filter(({ status, file }) => file && !declared.has(file) && !(status === "A" && isTestPath(file)) && !(adds && isAgentDoc(file)))
     .map((c) => c.file);
 };
-
-// The ticket closes on the local merge, so the comment says the work is not on
-// the remote yet: a repo that deploys on push has nothing live when this reads "done".
-export const closeComment = (
-  o: { branch: string; commits: number; repairs: number; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
-  gateNames: string,
-  report?: string,
-): string =>
-  `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
-  (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
-  `); ${gateNames} all green before merge.` +
-  (o.regenerated
-    ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
-    : "") +
-  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
-  (report ? `\n\n${report}` : "");
 
 // The landing merge. The subject must stay `Merge <branch> (closes <ticket>)`:
 // `mergedEarlier` and status.sh's `requeued` find a landed branch by it. The committer is
@@ -306,18 +290,20 @@ export const slotTurn = async (wanted: { n: number }, pause = 1000) => {
 };
 
 export type Landed =
-  | { kind: "merged"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean }
+  /** `overrun`: the paths it changed beyond its ticket's `Touches:` line, which the close comment names. */
+  | { kind: "merged"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "conflict"; files: string[]; with: string[] }
   /** The branch was green alone; its merge with the base, which holds `with` landed since it forked, was red. Not landed. */
   | { kind: "red"; with: string[]; gates: string[] }
-  | { kind: "held"; paths: string[]; reason: string }
+  /** `by`: what held it - a protected path, a large file, or a repair no review passed. */
+  | { kind: "held"; paths: string[]; reason: string; by: "protected" | "large" | "unreviewed" }
   | { kind: "withdrawn"; reason: string }
   | { kind: "taken-back" }
   | { kind: "closed-earlier" }
   | { kind: "skipped"; reason: string }
   | { kind: "not-landed"; reason: string }
   /** Merged, but the tracker would not close the ticket: still a merge, never a failure to land. */
-  | { kind: "close-failed"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean }
+  | { kind: "close-failed"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "dry-run" };
 
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
@@ -342,6 +328,8 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // Each ticket's state as landing decides it, so the view counts landing
   // down rather than showing one opaque stage for minutes.
   const land = (id: string, state: TicketState, note: string) => run.ticket(id, { state, note });
+  // What the tracker is told of this landing: the ledger's words, posted here as it happens.
+  const words = (said: Landed) => describe({ kind: "landing", green: o, landed: said, attempts: 1 }, { base, gateNames, report: reports.get(o.issue) }).tracker!.text;
   run.ticket(o.issue, { state: "landing" });
   // The issue can change during a long run: closed by hand, or sent to a
   // human. Merging then would land work nobody still wants. A gh error here
@@ -365,7 +353,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
         land(o.issue, "ready", "dry run: would close");
         return { kind: "dry-run" };
       }
-      await host.write(() => tracker.close(o.issue, `Merged into \`${base}\` by an earlier Sandcastle run (${o.head}); closing.`), trackerMade(root));
+      await host.write(() => tracker.close(o.issue, words({ kind: "closed-earlier" })), trackerMade(root));
       land(o.issue, "merged", `closed, merged earlier (${o.head})`);
       return { kind: "closed-earlier" };
     }
@@ -391,41 +379,25 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   }
   const touched = protectedChanges(project, o.branch);
   if (touched.length) {
-    const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`;
-    land(o.issue, "held", reason);
+    const held: Landed = { kind: "held", paths: touched, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${touched.join(", ")}`, by: "protected" };
+    land(o.issue, "held", held.reason);
     run.ticket(o.issue, { files: touched });
-    if (!dryRun) {
-      await host.write(() =>
-        tracker.hold(
-          o.issue,
-          `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it changes how the repo ` +
-            `executes (${touched.join(", ")}), which its own gates cannot vouch for. Review and merge by hand.` +
-            (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : ""),
-        ),
-        trackerMade(root),
-      );
-    }
-    return { kind: "held", paths: touched, reason };
+    if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
+    return held;
   }
   const large = largeFiles(project, o.branch);
   if (large.length) {
-    const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`;
-    land(o.issue, "held", reason);
+    const held: Landed = { kind: "held", paths: large, reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${large.join(", ")}`, by: "large" };
+    land(o.issue, "held", held.reason);
     run.ticket(o.issue, { files: large });
-    if (!dryRun) {
-      await host.write(() =>
-        tracker.hold(o.issue, `Gated green on \`${o.branch}\` (${gateNames}), but not merged automatically: it ${largeFilesNote(large)}.` + (reports.get(o.issue) ? `\n\n${reports.get(o.issue)}` : "")),
-        trackerMade(root),
-      );
-    }
-    return { kind: "held", paths: large, reason };
+    if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
+    return held;
   }
   if (o.unreviewed) {
-    const why = "repair commits not reviewed: the review after repair failed";
-    const reason = `${dryRun ? "dry run: would hold" : "human merge"}: ${why}`;
-    land(o.issue, "held", reason);
-    if (!dryRun) await host.write(() => tracker.hold(o.issue, `Gated green on \`${o.branch}\` after a repair, but not merged: ${why}. Review the repair commits and merge by hand.`), trackerMade(root));
-    return { kind: "held", paths: [], reason };
+    const held: Landed = { kind: "held", paths: [], reason: `${dryRun ? "dry run: would hold" : "human merge"}: ${UNREVIEWED}`, by: "unreviewed" };
+    land(o.issue, "held", held.reason);
+    if (!dryRun) await host.write(() => tracker.hold(o.issue, words(held)), trackerMade(root));
+    return held;
   }
   if (dryRun) {
     console.log(`[dry run] would merge ${o.branch} and close ${ref(o.issue)}`);
@@ -558,9 +530,9 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // The merge stands whatever the tracker says next: a failed close is a
   // merged ticket still open, not one that failed to land - calling it "not
   // landed" sent a human to merge work already on the base branch.
-  const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }) };
+  const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }), ...(overrun.length ? { overrun } : {}) };
   try {
-    await host.write(() => tracker.close(o.issue, closeComment({ ...o, regenerated, overrun }, gateNames, reports.get(o.issue))), trackerMade(root));
+    await host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
     land(o.issue, "merged", regenerated ? "merged and closed (generated files regenerated)" : "merged and closed");
     return { kind: "merged", ...merged };
   } catch (error) {
@@ -636,101 +608,6 @@ export const carriedMergeLine = (who: string, base: string, behind: number, requ
 
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);
-
-/** What the closing report is built from: where each landing ending put its ticket. `burndown()` builds the lists from the endings. */
-export type Landings = {
-  merged: string[];
-  /** Merged by regenerating generated files in a sandbox: for the close comment, and a tree no gate has seen. */
-  regenerated: Map<string, { files: string[]; regen: string[] }>;
-  conflicted: { issue: string; branch: string; files: string[]; with: string[] }[];
-  /** Green alone, red once merged: the pair is named, and nothing is landed. */
-  redMerged: { issue: string; branch: string; with: string[]; gates: string[] }[];
-  heldBack: { issue: string; paths: string[] }[];
-  failedToLand: { issue: string; reason: string }[];
-  skipped: { issue: string; reason: string }[];
-  withdrawn: { issue: string; reason: string }[];
-  /** Marked for a human by a person during the run: theirs now, not a merge to make. */
-  takenBack: string[];
-  closedEarlier: string[];
-  closeFailed: string[];
-};
-
-export const newLandings = (): Landings => ({
-  merged: [],
-  regenerated: new Map(),
-  conflicted: [],
-  redMerged: [],
-  heldBack: [],
-  failedToLand: [],
-  skipped: [],
-  withdrawn: [],
-  takenBack: [],
-  closedEarlier: [],
-  closeFailed: [],
-});
-
-/** Puts one landing ending in the list the closing report reads it from. */
-export const accountLanding = (lists: Landings, o: { issue: string; branch: string }, landed: Landed) => {
-  switch (landed.kind) {
-    case "merged":
-    case "close-failed":
-      lists.merged.push(o.issue);
-      if (landed.regenerated) lists.regenerated.set(o.issue, landed.regenerated);
-      if (landed.kind === "close-failed") lists.closeFailed.push(o.issue);
-      break;
-    case "conflict":
-      lists.conflicted.push({ issue: o.issue, branch: o.branch, files: landed.files, with: landed.with });
-      break;
-    case "red":
-      lists.redMerged.push({ issue: o.issue, branch: o.branch, with: landed.with, gates: landed.gates });
-      break;
-    case "held":
-      lists.heldBack.push({ issue: o.issue, paths: landed.paths });
-      break;
-    case "withdrawn":
-      lists.withdrawn.push({ issue: o.issue, reason: landed.reason });
-      break;
-    case "taken-back":
-      lists.takenBack.push(o.issue);
-      break;
-    case "closed-earlier":
-      lists.closedEarlier.push(o.issue);
-      break;
-    case "skipped":
-      lists.skipped.push({ issue: o.issue, reason: landed.reason });
-      break;
-    case "not-landed":
-      lists.failedToLand.push({ issue: o.issue, reason: landed.reason });
-      break;
-    case "dry-run":
-      break;
-  }
-};
-
-/** Each landed ticket's outcome for the status view; `againNote` is what a second conflict or red was held as. */
-export const landingLines = (lists: Landings, againNote: Map<string, string>): Map<string, Outcome> => {
-  const out = new Map<string, Outcome>();
-  const withOf = (w: string[]) => (w.length ? { with: w } : {});
-  for (const n of lists.merged) out.set(n, { kind: "merged", text: "merged" });
-  for (const n of lists.closeFailed) out.set(n, { kind: "merged", text: "merged (ticket not closed)" });
-  for (const c of lists.conflicted) out.set(c.issue, { kind: "conflict", ...withOf(c.with), text: `merge conflict: ${againNote.get(c.issue) ?? conflictLine(c)}` });
-  for (const r of lists.redMerged) {
-    out.set(r.issue, { kind: "red", ...withOf(r.with), text: againNote.get(r.issue) ?? `red when merged${r.with.length ? ` with ${r.with.map(refOf).join(", ")}` : ""}` });
-  }
-  for (const f of lists.failedToLand) out.set(f.issue, { kind: "not landed", text: "failed to land" });
-  for (const k of lists.skipped) out.set(k.issue, { kind: "not landed", text: `not merged: ${k.reason}` });
-  for (const w of lists.withdrawn) out.set(w.issue, { kind: "withdrawn", text: `withdrawn: ${w.reason}` });
-  for (const h of lists.heldBack) out.set(h.issue, { kind: "held", text: "needs a human merge" });
-  for (const id of lists.takenBack) out.set(id, { kind: "taken back", text: "needs a human: marked for a human during the run" });
-  return out;
-};
-
-/** One landing ending's outcome, as `landingLines` gives it at the end of the run; none for a dry run or an earlier merge closed. */
-export const landingOutcome = (o: { issue: string; branch: string }, landed: Landed, againNote: Map<string, string>): Outcome | undefined => {
-  const one = newLandings();
-  accountLanding(one, o, landed);
-  return landingLines(one, againNote).get(o.issue);
-};
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {

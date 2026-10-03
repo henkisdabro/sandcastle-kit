@@ -39,6 +39,7 @@ read a module's section there before changing it.
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
 | `src/burndown.ts` | The orchestrator: base gates, then every attempt and landing through `createSchedule`, then verify and report; the file hold's inputs, re-runs of carried branches, timings |
 | `src/landing.ts` | Landing one green branch (`landOne`), the scheduler's land and host ports, the requeue record, and `createHostGit`, the mutex every host git write goes through |
+| `src/ledger.ts` | The ticket ledger: `describe(ending)`, pure and exhaustive - the ticket state, outcome, view word and tracker text of every ending - and the writer that records it as the scheduler tells each one |
 | `src/resolution.ts` | `strayChanges`: a conflict resolution checked against git's own automatic merge, so a resolution that dropped another ticket's lines is held |
 | `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, and `createQueue` |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
