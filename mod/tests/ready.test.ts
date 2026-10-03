@@ -15,6 +15,24 @@ const SKILL = { skill: "sandcastle", text: "the skill" };
 const KEY = "ready:/work";
 
 /** A set-up project with no run alive, a queue the test answers, and every read of it noted. */
+/** What a band mounted now asks of the mod: the idle mark is one row of it, drawn when no run is. */
+const BAND = {
+  plugin: "sandcastle",
+  component: "AbovePrompt",
+  requestId: "band",
+  viewport: { columns: 120, rows: 30 },
+  props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 }, view: {} },
+} as const;
+
+/** The idle mark the band draws now - its one row's text - or undefined. */
+const markNow = async ($: Parameters<TestBody>[0]) => {
+  const ui = await $.ui.mount({ ...BAND, surface: "terminal" });
+  // The castle band has a "sandcastle" wordmark of its own, in lighter sand and bold: the mark is told by its colour.
+  const row = (await ui.findAll({ type: "Text", text: /^sandcastle/ })).find((r) => r.props.color === "#cdb894");
+  await ui.unmount();
+  return row?.text;
+};
+
 const world = (on: Parameters<TestBody>[1], store: Record<string, unknown> = {}) => {
   const w = {
     clock: mock.clock(on, { now: T0 }),
@@ -68,9 +86,9 @@ test("with no entry the first look reads the queue once, with the kit's own comm
   expect(w.reads[0]).toEqual({ argv: [expect.stringMatching(/\/bin\/sandcastle$|^sandcastle$/), "queue", "--json"], cwd: "/work", timeoutMs: 20000 });
   expect(w.store.get(KEY)).toEqual({ at: T0, ids: ["1", "2"], ok: true, tried: T0 });
   // The draw never waited for the read: the first line is the bare mark; the count is the next look's.
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual(["sandcastle", READY(2)]);
+  expect(await markNow($)).toBe(READY(2));
   expect(w.reads.length).toBe(1);
 });
 
@@ -79,7 +97,7 @@ test("a fresh entry in the shared store means no read, and shows its count at on
   await $.session.start(START);
   await w.clock.advance(5 * MIN);
   expect(w.reads.length).toBe(0);
-  expect(w.statuses).toEqual([READY(4)]);
+  expect(await markNow($)).toBe(READY(4));
   // Ten minutes after it was read, one session's look reads it again.
   await w.clock.advance(5 * MIN);
   expect(w.reads.length).toBe(1);
@@ -104,7 +122,7 @@ test("the end of a run of this project triggers a read, though the entry is fres
   await w.clock.settle();
   expect(w.reads.length).toBe(1);
   await w.clock.advance(15000);
-  expect(w.statuses[w.statuses.length - 1]).toBe(READY(2));
+  expect(await markNow($)).toBe(READY(2));
 });
 
 test("using the skill triggers a read, though the entry is fresh", async ($, on) => {
@@ -125,7 +143,7 @@ test("a hung read is given up at its timeout, and holds up neither a redraw nor 
   // While it hangs a run starts: the look finds it and the mark gives way to the band.
   w.pid = true;
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual([READY(2), undefined]);
+  expect(await markNow($)).toBeUndefined();
   w.pid = false;
   await w.clock.advance(15000);
   // Still inside the 20 s: no second read is started beside it.
@@ -143,7 +161,7 @@ test("a failed read keeps the last good count for an hour and then shows the bar
   await w.clock.settle();
   expect(w.reads.length).toBe(1);
   expect(w.store.get(KEY)).toEqual({ at: T0 - 20 * MIN, ids: ["1", "2"], ok: false, tried: T0 });
-  expect(w.statuses).toEqual([READY(2)]);
+  expect(await markNow($)).toBe(READY(2));
   // Tried again every ten minutes, not at every look.
   await w.clock.advance(9 * MIN);
   expect(w.reads.length).toBe(1);
@@ -151,8 +169,8 @@ test("a failed read keeps the last good count for an hour and then shows the bar
   expect(w.reads.length).toBe(2);
   // 20 minutes old at the start, so the hour is up 40 minutes in.
   await w.clock.advance(31 * MIN);
-  expect(w.statuses[w.statuses.length - 1]).toBe("sandcastle");
-  expect(w.statuses.every((s) => s === undefined || s.startsWith("sandcastle"))).toBe(true);
+  expect(await markNow($)).toBe("sandcastle");
+  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
 });
 
 test("output that is no list of tickets is a failed read, never 0 ready", async ($, on) => {
@@ -161,7 +179,7 @@ test("output that is no list of tickets is a failed read, never 0 ready", async 
   await $.session.start(START);
   await w.clock.settle();
   expect(w.store.get(KEY)).toEqual({ at: T0 - 20 * MIN, ids: ["1"], ok: false, tried: T0 });
-  expect(w.statuses).toEqual([READY(1)]);
+  expect(await markNow($)).toBe(READY(1));
 });
 
 test("a trigger that fires during a read gets one more read after it, and a look that is merely due does not", async ($, on) => {

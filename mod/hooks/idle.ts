@@ -1,4 +1,4 @@
-// The idle mark: the one line the mod pins in the status line under the prompt between runs, in a
+// The idle mark: the one row the mod draws in sand above the prompt (not in the status line) between runs, in a
 // project set up for sandcastle. Pure, and like run-state.ts it imports nothing: register.tsx
 // gathers the facts and this module decides the text. The input is one object on purpose - the
 // ready count, the project's hidden flag and a dismissal join it without a new signature.

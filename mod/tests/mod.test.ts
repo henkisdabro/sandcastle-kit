@@ -19,6 +19,15 @@ const band = (bodyColumns: number) =>
     props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns, scroll: { offset: 0, bodyRows: 3 }, view: {} },
   }) as const;
 
+/** The idle mark the band draws now: its one row's text, or undefined. A mounted band reads the same atoms the session's does. */
+const markNow = async ($: Parameters<TestBody>[0]) => {
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  // The castle band has a "sandcastle" wordmark of its own, in lighter sand and bold: the mark is told by its colour.
+  const row = (await ui.findAll({ type: "Text", text: /^sandcastle/ })).find((r) => r.props.color === "#cdb894");
+  await ui.unmount();
+  return row?.text;
+};
+
 /** A project with a run record, a run process that is alive until `pid` says otherwise, and what the mod showed. */
 const world = (on: Parameters<TestBody>[1], start: { project?: boolean; store?: Record<string, unknown> } = {}) => {
   const w = {
@@ -248,7 +257,7 @@ test("the skill's text says the mod is loaded, and that session gets one prompt 
   await w.clock.advance(60000);
   expect(w.prompts).toEqual([CLOSE("ended (exit 0)")]);
   // The mark returns once the run is over.
-  expect(w.statuses[w.statuses.length - 1]).toBe("sandcastle");
+  expect(await markNow($)).toBe("sandcastle");
 });
 
 test("a run that starts and dies between two idle looks is still closed", async ($, on) => {
@@ -432,9 +441,23 @@ test("between runs a set-up project shows the idle mark, and a project without c
   const w = world(on);
   w.pid = false;
   await $.session.start(START);
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   await w.clock.advance(60000);
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
+  // The mark is the band's, not a pinned status line: Claude Code would give that its warning triangle.
+  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
+});
+
+test("the idle mark is one row of the band in the status view's sand, never a pinned status line", async ($, on) => {
+  const w = world(on);
+  w.pid = false;
+  await $.session.start(START);
+  const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
+  const row = (await ui.findAll({ type: "Text", text: /^sandcastle/ })).find((r) => r.props.color === "#cdb894");
+  await ui.unmount();
+  // Claude Code gives a pinned status line its warning triangle and notice colour; the band's Text is the mod's own.
+  expect(row?.props.color).toBe("#cdb894");
+  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
 });
 
 test("a project with only a .sandcastle/ directory shows no mark", async ($, on) => {
@@ -444,6 +467,7 @@ test("a project with only a .sandcastle/ directory shows no mark", async ($, on)
   w.setUp = false;
   await $.session.start(START);
   await w.clock.advance(60000);
+  expect(await markNow($)).toBeUndefined();
   expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
 });
 
@@ -452,28 +476,28 @@ test("the machine switch turns the idle mark off, and a value that is not false 
   w.pid = false;
   w.settings = JSON.stringify({ idleMark: false, maxSandboxes: 4 });
   await $.session.start(START);
-  expect(w.statuses.filter((s) => s !== undefined)).toEqual([]);
+  expect(await markNow($)).toBeUndefined();
   w.settings = JSON.stringify({ idleMark: true });
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual([undefined, "sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   w.settings = JSON.stringify({ idleMark: "no" });
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual([undefined, "sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   w.settings = JSON.stringify({ idleMark: false });
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual([undefined, "sandcastle", undefined]);
+  expect(await markNow($)).toBeUndefined();
 });
 
 test("the band replaces the idle mark while a run is alive, and the mark returns when it ends", async ($, on) => {
   const w = world(on);
   w.pid = false;
   await $.session.start(START);
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   // A run starts by hand: the next idle look finds it.
   w.pid = true;
   w.file = record({ 105: { state: "implement" } }, { startedAt: "2026-01-02T00:00:00.000Z" });
   await w.clock.advance(15000);
-  expect(w.statuses).toEqual(["sandcastle", undefined]);
+  expect(await markNow($)).toBeUndefined();
   const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
   expect(await ui.find({ type: "Text", text: "demo" })).toBeDefined();
   await ui.unmount();
@@ -481,7 +505,7 @@ test("the band replaces the idle mark while a run is alive, and the mark returns
   w.pid = false;
   await w.clock.advance(3000);
   expect(w.toasts).toEqual(["run ended (exit 0)"]);
-  expect(w.statuses).toEqual(["sandcastle", undefined, "sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
 });
 
 test("a needs-you line keeps its place in the status line, and the mark follows it", async ($, on) => {
@@ -489,9 +513,12 @@ test("a needs-you line keeps its place in the status line, and the mark follows 
   w.file = record({ 105: { state: "conflict" } });
   await $.session.start(START);
   expect(w.statuses).toEqual(["#105 conflict - /sandcastle-status"]);
+  expect(await markNow($)).toBeUndefined();
   w.pid = false;
   await w.clock.advance(3000);
-  expect(w.statuses).toEqual(["#105 conflict - /sandcastle-status", "sandcastle"]);
+  // The needs-you line is cleared and the band shows the mark, not the status line.
+  expect(w.statuses).toEqual(["#105 conflict - /sandcastle-status", undefined]);
+  expect(await markNow($)).toBe("sandcastle");
 });
 
 test("a followed run in another directory leaves the mark about the session's own project", async ($, on) => {
@@ -500,7 +527,7 @@ test("a followed run in another directory leaves the mark about the session's ow
   w.file = record({ 105: { state: "merged" } }, { startedAt: OLD, ...FINISHED });
   await $.session.start(START);
   await $.skill.prompt(SKILL);
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
   // The session started a run in /elsewhere: the registry lists it, its record names this session, its process is alive.
   w.registry = "/work\n/elsewhere\n";
   w.other = record({ 7: { state: "implement" } }, { session: "session-1", pid: 43 });
@@ -510,5 +537,5 @@ test("a followed run in another directory leaves the mark about the session's ow
   const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
   expect(await ui.find({ type: "Text", text: "demo" })).toBeDefined();
   await ui.unmount();
-  expect(w.statuses).toEqual(["sandcastle"]);
+  expect(await markNow($)).toBe("sandcastle");
 });

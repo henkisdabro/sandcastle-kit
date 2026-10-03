@@ -121,8 +121,10 @@ _Avoid_: marker, kit-updated (the file's name, not the concept)
 ### Between runs
 
 **Idle mark**:
-The Claude Code mod's status line in a set-up project while no run is live: it says the project
-is ready for runs, and how many ready tickets wait. The live band replaces it while a run is alive.
+The Claude Code mod's one row of sand above the prompt in a set-up project while no run is live: it
+says the project is ready for runs, and how many ready tickets wait. The live band replaces it while
+a run of the session's project is alive. It is drawn by the mod, not pinned as a status line: Claude
+Code gives a pinned line its warning triangle and notice colour.
 _Avoid_: indicator, badge
 
 **Ready ticket**:
