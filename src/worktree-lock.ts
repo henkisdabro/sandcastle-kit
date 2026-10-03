@@ -14,8 +14,8 @@ import { execFileSync } from "node:child_process";
 
 const REASON = "sandcastle: live sandbox";
 
-const git = (args: string[]) =>
-  execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const git = (args: string[], cwd?: string) =>
+  execFileSync("git", args, { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 // Idempotent: the worktree hook locks each worktree the moment it exists, and
 // the pipeline locks again in case Sandcastle reused one.
@@ -28,9 +28,9 @@ export const lockWorktree = (path: string) => {
 };
 
 // `git worktree remove --force` (Sandcastle's close) refuses a locked worktree.
-export const unlockWorktree = (path: string) => {
+export const unlockWorktree = (path: string, cwd?: string) => {
   try {
-    git(["worktree", "unlock", path]);
+    git(["worktree", "unlock", path], cwd);
   } catch {
     // Already unlocked, or already gone - either way nothing holds it.
   }

@@ -78,11 +78,11 @@ import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { ensureImage, KIT, reapOrphans, sh } from "./sandbox.ts";
+import { cleanProject, ensureImage, KIT } from "./sandbox.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { lockWorktree, unlockAll } from "./worktree-lock.ts";
+import { lockWorktree } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
@@ -499,38 +499,15 @@ try {
       const project = await loadProject(root);
       pinHostGitConfig(project.root);
       lockRun(project);
-      reapOrphans(project);
-      unlockAll();
-      const worktrees = sh("git", ["worktree", "list", "--porcelain"])
-        .split("\n\n")
-        .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
-        .filter((p): p is string => !!p && p.startsWith(join(root, ".sandcastle/worktrees/")));
-      for (const path of worktrees) {
-        sh("git", ["worktree", "remove", "--force", path]);
-        console.log(`removed worktree ${path}`);
-      }
-      sh("git", ["worktree", "prune"]);
-      const base = project.baseBranch;
-      const all = args.includes("--all");
-      const standing: string[] = [];
-      let deleted = 0;
-      for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"]).split("\n").filter(Boolean)) {
-        // A base-gate or verify branch is always scratch. An agent branch is
-        // finished when every commit is on base, merged or as an equal patch.
-        const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch]).split("\n").some((l) => l.startsWith("+"));
-        if (finished || all) {
-          sh("git", ["branch", "-D", branch]);
-          deleted++;
-          console.log(`deleted ${branch}${finished ? "" : " (unmerged)"}`);
-        } else {
-          standing.push(`${branch} (${sh("git", ["rev-list", "--count", `${base}..${branch}`])} commit(s) not on ${base})`);
-        }
-      }
+      const { worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      for (const path of worktrees) console.log(`removed worktree ${path}`);
+      for (const { branch, unmerged } of deleted) console.log(`deleted ${branch}${unmerged ? " (unmerged)" : ""}`);
       archiveFinishedLogs(project);
-      if (standing.length) {
+      if (kept.length) {
+        const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!worktrees.length && !deleted && !standing.length) console.log("Nothing to clean.");
+      if (!worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
       break;
     }
     default:
