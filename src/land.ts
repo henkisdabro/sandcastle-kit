@@ -4,15 +4,16 @@
 // committed with the landing message, and the host's base branch is fast-forwarded to it.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
-import { gatesLog } from "./run.ts";
+import { gatesLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
@@ -218,6 +219,25 @@ export const sandboxOpener =
   };
 
 /**
+ * The acceptance criterion a run recorded as unmet for the branch, so that landing it by hand does
+ * what a run does: merge as "part of" the ticket and leave it open. The heads record is the one a
+ * land-only run reads and is trusted only while the branch sits at the head it ended green on;
+ * a branch a person moved on since is not judged by it. A branch with no green record (held before
+ * it was recorded green) falls back to the last run record's `unmet` on the ticket. Neither: undefined.
+ */
+export const recordedUnmet = (project: Project, id: string, branch: string, head: string): string | undefined => {
+  const record = readHeads(project.root)[id];
+  if (record?.green && record.branch === branch) return record.green === head ? record.unmet || undefined : undefined;
+  try {
+    const run = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"));
+    const unmet = run?.tickets?.[id]?.unmet;
+    return typeof unmet === "string" && unmet ? unmet : undefined;
+  } catch {
+    return undefined; // no run record, or a half-written one: no criterion known
+  }
+};
+
+/**
  * `sandcastle land <ticket>`: merge one agent branch the way a run does, gate the merge in a
  * sandbox, and close the ticket on green. Every refusal comes before `prepare()`, so it builds
  * no image and starts no container. Nothing is commented on a refusal or a red gate.
@@ -257,8 +277,9 @@ export const landTicket = async (
   const head = sh("git", ["rev-parse", branch], project.root);
   const log = gatesLog(project, id);
   mkdirSync(dirname(log), { recursive: true });
+  const unmet = recordedUnmet(project, id, branch, head);
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
-    landInSandbox(project, { branch, head, message: `Merge ${branch} (closes ${ref})`, squash: project.land === "squash" }, open, (box) =>
+    landInSandbox(project, { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" }, open, (box) =>
       runGates(project, box, `${ref} land gates`, false, { log }),
     ),
   );
@@ -276,10 +297,21 @@ export const landTicket = async (
       } catch {
         kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
       }
-      const comment =
+      const merged =
         `${squash ? "Squashed" : "Merged"} locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +
-        `${project.gates.map((g) => g.name).join(", ")} all green on the merge.` +
-        (files.length ? ` Conflicts in generated files (${files.join(", ")}) were resolved by running ${regen.map((c) => `\`${c}\``).join(", ")}.` : "");
+        `${project.gates.map((g) => g.name).join(", ")} all green on the merge.`;
+      const generated = files.length ? ` Conflicts in generated files (${files.join(", ")}) were resolved by running ${regen.map((c) => `\`${c}\``).join(", ")}.` : "";
+      if (unmet) {
+        // As a run lands a branch that says `<unmet>`: merged, the ticket left open with the criterion on it.
+        const left = `${merged} **Left open: an acceptance criterion is unmet.** ${unmet}\n\nThe next \`sandcastle run\` picks up the remainder.${generated}`;
+        try {
+          tracker.comment(id, left);
+        } catch (error) {
+          return `Landed ${ref} as partly done: ${how} ${branch} into ${base}, but commenting the unmet criterion failed (${errorLine(error)}). The ticket is still open; criterion: ${unmet}${kept}`;
+        }
+        return `Landed ${ref} as partly done: ${how} ${branch} into ${base} and left it open, an acceptance criterion being unmet: ${unmet} Not pushed - push under this repo's rules.${kept}`;
+      }
+      const comment = merged + generated;
       try {
         tracker.close(id, comment);
       } catch (error) {

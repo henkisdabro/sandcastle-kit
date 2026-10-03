@@ -316,7 +316,8 @@ agent that knowingly leaves a criterion undone says so in an `<unmet>` line of i
 branch still lands if its gates are green, but the ticket stays open with a comment naming the
 criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
 finished), and the closing summary lists it under Needs you as `merged, partly done`. The next run
-picks up the remainder.
+picks up the remainder. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
+lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
 
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
@@ -654,7 +655,8 @@ are now. Then:
 
 - **Push** the base branch yourself when you are happy with it. The kit never pushes.
 - **A red or conflicted branch** you have fixed on the branch itself: `sandcastle land <n>` merges it
-  the way a run does, gates the merge in a sandbox and closes the ticket - never a hand-written
+  the way a run does, gates the merge in a sandbox and closes the ticket (or, with a criterion
+  recorded unmet, leaves it open with that criterion commented) - never a hand-written
   `git merge`. Or leave it queued: its next run resumes the branch (see [Re-runs](#-re-runs)).
 - **A ticket that needs a new attempt:** `sandcastle requeue <n> --note "..."` puts it back in the
   queue with your note as a comment, takes the hold label (`ready-for-human`) off, and makes the next run re-implement it
@@ -959,7 +961,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes superseded tags. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
 | `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
-| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. Needs a clean tree on the base branch and no live run. Refuses a closed ticket, a branch that changes hooks, CI or install scripts, and one that adds a file over 50 MB; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
+| `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. A branch whose agents recorded an unmet acceptance criterion (`.sandcastle/logs/heads.json`, or `unmet` on the last run's ticket) lands as a run lands it: merged as `part of` the ticket, which stays open with the criterion commented. Needs a clean tree on the base branch and no live run. Refuses a closed ticket, a branch that changes hooks, CI or install scripts, and one that adds a file over 50 MB; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |

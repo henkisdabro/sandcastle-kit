@@ -27,7 +27,8 @@ This continues the run steps 1-3 in SKILL.md.
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
-      held, its size, the review and merge commands, and anything that needs a decision - and each
+      held, its size, the review and merge commands, the criterion an agent left unmet if the line
+      names one (`sandcastle land` leaves that ticket open), and anything that needs a decision - and each
       ticket listed `merged - check by hand`: what the reviewer said to check, and offer to check it
       if you can (open the page, rebuild the file) - the gates did not - and each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
