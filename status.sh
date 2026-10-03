@@ -908,9 +908,9 @@ render() {
       state="$phase"
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
-      # A squash-landed branch is deleted at landing, so its subject on the base is the proof.
+      # A landed branch is deleted at landing (merge or squash), so its subject on the base is the proof.
       if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" 2>/dev/null)" ]; then
-        state="merged"; activity_note="squashed into $BASE"
+        state="merged"; activity_note="landed on $BASE"
       else
         state="no branch"
       fi
