@@ -252,6 +252,8 @@ flowchart TD
 
 A green gate run proves only that the configured gate commands passed on that branch - no more than those commands check. Whether the change does what the ticket asked is checked by the review agent, not the gates, which is why every branch is reviewed before it is gated and a repaired branch is reviewed again. A live run rarely reaches the repair path, because agents run the gates themselves before they finish. `SANDCASTLE_TEST_RED_GATE=1` (see the [Configuration](#-configuration) table) counts each ticket's first gate run as red to exercise it, at the cost of one repair pass per ticket.
 
+The gates also run in the Linux sandbox, so a green run proves Linux only. A branch can still be red on macOS or Windows (BSD tools, bash 3.2, shell shims and terminal flags differ), and landing does not check that: it gates in the same Linux sandbox. A project that ships to macOS or Windows can add a CI job on that OS, or run its gates on the host before pushing.
+
 ## 🧱 Set up a project
 
 From the project's root, on its base branch:
@@ -274,7 +276,9 @@ Then edit, in this order:
    see [Trackers](#-trackers-github-or-ticket-files).
 1. **`.sandcastle/config.ts`** - `gates` (the commands CI runs: lint, typecheck, build, test),
    `setup` (dependency install in the sandbox), `mounts` (e.g. the host package store), `lean`.
-   See [Configuration](#-configuration).
+   See [Configuration](#-configuration). Gates run in the Linux sandbox, so green proves Linux only:
+   if the project ships to macOS or Windows, add a CI job on that OS or run the gates on the host
+   before pushing (see [How it works](#-how-it-works)).
 2. **`.sandcastle/rules.md`** - what an agent in *this* repo must read first, must never do
    (deploys, production databases), and how a visual or data change is proven. It is added to
    the implement, review and repair prompts, and reaches only those agents: the landing merge is
