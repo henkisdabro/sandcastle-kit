@@ -953,6 +953,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle run [--detach]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
+| `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -1190,11 +1191,26 @@ a run over its share keeps every slot it holds and shrinks as its tickets finish
 that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
 fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
 and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
-wait. The status header's `this run` row shows the run's demand and share, and a ticket held back
-by its share says `waits for the run's share`. A run started by an older kit knows no shares and
+wait. The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
+Herdr tab bar shows each live run's share, and a ticket held back by its share says `waits for the
+run's share`. A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
+
+**Capping a run.** `sandcastle cap N` limits the project's live run to N sandbox slots while it
+runs, so another run gets more of the machine; `sandcastle cap off` lifts it, and a bare
+`sandcastle cap` prints the run's demand, share, what it holds and its cap. `--project <name>` acts
+on another project's live run from any directory (the `name` in that project's
+`.sandcastle/config.ts`, as live runs record it). N is a whole number of 1 or more, at most the
+run's concurrency (the most a run ever wants); `cap` refuses anything else, and refuses when no run
+is live. A cap only lowers the run's share: the slots it frees go to the other live runs, up to their
+demand, and with two runs wanting 5 each on 6 slots, a cap of 1 on one gives the other 5; lifting it
+returns both to 3 and 3. A capped run takes no slot at its cap even when no other run wants one. Like
+any share, it is never taken from a run that holds slots: a run above its cap keeps the ones it holds
+and shrinks as its tickets finish. The cap lives in the run's registration and ends with the run: the
+next run of the project starts uncapped. The status header's `this run` row shows it beside demand and
+share (`wants 4 · share 2 · cap 2`).
 
 ## 🩺 Troubleshooting
 

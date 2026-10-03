@@ -197,6 +197,15 @@ has 'sandboxes +[█░ ]*[0-9]+/[0-9]+'
 hasnt 'wants [0-9]|share [0-9]'
 has 'waiting +none'
 
+# A person's cap (`sandcastle cap`) sits beside the demand and the share; a lifted cap leaves the record.
+sed -i.bak 's/"concurrency": 4,/"concurrency": 4, "demand": 4, "share": 2, "cap": 2,/' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2 · cap 2'
+sed -i.bak 's/"cap": 2,//' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2'
+hasnt 'cap [0-9]'
+
 # ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
 # A commit refused by a hook leaves the finished work in a kept worktree: not "no change", and among Needs you.
