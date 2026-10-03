@@ -932,12 +932,13 @@ all of it. The mod:
   last run it has accounted for;
 - submits one prompt when a run ends.
 
-It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no file, calls no model and changes neither git nor the
-tracker. The record is a file in the repository, so the mod trusts none of it: text from it is
-cut to one short line with control and invisible characters removed, and the prompt it submits
-carries nothing from the record but a numeric exit code. Ticket titles are shown as written, as
-`sandcastle status` shows them. `claude plugin validate <kit>/mod` lists every event it hooks
-and every call it makes, without running it:
+It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no
+file, calls no model and changes neither git nor the tracker. The record is a file in the
+repository, so the mod trusts none of it: text from it is cut to one short line with control and
+invisible characters removed, and the prompt it submits carries nothing from the record but a
+numeric exit code. Ticket titles are shown as written, as `sandcastle status` shows them.
+`claude plugin validate <kit>/mod` lists every event it hooks and every call it makes, without
+running it:
 
 ```
 ❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, ui.render{component=AbovePrompt}
