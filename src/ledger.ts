@@ -386,7 +386,7 @@ export const createLedger = (d: {
     sentBack.set(id, line);
     requeuedAs.set(id, line);
     d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
-    d.say(`${d.ref(id)}: ${line}; its pipeline runs again in this run.`);
+    d.say(`${d.ref(id)}: ${line}; it is tried again in this run.`);
   };
   const record = (id: string, ending: TicketEnding) => {
     let said: Said = {};
