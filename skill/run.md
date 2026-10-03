@@ -23,6 +23,10 @@ This continues the run steps 1-3 in SKILL.md.
       If it reads `ended early` or `ended without a clean exit` (Ctrl-C, a crash, a killed
       process), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
+      Under it, the `Settings:` line names the run's settings, and a line after it may name the switch
+      that would have helped (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run
+      again; a usage guard that had no reading, so the run was not guarded): relay both unchanged and
+      add no other switch - a report with no hint has none to give.
    2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the tickets are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread.

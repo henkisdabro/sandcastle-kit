@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterTurn, DRAIN_CAP, type Level, stillOpen } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type Level, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
@@ -21,7 +21,7 @@ import { sh } from "./sandbox.ts";
 import { isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
-import { isTicketState, type OutcomeKind, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+import { isTicketState, type OutcomeKind, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 export type Facts = {
   base: string;
@@ -67,6 +67,8 @@ export type Facts = {
   exitCode?: number | null;
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
+  /** The run settings the last turn's record carries; absent from an older kit's record. */
+  settings?: RunSettings;
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
   next?: { level: Level; turn: number; tickets: string[] };
 };
@@ -262,7 +264,50 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     stage: run.stage,
     exitCode: run.exitCode,
     baseGates: run.baseGates,
+    settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
   };
+};
+
+const LEVELS = [0, 1, 2, 3, "drain"];
+
+/**
+ * The run's settings as one line, and the hints its own facts call for. Only a field the record
+ * holds is said, and a value of the wrong type is as unknown as a missing one: the record is a
+ * file in a repository. A hint is a switch that would have changed this run's outcome, never a
+ * catalogue: nothing here is said when nothing calls for it.
+ */
+export const settingsLines = (f: Facts): string[] => {
+  const s = f.settings;
+  if (!s || typeof s !== "object") return [];
+  const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
+  const plain = (v: unknown, pattern: RegExp) => (typeof v === "string" && pattern.test(v) ? v : undefined);
+  const level = LEVELS.includes(s.autonomy as never) ? s.autonomy : undefined;
+  const turn = count(s.turn);
+  const cap = count(s.cap);
+  const stop = count(s.usageStop);
+  const items: string[] = [];
+  if (level !== undefined) items.push(`autonomy ${level}${turn ? ` (turn ${turn}${cap ? ` of ${cap}` : ""})` : ""}`);
+  if (s.crossReview === true) {
+    const model = plain(s.crossReviewModel, /^[A-Za-z0-9._:/-]+$/);
+    const effort = plain(s.crossReviewEffort, /^(low|medium|high|xhigh)$/);
+    items.push(`cross-review on${model ? ` (${model}${effort ? ` ${effort}` : ""})` : ""}`);
+  } else if (s.crossReview === false) items.push("cross-review off");
+  const noReading = s.usageGuard === true && s.usageReading === "unavailable";
+  if (s.usageGuard === true) items.push(`usage guard on${stop !== undefined ? `, stops at ${stop}%` : ""}${noReading ? ", no reading" : ""}`);
+  else if (s.usageGuard === false) items.push("usage guard off");
+  if (!items.length) return [];
+
+  const lines = [`Settings: ${items.join(" · ")}`];
+  const again = level === 0 && !f.next ? rerunnable(f) : undefined;
+  const left = again ? [...new Set([...again.conflicted, ...again.unblocked])] : [];
+  if (left.length) {
+    lines.push(
+      `Autonomy 0 makes one turn, and ${left.map(refOf).join(" ")} could run again: \`AUTONOMY_LEVEL=2\` (or \`drain\`) lets one \`sandcastle run\` take ` +
+        `${left.length === 1 ? "it" : "them"} without starting it by hand.`,
+    );
+  }
+  if (noReading) lines.push("The usage guard had no reading, so this run was not guarded: check your usage yourself.");
+  return lines;
 };
 
 const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
@@ -352,6 +397,7 @@ export const render = (f: Facts, plain = false): string => {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
+  out.push(...settingsLines(f));
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
