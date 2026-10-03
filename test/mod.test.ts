@@ -193,6 +193,7 @@ test("the castle builds through five-cell frames and holds complete for most of 
 // What the mod may ask of Claude Code. README.md ("What the mod touches") says the same in words.
 const CALLS = [
   "$.clock.after",
+  "$.clock.now",
   "$.command.register",
   "$.fs.exists",
   "$.fs.read",

@@ -15,7 +15,7 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, startedBy, summarise } from "./run-state";
 import { kitRunning } from "./run-live";
-import { machineSwitch, markText, SETTINGS_SCRIPT } from "./idle";
+import { afterRead, due, machineSwitch, markText, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -25,6 +25,8 @@ const RECORD = ".sandcastle/logs/run.json";
 // What makes a project set up: `sandcastle init` writes it.
 const CONFIG = ".sandcastle/config.ts";
 const LIVE_MS = 3000;
+// A read of the queue is given up after this long, so one stuck tracker call never blocks the next.
+const READ_TIMEOUT_MS = 20000;
 // With no run alive the record is read this often: a run started by hand shows within it.
 const IDLE_MS = 15000;
 // Room for the control Claude Code draws at the band's right end.
@@ -66,6 +68,14 @@ const followed = new Set<string>();
  * started before it records the old: the terminal that started the run still closes it.
  */
 const known = new Set<string>();
+/** What makes the next idle look read the queue ahead of the entry's age; one is enough, they all mean "now". */
+let trigger: Trigger | undefined;
+/** A queue read is under way in this session: one at a time. */
+let reading = false;
+/** A trigger fired during that read, which may have started before what the trigger is about. */
+let again = false;
+/** The `sandcastle` to run, found once: the kit's own `bin/sandcastle` beside the mod, else the one on PATH. */
+let kitBin: string | undefined;
 let drawn = "";
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
 let pinned: string | undefined | null = null;
@@ -75,11 +85,16 @@ let pinned: string | undefined | null = null;
  * a link to a device that never ends.
  */
 async function plain($: EngineInterface, path: string): Promise<boolean> {
+  const at = await stat($, path);
+  return at !== undefined && at.kind === "file" && !at.isLink;
+}
+
+/** The one place the mod stats a path; `resolve` also answers where the path lands. Undefined when it cannot be read. */
+async function stat($: EngineInterface, path: string, resolve = false) {
   try {
-    const at = await $.fs.stat(path);
-    return at.kind === "file" && !at.isLink;
+    return await $.fs.stat(path, resolve ? { resolve: true } : undefined);
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -96,7 +111,7 @@ async function record($: EngineInterface, root: string): Promise<Run | undefined
 const isProject = ($: EngineInterface, root: string) => $.fs.exists(`${root}/.sandcastle`);
 
 /** The one place the mod starts a process. */
-const exec = ($: EngineInterface, argv: string[]) => $.process.run(argv);
+const exec = ($: EngineInterface, argv: string[], init?: { cwd?: string; timeoutMs?: number }) => $.process.run(argv, init);
 
 // Asks for the process's command line and sends nothing to it; that it is the kit's is
 // run-live.ts's rule, the same everywhere a run is asked about. The record's `finishedAt` is
@@ -209,6 +224,8 @@ async function look($: EngineInterface, root: string, follow = false): Promise<R
   }
   // A session that was not waiting for a run meets an old record: nothing ended on its watch.
   if (first && !armed) return undefined;
+  // The run closed or left tickets: the count is read again at the next idle look.
+  if (!follow) trigger = "run-ended";
   const how = run.finishedAt ? `ended (exit ${run.exitCode ?? "unknown"})` : "ended without a clean exit";
   if (mine) {
     // The store keeps the old `since` until the turn this starts has begun, which may be much
@@ -253,9 +270,63 @@ async function adopt($: EngineInterface, root: string) {
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
 }
 
+/** The shared cache entry's key: one per project root, apart from the session entry under the bare root. */
+const readyKey = (root: string) => `ready:${root}`;
+
+/**
+ * The command that reads the queue. The mod is linked from the kit's checkout, so `bin/sandcastle`
+ * sits beside it; a mod copied elsewhere finds none and uses the `sandcastle` on PATH.
+ */
+async function sandcastle($: EngineInterface): Promise<string> {
+  if (kitBin !== undefined) return kitBin;
+  kitBin = "sandcastle";
+  // No stat of the mod's own folder, or no file beside it: the one on PATH.
+  const dir = ((await stat($, $.plugin.root, true))?.realPath ?? $.plugin.root).replace(/\/+$/, "");
+  const bin = `${dir.slice(0, Math.max(dir.lastIndexOf("/"), 0))}/bin/sandcastle`;
+  if (await plain($, bin)) kitBin = bin;
+  return kitBin;
+}
+
+/** The ready ids from `sandcastle queue --json`, or undefined when the read failed or timed out. */
+async function readQueue($: EngineInterface, root: string): Promise<string[] | undefined> {
+  try {
+    const out = await exec($, [await sandcastle($), "queue", "--json"], { cwd: root, timeoutMs: READ_TIMEOUT_MS });
+    return out.exitCode === 0 && !out.isStdoutTruncated ? readyIds(out.stdout) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads the queue into the shared entry, one read at a time in this session; never awaited by a
+ * look or a render, so a slow or hung tracker holds nothing up. A failed read keeps the last good
+ * ids and their time. Another session racing to the same stale entry may read too: accepted.
+ */
+async function refresh($: EngineInterface, root: string, forced: boolean) {
+  if (reading) {
+    // An age that is due again is the read under way; only a trigger asks for another after it.
+    if (forced) again = true;
+    return;
+  }
+  reading = true;
+  try {
+    do {
+      again = false;
+      const ids = await readQueue($, root);
+      const prior = parseEntry(await $.store.get(readyKey(root)));
+      await $.store.set(readyKey(root), afterRead(prior, ids, await $.clock.now()));
+    } while (again);
+  } catch {
+    // A store or clock that cannot be reached leaves the entry as it was: the next look reads again.
+  } finally {
+    reading = false;
+  }
+}
+
 /**
  * The idle mark's text for the session root's project, which no followed run changes: set up is
- * one `stat` of `.sandcastle/config.ts`, the machine switch one read of the personal settings.
+ * one `stat` of `.sandcastle/config.ts`, the machine switch one read of the personal settings,
+ * the count what the shared entry holds - a read it starts is for the next look to show.
  */
 async function mark($: EngineInterface, root: string): Promise<string | undefined> {
   const setUp = await plain($, `${root}/${CONFIG}`);
@@ -267,7 +338,14 @@ async function mark($: EngineInterface, root: string): Promise<string | undefine
   } catch {
     // Settings that cannot be read leave the switch on.
   }
-  return markText({ setUp, idleMark });
+  if (!idleMark) return markText({ setUp, idleMark });
+  const now = await $.clock.now();
+  const entry = parseEntry(await $.store.get(readyKey(root)));
+  if (due(entry, now, trigger)) {
+    void refresh($, root, trigger !== undefined);
+    trigger = undefined;
+  }
+  return markText({ setUp, idleMark, entry, now });
 }
 
 /** One round: every watched project once; true while a run is alive. The newest live run is the one drawn. */
@@ -356,6 +434,8 @@ export const register: Register = (on) => {
     // the project after this session started; a `/cd` leaves the watch on the first root, which
     // the id-based follow does not depend on.)
     await me($);
+    // The skill may just have labelled tickets: the next idle look reads the count.
+    trigger = "skill";
     await begin($, root, true);
     await remember($, root);
     armed = true;
