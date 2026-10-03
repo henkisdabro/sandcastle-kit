@@ -169,9 +169,9 @@ export const sessionId = (value: unknown): string | undefined => (typeof value =
 /**
  * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
  * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
- * and effective) and whether cross-review runs. Each field is optional and a reader shows
- * only what is there - an older kit's record has no group at all, and level 1 has no cap (it asks
- * after every turn).
+ * and effective), whether cross-review runs, and the usage guard. Each field is optional and a
+ * reader shows only what is there - an older kit's record has no group at all, level 1 has no cap
+ * (it asks after every turn), and a record without the guard's fields shows nothing about it.
  */
 export type RunSettings = {
   /** The level, resolved once per run. */
@@ -192,6 +192,16 @@ export type RunSettings = {
   crossReviewModel?: string;
   /** Cross-review's effort: written only when it is on. */
   crossReviewEffort?: string;
+  /** Whether the usage guard (`USAGE_CHECK=1`) was asked for. */
+  usageGuard?: boolean;
+  /** The guard's stop threshold in percent; only while it is on. */
+  usageStop?: number;
+  /**
+   * The guard's reading, a fact beside the setting and never a change to it: `unavailable` when it
+   * cannot get one (a 403 turns it off for the run, a rate limit or a missing OAuth token leaves it
+   * without one for now). The only settings field that may change during a turn.
+   */
+  usageReading?: "unavailable";
 };
 
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
@@ -216,6 +226,11 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
+  /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
+  demand?: number;
+  share?: number;
+  /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
+  cap?: number;
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */

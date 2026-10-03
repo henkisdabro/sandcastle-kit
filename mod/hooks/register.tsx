@@ -1,6 +1,7 @@
 // The sandcastle mod: shows a live run in the Claude Code session, in the status view's own
 // castle, glyphs and colours - a band above the prompt, a notice when a ticket needs a person -
-// and submits a prompt when the run ends, so the session that started it closes it.
+// and submits a prompt when the run ends, so the session that started it closes it. Between runs,
+// in a project `sandcastle init` has set up, it pins a quiet idle mark in the status line.
 //
 // It reads `.sandcastle/logs/run.json` under the session's root and asks whether the run's
 // process is alive. Once the session has used the sandcastle skill it also follows a run this
@@ -14,12 +15,15 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, startedBy, summarise } from "./run-state";
 import { kitRunning } from "./run-live";
+import { machineSwitch, markText, SETTINGS_SCRIPT } from "./idle";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
 const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
 
 const RECORD = ".sandcastle/logs/run.json";
+// What makes a project set up: `sandcastle init` writes it.
+const CONFIG = ".sandcastle/config.ts";
 const LIVE_MS = 3000;
 // With no run alive the record is read this often: a run started by hand shows within it.
 const IDLE_MS = 15000;
@@ -66,13 +70,23 @@ let drawn = "";
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
 let pinned: string | undefined | null = null;
 
+/**
+ * Whether `path` is a plain file. A plain file only: in a stranger's repository the path could be
+ * a link to a device that never ends.
+ */
+async function plain($: EngineInterface, path: string): Promise<boolean> {
+  try {
+    const at = await $.fs.stat(path);
+    return at.kind === "file" && !at.isLink;
+  } catch {
+    return false;
+  }
+}
+
 async function record($: EngineInterface, root: string): Promise<Run | undefined> {
   const path = `${root}/${RECORD}`;
   try {
-    // A plain file only: in a stranger's repository the path could be a link to a device
-    // that never ends.
-    const at = await $.fs.stat(path);
-    if (at.kind !== "file" || at.isLink) return undefined;
+    if (!(await plain($, path))) return undefined;
     return parse(await $.fs.read(path));
   } catch {
     return undefined;
@@ -239,6 +253,23 @@ async function adopt($: EngineInterface, root: string) {
   await $.command.register({ name: "sandcastle-status", description: "Show the sandcastle run in this project, with no model turn", immediate: true });
 }
 
+/**
+ * The idle mark's text for the session root's project, which no followed run changes: set up is
+ * one `stat` of `.sandcastle/config.ts`, the machine switch one read of the personal settings.
+ */
+async function mark($: EngineInterface, root: string): Promise<string | undefined> {
+  const setUp = await plain($, `${root}/${CONFIG}`);
+  if (!setUp) return markText({ setUp, idleMark: true });
+  let idleMark = true;
+  try {
+    const out = await exec($, ["sh", "-c", SETTINGS_SCRIPT]);
+    if (out.exitCode === 0) idleMark = machineSwitch(out.stdout);
+  } catch {
+    // Settings that cannot be read leave the switch on.
+  }
+  return markText({ setUp, idleMark });
+}
+
 /** One round: every watched project once; true while a run is alive. The newest live run is the one drawn. */
 async function round($: EngineInterface, root: string): Promise<boolean> {
   await adopt($, root);
@@ -253,7 +284,10 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   }
   const shown = live.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
   const now = shown ? needing(shown) : [];
-  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : undefined);
+  // The line is the needs-you text while a live run needs a person, and otherwise the idle mark -
+  // unless the session root's own run is alive, when the band has it. Last, so after the end
+  // notice: the mark returns once the run is over.
+  pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : own || !adopted ? undefined : await mark($, root));
   await draw($, shown);
   return live.length > 0;
 }

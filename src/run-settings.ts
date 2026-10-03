@@ -9,6 +9,7 @@ import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
 import { DEFAULT_CONCURRENCY } from "./config.ts";
 import { pipelineWorkers } from "./landing.ts";
 import { poolLimit, wholeNumber } from "./pool.ts";
+import { parseUsageStop } from "./usage.ts";
 
 export type SettingsSources = {
   env: Record<string, string | undefined>;
@@ -23,11 +24,21 @@ export type SettingsSources = {
  * once (`--concurrency`, `CONCURRENCY`, the config or the default); `effective` is that after the
  * machine-wide sandbox cap, before the ticket count (a short queue is not a clamp).
  */
-export type ResolvedSettings = { autonomy: Level; crossReview: CrossReviewSetting; repair: number; concurrency: { asked: number; effective: number } };
+export type ResolvedSettings = {
+  autonomy: Level;
+  crossReview: CrossReviewSetting;
+  repair: number;
+  concurrency: { asked: number; effective: number };
+  /** Whether the usage guard was asked for (`USAGE_CHECK=1`). */
+  usageGuard: boolean;
+  /** The guard's stop threshold in percent; only when it is on. */
+  usageStop?: number;
+};
 
 export const resolveSettings = ({ env, project, machine }: SettingsSources): ResolvedSettings => {
   const pool = poolLimit("sandboxes", env, machine);
   const asked = wholeNumber("CONCURRENCY", env.CONCURRENCY ?? project.concurrency ?? DEFAULT_CONCURRENCY, 1);
+  const usageGuard = env.USAGE_CHECK === "1";
   return {
     autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
     crossReview: crossReviewSetting(env),
@@ -35,11 +46,16 @@ export const resolveSettings = ({ env, project, machine }: SettingsSources): Res
     repair: wholeNumber("repair.attempts", project.repair?.attempts ?? 1, 0),
     // A dry run lands nothing, so it keeps no sandbox slot for landing.
     concurrency: { asked, effective: Math.min(pipelineWorkers(asked, Infinity, pool, env.DRY_RUN !== "1"), pool) },
+    usageGuard,
+    ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
   };
 };
 
-/** The settings group of one turn's run record: the run's settings, this turn's number and the level's cap. */
-export const settingsGroup = (settings: ResolvedSettings, turn: number): RunSettings => {
+/**
+ * The settings group of one turn's run record: the run's settings, this turn's number and the
+ * level's cap. `noReading` is the guard's reading as a fact beside its setting, not part of it.
+ */
+export const settingsGroup = (settings: ResolvedSettings, turn: number, noReading = false): RunSettings => {
   const cap = turnCap(settings.autonomy);
   const cross = settings.crossReview;
   return {
@@ -51,5 +67,8 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number): RunSett
     asked: settings.concurrency.asked,
     crossReview: cross.on,
     ...(cross.on ? { crossReviewModel: cross.model, crossReviewEffort: cross.effort } : {}),
+    usageGuard: settings.usageGuard,
+    ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
+    ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
   };
 };

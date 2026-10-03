@@ -17,6 +17,11 @@
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
 //   stop             stop the live run, as Ctrl-C does in its terminal
+//   cap [N | off] [--project NAME]
+//                    cap the live run's share of the machine's sandbox slots at N (at most
+//                    its concurrency), or lift the cap; bare, print its demand, share and
+//                    cap. The run keeps the slots it holds. The cap ends with the run;
+//                    --project acts on another project's run from any directory
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -74,7 +79,7 @@ import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
-import { limit } from "./pool.ts";
+import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
@@ -133,6 +138,17 @@ try {
   }
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP.join("\n"));
+    process.exit(0);
+  }
+  if (command === "cap") {
+    // The run's project as live runs record it: `--project` from anywhere, else this repository's.
+    const given = parseCapArgs(args);
+    if (!given.project && !repoRoot) throw new OperatorError("Not inside a git repository. Give the project's name with `--project NAME`.");
+    const name = given.project ?? (await loadProject(repoRoot!)).name;
+    const now = given.cap === undefined ? standing(name) : setCap(name, given.cap);
+    if (given.cap === "off") console.log(`Cap lifted for ${name}.`);
+    else if (given.cap !== undefined) console.log(`Capped ${name} at ${given.cap} sandbox slot(s). It keeps the slots it holds, and takes no more while it holds ${given.cap} or more.`);
+    console.log(standingLine(now));
     process.exit(0);
   }
   if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");
@@ -285,7 +301,8 @@ try {
     case "status": {
       const project = await loadProject(root);
       // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
-      // AUTONOMY_LEVEL or CONCURRENCY), so the view shows no row rather than the last run's as if they were next.
+      // AUTONOMY_LEVEL, CONCURRENCY, or a bad USAGE_STOP with the guard on), so the view shows no row rather than
+      // the last run's as if they were next.
       let next = "{}";
       try {
         next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));

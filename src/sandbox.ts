@@ -22,7 +22,7 @@ export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), "
 
 // Every key the personal config.json holds. An unknown one - a typo such as `keepawake` - was
 // ignored without a word, and the setting the person meant never applied.
-const MACHINE_KEYS = ["maxSandboxes", "maxGates", "keepAwake", "notify"];
+const MACHINE_KEYS = ["maxSandboxes", "maxGates", "keepAwake", "notify", "idleMark"];
 
 // Machine-wide settings from USER_CONFIG/config.json; empty when there is none.
 export const machineSettings = (): Record<string, unknown> => {

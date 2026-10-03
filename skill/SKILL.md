@@ -229,7 +229,12 @@ comments, and the gates can prove it.
    implementer shows `[implement <model>/<effort>]` after its title there), whether it is a dry
    run, and `sandcastle status 0`'s machine line (other projects' runs share the limits). Do not
    guess how long it takes: once the project has run before, the run prints a rough estimate at
-   its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
+   its start (detached: in `.sandcastle/logs/run-output.log`) - quote that once it is going. When
+   `sandcastle status 0`'s machine line shows another run live (its slots in use), say before confirming
+   that the start prints a line on how the machine is split - the other run's slots and demand, this
+   run's share and a rough wait for its first slot (an older kit's run is named as one that ignores
+   shares) - and quote that line to the user once the run has printed it, before the first ticket is
+   expected; the split applies by itself and asks nothing. Say that a red gate gets a repair pass (`repair.attempts`, default 1),
    and a repair that turns it green a second review - more allowance, fewer red branches - and
    after labelling tickets on GitHub (or a `sandcastle requeue`), give GitHub a few seconds before `sandcastle run`: its label search can lag, and a run started at once may miss them. Then offer `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that). If the config sets `autonomy` (or the
    user asks for `AUTONOMY_LEVEL`), say how many further turns the run may take by itself. If `sandcastle queue`
@@ -305,7 +310,8 @@ working, ready to land, need you, queued, blocked, merged. The states:
   but the run stopped before landing), `orphaned` (its run was killed and its container still
   works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed or unqueued
   during the run, or marked `ready-for-human` before it started) is greyed with the leftovers.
-- **`queued`** (next to start, or how many are ahead), **`blocked`** (what it waits for, and
+- **`queued`** (next to start, how many are ahead, or `waits for the run's share` while other
+  runs hold their part of the machine's sandbox slots), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**,
   **`no change`**, **`skipped`** (not started because the run stopped early).
