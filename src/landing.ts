@@ -637,8 +637,8 @@ export type RequeueRecordRun = { ticket(id: string, fields: TicketRecord): void;
  * The run record's side of the requeue-once rule, which the scheduler decides (schedule.ts):
  * `burndown()` hands it what the scheduler tells. A requeue is written as queued, with the line its
  * second attempt's setup carries (`requeuedAs`), as it is told - before the ticket is pushed back.
- * A second conflict or red is noted with the tickets of both attempts (`againNote`, for the outcome
- * line). A requeued ticket whose second attempt never began ends with its first landing: its record
+ * A second conflict or red is noted on the record with the tickets of both attempts (`againNote`;
+ * the outcome line is the ledger's). A requeued ticket whose second attempt never began ends with its first landing: its record
  * goes back to what it was, or to withdrawn when the tracker took it back meanwhile, and `dropFirst`
  * removes its first pipeline's entry from the per-issue lines.
  */
@@ -680,7 +680,7 @@ export const createRequeueRecord = (d: {
         }
       }
       if (e.again && (landed.kind === "conflict" || landed.kind === "red")) {
-        // Held for the next run, with the tickets of both attempts named - in the outcome and in the comment.
+        // Held for the next run, with the tickets of both attempts named in its note (the ledger names them in the outcome and the comment).
         const note = againNoteOf(landed);
         againNote.set(id, note);
         d.bookkeep(id, () => d.run.ticket(id, { note }));

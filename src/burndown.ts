@@ -44,7 +44,7 @@ import {
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { LATEST_ISSUE, ensureTriageLabel, makeTracker, refOf, type Ticket, type Tracker } from "./tracker.ts";
+import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { usageLine, usageStop } from "./usage.ts";
