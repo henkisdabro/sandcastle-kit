@@ -1,8 +1,10 @@
 // Live runs, one file per project holding its root, so the Herdr tab bar can show every run on
 // the machine whichever pane has focus, and the Claude Code mod can find a run its session
 // started in another directory. Written by the run itself (burndown.ts), with or without Herdr.
-// A run that dies without its exit handler leaves its file; readers check the run's pid and drop it.
+// A run that dies without its exit handler leaves its file; readers ask `liveness` (the mod's
+// run-live.ts) about the run's pid and drop the file when the run is not live.
 
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,6 +12,23 @@ import { join } from "node:path";
 
 // `||`, not `??`: an empty XDG_CACHE_HOME is unset (the XDG rule, and the mod's shell reads it so).
 export const RUNS_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "sandcastle-kit", "runs");
+
+/**
+ * The process check `liveness` is given: the command line of the process with this pid, or
+ * undefined when there is none. A signal of 0 says whether the process exists without waking
+ * it (EPERM: it exists, another user's); `ps` then says what it is, so a pid that came round
+ * as some other process is told from the run. `-p` and `-o command=` are what BSD `ps` (macOS)
+ * and procps-ng share, the flags the mod and status.sh use too.
+ */
+export const commandOf = (pid: number): string | undefined => {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") return undefined;
+  }
+  const ps = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  return ps.status === 0 ? ps.stdout.trim() || undefined : undefined;
+};
 
 /** The root with symlinks resolved (macOS: `/tmp` is `/private/tmp`), or as given when it cannot be. */
 const real = (root: string) => {

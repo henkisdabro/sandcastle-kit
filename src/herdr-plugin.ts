@@ -23,7 +23,8 @@ import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, runCounts } from "./herdr.ts";
-import { RUNS_DIR } from "./live-runs.ts";
+import { commandOf, RUNS_DIR } from "./live-runs.ts";
+import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { KIT } from "./sandbox.ts";
 
@@ -274,19 +275,10 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
 // The tab bar: one line for every live run, from the runs directory src/herdr.ts keeps.
 // ---------------------------------------------------------------------------
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
 type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: string; finishedAt?: string; tickets?: Record<string, TicketRecord> };
 
-/** Live runs, newest first. A file whose run has ended or died is removed. */
-export const liveRuns = (dir = RUNS_DIR): Run[] => {
+/** Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed. */
+export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf): Run[] => {
   const runs: Run[] = [];
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const file = join(dir, f);
@@ -294,7 +286,7 @@ export const liveRuns = (dir = RUNS_DIR): Run[] => {
       const root = readFileSync(file, "utf8").trim();
       const record = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
       const run = { root, ...record, tickets: readTickets(record) } as Run;
-      if (!run.finishedAt && run.pid && alive(run.pid)) {
+      if (liveness({ record: run }, probe).state === "live") {
         runs.push(run);
         continue;
       }
@@ -307,9 +299,9 @@ export const liveRuns = (dir = RUNS_DIR): Run[] => {
 };
 
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
-export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD) => {
+export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
-  const runs = liveRuns(dir).sort((a, b) => Number(here(b)) - Number(here(a)));
+  const runs = liveRuns(dir, probe).sort((a, b) => Number(here(b)) - Number(here(a)));
   return runs.length ? `🏰 ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}))).join("  |  ")}` : "";
 };
 

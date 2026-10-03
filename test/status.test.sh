@@ -90,7 +90,9 @@ hasnt() { # pattern
   ! grep -qE "$1" "$TMP/frame" || { echo "FAIL [$SCENARIO] a line matches /$1/: $(grep -E "$1" "$TMP/frame" | head -1)"; fails=$((fails+1)); }
 }
 
-sleep 600 & LIVE=$!
+# A process of the kit as far as status.sh can tell: its command line holds the kit's entry
+# (`src/cli.ts`), which is how a live run is told from a process that took a dead run's pid.
+( exec -a "node src/cli.ts" sleep 600 ) & LIVE=$!
 now=$(date +%s)
 started=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { livePid, OUTPUT_LOG, startDetached } from "../src/detach.ts";
@@ -47,7 +47,10 @@ setInterval(() => {
 }, 50);
 `;
 const scripts = mkdtempSync(join(tmpdir(), "sandcastle-detach-script-"));
-const fake = join(scripts, "fake-run.mjs");
+// Under a directory named for the kit's entry, so its command line reads as the kit's (src/live-runs.ts
+// `commandOf`): a run is a process whose command line holds it, and this stand-in has to pass for one.
+const fake = join(scripts, "src/cli.ts/fake-run.mjs");
+mkdirSync(dirname(fake), { recursive: true });
 writeFileSync(fake, FAKE_RUN);
 
 const started: number[] = [];
