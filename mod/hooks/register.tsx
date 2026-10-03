@@ -12,7 +12,8 @@
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
-import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, RUN_COMMAND, startedBy, summarise } from "./run-state";
+import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, startedBy, summarise } from "./run-state";
+import { kitRunning } from "./run-live";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
 /** The castle frame the band draws: an index into CASTLE_FRAMES. */
@@ -83,15 +84,16 @@ const isProject = ($: EngineInterface, root: string) => $.fs.exists(`${root}/.sa
 /** The one place the mod starts a process. */
 const exec = ($: EngineInterface, argv: string[]) => $.process.run(argv);
 
-// Asks for the process's command line and sends nothing to it. The pid alone is not enough:
-// it comes round again as some other process, and the run would seem to come back to life.
-// `finishedAt` cannot say it either - every turn of one run writes one, a killed run none.
+// Asks for the process's command line and sends nothing to it; that it is the kit's is
+// run-live.ts's rule, the same everywhere a run is asked about. The record's `finishedAt` is
+// left out on purpose: every turn of one run writes one, a killed run none, and between two
+// turns the run is still going.
 async function alive($: EngineInterface, pid: number): Promise<boolean> {
   try {
     // `-p` and `-o command=` are the flags BSD `ps` (macOS) and procps-ng share. BusyBox has no
     // `-p`: the call fails, so there it is no live run and no false end.
     const ps = await exec($, ["ps", "-p", String(pid), "-o", "command="]);
-    return ps.exitCode === 0 && ps.stdout.includes(RUN_COMMAND);
+    return kitRunning(pid, () => (ps.exitCode === 0 ? ps.stdout : undefined));
   } catch {
     return false;
   }

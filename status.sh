@@ -388,6 +388,18 @@ load_pool() {
   done
 }
 
+# A run's pid is the run only while it is a process of the kit: a pid comes round again as some
+# other process, and a run that was killed would read as live. The same rule as
+# mod/hooks/run-live.ts (`RUN_COMMAND`, and `ps -p <pid> -o command=`, the flags BSD and procps
+# share), in bash: a node start on each redraw is too slow. test/run-live-contract.test.ts holds
+# the two together.
+RUN_COMMAND="src/cli.ts"
+run_alive() {
+  local command
+  command=$(ps -p "$1" -o command= 2>/dev/null) || return 1
+  [[ "$command" == *"$RUN_COMMAND"* ]]
+}
+
 # The orchestrator writes logs/run.json: which run, since when, which models,
 # and on a clean exit when it finished. A pid that is gone without a
 # finishedAt is a run that was killed.
@@ -415,7 +427,7 @@ load_run() {
   [ -f "$f" ] || return 0
   RUN_STARTED=$(jq -r '.startedAt // empty' "$f" 2>/dev/null)
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+  [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
   RUN_ISSUES=$(jq -r '(.issues // [])[] | tostring' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
@@ -577,7 +589,7 @@ run_cell() {
   if [ -n "$finished" ]; then
     kvl state "${mute}ended (exit ${code})${off}"; RUNC[0]="$REPLY"
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
-  elif kill -0 "$pid" 2>/dev/null; then
+  elif run_alive "$pid"; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
     kvl state "${ylw}running${off}${dry:+ ${accent}${dry}${off}} ${mute}· $(dur $(( $(date +%s) - t0 )))${off}${stage:+ ${rule}·${off} ${accent}${stage}${off}}"; RUNC[0]="$REPLY"
