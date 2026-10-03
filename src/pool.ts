@@ -106,12 +106,13 @@ const WEDGED_MS = 10_000;
 
 /**
  * Takes the lock `file` for this process: `mine` (its content, to release it
- * with) if taken, `owner` if a live process holds it, neither if it is busy for
+ * with) if taken, `owner` if a live process of the kit holds it, neither if it is busy for
  * a moment (being written or taken over) - try again later.
  *
  * The content is "<pid> <token> <label>": the pid first, which status.sh reads;
  * the token, so a release never removes a lock someone else took since. A lock
- * whose pid is dead is taken over under `<file>.takeover`, and only if it still
+ * whose owner is gone (`holderRunning`: its pid is dead, or is some other process
+ * now) is taken over under `<file>.takeover`, and only if it still
  * holds the same stale content: two runs that both saw it stale once both
  * unlinked it, the second removing the first's fresh lock, and both ran.
  */
