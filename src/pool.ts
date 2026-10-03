@@ -33,6 +33,11 @@
 // older kit: it is counted as wanting its concurrency (its run record's), or the slots it holds.
 // The gates pool has no shares.
 //
+// A cap (`sandcastle cap`) is a person's limit on one run's share, in that run's registration, so it
+// ends with the run. It only lowers the share: the run's demand for the split is the smaller of its
+// demand and its cap, and a capped run at its cap takes no slot even when no other run wants one.
+// A run above its cap keeps the slots it holds, as above its share.
+//
 // The run lock (guard.ts) is the same kind of file, taken the same way. An owner
 // is a process of the kit (its command line holds RUN_COMMAND, as for a run):
 // a killed run's pid comes round as some other process, and the lock would
@@ -251,16 +256,17 @@ const waits = (pool: PoolName, seen?: Seen): Wait[] => {
 };
 
 /** A live run's registration: who it is and how many sandbox slots it could use now. */
-export type Registration = { pid: number; run: string; project: string; demand: number; concurrency: number; since: number };
+export type Registration = { pid: number; run: string; project: string; demand: number; concurrency: number; since: number; cap?: number };
 
-type Joined = { file: string; registration: Registration };
+type Joined = { file: string; registration: Omit<Registration, "cap"> };
 
 const parseRegistration = (text: string | undefined): Registration | undefined => {
   try {
     const r = JSON.parse(text ?? "") as Partial<Registration> & { shares?: boolean };
     // `shares` is the mark of a kit that knows them; a file without it is not one of ours.
     if (r.shares !== true || typeof r.run !== "string" || !Number.isInteger(r.pid) || !Number.isInteger(r.demand) || !Number.isInteger(r.since)) return undefined;
-    return { pid: r.pid!, run: r.run, project: String(r.project ?? ""), demand: Math.max(0, r.demand!), concurrency: Number(r.concurrency) || 0, since: r.since! };
+    const cap = Number.isInteger(r.cap) && r.cap! >= 1 ? r.cap : undefined;
+    return { pid: r.pid!, run: r.run, project: String(r.project ?? ""), demand: Math.max(0, r.demand!), concurrency: Number(r.concurrency) || 0, since: r.since!, ...(cap ? { cap } : {}) };
   } catch {
     return undefined;
   }
@@ -283,9 +289,20 @@ const registrations = (seen?: Seen): (Registration & { file: string })[] => {
     });
 };
 
+// The tmp name is the writer's own: `sandcastle cap` rewrites a run's file from another process.
+const writeFileWhole = (file: string, registration: Registration) => {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ ...registration, shares: true }) + "\n");
+  renameSync(tmp, file);
+};
+
+/**
+ * The cap is a person's, set from another process: the run's own copy of its registration never
+ * holds it, so a rewrite for a new demand takes it from the file, or it would undo the cap.
+ */
 const writeRegistration = (j: Joined) => {
-  writeFileSync(`${j.file}.tmp`, JSON.stringify({ ...j.registration, shares: true }) + "\n");
-  renameSync(`${j.file}.tmp`, j.file);
+  const cap = parseRegistration(read(j.file))?.cap;
+  writeFileWhole(j.file, { ...j.registration, ...(cap ? { cap } : {}) });
 };
 
 /**
@@ -329,18 +346,22 @@ const concurrencyOfRun = (pid: number): number | undefined => {
 };
 
 /** One live run as the pool sees it: what it wants, what it holds and, for the sandbox pool, its share. */
-export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number };
+export type Member = { run: string; project?: string; pid: number; demand: number; held: number; share: number; registered: boolean; since: number; cap?: number; concurrency?: number };
 
 /**
  * The limit split equally between the runs that want slots, none above its demand: a run that
  * needs less than an equal part releases the rest to the others, again equally, until the pool
  * or every demand is met. Whole slots: the earlier of two equal runs (`since`, then `run`) gets
- * the odd one, so every run works out the same split from the same files.
+ * the odd one, so every run works out the same split from the same files. A capped run asks for
+ * no more than its cap, so what the cap frees goes to the others like any unneeded part.
  */
-export const splitShares = (total: number, wants: { run: string; demand: number; since: number }[]): Map<string, number> => {
+export const splitShares = (total: number, wants: { run: string; demand: number; since: number; cap?: number }[]): Map<string, number> => {
   const shares = new Map<string, number>();
   let remaining = total;
-  const asking = wants.filter((w) => w.demand > 0).sort((a, b) => a.demand - b.demand || a.since - b.since || (a.run < b.run ? -1 : 1));
+  const asking = wants
+    .map((w) => ({ ...w, demand: Math.min(w.demand, w.cap ?? Infinity) }))
+    .filter((w) => w.demand > 0)
+    .sort((a, b) => a.demand - b.demand || a.since - b.since || (a.run < b.run ? -1 : 1));
   asking.forEach((w, i) => {
     const share = Math.min(w.demand, Math.ceil(remaining / (asking.length - i)));
     shares.set(w.run, share);
@@ -360,7 +381,7 @@ export const members = (pool: PoolName = "sandboxes", seen?: Seen): Member[] => 
   const locks = liveSlots(pool, seen);
   const heldBy = new Map<string, number>();
   for (const { run } of locks) heldBy.set(run, (heldBy.get(run) ?? 0) + 1);
-  const rows: Omit<Member, "share">[] = registered.map((r) => ({ run: r.run, project: r.project, pid: r.pid, demand: r.demand, held: heldBy.get(r.run) ?? 0, registered: true, since: r.since }));
+  const rows: Omit<Member, "share">[] = registered.map((r) => ({ run: r.run, project: r.project, pid: r.pid, demand: r.demand, held: heldBy.get(r.run) ?? 0, registered: true, since: r.since, cap: r.cap, concurrency: r.concurrency }));
   const known = new Set(registered.map((r) => r.run));
   for (const [run, count] of heldBy) {
     if (known.has(run)) continue;
@@ -372,10 +393,10 @@ export const members = (pool: PoolName = "sandboxes", seen?: Seen): Member[] => 
 };
 
 /** This run's demand and share, or undefined when it has not joined the pool. */
-export const myShare = (): { demand: number; share: number; held: number } | undefined => {
+export const myShare = (): { demand: number; share: number; held: number; cap?: number } | undefined => {
   if (!joined) return undefined;
   const me = members().find((m) => m.run === RUN_ID);
-  return me && { demand: me.demand, share: me.share, held: me.held };
+  return me && { demand: me.demand, share: me.share, held: me.held, ...(me.cap ? { cap: me.cap } : {}) };
 };
 
 /** A run that could take a slot if one were free: one that knows no shares, or holds fewer than its share. */
@@ -396,7 +417,10 @@ const olderWait = (pool: PoolName, mine: Wait, ms: Member[], seen: Seen) =>
  */
 const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
   if (pool !== "sandboxes" || !joined) return false;
-  if (below(ms.find((m) => m.run === RUN_ID))) return false;
+  const me = ms.find((m) => m.run === RUN_ID);
+  if (below(me)) return false;
+  // A cap that binds (the share is the cap itself) is a limit whether or not another run wants the slot.
+  if (me?.cap !== undefined && me.share >= me.cap) return true;
   if (ms.some((m) => m.run !== RUN_ID && m.registered && m.held < m.share)) return true;
   return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
 };
@@ -427,7 +451,7 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
   return undefined;
 };
 
-/** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own. */
+/** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own (or at its cap). */
 export type WaitReason = "slots" | "share";
 
 /**
@@ -455,7 +479,7 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
         told = why;
         const me = why === "share" ? myShare() : undefined;
         console.log(
-          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, another run waits below its own` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
+          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.share >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
         );
         onWait?.(why!);
       }
@@ -475,3 +499,58 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
 
 /** "sandboxes 3/6 · gates 1/2" - live slots only; read by status.sh too. */
 export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
+
+/** One live run's demand, share and cap, as `sandcastle cap` shows them. */
+export type Standing = { project: string; demand: number; share: number; held: number; concurrency: number; cap?: number };
+
+/** The live registered run of `project` with its file; no run, or several of one name, is a refusal. */
+const runOf = (project: string, seen?: Seen) => {
+  const live = registrations(seen).filter((r) => r.project === project);
+  if (live.length === 0) throw new OperatorError(`No live sandcastle run of project "${project}". A cap is a live run's: it ends with the run.`);
+  if (live.length > 1) throw new OperatorError(`${live.length} live runs are named "${project}" (pids ${live.map((r) => r.pid).join(", ")}): a cap cannot tell which you mean.`);
+  return live[0]!;
+};
+
+/** The project's live run: what it wants, its share of the sandbox pool, what it holds and its cap. */
+export const standing = (project: string): Standing => {
+  const seen: Seen = new Map();
+  const r = runOf(project, seen);
+  const me = members("sandboxes", seen).find((m) => m.run === r.run);
+  return { project, demand: r.demand, share: me?.share ?? 0, held: me?.held ?? 0, concurrency: r.concurrency, ...(r.cap ? { cap: r.cap } : {}) };
+};
+
+/** `sandcastle cap`'s arguments: an optional `--project <name>` and at most one of a whole number of 1 or more and `off`. */
+export const parseCapArgs = (args: string[]): { project?: string; cap?: number | "off" } => {
+  const rest = [...args];
+  let project: string | undefined;
+  const at = rest.indexOf("--project");
+  if (at !== -1) {
+    project = rest[at + 1];
+    if (!project || project.startsWith("-")) throw new OperatorError("Usage: sandcastle cap [N | off] [--project NAME] - --project needs the project's name.");
+    rest.splice(at, 2);
+  }
+  if (rest.length > 1) throw new OperatorError("Usage: sandcastle cap [N | off] [--project NAME]");
+  const [given] = rest;
+  if (given === undefined) return { project };
+  if (given === "off") return { project, cap: "off" };
+  if (!/^\d+$/.test(given) || Number(given) < 1) throw new OperatorError(`"${given}" is not a cap - expected a whole number of 1 or more, or "off".`);
+  return { project, cap: Number(given) };
+};
+
+/**
+ * Caps the project's live run's share at `cap` sandbox slots, or lifts the cap (`off`). The cap is
+ * written into the run's registration, which the run reads before each slot request; it goes when
+ * the run does.
+ */
+export const setCap = (project: string, cap: number | "off"): Standing => {
+  const r = runOf(project);
+  if (cap !== "off" && r.concurrency > 0 && cap > r.concurrency) {
+    throw new OperatorError(`A cap of ${cap} is above this run's concurrency of ${r.concurrency}, the most it ever wants. Use ${r.concurrency} or fewer, or "off".`);
+  }
+  const { file, cap: _, ...registration } = r;
+  writeFileWhole(file, { ...registration, ...(cap === "off" ? {} : { cap }) });
+  return standing(project);
+};
+
+/** What `sandcastle cap` prints: the run's demand, share, what it holds and its cap. */
+export const standingLine = (s: Standing) => `${s.project}: demand ${s.demand}, share ${s.share}, holds ${s.held}, cap ${s.cap ?? "off"}`;

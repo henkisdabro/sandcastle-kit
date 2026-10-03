@@ -437,7 +437,7 @@ WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
@@ -449,8 +449,10 @@ load_run() {
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
   # This run's demand and share of the machine pool, live values the run rewrites; an older kit's record has neither.
-  read -r POOL_DEMAND POOL_SHARE < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring)] | join(" ")' "$f" 2>/dev/null)
+  # The cap (`sandcastle cap`) is a person's, and absent when there is none.
+  read -r POOL_DEMAND POOL_SHARE POOL_CAP < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")' "$f" 2>/dev/null)
   [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
+  [[ "$POOL_CAP" =~ ^[0-9]+$ ]] || POOL_CAP=""
   RUN_ISSUES=$(jq -r '(.issues // [])[] | tostring' "$f" 2>/dev/null)
   WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
   ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
@@ -1024,7 +1026,7 @@ render() {
     # third row, so the gates queue, when there is one, moves onto the gates row.
     [ "$gate_wait" -gt 0 ] && REPLY="$REPLY ${hot}· ${gate_wait} waiting${off}"
     kvl gates "$REPLY"; MAC[1]="$REPLY"
-    kvl "this run" "${head}wants ${POOL_DEMAND}${gry} · share ${head}${POOL_SHARE}${off}"
+    kvl "this run" "${head}wants ${POOL_DEMAND}${gry} · share ${head}${POOL_SHARE}${off}${POOL_CAP:+${gry} · cap ${head}${POOL_CAP}${off}}"
   else
     kvl gates "$REPLY"; MAC[1]="$REPLY"
     if [ "$gate_wait" -gt 0 ]; then kvl waiting "${hot}${gate_wait} for a gates slot${off}"; else kvl waiting "${gry}none${off}"; fi
