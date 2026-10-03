@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { OperatorError } from "./errors.ts";
+import { nearest, OperatorError } from "./errors.ts";
 import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
@@ -19,6 +19,10 @@ export const KIT = dirname(dirname(fileURLToPath(import.meta.url)));
 // Everything personal - tokens, machine-wide limits - lives here, never in the
 // kit's own directory, so the kit repo can be public and still in daily use.
 export const USER_CONFIG = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "sandcastle-kit");
+
+// Every key the personal config.json holds. An unknown one - a typo such as `keepawake` - was
+// ignored without a word, and the setting the person meant never applied.
+const MACHINE_KEYS = ["maxSandboxes", "maxGates", "keepAwake", "notify"];
 
 // Machine-wide settings from USER_CONFIG/config.json; empty when there is none.
 export const machineSettings = (): Record<string, unknown> => {
@@ -32,6 +36,11 @@ export const machineSettings = (): Record<string, unknown> => {
   }
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     throw new OperatorError(`${file} is not a JSON object.`);
+  }
+  for (const key of Object.keys(settings)) {
+    if (MACHINE_KEYS.includes(key)) continue;
+    const near = nearest(key, MACHINE_KEYS);
+    throw new OperatorError(`${file}: unknown key \`${key}\`${near ? ` - did you mean \`${near}\`?` : ` (README -> Personal settings lists the keys)`}`);
   }
   return settings as Record<string, unknown>;
 };
