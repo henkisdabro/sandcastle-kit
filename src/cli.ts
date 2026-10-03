@@ -284,7 +284,7 @@ try {
     case "status": {
       const project = await loadProject(root);
       // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
-      // AUTONOMY_LEVEL), so the view shows no row rather than the last run's as if they were next.
+      // AUTONOMY_LEVEL or CONCURRENCY), so the view shows no row rather than the last run's as if they were next.
       let next = "{}";
       try {
         next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));
