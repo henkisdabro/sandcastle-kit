@@ -109,6 +109,7 @@ branch 109 1; log 109 impl 'done'
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "implement live-model/high",
   "stage": "landing 2/4", "concurrency": 2, "tokens": "1.2M in / 30k out",
+  "settings": { "autonomy": 2, "turn": 2, "cap": 2 },
   "typical": { "implement": 600, "gates": 60, "issue": 900 },
   "issues": ["101","102","103","104","105","106","108","109","110"],
   "tickets": {
@@ -128,6 +129,9 @@ render "101 102 103 104 105 106 107 108 109 110 120"
 # The first column is headed TICKET (6 characters), not the GitHub word; the widths are sized for it.
 has '^│ +TICKET +│ +STATE +│'
 hasnt 'ISSUE'
+# A live run's settings come from its record: no (next run) or (last run) mark, whatever the pane's width.
+has '^│ settings +autonomy (0 1 \[2\] 3 drain|2) · turn 2/2 +│'
+hasnt '\((next|last) run\)'
 row '#101' impl 'Bash|\$ pnpm test'
 row '#102' gates 'usually 1m - 2/3 pytest'
 row '#103' ready 'gates green'

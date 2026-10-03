@@ -64,7 +64,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, autonomyLevel, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
@@ -78,7 +78,8 @@ import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { makeTracker, parseRequeueArgs, requeueTicket } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { cleanProject, ensureImage, KIT } from "./sandbox.ts";
+import { cleanProject, ensureImage, KIT, machineSettings } from "./sandbox.ts";
+import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -155,7 +156,7 @@ try {
       // before a process starts; the child (SANDCASTLE_DETACHED) runs the checks again for itself.
       if ((given.detach || process.env.SANDCASTLE_DETACH === "1") && process.env.SANDCASTLE_DETACHED !== "1") {
         const project = await loadProject(root);
-        if (autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy) === 1) {
+        if (resolveSettings({ env: process.env, project, machine: machineSettings() }).autonomy === 1) {
           throw new OperatorError("Autonomy level 1 asks a question at the end of each turn, which a detached run cannot. Use level 2 or 3, or run attached.");
         }
         sandboxPanes(project);
@@ -184,7 +185,8 @@ try {
       rewordLibraryLines();
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
-      const level = autonomyLevel(process.env.AUTONOMY_LEVEL, project.autonomy);
+      // The run's settings, resolved once: every turn's record carries them.
+      const { autonomy: level } = resolveSettings({ env: process.env, project, machine: machineSettings() });
       sandboxPanes(project);
       checkUsageSettings();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
@@ -280,6 +282,12 @@ try {
     }
     case "status": {
       const project = await loadProject(root);
+      // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
+      // AUTONOMY_LEVEL), so the view shows no row rather than the last run's as if they were next.
+      let next = "{}";
+      try {
+        next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));
+      } catch {}
       const r = spawnSync(join(KIT, "status.sh"), args, {
         stdio: "inherit",
         env: {
@@ -291,6 +299,7 @@ try {
           // What the next run would use: between runs the view showed the last
           // run's models, which read as the current setting.
           SANDCASTLE_MODELS: MODELS_LINE,
+          SANDCASTLE_SETTINGS: next,
           SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
           SANDCASTLE_MAX_GATES: String(limit("gates")),
         },
