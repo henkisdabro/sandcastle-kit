@@ -147,6 +147,20 @@ test("a capped run takes no slot above its cap even when no other run wants one,
   await a.done;
 });
 
+test("a capped run holds no more than its cap when its demand is below it and no other run wants a slot", async () => {
+  // The demand is the scheduler's count, told as it changes: a run can ask for a slot above it, and
+  // with no other run its share would not stop it. The cap still does.
+  const dir = tmp();
+  const a = run(dir, `joinPool("alpha", 5, 1); while (!has("go")) await sleep(25); ${tickets("a", "a", 4)}`);
+  await until(registered("alpha"), "run A to register");
+  setCap("alpha", 2);
+  writeFileSync(join(dir, "go"), "");
+  await until(() => heldBy().join() === "2", "run A to hold its cap");
+  await holds(() => heldBy().join() === "2");
+  writeFileSync(join(dir, "stop"), "");
+  await a.done;
+});
+
 test("the run's own rewrites of its registration keep a cap set from outside", async () => {
   const dir = tmp();
   const a = run(dir, `joinPool("alpha", 5, 5); while (!has("redemand")) await sleep(25); setDemand(3); joinPool("alpha", 5, 4); mark("done"); while (!has("stop")) await sleep(25);`);

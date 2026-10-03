@@ -35,7 +35,7 @@
 //
 // A cap (`sandcastle cap`) is a person's limit on one run's share, in that run's registration, so it
 // ends with the run. It only lowers the share: the run's demand for the split is the smaller of its
-// demand and its cap, and a capped run at its cap takes no slot even when no other run wants one.
+// demand and its cap, and a run holding its cap takes no slot even when no other run wants one.
 // A run above its cap keeps the slots it holds, as above its share.
 //
 // The run lock (guard.ts) is the same kind of file, taken the same way. An owner
@@ -419,8 +419,9 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
   if (pool !== "sandboxes" || !joined) return false;
   const me = ms.find((m) => m.run === RUN_ID);
   if (below(me)) return false;
-  // A cap that binds (the share is the cap itself) is a limit whether or not another run wants the slot.
-  if (me?.cap !== undefined && me.share >= me.cap) return true;
+  // A cap is a limit whether or not another run wants the slot. Held, not share: a demand below the
+  // cap leaves the share below it too, and a run with no rival takes slots past its share.
+  if (me?.cap !== undefined && me.held >= me.cap) return true;
   if (ms.some((m) => m.run !== RUN_ID && m.registered && m.held < m.share)) return true;
   return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
 };
@@ -479,7 +480,7 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
         told = why;
         const me = why === "share" ? myShare() : undefined;
         console.log(
-          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.share >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
+          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
         );
         onWait?.(why!);
       }
