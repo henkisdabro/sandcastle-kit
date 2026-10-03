@@ -322,18 +322,21 @@ export const doctor = async (repoRoot?: string, verify = false) => {
 
   // pool.ts reads the machine settings on first use, so a malformed file or a
   // bad limit lands here as a FIX line instead of crashing every command.
+  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsProblem = (() => {
     try {
       // limit() skips the file when an environment variable sets the limit, so read it here too.
       machineSettings();
       limit("sandboxes");
       limit("gates");
+      // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
+      const idleMark = machineSettings().idleMark;
+      if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
       return undefined;
     } catch (error) {
       return (error as Error).message;
     }
   })();
-  const settingsFile = join(USER_CONFIG, "config.json");
   const settingsName = settingsProblem?.match(/^SANDCASTLE_MAX_\w+/)?.[0];
   check(
     !settingsProblem,
@@ -341,7 +344,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     `${settingsProblem} ` +
       (settingsName
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
-        : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
+        : settingsProblem?.startsWith('"idleMark"')
+          ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
   );
 
   const envFile = join(USER_CONFIG, ".env");

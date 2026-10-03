@@ -869,6 +869,13 @@ itself, in the status view's castle, glyphs and colours:
   terminal, Codex or OpenCode has no such session: the mod shows it only in the session's own
   project, and the skill's `sandcastle wait` covers the rest. A session you quit and resumed in the meantime hears it when
   it comes back; after `/clear` the terminal you started from still hears it.
+- 🏷️ **An idle mark between runs.** In a project `sandcastle init` has set up - its
+  `.sandcastle/config.ts` is a plain file; a stray `.sandcastle/` directory does not count - the
+  mod pins the word `sandcastle` in its status line under the prompt, so the session shows the
+  project takes runs. The live band replaces it while a run of the session's project is alive,
+  and it returns after the end notice. A run this session follows in another directory never
+  changes it: the mark is about the session's own project. Turn it off for every project with
+  `"idleMark": false` in your [personal settings](#personal-settings).
 - 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
   answers while Claude is working.
 
@@ -898,6 +905,9 @@ all of it. The mod:
 
 - reads `.sandcastle/logs/run.json` under the session's project root, after checking that
   `.sandcastle/` exists and that the record is a plain file, not a link;
+- checks that `.sandcastle/config.ts` is a plain file (one `stat`) for the idle mark, and runs
+  one `sh` script (`cat`, no writing) that prints your personal `config.json` for its `idleMark`
+  switch. It never writes that file;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -1033,9 +1043,10 @@ kit or a repository. `.env` holds every token (`CLAUDE_CODE_OAUTH_TOKEN` or `ANT
 |---|---|---|
 | `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
+| `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod pins between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key or holds a bad limit.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit or has an `idleMark` that is not `true` or `false`.
 
 ### 🐳 The image's agent versions
 
