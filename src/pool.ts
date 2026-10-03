@@ -15,13 +15,22 @@
 //
 // A slot is a lock file holding the owner's pid, created with O_EXCL. A slot
 // whose owner is gone is stale and taken over, so a killed run never leaks one.
+// It also names the run that holds it (`run=<id>`), so the pool can count slots per run.
+//
+// A freed slot goes to the longest wait across runs. A run that wants a slot writes a wait
+// entry (`waits/`) with the time it began, and takes a free slot only when no other live run
+// has an older entry for that pool: without it, a run that has just freed a slot asks again at
+// once and almost always wins, and a second project's run waits until the first drains. A wait
+// entry whose process is gone is ignored and removed, by the same rule as a stale slot.
+// Within one run nothing is ordered here: its own waiters poll as they always did, and
+// `slotTurn` (landing.ts) puts a landing before the run's next pipeline.
 // The run lock (guard.ts) is the same kind of file, taken the same way. An owner
 // is a process of the kit (its command line holds RUN_COMMAND, as for a run):
 // a killed run's pid comes round as some other process, and the lock would
 // otherwise be held for as long as that one lasts.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
@@ -32,6 +41,11 @@ import { machineSettings } from "./sandbox.ts";
 export type PoolName = "sandboxes" | "gates";
 
 const DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "slots");
+// A subdirectory, so status.sh's `<pool>-*.lock` glob and `usage` never see an entry.
+const WAITS = join(DIR, "waits");
+
+/** This process's run, as its slot locks and wait entries name it: one id per process, never reused. */
+export const RUN_ID = randomUUID().slice(0, 8);
 
 /**
  * `raw` as a whole number of `min` or more, or an OperatorError naming it.
@@ -160,9 +174,81 @@ export const releaseLock = (file: string, mine: string) => {
 };
 
 const held = new Map<string, string>();
+const waiting = new Set<string>();
 process.on("exit", () => {
   for (const [file, mine] of held) releaseLock(file, mine);
+  for (const file of waiting) rmSync(file, { force: true });
 });
+
+export type SlotLock = { pid: number; run: string; label: string };
+
+/**
+ * A slot lock's content ("<pid> <token> run=<id> <label>"). A lock from a kit that did not name
+ * its run reads as a run of its own pid: it still counts, and is never mistaken for another's.
+ */
+const parseLock = (content: string): SlotLock => {
+  const [pid, , second, ...rest] = content.trim().split(" ");
+  const named = second?.startsWith("run=");
+  return { pid: Number(pid), run: named ? second.slice(4) : `pid:${pid}`, label: (named ? rest : [second, ...rest]).filter(Boolean).join(" ") };
+};
+
+/** The pool's slots held by a live run now. */
+export const liveSlots = (pool: PoolName): SlotLock[] => {
+  if (!existsSync(DIR)) return [];
+  return readdirSync(DIR)
+    .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".lock")) // not a `.takeover` guard: that is a slot changing hands
+    .flatMap((f) => {
+      const content = read(join(DIR, f));
+      const lock = content ? parseLock(content) : undefined;
+      return lock && holderRunning(lock.pid) ? [lock] : [];
+    });
+};
+
+/** How many of the pool's slots each live run holds, by run id. */
+export const slotsByRun = (pool: PoolName): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const { run } of liveSlots(pool)) counts.set(run, (counts.get(run) ?? 0) + 1);
+  return counts;
+};
+
+type Wait = { file: string; pid: number; run: string; since: number };
+
+/** The live waits for `pool`; an entry left by a dead process is removed, one that cannot be read is skipped. */
+const waits = (pool: PoolName): Wait[] => {
+  if (!existsSync(WAITS)) return [];
+  return readdirSync(WAITS)
+    .filter((f) => f.startsWith(`${pool}-`) && f.endsWith(".wait"))
+    .flatMap((f) => {
+      const file = join(WAITS, f);
+      const [pid, run, since] = (read(file) ?? "").split(" ");
+      if (!since) return [];
+      if (!holderRunning(Number(pid))) {
+        rmSync(file, { force: true });
+        return [];
+      }
+      return [{ file, pid: Number(pid), run, since: Number(since) }];
+    });
+};
+
+/** Another live run has waited for this pool longer than `mine` (ties go to the lower run id). */
+const olderWait = (pool: PoolName, mine: Wait) =>
+  waits(pool).some((w) => w.run !== mine.run && (w.since < mine.since || (w.since === mine.since && w.run < mine.run)));
+
+let sequence = 0;
+// Written whole, then renamed in: a reader never sees an entry half-written.
+const beginWait = (pool: PoolName, label: string): Wait => {
+  mkdirSync(WAITS, { recursive: true });
+  const since = Date.now();
+  const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}.wait`);
+  writeFileSync(`${file}.tmp`, `${process.pid} ${RUN_ID} ${since} ${label}\n`);
+  renameSync(`${file}.tmp`, file);
+  waiting.add(file);
+  return { file, pid: process.pid, run: RUN_ID, since };
+};
+const endWait = (wait: Wait) => {
+  waiting.delete(wait.file);
+  rmSync(wait.file, { force: true });
+};
 
 const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string } | undefined => {
   mkdirSync(DIR, { recursive: true });
@@ -174,16 +260,27 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
   return undefined;
 };
 
-/** Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free. */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: () => void): Promise<T> => {
-  let slot = tryAcquire(pool, label);
-  if (!slot) {
-    console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${limit(pool)} in use)`);
-    onWait?.();
-  }
-  while (!slot) {
-    await new Promise((r) => setTimeout(r, 5000));
-    slot = tryAcquire(pool, label);
+/**
+ * Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free. The slot
+ * goes to the run that has waited longest; `pollMs` is how often a wait looks again.
+ */
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: () => void, pollMs = 5000): Promise<T> => {
+  const wait = beginWait(pool, label);
+  let slot: ReturnType<typeof tryAcquire>;
+  try {
+    let yielded = olderWait(pool, wait);
+    slot = yielded ? undefined : tryAcquire(pool, `run=${RUN_ID} ${label}`);
+    if (!slot) {
+      console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${yielded ? "another run has waited longer" : `${limit(pool)} in use`})`);
+      onWait?.();
+    }
+    while (!slot) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      yielded = olderWait(pool, wait);
+      slot = yielded ? undefined : tryAcquire(pool, `run=${RUN_ID} ${label}`);
+    }
+  } finally {
+    endWait(wait);
   }
   held.set(slot.file, slot.mine);
   try {
@@ -195,17 +292,4 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
 };
 
 /** "sandboxes 3/6 · gates 1/2" - live slots only; read by status.sh too. */
-export const usage = () =>
-  (["sandboxes", "gates"] as const)
-    .map((pool) => {
-      const used = existsSync(DIR)
-        ? readdirSync(DIR).filter((f) => {
-            // Not a `.takeover` guard: that is a slot changing hands, not a second one.
-            if (!f.startsWith(`${pool}-`) || !f.endsWith(".lock")) return false;
-            const content = read(join(DIR, f));
-            return !!content && holderRunning(Number(content.split(" ")[0]));
-          }).length
-        : 0;
-      return `${pool} ${used}/${limit(pool)}`;
-    })
-    .join(" · ");
+export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
