@@ -1153,7 +1153,24 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`).
+
+Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
+slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch
+waits to land, never more than its concurrency; a ticket held for a blocker adds nothing until the
+blocker lands, and a run that has drained its queue asks for none. The pool is divided equally
+between the runs that ask for slots, and a run that needs less than an equal part releases the rest
+to the others, again equally. A run's share is its part: with two runs wanting 5 each on 6 slots,
+each gets 3; a run wanting 1 leaves 5 to the other; a run alone gets everything it asks for, as
+before. A run at or above its share (the slots it holds count) takes no new slot while another run
+below its share wants one; with no one wanting one, a free slot is taken as usual. Nothing is stopped:
+a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
+that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
+fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
+and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
+wait. The status header's `this run` row shows the run's demand and share, and a ticket held back
+by its share says `waits for the run's share`. A run started by an older kit knows no shares and
+ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
 
