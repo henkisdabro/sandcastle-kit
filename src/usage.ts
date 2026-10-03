@@ -13,13 +13,16 @@ import { OperatorError } from "./errors.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
 
-// Read only when the check is on: a bad USAGE_STOP must not break
-// `sandcastle doctor` or `status`, which never use it.
-const usageStopPercent = () => {
-  const stop = Number(process.env.USAGE_STOP || 90);
-  if (!(stop > 0 && stop <= 100)) throw new OperatorError(`USAGE_STOP=${process.env.USAGE_STOP} - expected 1 to 100.`);
+/** The stop threshold a USAGE_STOP value gives (90 when unset or empty); a value outside 1 to 100 is refused. */
+export const parseUsageStop = (value: string | undefined) => {
+  const stop = Number(value || 90);
+  if (!(stop > 0 && stop <= 100)) throw new OperatorError(`USAGE_STOP=${value} - expected 1 to 100.`);
   return stop;
 };
+
+// Read only when the check is on: a bad USAGE_STOP must not break
+// `sandcastle doctor` or `status`, which never use it.
+const usageStopPercent = () => parseUsageStop(process.env.USAGE_STOP);
 
 /** Refuses a bad USAGE_STOP when the run starts - before the image, preflight or any spend - not at the first reading. */
 export const checkUsageSettings = () => {
@@ -95,14 +98,25 @@ const read = (token: string): Promise<Reading> => {
   return cache.windows;
 };
 
+// What the last attempt to read the plan's usage got, as a fact for the run record: the guard is
+// guarding only while it has a reading. Undefined until the guard has asked.
+let lastReading: "got" | "none" | undefined;
+
+/** True when the guard's last attempt got no reading (a 403, a rate limit, no OAuth token): it is not guarding right now. */
+export const usageReadingLost = () => lastReading === "none";
+
 const describe = (windows: Window[]) => windows.map((w) => `${w.kind} ${Math.round(w.percent)}%`).join(" · ");
 
 /** One line for the run's start, or undefined when the check is off. */
 export const usageLine = async (env: Record<string, string>) => {
   if (!USAGE_CHECK) return undefined;
   const stop = usageStopPercent();
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN) return "Plan usage: not checked - it needs CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+    lastReading = "none";
+    return "Plan usage: not checked - it needs CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
+  }
   const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
+  lastReading = Array.isArray(windows) ? "got" : "none";
   if (Array.isArray(windows)) return `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`;
   if (windows.off) return `Plan usage: the usage guard is off for this run (${windows.why}; USAGE_CHECK=1 cannot work with it, and the endpoint is not asked again).`;
   return `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.`;
@@ -110,9 +124,14 @@ export const usageLine = async (env: Record<string, string>) => {
 
 /** Why no further issue should start, or undefined to carry on. */
 export const usageStop = async (env: Record<string, string>) => {
-  if (!USAGE_CHECK || !env.CLAUDE_CODE_OAUTH_TOKEN) return undefined;
+  if (!USAGE_CHECK) return undefined;
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+    lastReading = "none";
+    return undefined;
+  }
   const stop = usageStopPercent();
   const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
+  lastReading = Array.isArray(windows) ? "got" : "none";
   const over = Array.isArray(windows) ? windows.filter((w) => w.percent >= stop) : undefined;
   return over?.length ? `plan usage ${describe(over)} reached USAGE_STOP=${stop}%` : undefined;
 };

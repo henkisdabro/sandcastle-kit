@@ -634,14 +634,14 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US mark" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US guard US stop US reading" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
 # with no settings group gives no row. $1: a file holding a run record.
 read_settings() {
   local f="$1"
-  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring), (.usageGuard | if . == null then "" else tostring end), (.usageStop // "" | tostring), (.usageReading // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -651,7 +651,9 @@ settings_fields() {
   fi
 }
 
-# The settings row into SETTINGS_ROW ("" for none), from the pane's width in $cols. Each item is
+# The settings row into SETTINGS_ROWS (empty for none), from the pane's width in $cols. A row too
+# wide for the pane wraps whole items onto further lines, so the usage guard's warning is never cut
+# off. Each item is
 # added with set_item: its text, the shorter text it has below 100 columns, and the narrowest pane
 # it stays in (0: always; 80 for an item marked ○ in the plan, which drops below 80 columns).
 SET_ITEMS=()
@@ -660,11 +662,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap l i levels="" sep="${rule} · ${off}"
-  SETTINGS_ROW=""; SET_ITEMS=()
+  local lvl turn cap guard stop reading l i n levels=""
+  SETTINGS_ROWS=(); SET_ITEMS=()
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap guard stop reading <<<"$SET_FIELDS"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
     0|1|2|3|drain)
@@ -675,11 +677,25 @@ settings_row() {
   esac
   [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
   [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  # The usage guard: only a record that holds the field says anything about it. A lost reading is a
+  # fact beside the setting, drawn in the warning colour, and stays at any width.
+  [[ "$stop" =~ ^[0-9]+$ ]] || stop=""
+  case "$guard" in
+    true)
+      if [ "$reading" = unavailable ]; then set_item "${ylw}● usage-guard${stop:+ ${stop}%} (no reading - not guarding)${off}"
+      else set_item "${grn}●${off} ${mute}usage-guard${off}${stop:+ ${head}${stop}%${off}}"; fi;;
+    false) set_item "${gry}○ usage-guard${off}" "" 80;;
+  esac
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
-  SETTINGS_ROW="${SET_ITEMS[0]}"
-  for (( i=1; i<${#SET_ITEMS[@]}; i++ )); do SETTINGS_ROW="${SETTINGS_ROW}${sep}${SET_ITEMS[i]}"; done
-  kvl settings "$SETTINGS_ROW"; SETTINGS_ROW="$REPLY"
-  [ -n "$SET_MARK" ] && SETTINGS_ROW="${SETTINGS_ROW} ${gry}(${SET_MARK})${off}"
+  wrap_items $(( cols - 14 )) "${SET_ITEMS[@]}"
+  if [ -n "$SET_MARK" ]; then
+    # The mark ends the last line, or stands on a line of its own when that would cut the line.
+    n=$(( ${#WRAPPED[@]} - 1 ))
+    vlen "${WRAPPED[n]} (${SET_MARK})"
+    if [ "$VN" -le $(( cols - 14 )) ]; then WRAPPED[n]="${WRAPPED[n]} ${gry}(${SET_MARK})${off}"; else WRAPPED[n+1]="${gry}(${SET_MARK})${off}"; fi
+  fi
+  kvl settings "${WRAPPED[0]}"; SETTINGS_ROWS[0]="$REPLY"
+  for (( i=1; i<${#WRAPPED[@]}; i++ )); do SETTINGS_ROWS[i]="          ${WRAPPED[i]}"; done
   return 0
 }
 
@@ -993,7 +1009,7 @@ render() {
   fi
   # Tickets queued for a gates slot: gates are what the machine is busy with
   # while the table stands still.
-  local gate_wait models mprefix SETTINGS_ROW part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
+  local gate_wait models mprefix SETTINGS_ROWS part item i l hdr_n ftr_n tbars lbars up sep_line need used cost sep pp sorted
   local -a LG=() MAC=() MOD=() LEG=() NOTE=()
   gate_wait=$(printf '%s\n' "$TICKETS" | awk -F"$US" '$2=="gates" && $6 ~ /^waiting for/ {c++} END{print c+0}')
   run_cell
@@ -1190,10 +1206,10 @@ build_header() {
     fi
   fi
   # The run settings, one full-width row under the run band.
-  if [ -n "$SETTINGS_ROW" ]; then
+  if [ "${#SETTINGS_ROWS[@]}" -gt 0 ]; then
     prev="$BARS"; split_cols 1; AL=(l)
     junction '├' '┤' '─' "$prev" ""; put "$REPLY"
-    CELL=("$SETTINGS_ROW"); cells_line; put "$REPLY"
+    for part in "${SETTINGS_ROWS[@]}"; do CELL=("$part"); cells_line; put "$REPLY"; done
     BARS=""
   fi
   prev="$BARS"
