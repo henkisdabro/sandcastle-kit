@@ -311,7 +311,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // counts each ticket's first gate run as red, with an output that says so.
   // Off without repair passes: a forced red nobody repairs would only hold
   // good work back.
-  const settings = resolveSettings({ env: process.env, project, machine: machineSettings() });
+  // The turn's own settings, so the record it writes and what the run does cannot differ.
+  const settings = turn?.settings ?? resolveSettings({ env: process.env, project, machine: machineSettings() });
   const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && settings.repair > 0;
   // Four by default, not one-per-issue. Twelve at once saturated a 15-core
   // machine to load 33 and starved a vitest run into a false gate failure -
