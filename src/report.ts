@@ -18,6 +18,7 @@ import type { Project } from "./config.ts";
 import { addTokens, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
+import { isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { isTicketState, type OutcomeKind, readTickets, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -70,8 +71,18 @@ export type Facts = {
   next?: { level: Level; turn: number; tickets: string[] };
 };
 
-/** The one line the close comment and the closing report share for a diff that left its `Touches:` line. */
-export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${paths.join(", ")}`;
+/**
+ * The one line the close comment and the closing report share for a diff that left its `Touches:` line.
+ * Test files only follow a refactor (a renamed import), so they fold into a count ("+7 test files")
+ * and the paths that stay listed are the source and docs a ticket's line missed. The run record keeps
+ * every path; only this line folds them.
+ */
+export const overrunLine = (paths: string[]) => {
+  const tests = paths.filter(isTestPath).length;
+  const listed = paths.filter((p) => !isTestPath(p));
+  const folded = tests ? [`+${tests} test file${tests === 1 ? "" : "s"}`] : [];
+  return `changed beyond its Touches line: ${[...listed, ...folded].join(", ")}`;
+};
 
 /**
  * The report's own sections, finer than the status view's groups: where a ticket's part in a run
