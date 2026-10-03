@@ -551,7 +551,7 @@ marked `(next run)`, and a bare `status.sh` falls back to the last run's record,
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
 and draws no row.
 
-With `USAGE_CHECK=1` the row also shows the usage guard: `● usage-guard 90%` (its stop
+The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
 threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
 When the guard cannot get a reading (a 403 turns it off for the run, a rate limit or a missing
 OAuth token leaves it without one for now) the row says so in the warning colour:
