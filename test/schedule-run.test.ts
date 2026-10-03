@@ -65,7 +65,7 @@ test("every ticket the run took in gets exactly one ending, of a typed kind", as
       if (t.id === "4") return { kind: "not begun", why: { kind: "withdrawn", reason: "ticket closed during the run" } };
       return green(t.id);
     },
-    land: async (g) => (g.issue === "5" ? { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge" } : { kind: "merged" }),
+    land: async (g) => (g.issue === "5" ? { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" } : { kind: "merged" }),
   });
   assert.deepEqual(kinds(endings), { 1: "landing", 2: "pipeline", 3: "crashed", 4: "not begun", 5: "landing", 8: "waiting", 9: "waiting" });
   assert.deepEqual(endings.get("1"), { kind: "landing", green: { issue: "1" }, landed: { kind: "merged" }, attempts: 1 });

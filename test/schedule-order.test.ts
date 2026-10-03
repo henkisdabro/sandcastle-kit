@@ -224,7 +224,7 @@ const play = async (seed: number) => {
           case "red":
             return { kind: "red", with: [other], gates: ["test"] };
           case "held":
-            return { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge" };
+            return { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" };
           case "withdrawn":
             return { kind: "withdrawn", reason: "ticket closed during the run" };
           case "crash":

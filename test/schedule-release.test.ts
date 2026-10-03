@@ -153,7 +153,7 @@ test("a blocker that ends without landing releases nothing; its dependant is tol
   assert.deepEqual(endings.get("2"), { kind: "waiting", on: "blockers" });
 
   // A landing that does not close its ticket (held for a person) is the same.
-  const heldBack = await play(["1"], { 2: ["1"] }, { land: async () => ({ kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge" }) });
+  const heldBack = await play(["1"], { 2: ["1"] }, { land: async () => ({ kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" }) });
   assert.deepEqual(heldBack.asked, []);
   assert.deepEqual(heldBack.endings.get("2"), { kind: "waiting", on: "blockers" });
 });

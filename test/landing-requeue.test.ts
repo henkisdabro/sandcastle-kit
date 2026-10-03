@@ -1,7 +1,8 @@
 // A ticket that conflicts or goes red at landing is requeued once, in the same run: the scheduler's
 // requeue-once rule (createSchedule in src/schedule.ts). Its second attempt runs on the land-only
 // path, and a second conflict or red holds it for the next run. The record's side of a requeue is
-// `createRequeueRecord` (src/landing.ts), which burndown.ts hands what the scheduler tells. Every
+// `createRequeueRecord` (src/landing.ts), which burndown.ts hands what the scheduler tells, and the
+// outcome lines are the ledger's (`describe`, src/ledger.ts). Every
 // test drives `createSchedule(plan).run(work)`: the first ones with fake attempts and the real
 // `landOne` (`landingWork`) on temp repos, a fake tracker and a host worktree for the sandbox; the
 // later ones with made-up landings and a run record in a temp dir. No Docker, no gh, no network.
@@ -23,8 +24,9 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { accountLanding, againLine, createHostGit, createRequeueRecord, landingLines, landingWork, newLandings, requeuedLine } = await import("../src/landing.ts");
+const { againLine, createHostGit, createRequeueRecord, landingWork, requeuedLine } = await import("../src/landing.ts");
 const { notLandedComment } = await import("../src/burndown.ts");
+const { describe } = await import("../src/ledger.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { landOnlyHead, recordHead, recordRun } = await import("../src/run.ts");
 const { createSchedule } = await import("../src/schedule.ts");
@@ -126,8 +128,8 @@ const endings = () => {
 
 /**
  * What the run is told and ends with, as burndown.ts reads it: the requeues and endings through the
- * record's side of a requeue (`createRequeueRecord`, the code burndown.ts calls), the Landings lists
- * from each landing ending (`accountLanding`) and the outcome lines from them (`landingLines`).
+ * record's side of a requeue (`createRequeueRecord`, the code burndown.ts calls), each landing
+ * ending sorted by how it landed, and the outcome the ledger gives each (`describe`).
  */
 const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => void) => {
   const told: Change[] = [];
@@ -142,10 +144,27 @@ const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => v
   };
   const ended = () => told.flatMap((c) => (c.kind === "ended" ? [{ id: c.id, ending: c.ending }] : []));
   const lists = () => {
-    const l = newLandings();
-    for (const { ending: e } of ended()) if (e.kind === "landing") accountLanding(l, e.green, e.landed);
+    const l = {
+      merged: [] as string[],
+      conflicted: [] as { issue: string; branch: string; files: string[]; with: string[] }[],
+      redMerged: [] as { issue: string; branch: string; with: string[]; gates: string[] }[],
+      withdrawn: [] as { issue: string; reason: string }[],
+    };
+    for (const { ending: e } of ended()) {
+      if (e.kind !== "landing") continue;
+      const [{ issue, branch }, landed] = [e.green, e.landed];
+      if (landed.kind === "merged" || landed.kind === "close-failed") l.merged.push(issue);
+      if (landed.kind === "conflict") l.conflicted.push({ issue, branch, files: landed.files, with: landed.with });
+      if (landed.kind === "red") l.redMerged.push({ issue, branch, with: landed.with, gates: landed.gates });
+      if (landed.kind === "withdrawn") l.withdrawn.push({ issue, reason: landed.reason });
+    }
     return l;
   };
+  const outcomes = () =>
+    new Map(ended().flatMap(({ id, ending: e }) => {
+      const o = e.kind === "landing" ? describe(e, { base: "main", gateNames: "test" }).outcome : undefined;
+      return o ? [[id, o] as const] : [];
+    }));
   return {
     told,
     said,
@@ -154,9 +173,9 @@ const observe = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) => v
     tell,
     ended,
     lists,
-    outcomes: () => landingLines(lists(), requeues.againNote),
+    outcomes,
     // Each outcome's line alone, as the status view shows it.
-    lines: () => new Map([...landingLines(lists(), requeues.againNote)].map(([id, o]) => [id, o.text])),
+    lines: () => new Map([...outcomes()].map(([id, o]) => [id, o.text])),
     // "2: requeued after conflict with #1", for each "runs again in this run" line.
     sentBack: () => said.flatMap((line) => (/; its pipeline runs again in this run\.$/.test(line) ? [line.replace("; its pipeline runs again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
@@ -462,7 +481,7 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
     3: [redWith1, { landed: { kind: "merged" } }],
     4: [{ landed: { kind: "merged" } }],
     5: [{ landed: { kind: "not-landed", reason: "ENOSPC" } }],
-    6: [{ landed: { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge" } }],
+    6: [{ landed: { kind: "held", paths: [".github/workflows/ci.yml"], reason: "human merge", by: "protected" } }],
   };
   const told: Change[] = [];
   const n: Record<string, number[]> = {};

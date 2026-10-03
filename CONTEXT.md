@@ -57,9 +57,13 @@ landing to decide it (finished), or an older run's branch whose ticket was label
 
 **Outcome**:
 What a run says became of one ticket, as a kind from a closed set (merged, conflict, red, gate
-red ...) and its line, kept in `outcomes.json` across runs. Every view decides on the kind; the
-line is only for a person to read.
+red ...) and its line; recorded from the ticket's ending, and kept in `outcomes.json` across runs.
+Every view decides on the kind; the line is only for a person to read.
 _Avoid_: result, the prose line alone
+
+**Ledger**:
+The module that turns endings and told changes into the run record's verdicts, outcomes, view
+words and tracker text.
 
 ### Keeping a project up to date
 
