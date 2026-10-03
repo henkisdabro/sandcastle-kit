@@ -391,7 +391,10 @@ export const render = (f: Facts, plain = false): string => {
         const t = f.tickets[id];
         const size = f.changed[id] !== undefined ? ` - ${f.changed[id]} file(s)` : "";
         const why = t.files?.length ? `changes ${t.files.join(", ")}` : (t.note ?? "held");
-        return [`- ${name(id)} - ${why}${size}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
+        // A criterion the agents left undone travels with the branch: whoever lands it by hand sees it first
+        // (`sandcastle land` merges it as partly done and leaves the ticket open).
+        const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
+        return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
       }),
       ...takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
       ...handedBack.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"}, no commits - read the agent's comment: do it yourself and close the ticket, or answer its question and requeue it`),
