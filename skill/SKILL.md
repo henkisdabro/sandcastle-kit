@@ -309,7 +309,7 @@ After a run, or for a ticket outside it, the state is inferred from branches and
 over` is a branch from an earlier run, for `sandcastle clean`. Each ticket's agent and gate logs
 are `.sandcastle/logs/agent-issue-<n>-*.log` (a merged ticket's move to `.sandcastle/logs/archive/`
 at the next run or `sandcastle clean`; the `-gates-` one is the orchestrator's gate
-output; each pass's raw stream - every tool call and result - is the `.jsonl` beside its `.log`, so read that to check a reviewer's claim); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
+output; each pass's raw stream - every tool call and result - is the `.jsonl` beside its `.log`, so read that to check a reviewer's claim; the `.log` marks a failed tool result as `! error: ...` or `! exit N: ...`); the last lines of a failed run's log hold the real cause (a usage limit usually reads as
 a "trust dialog" error). The live view fits its pane and summarises the rows that do not fit on
 one line (`sandcastle status 10 all` shows them all). How long each step took, and each agent
 pass's tokens, is in `.sandcastle/logs/timings.jsonl`.

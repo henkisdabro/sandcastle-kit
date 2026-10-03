@@ -352,6 +352,13 @@ load_queue() {
   return 0
 }
 in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+# Whether a readable log ends saying the plan allowance is spent (run.ts logSaysLimit). A `! error`
+# or `! exit N` line quotes a failed tool's output, which can say "usage limit" too, so it is skipped.
+# No grep -q at the end: under pipefail, an early exit can fail the pipeline through a writer's SIGPIPE.
+log_says_limit() {
+  tail -12 "$1" 2>/dev/null | grep -vE '^! (error|exit -?[0-9]+)(: |$)' | tail -5 \
+    | grep -iE "out of usage credits|usage limit|limit reached" >/dev/null
+}
 # The .jsonl sidecars (each pass's raw agent stream) are deliberately not matched here or by any log glob below.
 # Ticket ids from log names, one per line. A log is agent-issue-<id>-<phase>-<id>.log
 # (phase impl, review, review-codex, repair, or gates - the orchestrator's gate output):
@@ -830,7 +837,7 @@ render() {
     style_of "$state"
     # A spent plan allowance makes the orchestrator report a trust-dialog
     # error or `exited with code 1`; the real cause is only in the log tail.
-    if [ "$grp" = working ] && [ -n "${log:-}" ] && [ -f "$log" ] && tail -5 "$log" 2>/dev/null | grep -qiE "out of usage credits|usage limit|limit reached"; then
+    if [ "$grp" = working ] && [ -n "${log:-}" ] && [ -f "$log" ] && log_says_limit "$log"; then
       activity="USAGE LIMIT REACHED - $state model"; glyph='!'; colour="$hot"
     fi
     log=""
@@ -968,7 +975,7 @@ render() {
       act_col="$hot"
     fi
     # Only on an unfinished row: a merged branch's old log keeps the line.
-    if [ "$prio" -le 1 ] && tail -5 "$log" 2>/dev/null | grep -qiE "out of usage credits|usage limit|limit reached"; then
+    if [ "$prio" -le 1 ] && log_says_limit "$log"; then
       activity="USAGE LIMIT REACHED - $phase model"
       glyph='!'; colour="$hot"
     fi

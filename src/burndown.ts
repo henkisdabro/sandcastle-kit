@@ -38,7 +38,7 @@ import { registerRun } from "./live-runs.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { limit, usage, wholeNumber, withSlot } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, recordHead, relabelContextWindow,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -157,9 +157,6 @@ export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
   ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
-
-// What a spent plan allowance leaves at the end of an agent's log.
-const LIMIT = /out of usage credits|usage limit|limit reached/i;
 
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
@@ -715,6 +712,10 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       throw error;
     });
 
+    // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
+      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+
     try {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
@@ -814,7 +815,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       if (landOnly && mergeConflicted) {
         await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `impl-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -852,7 +853,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       // ride the same gates as the implementer's, so a review that breaks the
       // build cannot merge either. Log names keep `-review-` for status.sh.
       const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
-        sandbox.run({
+        pass({
           name,
           logging: agentLogging(project, issue.id, name, runId),
           agent,
@@ -895,7 +896,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
       if (!landOnly) {
         const impl = await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `impl-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -1034,7 +1035,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
         // allowance still has to stop the queue, so that one is rethrown.
         const fixed = await timed(issue.id, "repair", () => {
           const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
-          return sandbox.run({
+          return pass({
             name: `repair-${issue.id}`,
             logging,
             agent: implAgent(own),
@@ -1147,7 +1148,7 @@ export const burndown = async (project: Project, turn?: { level: Level; turn: nu
     return readdirSync(logs)
       // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
       .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-      .some((f) => LIMIT.test(readFileSync(join(logs, f), "utf8").split("\n").slice(-8).join("\n")));
+      .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
   };
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
