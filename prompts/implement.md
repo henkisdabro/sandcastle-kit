@@ -55,6 +55,15 @@ ticket names. The project rules below say what else to read.
   "Not followed:", so a person sees the ticket asked for it.
 - Dependencies are already installed. If you add one, use the project's package manager and commit
   the lockfile.
+- **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
+  outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
+  long suite is run once and not again to find the line you wanted. Give the command a timeout long enough for the whole suite
+  (other sandboxes run at the same moment and slow it); never start it in the background and poll it
+  with `sleep`, which the sandbox blocks. Look in the project rules for how the test runner reports a
+  pass and a failure, and grep for that, not for another runner's format.
+- **Prefer the Edit tool to scripted replacements.** A `sed -i` or a `python3` heredoc that does a
+  string replace does nothing when the text does not match, and says nothing. If you do script an
+  edit, assert that each replacement matched.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A

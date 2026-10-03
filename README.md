@@ -542,6 +542,15 @@ in the run waits for a later run, and so does one whose existing branch changes 
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
 gates; a red one stops the run before any agent starts.
 
+When another run is live and holds or wants sandbox slots, the start also says how the machine is
+split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3; it starts
+as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
+time for an issue and the ages of its working tickets, so it is left out where that project has no
+history. A run from an older kit is named as one that ignores shares (`webshop's run predates
+shares: it keeps taking free slots until it ends`); the run still starts. Nothing is asked: the
+split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share, not the
+machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`.
+
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
@@ -577,7 +586,7 @@ lines rather than cut anything off.
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person; `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started: next to start, how many ahead, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
+| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
 
@@ -867,6 +876,13 @@ itself, in the status view's castle, glyphs and colours:
   terminal, Codex or OpenCode has no such session: the mod shows it only in the session's own
   project, and the skill's `sandcastle wait` covers the rest. A session you quit and resumed in the meantime hears it when
   it comes back; after `/clear` the terminal you started from still hears it.
+- 🏷️ **An idle mark between runs.** In a project `sandcastle init` has set up - its
+  `.sandcastle/config.ts` is a plain file; a stray `.sandcastle/` directory does not count - the
+  mod pins the word `sandcastle` in its status line under the prompt, so the session shows the
+  project takes runs. The live band replaces it while a run of the session's project is alive,
+  and it returns after the end notice. A run this session follows in another directory never
+  changes it: the mark is about the session's own project. Turn it off for every project with
+  `"idleMark": false` in your [personal settings](#personal-settings).
 - 📋 **`/sandcastle-status`**: every ticket and where it is, as text, with no model turn. It
   answers while Claude is working.
 
@@ -896,6 +912,9 @@ all of it. The mod:
 
 - reads `.sandcastle/logs/run.json` under the session's project root, after checking that
   `.sandcastle/` exists and that the record is a plain file, not a link;
+- checks that `.sandcastle/config.ts` is a plain file (one `stat`) for the idle mark, and runs
+  one `sh` script (`cat`, no writing) that prints your personal `config.json` for its `idleMark`
+  switch. It never writes that file;
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -951,6 +970,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle run [--detach]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
+| `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -1030,9 +1050,10 @@ kit or a repository. `.env` holds every token (`CLAUDE_CODE_OAUTH_TOKEN` or `ANT
 |---|---|---|
 | `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
+| `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod pins between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key or holds a bad limit.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit or has an `idleMark` that is not `true` or `false`.
 
 ### 🐳 The image's agent versions
 
@@ -1173,9 +1194,41 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). All runs share one plan allowance; the
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`).
+
+Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
+slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch
+waits to land, never more than its concurrency; a ticket held for a blocker adds nothing until the
+blocker lands, and a run that has drained its queue asks for none. The pool is divided equally
+between the runs that ask for slots, and a run that needs less than an equal part releases the rest
+to the others, again equally. A run's share is its part: with two runs wanting 5 each on 6 slots,
+each gets 3; a run wanting 1 leaves 5 to the other; a run alone gets everything it asks for, as
+before. A run at or above its share (the slots it holds count) takes no new slot while another run
+below its share wants one; with no one wanting one, a free slot is taken as usual. Nothing is stopped:
+a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
+that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
+fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
+and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
+wait. The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
+Herdr tab bar shows each live run's share, and a ticket held back by its share says `waits for the
+run's share`. A run started by an older kit knows no shares and
+ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent.
+
+**Capping a run.** `sandcastle cap N` limits the project's live run to N sandbox slots while it
+runs, so another run gets more of the machine; `sandcastle cap off` lifts it, and a bare
+`sandcastle cap` prints the run's demand, share, what it holds and its cap. `--project <name>` acts
+on another project's live run from any directory (the `name` in that project's
+`.sandcastle/config.ts`, as live runs record it). N is a whole number of 1 or more, at most the
+run's concurrency (the most a run ever wants); `cap` refuses anything else, and refuses when no run
+is live. A cap only lowers the run's share: the slots it frees go to the other live runs, up to their
+demand, and with two runs wanting 5 each on 6 slots, a cap of 1 on one gives the other 5; lifting it
+returns both to 3 and 3. A capped run takes no slot at its cap even when no other run wants one. Like
+any share, it is never taken from a run that holds slots: a run above its cap keeps the ones it holds
+and shrinks as its tickets finish. The cap lives in the run's registration and ends with the run: the
+next run of the project starts uncapped. The status header's `this run` row shows it beside demand and
+share (`wants 4 · share 2 · cap 2`).
 
 ## 🩺 Troubleshooting
 

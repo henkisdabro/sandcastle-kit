@@ -98,8 +98,8 @@ Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
 - `LINEAR_API_KEY` - only if tickets wait on Linear issues (README, Blockers); read-only is enough.
   It stays on the host.
 
-Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake and an
-end-of-run notification go in an optional `~/.config/sandcastle-kit/config.json` - see the README's
+Leave unused keys commented out: an empty value stops a run. Machine-wide limits, keep-awake, an
+end-of-run notification and the Claude Code mod's idle mark switch go in an optional `~/.config/sandcastle-kit/config.json` - see the README's
 [Personal settings](../README.md#personal-settings).
 
 > [!IMPORTANT]

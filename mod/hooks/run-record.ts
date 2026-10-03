@@ -219,6 +219,11 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
+  /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
+  demand?: number;
+  share?: number;
+  /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
+  cap?: number;
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */

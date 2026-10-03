@@ -174,6 +174,39 @@ row '#106' queued 'next to start'
 sed -i.bak 's/"concurrency": 3/"concurrency": 2/' "$L/run.json"
 
 # ---------------------------------------------------------------------------
+SCENARIO="live run, sharing the machine pool"
+# The run's own demand and share, live values in its record, beside the pool's use in the
+# machine cell. #106 is held back by the run's share (a free slot is another run's): its row says
+# so, where #105 only waits its turn. An older kit's record has neither value, and the cell shows none.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m",
+  "stage": "running", "concurrency": 4, "demand": 4, "share": 3,
+  "issues": ["105","106"],
+  "tickets": {
+    "105": { "state": "queued", "order": 5, "since": $now },
+    "106": { "state": "queued", "order": 6, "since": $now, "note": "waits for the run's share" }
+  } }
+EOF
+render "105 106"
+has 'this run +wants 4 · share 3'
+row '#105' queued 'next to start'
+row '#106' queued "waits for the run's share"
+sed -i.bak 's/"demand": 4, "share": 3,//' "$L/run.json"
+render "105 106"
+has 'sandboxes +[█░ ]*[0-9]+/[0-9]+'
+hasnt 'wants [0-9]|share [0-9]'
+has 'waiting +none'
+
+# A person's cap (`sandcastle cap`) sits beside the demand and the share; a lifted cap leaves the record.
+sed -i.bak 's/"concurrency": 4,/"concurrency": 4, "demand": 4, "share": 2, "cap": 2,/' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2 · cap 2'
+sed -i.bak 's/"cap": 2,//' "$L/run.json"
+render "105 106"
+has 'this run +wants 4 · share 2'
+hasnt 'cap [0-9]'
+
+# ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
 # A commit refused by a hook leaves the finished work in a kept worktree: not "no change", and among Needs you.
 git_ branch agent/issue-113 main; log 113 impl 'done'
