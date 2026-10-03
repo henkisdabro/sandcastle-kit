@@ -498,7 +498,9 @@ outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "
 # The row state for a recorded outcome, in the words the live view uses.
 outcome_state() {
   case "$1" in
-    "gate red"*) printf 'gate red';;
+    # Red at landing ("red when merged", "red again ... after a requeue") is
+    # as red as a pipeline's gate: falling through would read it as ready.
+    "gate red"*|"red when merged"*|"red again"*) printf 'gate red';;
     "merge conflict"*) printf 'conflict';;
     "needs a human"*) printf 'held';;
     uncommitted*) printf 'uncommitted';;

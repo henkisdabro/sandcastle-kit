@@ -23,6 +23,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
   terminal draws it - in place of the plain heading.
 
+### Fixed
+
+- **A branch red at landing no longer shows as ready after the run.** The status view read the
+  outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
+  row as ready to land; it now shows gate red, like a red pipeline.
+
 ## [0.5.0] - 2026-10-02
 
 ### Upgrading
