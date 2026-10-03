@@ -42,11 +42,11 @@ import {
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { credentials, ensureImage, errorLine, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { credentials, ensureImage, errorLine, machineSettings, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
-import { type ResolvedSettings, settingsGroup } from "./run-settings.ts";
+import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { usageLine, usageReadingLost, usageStop } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
@@ -311,11 +311,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // counts each ticket's first gate run as red, with an output that says so.
   // Off without repair passes: a forced red nobody repairs would only hold
   // good work back.
-  const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && (project.repair.attempts ?? 1) > 0;
+  // The turn's own settings, so the record it writes and what the run does cannot differ.
+  const settings = turn?.settings ?? resolveSettings({ env: process.env, project, machine: machineSettings() });
+  const TEST_RED_GATE = process.env.SANDCASTLE_TEST_RED_GATE === "1" && settings.repair > 0;
   // Four by default, not one-per-issue. Twelve at once saturated a 15-core
   // machine to load 33 and starved a vitest run into a false gate failure -
   // good work withheld by resource contention rather than by a defect.
-  const CONCURRENCY = wholeNumber("CONCURRENCY", process.env.CONCURRENCY ?? project.concurrency, 1);
+  const CONCURRENCY = settings.concurrency.asked;
   const base = project.baseBranch;
 
   // Fail before spending a single container.
@@ -1069,7 +1071,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // failure no earlier pass saw: a gate that stops at its first failure
       // (`pytest -x`) showed a repair one test, hid a second, and a branch one
       // line from green stayed unmerged. The same failure twice stops it.
-      const attempts = project.repair.attempts ?? 1;
+      const attempts = settings.repair;
       const preRepair = sh("git", ["rev-parse", branch]);
       const seen = new Set<string>();
       let repairs = 0;

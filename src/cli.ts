@@ -302,7 +302,7 @@ try {
     case "status": {
       const project = await loadProject(root);
       // The next run's settings, as the view draws them; "{}" when they cannot be resolved (a bad
-      // AUTONOMY_LEVEL, or a bad USAGE_STOP with the guard on), so the view shows no row rather than
+      // AUTONOMY_LEVEL, CONCURRENCY, or a bad USAGE_STOP with the guard on), so the view shows no row rather than
       // the last run's as if they were next.
       let next = "{}";
       try {

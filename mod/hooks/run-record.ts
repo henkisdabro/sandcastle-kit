@@ -168,9 +168,10 @@ export const sessionId = (value: unknown): string | undefined => (typeof value =
 
 /**
  * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
- * level, the turn this record is, the level's cap, whether cross-review runs, and the usage guard. Each field is
- * optional and a reader shows only what is there - an older kit's record has no group at all, level 1
- * has no cap (it asks after every turn), and a record without the guard's fields shows nothing about it.
+ * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
+ * and effective), whether cross-review runs, and the usage guard. Each field is optional and a
+ * reader shows only what is there - an older kit's record has no group at all, level 1 has no cap
+ * (it asks after every turn), and a record without the guard's fields shows nothing about it.
  */
 export type RunSettings = {
   /** The level, resolved once per run. */
@@ -179,6 +180,12 @@ export type RunSettings = {
   turn?: number;
   /** The most turns the level allows. */
   cap?: number;
+  /** The repair attempts a ticket gets after a red gate; 0 is repair off. */
+  repair?: number;
+  /** The tickets the run takes at once, after the machine-wide sandbox cap. */
+  concurrency?: number;
+  /** The tickets at once the run asked for; the view shows it only when it differs from `concurrency`. */
+  asked?: number;
   /** Whether cross-review runs, resolved once per run. */
   crossReview?: boolean;
   /** Cross-review's model: written only when it is on. */

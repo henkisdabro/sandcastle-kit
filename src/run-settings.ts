@@ -6,31 +6,46 @@
 import type { RunSettings } from "../mod/hooks/run-record.ts";
 import { type CrossReviewSetting, crossReviewSetting } from "./agents.ts";
 import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
+import { DEFAULT_CONCURRENCY } from "./config.ts";
+import { pipelineWorkers } from "./landing.ts";
+import { poolLimit, wholeNumber } from "./pool.ts";
 import { parseUsageStop } from "./usage.ts";
 
 export type SettingsSources = {
   env: Record<string, string | undefined>;
   /** The project's `.sandcastle/config.ts`, as far as settings are concerned. */
-  project: { autonomy?: unknown };
-  /** The personal `config.json`; no setting reads it yet. */
+  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown } };
+  /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;
 };
 
-/** What a run resolves once, at its start. */
+/**
+ * What a run resolves once, at its start. `concurrency.asked` is the most tickets the run wants at
+ * once (`--concurrency`, `CONCURRENCY`, the config or the default); `effective` is that after the
+ * machine-wide sandbox cap, before the ticket count (a short queue is not a clamp).
+ */
 export type ResolvedSettings = {
   autonomy: Level;
   crossReview: CrossReviewSetting;
+  repair: number;
+  concurrency: { asked: number; effective: number };
   /** Whether the usage guard was asked for (`USAGE_CHECK=1`). */
   usageGuard: boolean;
   /** The guard's stop threshold in percent; only when it is on. */
   usageStop?: number;
 };
 
-export const resolveSettings = ({ env, project }: SettingsSources): ResolvedSettings => {
+export const resolveSettings = ({ env, project, machine }: SettingsSources): ResolvedSettings => {
+  const pool = poolLimit("sandboxes", env, machine);
+  const asked = wholeNumber("CONCURRENCY", env.CONCURRENCY ?? project.concurrency ?? DEFAULT_CONCURRENCY, 1);
   const usageGuard = env.USAGE_CHECK === "1";
   return {
     autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
     crossReview: crossReviewSetting(env),
+    // The attempts a ticket gets after a red gate; 0 turns repair off. Only the project config sets it.
+    repair: wholeNumber("repair.attempts", project.repair?.attempts ?? 1, 0),
+    // A dry run lands nothing, so it keeps no sandbox slot for landing.
+    concurrency: { asked, effective: Math.min(pipelineWorkers(asked, Infinity, pool, env.DRY_RUN !== "1"), pool) },
     usageGuard,
     ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
   };
@@ -47,6 +62,9 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     autonomy: settings.autonomy,
     turn,
     ...(cap === undefined ? {} : { cap }),
+    repair: settings.repair,
+    concurrency: settings.concurrency.effective,
+    asked: settings.concurrency.asked,
     crossReview: cross.on,
     ...(cross.on ? { crossReviewModel: cross.model, crossReviewEffort: cross.effort } : {}),
     usageGuard: settings.usageGuard,

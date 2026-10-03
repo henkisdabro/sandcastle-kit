@@ -640,14 +640,14 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US cross US model US effort US guard US stop US reading" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US repair US concurrency US asked US cross US model US effort US guard US stop US reading" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
 # with no settings group gives no row. $1: a file holding a run record.
 read_settings() {
   local f="$1"
-  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring),
+  jq -r '(.settings // {}) | if type == "object" then [(.autonomy // "" | tostring), (.turn // "" | tostring), (.cap // "" | tostring), (.repair // "" | tostring), (.concurrency // "" | tostring), (.asked // "" | tostring),
     (if .crossReview == true then "on" elif .crossReview == false then "off" else "" end),
     (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
     (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end),
@@ -672,11 +672,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap cross xmodel xeffort guard stop reading l i n levels="" WRAP_SEP="${rule} · ${off}"
+  local lvl turn cap repair conc asked ask cross xmodel xeffort guard stop reading l i n levels="" WRAP_SEP="${rule} · ${off}"
   SETTINGS_ROWS=(); SET_ITEMS=(); CROSS_SET=""
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap cross xmodel xeffort guard stop reading <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap repair conc asked cross xmodel xeffort guard stop reading <<<"$SET_FIELDS"
   CROSS_SET="$cross"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
@@ -688,6 +688,17 @@ settings_row() {
   esac
   [[ "$cap" =~ ^[0-9]+$ ]] || cap=""
   [[ "$turn" =~ ^[0-9]+$ ]] && set_item "${mute}turn${off} ${head}${turn}${cap:+/${cap}}${off}"
+  # Repair attempts: off is greyed, with the ○ that says so without colour, and drops below 80 columns.
+  if [[ "$repair" =~ ^[0-9]+$ ]]; then
+    if [ "$repair" -eq 0 ]; then set_item "${gry}○ repair${off}" "" 80
+    else set_item "${mute}repair${off} ${head}${repair}${off}"; fi
+  fi
+  # Concurrency, as the run takes it after the machine-wide sandbox cap; what it asked for only when that differs.
+  if [[ "$conc" =~ ^[0-9]+$ ]]; then
+    ask=""
+    [[ "$asked" =~ ^[0-9]+$ ]] && [ "$asked" -ne "$conc" ] && ask=" ${gry}(asked ${asked})${off}"
+    set_item "${mute}concurrency${off} ${head}${conc}${off}${ask}"
+  fi
   # The record is a file in a repository: a model or effort that is not plain text is left out,
   # never drawn into the terminal.
   case "$cross" in
