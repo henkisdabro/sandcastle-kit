@@ -28,7 +28,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, type GateRun, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, type Gate, type GateRun, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -263,27 +263,15 @@ export const changelogRead = (text: string): { lines: string[]; dropped: number 
 };
 export const changelogOf = (text: string): string[] => changelogRead(text).lines;
 
-// Whether two changelog lines say the same thing in other words: the implementer's line and a reviewer's
-// or a repair's rewording of it. Their words (leaving out the Added/Changed/Fixed label and the short
-// ones, and a plural or past tense's ending) overlap by CHANGELOG_SAME or more of all the words either uses.
-export const CHANGELOG_SAME = 0.6;
-const wordsOf = (line: string) =>
-  new Set(line.toLowerCase().replace(/^\s*(?:added|changed|fixed):/, "").split(/[^a-z0-9]+/).filter((w) => w.length > 3).map((w) => w.replace(/(?:ed|s)$/, "")));
-export const sameChangelogLine = (a: string, b: string): boolean => {
-  const [x, y] = [wordsOf(a), wordsOf(b)];
-  const shared = [...x].filter((w) => y.has(w)).length;
-  const all = x.size + y.size - shared;
-  return all === 0 ? a.trim().toLowerCase() === b.trim().toLowerCase() : shared / all >= CHANGELOG_SAME;
-};
-
-// Adds one pass's lines to the ticket's, in order, and returns how many tags were no line. The first
-// pass's lines stand; a later one adds only what no line already there says. A pass is checked against
-// the earlier passes' lines alone: two of its own lines are two changes, however alike their words
-// ("`size --json` prints ..." and "`status --json` prints ..."), and the implementer's must all stand.
+// Adds one pass's lines to the ticket's and returns how many tags were no line. A later pass that gives
+// any lines gives the full set for the branch (the review prompt asks it to restate the implementer's
+// along with its own), so its set replaces the earlier one: a rewording then shows once however few
+// words it shares, and a distinct change that shares words is not dropped for it. A pass that gives
+// none leaves the earlier set standing. Two lines of one pass are two changes, however alike their words
+// ("`size --json` prints ..." and "`status --json` prints ...").
 export const addChangelog = (have: string[], text: string): number => {
   const read = changelogRead(text);
-  const earlier = [...have];
-  for (const line of read.lines) if (!earlier.some((kept) => sameChangelogLine(kept, line))) have.push(line);
+  if (read.lines.length) have.splice(0, have.length, ...read.lines);
   return read.dropped;
 };
 
@@ -709,8 +697,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
       let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
-      // The implementer's lines come first and stand: a later pass (a reviewer, a repair) adds a line only
-      // for a change of its own, so one that says what a line already there says is left out.
+      // The implementer's lines come first; a later pass that gives lines restates the branch's whole set
+      // and replaces them (see addChangelog).
       const noteChangelog = (text: string | undefined) => {
         if (!project.changelog || !text) return;
         changelogDropped += addChangelog(changelog, text);
@@ -1444,7 +1432,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: (box, id) => runGates(box, id, "landing gate"),
+    gate: (box, id) =>
+      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate")),
     landed: new Map(),
     slotWanted,
     reds,

@@ -14,7 +14,7 @@ import { limit } from "./pool.ts";
 import { sizePointerNow } from "./size.ts";
 import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
-import { probeOAuth, usageToken } from "./usage.ts";
+import { probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string) => {
@@ -385,7 +385,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       return found;
     };
     // The guard's own credential, which may not be a file's: it prefers the host's Claude Code login.
-    const guardCredential = usageToken({ CLAUDE_CODE_OAUTH_TOKEN: source("CLAUDE_CODE_OAUTH_TOKEN")?.value });
+    const guardCredential = usageToken({ CLAUDE_CODE_OAUTH_TOKEN: source("CLAUDE_CODE_OAUTH_TOKEN")?.value, ANTHROPIC_API_KEY: source("ANTHROPIC_API_KEY")?.value });
     console.log("\ncredentials (live)");
     // The OAuth token's answer, kept for the guard's line: the usage endpoint is rate-limited, and a
     // second ask for the same token can draw a 429 that reads as a problem.
@@ -415,11 +415,12 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     }
     // Only the source and the HTTP status are printed, never a character of a token.
     const usage = guardCredential;
-    if (usage && "token" in usage) {
+    if (usage?.source === "api key") console.log("info usage guard (USAGE_CHECK=1) does not apply: the sandboxes spend ANTHROPIC_API_KEY (API credits, no plan), so there is no plan usage to read");
+    else if (usage && "token" in usage) {
       const status = usage.source === "login" || oauthStatus === undefined ? await probeOAuth(usage.token) : oauthStatus;
-      console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`}`);
+      console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`} - ${usageWhose(usage.source)}`);
     } else if (usage) console.log("warn usage guard (USAGE_CHECK=1) would find the Claude Code login expired, so it would have no reading until Claude Code refreshes it (any use of Claude Code does)");
-    else console.log("info usage guard (USAGE_CHECK=1) has no credential: no readable Claude Code login and no CLAUDE_CODE_OAUTH_TOKEN");
+    else console.log("info usage guard (USAGE_CHECK=1) has no credential: the sandboxes spend no subscription token (CLAUDE_CODE_OAUTH_TOKEN is not set)");
     console.log();
   }
   check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "`npm install -g @openai/codex && codex login`", true);

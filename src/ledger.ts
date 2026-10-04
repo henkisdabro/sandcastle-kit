@@ -17,6 +17,7 @@
 // complete - the agent's hand-back is on its pipeline's result - so nothing is patched in later.
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
+import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
@@ -105,7 +106,7 @@ export const closeComment = (
   (report ? `\n\n${report}` : "");
 
 // A merged ticket left open, an acceptance criterion undone: the comment says what, and that the
-// next run picks up the remainder. Posted after the schedule, as the comment on any ticket not closed.
+// next run picks up the remainder (or whose decision it is). Posted after the schedule, as the comment on any ticket not closed.
 export const partlyDoneComment = (
   o: { branch: string; commits: number; repairs: number; unmet: string; regenerated?: { files: string[]; regen: string[] }; overrun?: string[] },
   gateNames: string,
@@ -114,7 +115,7 @@ export const partlyDoneComment = (
   `Merged locally, not yet pushed, by the Sandcastle loop from \`${o.branch}\` (${o.commits} commit(s)` +
   (o.repairs ? `, ${o.repairs} repair pass(es) after a red gate` : "") +
   `); ${gateNames} all green before merge. **Left open: an acceptance criterion is unmet.** ${o.unmet}\n\n` +
-  "The next run picks up the remainder." +
+  remainderNote(o.unmet) +
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +

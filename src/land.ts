@@ -11,6 +11,7 @@ import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { gatesLog, readHeads } from "./run.ts";
@@ -308,7 +309,7 @@ export const landTicket = async (
       const generated = files.length ? ` Conflicts in generated files (${files.join(", ")}) were resolved by running ${regen.map((c) => `\`${c}\``).join(", ")}.` : "";
       if (unmet) {
         // As a run lands a branch that says `<unmet>`: merged, the ticket left open with the criterion on it.
-        const left = `${merged} **Left open: an acceptance criterion is unmet.** ${unmet}\n\nThe next \`sandcastle run\` picks up the remainder.${generated}`;
+        const left = `${merged} **Left open: an acceptance criterion is unmet.** ${unmet}\n\n${remainderNote(unmet, "`sandcastle run`")}${generated}`;
         try {
           tracker.comment(id, left);
         } catch (error) {

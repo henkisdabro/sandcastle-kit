@@ -23,9 +23,11 @@ This continues SKILL.md: run its "Before every action" first.
      to ticket files) and merges into the base branch locally.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. Offer
-     `USAGE_CHECK=1` if the plan is close to its limit (it reads usage with the host's Claude Code
-     login, read-only, else `CLAUDE_CODE_OAUTH_TOKEN`; a `claude setup-token` token gets HTTP 403 and
-     cannot use the guard, and `sandcastle doctor --verify` shows which credential it would use).
+     `USAGE_CHECK=1` if the plan is close to its limit (it applies only when the sandboxes spend
+     `CLAUDE_CODE_OAUTH_TOKEN`, and with `ANTHROPIC_API_KEY` it says it does not apply; it reads usage
+     with the host's Claude Code login, read-only, else that token; a `claude setup-token` token gets
+     HTTP 403 and cannot use the guard, and `sandcastle doctor --verify` shows which credential it
+     would use and whose plan that is).
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
@@ -37,10 +39,10 @@ This continues SKILL.md: run its "Before every action" first.
      blocker lands and closes. With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
-     before left conflicted or released; a red ticket is not run again, and a ticket queued after
+     before left conflicted, released or partly done (still queued); a red ticket is not run again, and a ticket queued after
      the run started waits for the next `sandcastle run`. A drain stops when no ticket is left to
-     run again or a stop holds: no progress, the same ticket conflicting in two turns running, a
-     red merged base, a usage limit or a stopped run, 20 turns at most.
+     run again or a stop holds: no progress, the same ticket conflicting or left partly done in two
+     turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
      (detached: in `.sandcastle/logs/run-output.log`); quote that once it is going, as the only
      estimate you give.
@@ -121,7 +123,8 @@ This continues SKILL.md: run its "Before every action" first.
       Each ticket listed `merged - check by hand`: what the reviewer said to check, and offer to
       check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
-      next run picks up the remainder). Each `needs-triage` issue opened during the run (an agent
+      next run picks up the remainder - unless the line says the remainder is a person's decision,
+      when the summary suggests moving the ticket to the hold label instead). Each `needs-triage` issue opened during the run (an agent
       or a person may have opened it): one line on what it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
@@ -164,7 +167,7 @@ lands on. Two cases follow from that:
   no action from the user and runs again on the next `sandcastle run`.
 
 In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
-`ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
+`ends ~HH:MM` (when the last pipeline should finish, or when the landing gates, one after another on the one worker, should, if later) rather than `lands ~HH:MM`.
 
 ## Reading the summary
 

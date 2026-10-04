@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
-import type { Gate } from "./gates.ts";
+import { type Gate, LANDING_GATES } from "./gates.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
@@ -417,8 +417,10 @@ const CHANGELOG_ASK =
   "changelog, not the diff. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
 const CHANGELOG_REVIEW =
-  `${CHANGELOG_ASK}The implementer has given its own: add a line only for a user-facing change you made yourself in this review, ` +
-  "and none otherwise.\n\n";
+  `${CHANGELOG_ASK}The implementer has given its own, which you cannot see. If the diff shows a user-facing change you made yourself ` +
+  "in this review, or a line of the implementer's that would now be wrong, give the full set of lines for the whole branch - " +
+  "its changes as well as yours, one line each: your set replaces the implementer's, so a line left out is lost, and a reworded " +
+  "one is not shown twice. Otherwise give none, and the implementer's lines stand.\n\n";
 
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
@@ -574,7 +576,11 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
   return picked;
 };
 
-/** Seconds per step, and `issue` for one whole issue; `extra` adds this run's finished issues (ms). */
+/**
+ * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate); `extra` adds this run's finished issues (ms).
+ * `LANDING_GATES` is one ticket's landing gates summed (a ticket landed with no gate counts none), the median over the window's tickets,
+ * and absent when no line of the window is a landing gate.
+ */
 export const typicalTimes = (project: Project, extra: number[] = []) => {
   let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number }[] = [];
   try {
@@ -586,14 +592,24 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   const steps = recentWindow(lines.filter((l) => l.project === project.name && l.issue && String(l.issue) !== "0" && typeof l.ms === "number"));
   const byPhase = new Map<string, number[]>();
   const byIssue = new Map<string, number>();
+  const landing = new Map<string, number>();
   for (const l of steps) {
+    const key = `${l.run}|${l.issue}`;
+    if (l.phase === LANDING_GATES) {
+      landing.set(key, (landing.get(key) ?? 0) + l.ms!);
+      continue;
+    }
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
-    byIssue.set(`${l.run}|${l.issue}`, (byIssue.get(`${l.run}|${l.issue}`) ?? 0) + l.ms!);
+    byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
   const out: Record<string, number> = {};
   for (const [phase, ms] of byPhase) out[phase] = Math.round(median(ms)! / 1000);
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
+  if (landing.size) {
+    const landMs = median([...byIssue.keys()].map((key) => landing.get(key) ?? 0));
+    if (landMs !== undefined) out[LANDING_GATES] = Math.round(landMs / 1000);
+  }
   return out;
 };
 
@@ -641,8 +657,8 @@ const HIGH = 0.8;
  * longer (`chain` is the longest in-run `Blocked by` chain's length; `detail.chainAt` says which
  * tickets, by their place in `models`, and without it each takes the average). Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
- * covers the tickets' own pipelines only - not the image check, preflight,
- * base gates, landing or verify. A line that does not parse is skipped.
+ * covers the tickets' own pipelines - not the image check, preflight,
+ * base gates, or verify, and its landings only as that floor and in the gates pool's sum. A line that does not parse is skipped.
  *
  * `models` is the implement model of each ticket in the run (its `model:` label, else the default):
  * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
@@ -657,9 +673,11 @@ const HIGH = 0.8;
  * history of its own; a carried ticket with none says the estimate is low.
  *
  * `detail.gateSlots` is the machine's gates pool (`limit("gates")`): every ticket's gate passes (the
- * pre-landing `gates` lines; a landing gate writes none) share it, so the run takes at least their
+ * pre-landing `gates` lines, and the `landing gates` lines) share it, so the run takes at least their
  * summed time over those slots, and the larger of that and the sandbox-bound or chain figure sets the
- * time. Without it the gates are not modelled.
+ * time. Without it the gates are not modelled. The landing gates alone, summed (each ticket's, from the
+ * history tickets', none for one that landed without a gate), are a floor of their own: landings run in
+ * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const estimate = (
   project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; chainAt?: number[]; gateSlots?: number } = {},
@@ -671,7 +689,7 @@ export const estimate = (
     return undefined;
   }
   type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  type Group = { ms: number; gateMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
+  type Group = { ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
   const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
@@ -687,8 +705,10 @@ export const estimate = (
   }
   for (const l of recentWindow(ticketLines)) {
     const key = `${l.run}|${l.issue}`;
-    const g = groups.get(key) ?? { ms: 0, gateMs: 0, tokened: false, inTokens: 0, out: 0, carried: false };
-    g.ms += l.ms as number;
+    const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false };
+    // A landing gate is the landing worker's time, not the ticket's own pipeline.
+    if (l.phase === LANDING_GATES) g.landMs += l.ms as number;
+    else g.ms += l.ms as number;
     // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
     if (l.phase === "gates") g.gateMs += l.ms as number;
     if (l.phase === "resolve" || l.carried === true) g.carried = true;
@@ -703,7 +723,7 @@ export const estimate = (
   }
   const counted = [...groups.values()].filter((g) => g.tokened);
   if (!counted.length) return undefined;
-  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)), gateMs: at(gs.map((g) => g.gateMs)) });
+  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)), gateMs: at(gs.map((g) => g.gateMs)), landMs: at(gs.map((g) => g.landMs)) });
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
@@ -720,26 +740,32 @@ export const estimate = (
   });
   const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
-  const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number) => {
+  const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number, land: (p: (typeof per)[number]) => number) => {
     const rounds = Math.ceil(tickets / slots);
     const serial = rounds * (sum(pick) / Math.max(tickets, 1));
     const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? pick(per[at]) : 0), 0) : chain * (sum(pick) / Math.max(tickets, 1));
     // Every ticket's gate passes share the machine's gate slots, whatever the sandboxes: the run cannot finish before they have all run.
-    const gated = detail.gateSlots && detail.gateSlots > 0 ? sum(gate) / detail.gateSlots : 0;
-    return { serial, chained, gated };
+    // The landing gates take gates slots too, beside the tickets' own passes.
+    const gated = detail.gateSlots && detail.gateSlots > 0 ? (sum(gate) + sum(land)) / detail.gateSlots : 0;
+    // Landings go one at a time on one worker, whatever the slots: their gates in a row are a floor on the end.
+    const landed = sum(land);
+    return { serial, chained, gated, landed };
   };
-  const midMs = minutes((p) => p.mid.ms, (p) => p.mid.gateMs);
-  const highMs = minutes((p) => p.high.ms, (p) => p.high.gateMs);
+  const midMs = minutes((p) => p.mid.ms, (p) => p.mid.gateMs, (p) => p.mid.landMs);
+  const highMs = minutes((p) => p.high.ms, (p) => p.high.gateMs, (p) => p.high.landMs);
   const clock = (ms: number) => {
     const m = Math.round(ms / 60_000);
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
   const span = (lo: number, hi: number, show: (n: number) => string) => (show(lo) === show(hi) ? show(lo) : `${show(lo)} to ${show(hi)}`);
-  const total = (t: { serial: number; chained: number; gated: number }) => Math.max(t.serial, t.chained, t.gated);
+  const total = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
   const split = carriedCount ? ` (${carriedCount} carried, ${tickets - carriedCount} fresh)` : "";
   const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
-  const gateBound = highMs.gated > Math.max(highMs.serial, highMs.chained) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
+  const landBound = highMs.landed > Math.max(highMs.serial, highMs.chained, highMs.gated);
+  const gateBound = landBound
+    ? " (landing gates, one after another, set the time)"
+    : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
   const low = [
     unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
