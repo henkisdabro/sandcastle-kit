@@ -21,10 +21,12 @@ fi
 
 # `git` only at a command position, then global options, then the subcommand: grepping for
 # `git ... gc` anywhere blocked ordinary commit messages that mention the word.
+# The branch rule's flag and ref stay inside the one command (no `;`, `&`, `|` or backtick between
+# them): `.*` ran into a later `git merge --no-ff`, whose `-ff` looked like `-f`.
 GIT='(^|[;&|(`])[[:space:]]*(sudo[[:space:]]+)?git([[:space:]]+(-C[[:space:]]+[^[:space:]]+|-c[[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?))*[[:space:]]+'
 grep -qE "${GIT}(update-ref|gc|prune|push)([[:space:]]|\$)" <<<"$CMD" && deny "git update-ref, gc, prune or push"
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
 grep -qE "${GIT}worktree[[:space:]]+(prune|repair)" <<<"$CMD" && deny "git worktree prune or repair (git worktree remove --force is allowed)"
-grep -qE "${GIT}branch[[:space:]].*(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]].*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
+grep -qE "${GIT}branch[[:space:]]([^;&|\`]*[[:space:]])?(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]][^;&|\`]*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
 if [ -n "$COMMON" ] && grep -qE '(^|[;&|(`])[[:space:]]*(rm|mv)[[:space:]]' <<<"$CMD" && grep -qF "$COMMON/" <<<"$CMD"; then deny "rm or mv inside the shared .git"; fi
 exit 0

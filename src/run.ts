@@ -655,9 +655,14 @@ const HIGH = 0.8;
  * ticket is estimated from the history tickets that were carried (a `resolve` pass, or a `carried`
  * field on their lines), a fresh one from the rest, each falling back to the other when it has no
  * history of its own; a carried ticket with none says the estimate is low.
+ *
+ * `detail.gateSlots` is the machine's gates pool (`limit("gates")`): every ticket's gate passes (the
+ * pre-landing `gates` lines; a landing gate writes none) share it, so the run takes at least their
+ * summed time over those slots, and the larger of that and the sandbox-bound or chain figure sets the
+ * time. Without it the gates are not modelled.
  */
 export const estimate = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; chainAt?: number[] } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; chainAt?: number[]; gateSlots?: number } = {},
 ): string | undefined => {
   let text: string;
   try {
@@ -666,7 +671,7 @@ export const estimate = (
     return undefined;
   }
   type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  type Group = { ms: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
+  type Group = { ms: number; gateMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
   const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
@@ -682,8 +687,10 @@ export const estimate = (
   }
   for (const l of recentWindow(ticketLines)) {
     const key = `${l.run}|${l.issue}`;
-    const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0, carried: false };
+    const g = groups.get(key) ?? { ms: 0, gateMs: 0, tokened: false, inTokens: 0, out: 0, carried: false };
     g.ms += l.ms as number;
+    // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
+    if (l.phase === "gates") g.gateMs += l.ms as number;
     if (l.phase === "resolve" || l.carried === true) g.carried = true;
     // The review lines name the reviewer's model: only the steps the implementer ran say who implemented.
     if ((l.phase === "implement" || l.phase === "repair") && typeof l.model === "string" && l.model) g.model ??= l.model;
@@ -696,7 +703,7 @@ export const estimate = (
   }
   const counted = [...groups.values()].filter((g) => g.tokened);
   if (!counted.length) return undefined;
-  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)) });
+  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)), gateMs: at(gs.map((g) => g.gateMs)) });
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
@@ -713,23 +720,26 @@ export const estimate = (
   });
   const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
-  const minutes = (pick: (p: (typeof per)[number]) => number) => {
+  const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number) => {
     const rounds = Math.ceil(tickets / slots);
     const serial = rounds * (sum(pick) / Math.max(tickets, 1));
     const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? pick(per[at]) : 0), 0) : chain * (sum(pick) / Math.max(tickets, 1));
-    return { serial, chained };
+    // Every ticket's gate passes share the machine's gate slots, whatever the sandboxes: the run cannot finish before they have all run.
+    const gated = detail.gateSlots && detail.gateSlots > 0 ? sum(gate) / detail.gateSlots : 0;
+    return { serial, chained, gated };
   };
-  const midMs = minutes((p) => p.mid.ms);
-  const highMs = minutes((p) => p.high.ms);
+  const midMs = minutes((p) => p.mid.ms, (p) => p.mid.gateMs);
+  const highMs = minutes((p) => p.high.ms, (p) => p.high.gateMs);
   const clock = (ms: number) => {
     const m = Math.round(ms / 60_000);
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
   const span = (lo: number, hi: number, show: (n: number) => string) => (show(lo) === show(hi) ? show(lo) : `${show(lo)} to ${show(hi)}`);
-  const total = (t: { serial: number; chained: number }) => Math.max(t.serial, t.chained);
+  const total = (t: { serial: number; chained: number; gated: number }) => Math.max(t.serial, t.chained, t.gated);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
   const split = carriedCount ? ` (${carriedCount} carried, ${tickets - carriedCount} fresh)` : "";
   const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
+  const gateBound = highMs.gated > Math.max(highMs.serial, highMs.chained) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
   const low = [
     unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
@@ -737,7 +747,7 @@ export const estimate = (
   return (
     `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): ` +
     `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
-    `and ${span(total(midMs), total(highMs), clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}.${low}`
+    `and ${span(total(midMs), total(highMs), clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}${gateBound}.${low}`
   );
 };
 
@@ -941,6 +951,10 @@ export const ARCHIVE_KEEP_DAYS = 14;
 /** The raw `.jsonl` streams are the bulk of the archive, so they go sooner; the readable `.log` stays. */
 export const ARCHIVE_KEEP_RAW_DAYS = 2;
 
+/** The cleanup's one line; both limits carry their unit, so the raw streams' "2" is read as days. */
+export const prunedLine = (pruned: number): string =>
+  `Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS} days).`;
+
 /** Delete archived files past their age limit, by mtime (an append refreshes it). Returns how many went. */
 export const pruneArchive = (project: Project, now = Date.now()): number => {
   const archive = join(project.root, ".sandcastle/logs/archive");
@@ -990,7 +1004,7 @@ export const archiveFinishedLogs = (project: Project) => {
   }
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
   const pruned = pruneArchive(project);
-  if (pruned) console.log(`Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS}).`);
+  if (pruned) console.log(prunedLine(pruned));
 };
 
 // ---------------------------------------------------------------------------

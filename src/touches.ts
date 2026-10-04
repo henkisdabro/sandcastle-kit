@@ -63,6 +63,15 @@ export const isTestPath = (path: string): boolean => {
  */
 export const isAgentDoc = (path: string): boolean => /^(?:AGENTS|CLAUDE)\.md$/.test(normalise(path).split("/").pop() ?? "");
 
+/**
+ * Docs a repo's rules have every change touch: any Markdown file, and anything under `docs/` or
+ * `skill/`. A ticket's `Touches:` line seldom names them, so `overrunPaths` folds them into a count.
+ */
+export const isDocPath = (path: string): boolean => {
+  const p = normalise(path);
+  return /\.md$/i.test(p) || p.startsWith("docs/") || p.startsWith("skill/");
+};
+
 const isGlob = (p: string) => /[*?]/.test(p);
 
 // `**` crosses directories, `*` and `?` stay inside one path segment.

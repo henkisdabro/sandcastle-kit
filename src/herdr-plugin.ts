@@ -23,7 +23,7 @@ import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, runCounts } from "./herdr.ts";
-import { commandOf, RUNS_DIR } from "./live-runs.ts";
+import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { KIT } from "./sandbox.ts";
@@ -198,6 +198,8 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
   const plugin = pluginState();
 
   if (remove) {
+    // A link from another checkout stays, so the status view's links stay with it.
+    if (!plugin.linkedFrom || plugin.linkedHere) rmSync(PLUGIN_MARKER, { force: true });
     const after = withoutBlock(before);
     if (after !== before) writeFileSync(path, after);
     // Only this checkout's link: the one in use may be another clone's or worktree's. Herdr
@@ -264,6 +266,8 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
         (reload.ok ? JSON.stringify(reload.diagnostics, null, 2) : reload.reason),
     );
   }
+  mkdirSync(dirname(PLUGIN_MARKER), { recursive: true });
+  writeFileSync(PLUGIN_MARKER, PLUGIN_DIR);
   console.log(
     `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove` takes the block out"}.` +
       `\n  prefix+shift+s  status view    prefix+shift+e  last run's report    prefix+shift+a  sandboxes first in Agents` +

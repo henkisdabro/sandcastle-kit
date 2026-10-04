@@ -71,11 +71,16 @@ moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '16
 # terminal. Top level on purpose: the live loop calls render inside $(...),
 # where stdout is always a pipe, so the check there would always strip colour.
 if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; wht=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; moon=''; dusk=''; night=''; deep=''; star=''; fi
-# Inside Herdr each ticket links to its latest log (OSC 8). With the kit's Herdr plugin
-# linked, Ctrl-click opens that log in a popup; without it, Herdr does nothing with the
-# click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
+# Inside Herdr each ticket links to its latest log (OSC 8), and the note band says so. Only
+# with the kit's Herdr plugin linked (`sandcastle herdr configure` leaves the marker, `--remove`
+# takes it out): Ctrl-click opens that log in a popup, and without the plugin Herdr does nothing
+# with the click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
+# Read once here, not per redraw; the path is src/live-runs.ts's KIT_CACHE (an empty
+# XDG_CACHE_HOME is unset, as there).
 LINKS="${SANDCASTLE_LINKS:-}"
-if [ -z "$LINKS" ]; then if [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ]; then LINKS=1; else LINKS=0; fi; fi
+if [ -z "$LINKS" ]; then
+  if [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ] && [ -e "${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/herdr-plugin-linked" ]; then LINKS=1; else LINKS=0; fi
+fi
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -1119,6 +1124,7 @@ render() {
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
   # Below 80 columns there is no CPU column to explain.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
+  [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}ctrl-click a ticket for its log${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
   # columns: eight on one row from 130 columns, else rows of four, or of two

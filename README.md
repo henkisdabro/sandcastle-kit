@@ -537,7 +537,7 @@ moments earlier (the search index lags), so a run started straight after `--add-
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time, as a range from the median to the 80th percentile of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). A carried branch (one ahead of the base, which a base merge may conflict with) is priced from earlier carried tickets - those that had a conflict resolved or ran as carried - and a fresh ticket from the rest; the line gives the split `(N carried, M fresh)`, and says the estimate is low for a carried ticket with no carried history. When a `Blocked by` chain in the run takes longer than the tickets over the slots, the chain sets the time, as the sum of its own tickets' times: `(N tickets in sequence)`. Tickets that others wait for start first; a ticket
+time, as a range from the median to the 80th percentile of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). A carried branch (one ahead of the base, which a base merge may conflict with) is priced from earlier carried tickets - those that had a conflict resolved or ran as carried - and a fresh ticket from the rest; the line gives the split `(N carried, M fresh)`, and says the estimate is low for a carried ticket with no carried history. When a `Blocked by` chain in the run takes longer than the tickets over the slots, the chain sets the time, as the sum of its own tickets' times: `(N tickets in sequence)`. The machine-wide gates pool is counted too: every ticket's gate passes (from earlier runs' pre-landing gate lines, without the wait for a slot) share the `maxGates` slots, and when that takes longer than the rest it sets the time: `(gate runs on N slot(s) set the time)`. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -558,7 +558,8 @@ cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a
 every five minutes while agents work, and the status view flags a sandbox whose log has been quiet
 for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
 `.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
-`USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket.
+`USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket, with
+the host's Claude Code login, read-only (the details are under [Configuration](#-configuration)).
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
 with the run. Under the run band, one full-width **settings** row shows the run's settings:
@@ -578,8 +579,8 @@ and draws no row.
 
 The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
 threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
-When the guard cannot get a reading (a 403 turns it off for the run, a rate limit or a missing
-OAuth token leaves it without one for now) the row says so in the warning colour:
+When the guard cannot get a reading (a 403 turns it off for the run, a rate limit, an expired
+Claude Code login or no token at all leaves it without one for now) the row says so in the warning colour:
 `● usage-guard 90% (no reading - not guarding)`. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
@@ -819,7 +820,7 @@ nothing asks. What you get:
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says `ctrl-click a ticket for its log`. The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
 | Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 
@@ -1066,9 +1067,9 @@ Examples: [`examples/`](examples/).
 | `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
 | `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
-| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr | The status view's links from each ticket to its latest log (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); off outside Herdr and into a pipe |
+| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log, and its `ctrl-click a ticket for its log` hint (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
-| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Needs `CLAUDE_CODE_OAUTH_TOKEN`. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and a rate limit is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows that beforehand, as a `warn` line under the token |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use and the HTTP status the endpoint answers it (never the token), and a `warn` line under a setup token the endpoint refuses with 403 |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
 | `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |
