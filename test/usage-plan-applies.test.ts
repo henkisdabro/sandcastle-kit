@@ -17,9 +17,9 @@ process.env.USAGE_CHECK = "1";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-usage-plan-xdg-"));
 const { usageToken, usageLine, usageStop, usageReadingLost } = await import("../src/usage.ts");
 
-const NOW = Date.UTC(2026, 9, 4, 12);
-// Live at NOW (the injected clock) and at the real clock, which usageLine reads: a fixed expiry goes stale once the day passes it.
-const login = JSON.stringify({ claudeAiOauth: { accessToken: "login-token-xyz", expiresAt: Math.max(NOW, Date.now()) + 3_600_000 } });
+// The real clock: usageLine reads it itself, so a fixed date would leave the login expired once it passed.
+const NOW = Date.now();
+const login = JSON.stringify({ claudeAiOauth: { accessToken: "login-token-xyz", expiresAt: NOW + 3_600_000 } });
 const readers = { keychain: () => login, file: () => login };
 
 test("with an API key the host login is not read, whatever platform", () => {
