@@ -24,9 +24,97 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   use. A project that left the guard off because it had no reading can turn it on.
 - **A project that mounts the pnpm store by hand** can switch to `pnpmStore: true`;
   `/sandcastle update` proposes it.
+- **A run started by an older kit ignores shares until it ends.** Live runs now split the machine's
+  sandbox slots between them, but a run already going when the kit is pulled knows nothing of it
+  and keeps taking free slots (it is counted as wanting its concurrency). Let it finish, or stop it
+  and start it again, before relying on the split.
+- **The personal `config.json` now refuses an unknown key.** A typo such as `"keepawake"` was
+  ignored, so the setting never applied; now every command that reads the file stops with the
+  nearest real key (`maxSandboxes`, `maxGates`, `keepAwake`, `notify`, `idleMark`). Run
+  `sandcastle doctor` once per machine: it names the key.
+- **A ticket with an acceptance criterion an agent left undone now merges as "partly done" and
+  stays open.** Its merge says `part of` the ticket instead of `closes` it, and the next run takes
+  up the remainder; a project's own scripts that read merge subjects for `closes #N` should accept
+  `part of #N` too.
+- **`changelog: true` is a new project config key**, off by default. A project whose rules keep
+  agents out of its changelog can turn it on to have the closing summary gather their suggested
+  lines.
+- **The log archive is now pruned**: archived files go after 14 days and raw `.jsonl` streams after
+  2. Copy anything under `.sandcastle/logs/archive/` you want to keep for longer before the next
+  run.
+- **Landing now deletes a merge-landed `agent/issue-*` branch**, as it always did a squash-landed
+  one, so merged agent branches no longer wait for `sandcastle clean`. Nothing to do; a project that
+  relied on finding them should read the merge commit instead.
+- **`sandcastle clean` removes only dangling images built by this kit or later** (they carry a
+  `sandcastle-kit=1` label). Images left by an older kit are not touched: run `sandcastle build`,
+  then `docker image prune` by hand once if `sandcastle doctor` shows a large build cache.
 
 ### Added
 
+- **The machine pool shares itself fairly between projects.** A freed sandbox or gates slot goes to
+  the run that has waited longest, across projects: a run that just freed one no longer takes it
+  straight back while another project's run waits for the first to drain. Live runs also split the
+  sandbox slots by **share**: equal parts between the runs that want slots, each never more than
+  its **demand** (its tickets in a sandbox or ready to start, plus one for a waiting landing), a run
+  that needs less releasing the rest to the others. Nothing is taken back: a run over its share
+  keeps what it holds and shrinks as tickets finish. The status header's `this run` row shows
+  `wants 4 · share 3`, and a ticket held back says `waits for the run's share`. Gate slots have no
+  shares.
+- **A run that starts beside another says how the machine is split.** Its start line names each
+  other live run's project, slots and demand, this run's share and, when no slot is free, a rough
+  wait for its first (`webshop is live (6 slots, demand 5): this run's share is 3; ...`); a run from
+  an older kit is named as one that ignores shares. The estimate divides by the share while another
+  run is live, and the skill quotes the line before confirming the start.
+- **`sandcastle cap`** limits a live run's share while it runs: `cap N` caps this project's run at
+  N sandbox slots, `cap off` lifts it, a bare `cap` prints demand, share and cap, and
+  `--project <name>` acts on another project's run from anywhere. The cap only lowers the share,
+  frees its slots to the other runs and ends with the run. The status view shows it
+  (`wants 4 · share 3 · cap 3`), and the Herdr tab bar shows each live run's share.
+- **The status view has a settings row** under the run band: the autonomy level lit among the
+  others and the turn out of the level's cap (`autonomy 0 1 2 [3] drain · turn 2/3`), repair
+  attempts (`repair 1`), concurrency after the machine cap (`concurrency 6 (asked 8)` when it
+  clamped), cross-review with its model and effort, and the usage guard with its threshold
+  (`● usage-guard 90%`, or a warning `(no reading - not guarding)` when it has no reading). Settings
+  that are off are greyed and drop below 80 columns. Between runs it shows what the next run would
+  use, prefixed `next run:`. Each turn's run record carries the settings, so `sandcastle run` and
+  `sandcastle status` resolve them the same way; a record from an older kit draws no row.
+- **The closing summary names the run's settings, and the switch that would have helped.** A
+  Settings line sits under the headline; a level-0 run that left tickets it could run again
+  suggests `AUTONOMY_LEVEL=2` (or `drain`), and a usage guard that had no reading says the run was
+  not guarded. Nothing else is suggested, and the skill relays the hint as written.
+- **An idle mark between runs in the Claude Code mod.** In a project `sandcastle init` has set up,
+  the mod draws `sandcastle` in sand, one row above the prompt led by a castle tower (`♜`), and when
+  tickets are ready (queued, no open blocker) it reads `sandcastle · 4 ready - /sandcastle run`. The
+  count comes from `sandcastle queue --json`, read in the background and cached per project for
+  every session on the machine: at most one tracker read per project every 10 minutes, plus one when
+  a run ends and when you use `/sandcastle`. A failed read keeps the last count for an hour and
+  never shows an error. The live band replaces the mark during a run.
+- **`/sandcastle-mark`** controls the idle mark with no model turn: `dismiss` takes the count off
+  until a new ticket becomes ready, `hide` turns the mark off in this project until `show`, and a
+  bare `/sandcastle-mark` says which applies and how old the count is. `"idleMark": false` in the
+  personal `config.json` turns it off everywhere; doctor reports a value that is not a boolean. The command's
+  typeahead shows its choices: `/sandcastle-mark [dismiss|hide|show]`.
+- **An acceptance criterion left undone is reported, not merged over.** Every criterion, and any
+  regression the branch causes, is now in the agents' scope. An agent that still leaves one undone
+  says so in an `<unmet>` line; the branch lands if green, but the ticket stays open with a comment
+  naming the criterion, its merge says `part of` rather than `closes`, and the closing summary lists
+  it under Needs you as `merged, partly done`. A ticket used to merge as plain "merged" with nothing
+  telling you. A branch that lands in a later run keeps its criterion.
+- **`changelog: true` gathers the agents' changelog lines into the closing summary.** For a project
+  whose rules keep agents out of its changelog, the implement and review prompts ask for each line
+  in a `<changelog>` tag (`Added:`, `Changed:` or `Fixed:`), and the summary lists the merged
+  tickets' lines under Done, grouped, instead of leaving them scattered across the agents' logs.
+- **The readable agent log shows failed tool calls.** Each tool result that errored or exited
+  non-zero adds one `! error: ...` or `! exit N: ...` line; the library left them out, so a log read
+  to find why a ticket went wrong showed only the agent's next line. These lines never count as a
+  usage limit.
+- **`sandcastle clean` removes exited sandbox containers and the kit's dangling images**, which
+  were never cleaned up and could hold several GB each. The kit's images now carry a
+  `sandcastle-kit=1` label so another project's images are left alone, and `sandcastle doctor`
+  shows the Docker build cache's size with a prune hint.
+- **`sandcastle init` writes `pnpmStore: true`** and the kit runs `pnpm store path` on the host at
+  run time, so the committed config holds no host path. A literal macOS store path in the config
+  was a mount that did not exist for a teammate on Linux.
 - **`queue --lint` flags blockers listed under a heading.** A `## Blocked by` heading over `- #12`
   items is not read, so such a ticket started before its blocker landed with nothing saying so;
   the lint now names it under problems.
@@ -56,6 +144,40 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The run estimate prices each ticket from its implement model's history**, so a run of
+  Opus-labelled tickets is no longer estimated at the Sonnet pace of the last runs (one was 10x out
+  on tokens). A model with no history here falls back to the overall median and the line says the
+  estimate is low; a chain now reads `N tickets in sequence`, not `a chain of N runs`.
+- **Issues opened during a run read "opened during this run"** in the closing summary, not "filed by
+  an agent", since agents use your own `gh` token; a finished run's window ends at its finish, so a
+  later issue is no longer listed every time `sandcastle report` is read, and the header counts them
+  as `N to triage`.
+- **A re-run's conflict resolution is its own phase, `resolve`**, with a `resolve-<n>` sandbox and
+  log and its own `timings.jsonl` line, in the status view, Herdr panes and report. It ran as
+  "implement", appending to the implementer's log and pulling the usual implement time down.
+- **The requeue line says the ticket is tried again in this run**, not that "its pipeline runs
+  again": the second attempt is often land-only, which the next line says.
+- **The agent log's closing line reads `Tokens processed (all turns): Nk`**; it said "Context
+  window", but it is every turn's input and cache tokens added up.
+- **The implement prompt tells the agent to run gates in the foreground to a file and to prefer
+  the Edit tool**, after agents polled a background test run with `sleep` and edited with scripted
+  replacements that silently did nothing on a missed match.
+- **The skill's ticket-writing guidance**: a `Touches:` line names only files an agent may edit
+  under the project's rules (a forbidden `CHANGELOG.md` there gave false overlap lines), existing
+  paths as they are with new files marked new in the prose, and evidence goes in the final message
+  or a ticket comment, since a run opens no pull request.
+- **`sandcastle requeue` reminds you to give GitHub a few seconds** before `sandcastle run`, when it
+  changed a label: GitHub's label search can miss a ticket labelled moments earlier, and the run
+  then leaves it out silently. The README and the skill say the same.
+- **Doctor reports another kit checkout on PATH as a note, not a FIX.** Run from a clone or worktree
+  of the kit, it advised relinking PATH to that checkout, which would hijack the installed kit; it
+  now says `./bin/sandcastle` runs this one.
+- **A short status pane shows the wordmark alone**, not a castle cut to a one-row slab that read as
+  a broken logo.
+- **The README says more about what a run proves and holds.** A run's gates prove Linux only (a
+  branch green there can be red on macOS or Windows; it suggests a CI job or a host-side check), a
+  held conflict resolution is explained with what to look at and how to go on, and the install
+  guide no longer says an open session picks up a pulled skill.
 - **The usage guard reads plan usage with the host's Claude Code login**, read-only and never
   refreshed (the macOS keychain, or `.credentials.json` in the Claude config directory), and falls
   back to `CLAUDE_CODE_OAUTH_TOKEN`. The usage endpoint answers a `claude setup-token` token with
@@ -63,9 +185,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Ticket links and a new `ctrl-click a ticket for its log` hint appear in the status view inside
   Herdr only once the plugin is linked** (`sandcastle herdr configure`): without it a click did
   nothing. `SANDCASTLE_LINKS` still overrides.
-- **The beyond-Touches note counts docs paths as "+N docs files"**, as it does test files, so a
-  source-file overrun is no longer buried under the docs every change must edit. The closing
-  report separates a ticket's title from the note ("<title> - beyond Touches: ...").
+- **The Touches overrun note folds tests and docs into counts.** Edited test files read "+N test
+  files" and docs paths (`*.md`, `docs/`, `skill/`) "+N docs files", other paths in full, so a
+  source-file overrun is no longer buried under the tests and docs every change must edit; it used
+  to flag almost every ticket. The run record keeps every path, and the closing report separates a
+  ticket's title from the note ("<title> - beyond Touches: ...").
 - **A red requeue line names the failing gate and tests**, and names a landed ticket only when it
   changed a file the branch also changed; otherwise it says "red on the merged tree".
 - **The run estimate is a range**, from the median to the 80th percentile. It prices carried
@@ -90,12 +214,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   are written once, in `queue.md`, and the audit follows them; long steps such as the run's
   pre-start check are broken into checklists. An open session keeps the skill it loaded, so
   start a new one after updating.
-- **The idle mark is drawn in sand above the prompt, not pinned in the status line.** Claude Code gives
-  every pinned status line a warning triangle and its notice colour, which a mod cannot change, so
-  the quiet `sandcastle · 3 ready` read as a warning and clashed with its own indicators. The mod
-  now draws it as one row of its band, led by a castle tower (`♜`), in the status view's sand; the
-  status line is kept for what needs you. Nothing to do: `/sandcastle-mark` and `"idleMark": false` work as before, and the command's typeahead
-  now shows its choices: `/sandcastle-mark [dismiss|hide|show]`.
 - **The README opens with the kit's logo** - the pixel castle and wordmark, and the castle as a
   terminal draws it - in place of the plain heading.
 - **Each outcome in `.sandcastle/logs/outcomes.json` carries a kind** (merged, conflict, red, held
@@ -106,11 +224,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
-- **The tip backup is pruned reliably.** Every fetch into `.sandcastle/backup.git` started git's
-  background auto maintenance, which repacked it behind the kit's back and could hold the lock the
-  kit's own prune needs, so the prune failed silently and packs piled up. The kit now runs its
-  git calls there with auto maintenance off, detached gc off and cruft packs off, so a prune ends
-  with one pack. Nothing to do.
+- **A killed run's recycled process id no longer holds the run lock or a machine slot.** The next
+  `sandcastle run` of the project refused with "Another sandcastle run of this project is live" for
+  as long as the unrelated process lasted; the run lock and slot locks now check the process is the
+  kit's, and keep a lock when `ps` cannot answer.
+- **A requeued ticket that lands on its second attempt counts its first review's commits**;
+  `commits=3 (review=0)` contradicted the reviewer's commit still on the branch.
+- **The log archive is pruned.** `.sandcastle/logs/archive/` only grew (about 17 MB a day); archived
+  files now go after 14 days and raw `.jsonl` streams after 2, the readable `.log` staying.
+- **Merged agent branches are deleted at landing in merge mode too**, not left for
+  `sandcastle clean`, by a run and by `sandcastle land`; they piled up in `git branch` and the
+  status view. A branch a kept worktree holds is told and left.
+- **The kit's own tests are faster and cannot hang.** The `--help` checks run in process (they took
+  a third of the test gate), every test that starts the kit does it through one helper with the
+  launcher's Node flags and a time limit (one stuck exit hung `pnpm test` for good), and passing
+  tests no longer print stray lines into green gate logs.
+- **The tip backup no longer grows with every run.** Each fetch into `.sandcastle/backup.git` sent
+  the whole history as a new pack (about 50 MB after 30 runs, with no refs left); it now keeps the
+  base branch for thin fetches, prunes itself once no agent branch is left, and runs its git calls
+  with auto maintenance off, so the prune cannot fail on git's own background lock and ends with
+  one pack. Nothing to do.
 - **`pnpmStore` mounts the host's store-dir**, not its versioned `vN` directory, so sandboxes install
   from the host's own store instead of building a second one nested inside it. `/sandcastle update`
   checks a project that mounts the store by hand.
@@ -130,8 +263,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The pool tests take about 2 s**, not 10-100 s, and no longer slow the test gate or flake under load.
 - **Gate time no longer counts the wait for a gates slot.** The wait is recorded apart as `waitMs`
   in `timings.jsonl`, so usual times, the "twice the usual" age and the estimate stop counting it.
-- **An ended run's settings row reads "next run:"**, so it cannot be mistaken for the settings the
-  closing summary recorded for the run that ended.
 - **The idle mark steps aside for a run this session follows in another directory.** It hid only
   for a run of the session's own project, so a run started from a second clone drew its castle and
   counts under a `sandcastle · 13 ready` that no longer meant anything. Any live run the band draws
