@@ -926,8 +926,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
         if (stray?.length) {
           const why = strayNote(stray);
+          // No `files` on the record: the report reads them as a protected-path hold ("changes X") and would hide this note.
           console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
-          run.ticket(issue.id, { files: stray });
           notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
           // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
           return heldResolution(issue.id, branch, why, {
