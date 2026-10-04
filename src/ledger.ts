@@ -21,7 +21,7 @@ import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
-import { overrunLine } from "./report.ts";
+import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending } from "./schedule.ts";
@@ -101,7 +101,7 @@ export const closeComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
-  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
+  (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // A merged ticket left open, an acceptance criterion undone: the comment says what, and that the
@@ -118,7 +118,7 @@ export const partlyDoneComment = (
   (o.regenerated
     ? ` Conflicts in generated files (${o.regenerated.files.join(", ")}) were resolved by running ${o.regenerated.regen.map((c) => `\`${c}\``).join(", ")}.`
     : "") +
-  (o.overrun?.length ? `\n\n${overrunLine(o.overrun)}` : "") +
+  (overrunNoted(o.overrun) ? `\n\n${overrunLine(o.overrun!)}` : "") +
   (report ? `\n\n${report}` : "");
 
 // The one comment a ticket that did not land gets: the conflict (the other

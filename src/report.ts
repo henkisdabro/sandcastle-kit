@@ -90,6 +90,13 @@ export const overrunPaths = (paths: string[]) => {
   return [...listed, ...count(tests, "test"), ...count(docs, "docs")].join(", ");
 };
 
+/**
+ * Whether an overrun is worth a note: some path is a source file. An overrun of only test and docs
+ * files is the usual follow-through of a change (`overrunPaths` folds them), so it stays in the run
+ * record and neither the close comment nor the report says it.
+ */
+export const overrunNoted = (paths: readonly string[] | undefined) => !!paths?.some((p) => !isTestPath(p) && !isDocPath(p));
+
 /** The close comment's paragraph for a diff that left its `Touches:` line. */
 export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${overrunPaths(paths)}`;
 
@@ -427,7 +434,7 @@ export const render = (f: Facts, plain = false): string => {
     done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
-  for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
+  for (const id of merged.filter((id) => overrunNoted(f.tickets[id].overrun))) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
   if (byHand.length) done.push(`${byHand.length} held, merged by hand; closes on push: ${list(byHand)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.

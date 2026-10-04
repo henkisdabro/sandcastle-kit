@@ -22,7 +22,7 @@ import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
-import { dirtyFiles } from "./run.ts";
+import { dirtyFiles, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import type { LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
@@ -43,8 +43,11 @@ export const conflictLine = (c: { files: string[]; with: string[] }) =>
  * returned here; `overrunPaths` folds the test and docs paths into counts when the overrun is reported.
  * Nor is a change to an agent-instructions file (`isAgentDoc`) when the branch adds any file: the
  * new module's row in the layout table is expected. On a branch that adds nothing it still counts.
+ * Nor is a file only a repair pass (`repaired`, the commits it made) or a merge commit (a conflict
+ * resolution) changed: those answer a red gate or the base, not the ticket. A file any other commit
+ * of the branch changed still counts.
  */
-export const touchesOverrun = (root: string, base: string, head: string, body: string): string[] => {
+export const touchesOverrun = (root: string, base: string, head: string, body: string, repaired: ReadonlySet<string> = new Set()): string[] => {
   const patterns = parseTouches(body);
   if (!patterns.length) return [];
   const declared = new Set([...expandTouches(root, base, patterns), ...expandTouches(root, head, patterns)]);
@@ -53,8 +56,13 @@ export const touchesOverrun = (root: string, base: string, head: string, body: s
   const changes: { status: string; file: string }[] = [];
   for (let i = 0; i + 1 < fields.length; i += 2) changes.push({ status: fields[i].trim(), file: fields[i + 1] });
   const adds = changes.some((c) => c.status === "A");
+  // The files the branch's own commits changed: `--no-merges` leaves out a resolution, `repaired` a repair.
+  const own = new Set<string>();
+  for (const sha of sh("git", ["rev-list", "--no-merges", `${base}..${head}`], root).split("\n").filter((s) => s && !repaired.has(s))) {
+    for (const file of sh("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--no-renames", sha], root).split("\0")) own.add(file);
+  }
   return changes
-    .filter(({ status, file }) => file && !declared.has(file) && !(status === "A" && isTestPath(file)) && !(adds && isAgentDoc(file)))
+    .filter(({ status, file }) => file && own.has(file) && !declared.has(file) && !(status === "A" && isTestPath(file)) && !(adds && isAgentDoc(file)))
     .map((c) => c.file);
 };
 
@@ -392,7 +400,8 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
   // costs the warning only.
   let overrun: string[] = [];
   try {
-    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "");
+    const record = readHeads(root)[o.issue];
+    overrun = touchesOverrun(root, base, o.head!, tracker.get(o.issue).body ?? "", new Set(record?.branch === o.branch ? record.repaired : []));
   } catch {
     overrun = [];
   }

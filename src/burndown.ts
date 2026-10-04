@@ -818,7 +818,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -1265,6 +1265,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         );
         if (!fixed) break;
         gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
+      }
+      // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
+      // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
+      if (repairs) {
+        const earlier = readHeads(project.root)[issue.id];
+        const made = sh("git", ["rev-list", "--no-merges", `${preRepair}..${branch}`]).split("\n").filter(Boolean);
+        if (made.length) noteHead(issue.id, branch, { repaired: [...new Set([...(earlier?.branch === branch ? (earlier.repaired ?? []) : []), ...made])] });
       }
 
       // A repair works against a red gate, and the easy way to green is to
