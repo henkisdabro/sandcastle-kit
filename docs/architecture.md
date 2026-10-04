@@ -75,7 +75,7 @@ Herdr helpers and the run's view: the tab (adopted only from a terminal), per-sa
 
 ## `src/live-runs.ts`
 
-The machine-wide live-runs directory (`RUNS_DIR`, in `KIT_CACHE`: `sandcastle-kit` under `XDG_CACHE_HOME` or `~/.cache`, on Linux and macOS alike): `registerRun` writes a run's file (named by the resolved root) from `burndown()`, Herdr or not, and removes it at exit. The Herdr tab bar (`liveRuns` in `src/herdr-plugin.ts`) and the Claude Code mod (`REGISTRY_SCRIPT` in `mod/hooks/run-state.ts`) read it; the mod follows a run whose recorded `session` (`CLAUDE_CODE_SESSION_ID`) is its own. `commandOf` is the real process check that `liveness` is given: a signal of 0, then `ps -p <pid> -o command=`.
+The machine-wide live-runs directory (`RUNS_DIR`, in `KIT_CACHE`: `sandcastle-kit` under `XDG_CACHE_HOME` or `~/.cache`, on Linux and macOS alike): `registerRun` writes a run's file (named by the resolved root) from `burndown()`, Herdr or not, and removes it at exit. The Herdr tab bar (`liveRuns` in `src/herdr-plugin.ts`) and the Claude Code mod (`REGISTRY_SCRIPT` in `mod/hooks/run-state.ts`) read it; the mod follows a run whose recorded `session` (`CLAUDE_CODE_SESSION_ID`) is its own. `commandOf` is the real process check that `liveness` is given: a signal of 0, then `ps -p <pid> -o command=`. `PLUGIN_MARKER` (`herdr-plugin-linked`, beside it) is left by `sandcastle herdr configure` and removed by `--remove`; `status.sh` reads it once at start-up (inside Herdr, on a terminal) to decide whether to emit ticket links and the `ctrl-click a ticket for its log` hint, as a Ctrl-click does nothing without the plugin.
 
 ## `src/blockers.ts`
 
