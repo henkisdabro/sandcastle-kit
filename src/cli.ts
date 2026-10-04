@@ -428,13 +428,15 @@ try {
       const { message, relabelled } = requeueTicketWithEffect(tracker, project.label, args);
       console.log(message);
       if (relabelled) console.log(LABEL_LAG_REMINDER);
-      // Warn only: a re-run of such a ticket costs a pipeline and ends held for the same paths.
-      const requeued = parseRequeueArgs(args).id;
-      const protectedPaths = protectedForTicket(project, requeued, tracker.get(requeued).body ?? "");
-      if (protectedPaths.length) console.log(`${tracker.ref(requeued)} ${protectedWarning(protectedPaths)}`);
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
       const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
+      // Warn only: a re-run of such a ticket costs a pipeline and ends held for the same paths.
+      // Last, and never fatal: a failed re-read of the ticket must not undo a requeue that happened.
+      try {
+        const protectedPaths = protectedForTicket(project, id, tracker.get(id).body ?? "");
+        if (protectedPaths.length) console.log(`${tracker.ref(id)} ${protectedWarning(protectedPaths)}`);
+      } catch {}
       break;
     }
     case "blockers": {
