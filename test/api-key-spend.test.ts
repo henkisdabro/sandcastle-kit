@@ -8,13 +8,15 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
 
-const TMP = mkdtempSync(join(tmpdir(), "sandcastle-api-key-"));
+// Real path: macOS's tmpdir is under /var, a link to /private/var, and the kit names the project's
+// .env by git's root (the real path) - a test comparing it with the linked path fails only on a Mac.
+const TMP = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-api-key-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 process.env.XDG_CONFIG_HOME = join(TMP, "xdg-in-process");
 const { apiKeySpend, credentialSource, USER_CONFIG } = await import("../src/sandbox.ts");
