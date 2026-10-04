@@ -19,6 +19,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { confirm } from "./autonomy.ts";
+import { clickHintLine, resolveClickHint } from "./click-hint.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
@@ -271,8 +272,10 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
   console.log(
     `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove` takes the block out"}.` +
       `\n  prefix+shift+s  status view    prefix+shift+e  last run's report    prefix+shift+a  sandboxes first in Agents` +
-      `\n  (the prefix is ctrl+b unless you changed it). Ctrl-click a ticket in the status view for its log.`,
+      `\n  (the prefix is ctrl+b unless you changed it). A click on a ticket in the status view opens its log, with the key below.`,
   );
+  // Ctrl-click is macOS's right-click in iTerm2: which key the view will name, said where the plugin is set up.
+  console.log(clickHintLine(resolveClickHint()));
 };
 
 // ---------------------------------------------------------------------------
