@@ -294,7 +294,21 @@ export type LandContext = {
   landed: Map<string, { files: string[]; commit: string }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
+  /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
+  reds?: Map<string, RedLanding>;
 };
+
+/** What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit. */
+export type RedLanding = { head: string; base: string; failure: NonNullable<GateRun["failure"]>; gates: GateRun["gates"] };
+
+/**
+ * The red landing gate a requeue repairs from, without running the gates again: the landing gate's own, when
+ * the requeue's merge joined the same base tip to the same branch head (`joined`), which is the same
+ * tree and so the same red. A moved base, or a failure a repair cannot start from (a setup step, a
+ * gate that timed out), leaves it to the gates, as before.
+ */
+export const repairFromRed = (red: RedLanding | undefined, joined: { head: string; base: string } | undefined) =>
+  red && joined && red.head === joined.head && red.base === joined.base && red.failure.name !== "setup" && red.failure.exitCode !== 124 ? red : undefined;
 
 /**
  * Before a pipeline takes a sandbox slot: wait while a landing wants one. Slots are polled every
@@ -482,6 +496,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       // The pair, named: which tickets this one is red with.
       const earlier = since().map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
+      if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates });
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
     }
     if (result.kind === "merged") {

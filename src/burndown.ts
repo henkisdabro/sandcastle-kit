@@ -54,7 +54,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -781,6 +781,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   };
 
+  // Each ticket's red landing gate, for its requeue (`ctx.reds`).
+  const reds = new Map<string, RedLanding>();
+
   const pipeline = async (issue: Issue): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
@@ -844,6 +847,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // merge. Read from the merge itself: the landing worker can move the base between a host
       // rev-parse and the merge, and the newly landed lines would then read as strays.
       let baseTip: string | undefined;
+      // A clean merge of the base into the branch: what the requeue compares with its landing gate's red (`repairFromRed`).
+      let joined: { merge: string; head: string; base: string } | undefined;
       if (behind > 0 && carried) {
         const identity = hostIdentity(project.root);
         const merge = `git ${identity} merge --no-edit ${shq(base)}`;
@@ -871,7 +876,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
               `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
             );
           }
-        } else if (pull.exitCode === 0) console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
+        } else if (pull.exitCode === 0) {
+          console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
+          // The merge commit and the two commits it joined, read in the sandbox that made it: a base that moved
+          // between a host read and the merge is then never mistaken for the tip the landing gate ran on.
+          const [merge, head, joinedBase] = (await sandbox.exec("git rev-list --parents -n 1 HEAD")).stdout.trim().split(/\s+/);
+          if (joinedBase) joined = { merge, head, base: joinedBase };
+        }
         else if (unmerged) {
           mergeConflicted = true;
           console.log(
@@ -1111,7 +1122,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
-      let gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
+      // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
+      // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red, and the
+      // repair starts from the landing gate's own output.
+      const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch]) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
+      reds.delete(issue.id);
+      let gated: Awaited<ReturnType<typeof runGates>>;
+      if (redAtLanding) {
+        console.log(`${ref(issue.id)}: ${base} has not moved since ${redAtLanding.failure.name} went red at landing - no gate run; the repair starts from that output.`);
+        gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
+      } else gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
       // The forced red is named as such everywhere it shows: "ruff red" for a
       // gate that passed sent a reader looking for a ruff failure.
       let forced = false;
@@ -1305,6 +1325,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     gate: (box, id) => runGates(box, id),
     landed: new Map(),
     slotWanted,
+    reds,
   };
 
   const results: PromiseSettledResult<Outcome>[] = [];
