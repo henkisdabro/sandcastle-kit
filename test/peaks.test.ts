@@ -165,7 +165,7 @@ const reading = (over: Record<string, unknown> = {}) => ({
   hostCpus: () => 16,
   freeDisk: () => 100 * GIB,
   exists: () => false,
-  home: () => "/home/made-up",
+  home: () => "/home/user",
   platform: "darwin" as const,
   ...over,
 });

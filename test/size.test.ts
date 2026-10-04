@@ -26,7 +26,7 @@ const reading = (info: object | undefined, over: Partial<Readers> = {}): Readers
   hostCpus: () => 16,
   freeDisk: () => 120 * GIB,
   exists: () => false,
-  home: () => "/home/made-up",
+  home: () => "/home/user",
   platform: "darwin",
   ...over,
 });
@@ -41,7 +41,7 @@ test("8 CPUs and 8 GiB: 4 sandboxes set by memory, 1 gate set by CPUs, each figu
   assert.equal(recommend(8 * GIB, 8).sandboxes, 4);
   assert.match(out, /maxGates: 1 {2}\(CPUs: floor\(8 \/ 6\) = 1\)/);
   assert.match(out, /2 GiB headroom, 1\.5 GiB per sandbox/, "the assumed figures are printed");
-  assert.match(out, /Free disk for images and worktrees: 120 GiB \(\/home\/made-up\)/);
+  assert.match(out, /Free disk for images and worktrees: 120 GiB \(\/home\/user\)/);
 });
 
 test("the smaller of memory and CPUs sets the sandboxes, within 1 and 12", () => {
@@ -126,7 +126,7 @@ test("the free disk is read where the Docker data root is on this host, else the
   const info = { ...orbstack(8, 8), DockerRootDir: "/var/lib/docker" };
   sizeLines(reading(info, { ...probe, exists: () => true }), {}, {});
   sizeLines(reading(info, { ...probe, exists: () => false }), {}, {});
-  assert.deepEqual(asked, ["/var/lib/docker", "/home/made-up"]);
+  assert.deepEqual(asked, ["/var/lib/docker", "/home/user"]);
   assert.match(text(sizeLines(reading(orbstack(8, 8), { freeDisk: () => undefined }), {}, {})), /Free disk for images and worktrees: unknown/);
 });
 
