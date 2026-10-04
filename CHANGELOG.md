@@ -43,6 +43,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The mod's castle loops, in time.** While a ticket is in work it builds one level per 500 ms
+  beat, stands complete for seven beats and builds again: a 6-second loop of twelve beats, where a
+  16-second hold read as the run standing still.
 - **Sandbox agents can no longer use Monitor, ScheduleWakeup, CronCreate, CronDelete, CronList or
   RemoteTrigger.** The sandbox's managed settings deny them, so a pass cannot sit waiting on a
   backgrounded suite, spending tokens and the machine's shared gate slots.

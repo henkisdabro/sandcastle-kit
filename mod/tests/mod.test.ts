@@ -93,7 +93,9 @@ const STATUS = { command: "sandcastle-status", args: "", origin: { kind: "compos
 const CLOSE = (how: string) => `The sandcastle run in /work ${how}. Close it now: read run.md in the sandcastle skill's directory and follow it.`;
 
 // How long the castle takes to build, from level sand to complete (run-state.ts, CASTLE_FRAMES).
-const BUILD = 2200;
+const BUILD = 2500;
+// How long it then stands complete before building again.
+const HOLD = 3500;
 
 test("a live run draws the castle and the status view's legend, on every surface that draws", async ($, on) => {
   const w = world(on);
@@ -138,9 +140,10 @@ test("while a ticket is in work the castle builds from level sand, holds, and bu
   await w.clock.advance(BUILD - 800);
   expect(await shows("▄ ▄ ▄")).toBe(true);
   expect(await shows("█████")).toBe(true);
-  await w.clock.advance(15000);
+  // It holds complete for 3.5 s (HOLD), then starts again from level sand.
+  await w.clock.advance(HOLD - 500);
   expect(await shows("▄ ▄ ▄")).toBe(true);
-  await w.clock.advance(1000);
+  await w.clock.advance(500);
   expect(await shows("▁▁▁▁▁")).toBe(true);
 });
 
