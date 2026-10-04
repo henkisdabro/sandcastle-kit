@@ -546,8 +546,12 @@ export const ticketFileOf = (paths: string[], id: string, slug: (s: string) => s
 
 // `t`: no network call. The GitHub URL comes from the origin remote, a ticket file from git's own list
 // of the repository's files - the card does not load the project's config.ts to learn its tracker.
-const trackerLink = (root: string, id: string, slug: (s: string) => string) => {
-  const git = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+// The root comes from the clicked log's path, and an agent can print a link to a log in a repo of
+// its own making under its worktree: that repo's config must not run anything on the host, so its
+// fsmonitor and hooks are switched off on the command line, which outranks any config file.
+export const trackerLink = (root: string, id: string, slug: (s: string) => string) => {
+  const git = (args: string[]) =>
+    spawnSync("git", ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   if (/^\d+$/.test(id)) {
     const remote = git(["remote", "get-url", "origin"]);
     const url = remote.status === 0 ? githubIssueUrl(remote.stdout, id) : undefined;

@@ -8,7 +8,8 @@
 //   pnpm exec tsx --test test/herdr-ticket-card.test.ts
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -17,7 +18,7 @@ import { HERDR_PLUGIN, KIT, runKit } from "./cli-spawn.ts";
 
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-card-config-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-card-cache-"));
-const { cardKey, githubIssueUrl, ticketCard, ticketFileOf } = await import("../src/herdr-plugin.ts");
+const { cardKey, githubIssueUrl, ticketCard, ticketFileOf, trackerLink } = await import("../src/herdr-plugin.ts");
 const { ticketPasses } = await import("../src/report.ts");
 const { slug } = await import("../src/tracker.ts");
 type CardFacts = import("../src/herdr-plugin.ts").CardFacts;
@@ -206,4 +207,18 @@ test("the card refuses a file that is not a sandcastle log", () => {
   const r = runKit(["herdr", "card"], { script: HERDR_PLUGIN, encoding: "utf8", env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, SANDCASTLE_LOG: join(project, "README.md") } });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /not a sandcastle log/);
+});
+
+test("t on a ticket file's card runs nothing from the clicked repo's own git config", () => {
+  // A repo an agent made under its worktree, with a log it can print a link to.
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-card-fsmonitor-")));
+  const ran = join(repo, "fsmonitor-ran");
+  const git = (...args: string[]) => assert.equal(spawnSync("git", ["-C", repo, ...args]).status, 0, args.join(" "));
+  git("init", "-q");
+  const hook = join(repo, "hook.sh");
+  writeFileSync(hook, `#!/bin/sh\ntouch '${ran}'\n`);
+  chmodSync(hook, 0o755);
+  git("config", "core.fsmonitor", hook);
+  trackerLink(repo, "x-1", slug);
+  assert.equal(existsSync(ran), false, "the repo's fsmonitor hook ran");
 });
