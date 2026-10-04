@@ -26,6 +26,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- **The status view's click hint names the key that works in your terminal.** The terminal is
+  sensed once, from the attached Herdr client, when the view starts: `cmd-click` in iTerm2 (where
+  Ctrl-click is macOS's right-click), `ctrl-click` in Terminal.app and Ghostty, and both elsewhere.
+  `"herdr": {"clickHint": "auto" | "ctrl" | "cmd"}` in the personal config.json, or
+  `SANDCASTLE_CLICK_HINT`, overrides it; `sandcastle doctor` and `sandcastle herdr configure` say
+  which terminal was sensed and which hint the view shows.
 - **Agents can suggest an Upgrading note.** With `changelog: true`, a line starting `Upgrading:` says
   what an existing project must act on; the closing summary lists such lines in a block of their own,
   apart from the changes, where an instruction used to be folded into a `Changed:` line or left in an
@@ -43,6 +49,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **Ctrl-clicking a ticket in Herdr's status view opens its card**, not its latest raw log: its state
+  and how long it has been in it, each pass with its outcome and time, and why it is held, in
+  conflict or red. A digit opens that pass's log, `t` prints the tracker link, and `q`, Esc or
+  Ctrl-C closes it.
+- **A full review sees the ticket's comments and the implementer's `<unmet>` line**, and is asked to
+  finish that criterion or restate it, so scope added in a comment is no longer closed as done.
+- **The run estimate prices the tickets as their summed figures over the slots**, never shorter than
+  the slowest single ticket, where one ticket more than the slots doubled it.
 - **The mod's castle loops, in time.** While a ticket is in work it builds one level per 500 ms
   beat, stands complete for seven beats and builds again: a 6-second loop of twelve beats, where a
   16-second hold read as the run standing still.
@@ -63,6 +77,23 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The Herdr log popup says which key closes it**: a followed log's bottom line reads "Following new
+  lines - Ctrl-C closes this popup" in place of "Waiting for data", a finished or short log's says
+  that `q` closes it and `F` follows, and Ctrl-C closes a short log's popup too. The report popup
+  says `q` closes it.
+- **The status view no longer says "closes on push"** for a hand merge already on the remote's base
+  branch.
+- **A ticket handed back or held for a human prints a line to the run's output** when it happens,
+  instead of dropping silently out of the `working:` line until the closing summary.
+- **A run killed while Herdr was up gets its closing report in its own tab** even when Herdr restarts
+  some time after the kill, not only when the kill and the restart happen together.
+- **With two Herdr servers on one machine, only the one holding a dead run's tab acts on it**: the
+  other no longer types the report into a pane of the same id, or removes the run's file first.
+- **After a Herdr restart, a live run's tab gets its status view back** on the next tab-bar tick, and
+  a run that ends after a restart (or is stopped by a closing Herdr's hangup) shows its closing
+  report in its tab instead of finishing silently.
+- **A status view opened before `sandcastle herdr configure` linked the plugin** shows ticket links
+  and the click hint within one redraw, and drops them when the plugin is unlinked.
 - **The usage guard finds the Claude Code login when `CLAUDE_CONFIG_DIR` is set.** Claude Code keeps
   that login in the keychain as `Claude Code-credentials-<h>` (the first 8 hex characters of the
   SHA-256 of the directory's path); the guard looked only for the default name, fell back to a setup
