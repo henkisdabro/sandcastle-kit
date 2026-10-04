@@ -19,13 +19,20 @@ import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
-export const run = (cmd: string, args: string[], cwd?: string) => {
+export const run = (cmd: string, args: string[], cwd?: string, timeout?: number) => {
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd }).trim();
+    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd, timeout }).trim();
   } catch {
     return undefined;
   }
 };
+
+/**
+ * Doctor's build-cache line, or undefined when Docker is down or slow. `docker system df` sizes every
+ * container's files, and with a busy container (a test suite in one) it took over a minute: an info
+ * line is not worth holding doctor for, so it gets a few seconds.
+ */
+export const buildCacheLine = (timeout = 5000) => buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"], undefined, timeout) ?? "");
 
 /** The first Claude Code that loads mods (plugins whose hooks run inside it). */
 const MOD_MIN = [2, 1, 287];
@@ -509,7 +516,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
     // Info, never a FIX. Silent when Docker is down.
-    const cache = buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"]) ?? "");
+    const cache = buildCacheLine();
     if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));

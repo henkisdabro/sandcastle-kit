@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { buildCacheNote } from "../src/doctor.ts";
+import { buildCacheLine, buildCacheNote } from "../src/doctor.ts";
 import { buildArgs, KIT_LABEL, removeDanglingImages, removeExitedSandboxes } from "../src/sandbox.ts";
 
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-cleandocker-")));
@@ -133,4 +133,14 @@ test("the build-cache line is silent for output it does not understand", () => {
   assert.equal(buildCacheNote(""), undefined);
   assert.equal(buildCacheNote("TYPE SIZE\nBuild Cache 34GB"), undefined);
   assert.equal(buildCacheNote('{"Type":"Images","Size":"1GB"}'), undefined);
+});
+
+test("doctor's build-cache line gives up on a slow docker instead of holding doctor", () => {
+  const bin = tmp();
+  // exec: the timeout kills docker itself, as with the real CLI, not a shell left holding the pipe.
+  writeFileSync(join(bin, "docker"), "#!/bin/sh\nexec sleep 30\n");
+  chmodSync(join(bin, "docker"), 0o755);
+  const started = Date.now();
+  assert.equal(withPath(bin, () => buildCacheLine(300)), undefined);
+  assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
 });
