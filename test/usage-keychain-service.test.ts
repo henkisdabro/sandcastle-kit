@@ -20,9 +20,9 @@ test("an unset or empty CLAUDE_CONFIG_DIR reads the unsuffixed service", () => {
 });
 
 test("a set CLAUDE_CONFIG_DIR reads the service suffixed with its hash, a trailing slash removed first", () => {
-  // The suffix is the first 8 hex of `printf %s /Users/someone/.claude-alt | sha256sum`.
-  assert.equal(keychainService("/Users/someone/.claude-alt"), "Claude Code-credentials-3bd5efba");
-  assert.equal(keychainService("/Users/someone/.claude-alt/"), "Claude Code-credentials-3bd5efba");
+  // The suffix is the first 8 hex of `printf %s /home/user/claude-alt | sha256sum`.
+  assert.equal(keychainService("/home/user/claude-alt"), "Claude Code-credentials-206758aa");
+  assert.equal(keychainService("/home/user/claude-alt/"), "Claude Code-credentials-206758aa");
 });
 
 test("the real keychain reader asks `security` for that service, and doctor names it", () => {
@@ -33,9 +33,9 @@ test("the real keychain reader asks `security` for that service, and doctor name
   const before = { path: process.env.PATH, dir: process.env.CLAUDE_CONFIG_DIR };
   try {
     process.env.PATH = `${bin}${delimiter}${before.path}`;
-    process.env.CLAUDE_CONFIG_DIR = "/Users/someone/.claude-alt/";
+    process.env.CLAUDE_CONFIG_DIR = "/home/user/claude-alt/";
     assert.equal(hostLoginReaders.keychain(), undefined);
-    assert.equal(loginLocation("darwin"), 'keychain service "Claude Code-credentials-3bd5efba"');
+    assert.equal(loginLocation("darwin"), 'keychain service "Claude Code-credentials-206758aa"');
     delete process.env.CLAUDE_CONFIG_DIR;
     assert.equal(hostLoginReaders.keychain(), undefined);
     assert.equal(loginLocation("darwin"), 'keychain service "Claude Code-credentials"');
@@ -45,7 +45,7 @@ test("the real keychain reader asks `security` for that service, and doctor name
     else process.env.CLAUDE_CONFIG_DIR = before.dir;
   }
   assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
-    "find-generic-password -s Claude Code-credentials-3bd5efba -w",
+    "find-generic-password -s Claude Code-credentials-206758aa -w",
     "find-generic-password -s Claude Code-credentials -w",
   ]);
 });
