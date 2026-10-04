@@ -13,7 +13,9 @@
 # Prints one summary line per step and RESULT: PASS or FAIL; a failure's output is shown, the rest
 # kept in a temp directory.
 #
-# FULL_CHECK_SHARDS sets the shards per pass (default: half the cores, 1 to 6).
+# Shards per pass: the cores shared out between the suite passes running at once (macOS, the
+# agent identity and, with Docker, Linux), about two cores a shard, 1 to 6 (test/shard-count.sh).
+# FULL_CHECK_SHARDS sets the number instead.
 #
 #   bash test/full-check.sh [base]     # base defaults to origin/main
 #   NO_DOCKER=1 bash test/full-check.sh  # skip the Linux step
@@ -61,7 +63,7 @@ leg_bash32() {
 leg_linux() {
   # COPYFILE_DISABLE: macOS tar would add an AppleDouble `._` file beside each one.
   git ls-files -z -co --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - 2>/dev/null \
-    | docker run --rm -i node:24-trixie bash -c '
+    | docker run --rm -i -e FULL_CHECK_SHARDS="$shards" node:24-trixie bash -c '
       set -e
       apt-get update -qq >/dev/null && apt-get install -y -qq jq bsdutils git >/dev/null
       mkdir /w && cd /w && tar -xf -
@@ -69,9 +71,10 @@ leg_linux() {
       git config --global user.email t@example.com && git config --global user.name t
       corepack enable >/dev/null 2>&1 && CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
       pnpm exec tsc --noEmit
-      # The container has the whole VM to itself, so its shards are not halved by a second pass.
+      # The host worked out the count against its own cores; the VM may have fewer.
       bash test/status.test.sh >/tmp/status.log 2>&1 || { tail -20 /tmp/status.log; exit 1; }
-      FULL_CHECK_SHARDS=$(nproc) bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
+      [ "$FULL_CHECK_SHARDS" -le "$(nproc)" ] || export FULL_CHECK_SHARDS=$(nproc)
+      bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
       cat /tmp/t.log' >"$logs/linux.log" 2>&1 \
     && { printf 'pnpm test: '; tail -1 "$logs/linux.log"; } \
     || { echo "FAIL"; tail -60 "$logs/linux.log"; return 1; }
@@ -126,6 +129,14 @@ if [ -n "${NO_DOCKER:-}" ]; then
 elif ! docker info >/dev/null 2>&1; then
   docker_note="skipped: Docker is not running"
 fi
+
+# Every pass that runs at once, the Linux container's too (its VM takes its cores from this
+# machine), counts against the cores: all of them oversubscribed made a loaded machine's tests
+# time out. run-shards.sh and the container read the count from FULL_CHECK_SHARDS.
+passes=2
+[ -n "$docker_note" ] || passes=3
+shards="${FULL_CHECK_SHARDS:-$(bash test/shard-count.sh "" "$passes")}"
+export FULL_CHECK_SHARDS="$shards"
 
 # The Linux leg is the slowest (an image, an install), so it starts first.
 [ -n "$docker_note" ] || start linux leg_linux

@@ -21,6 +21,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 mkdirSync(join(root, "test"));
 mkdirSync(join(root, "bin"));
 copyFileSync(join(KIT, "test/run-shards.sh"), join(root, "test/run-shards.sh"));
+copyFileSync(join(KIT, "test/shard-count.sh"), join(root, "test/shard-count.sh"));
 writeFileSync(
   join(root, "bin/pnpm"),
   `#!/usr/bin/env bash
@@ -98,4 +99,17 @@ test("full-check.sh starts every leg before it waits on one, and runs no suite i
   assert.ok(wait > Math.max(...starts), "the one wait comes after the last start");
   assert.ok(code.some((l) => l.includes("test/run-shards.sh")));
   assert.ok(!code.some((l) => /pnpm (run )?test\b|tsx --test/.test(l) && !l.includes("printf")), "no serial suite run");
+});
+
+test("full-check.sh counts the Linux container's pass among those sharing the cores", () => {
+  const code = readFileSync(join(KIT, "test/full-check.sh"), "utf8");
+  assert.match(code, /passes=2\n\[ -n "\$docker_note" \] \|\| passes=3/);
+  assert.match(code, /test\/shard-count\.sh "" "\$passes"/);
+  assert.match(code, /docker run --rm -i -e FULL_CHECK_SHARDS="\$shards"/);
+});
+
+test("without a count, run-shards.sh uses shard-count.sh for one pass on these cores", () => {
+  const want = spawnSync("bash", [join(KIT, "test/shard-count.sh")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const r = run("", { FULL_CHECK_SHARDS: "" });
+  assert.equal(r.called.length, Number(want.stdout.trim()));
 });
