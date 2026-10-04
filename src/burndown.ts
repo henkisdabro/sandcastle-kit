@@ -275,7 +275,7 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
  * What a ticket's gates run is called in the pool's wait line. It names the project, as the landing
  * label does: with several projects' runs on one machine, "#252 gates" says nothing of which run waits.
  */
-export const gatesLabel = (project: { name: string }, ref: (id: string) => string, id: string): string => `${project.name} ${ref(id)} gates`;
+export const gatesLabel = (project: { name: string }, ref: (id: string) => string, id: string, what = "gates"): string => `${project.name} ${ref(id)} ${what}`;
 
 /** The tickets a turn runs plus the rest of the queue: a named ticket not queued (hand-picked) stays, as it was. */
 export const wholeQueue = (tracker: Tracker, named: Issue[]): Issue[] => [...named, ...tracker.queued(false).filter((t) => !named.some((n) => n.id === t.id))];
@@ -738,9 +738,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string) => {
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string) => {
     markLog(gatesLog(project, id), runId);
-    return gatesIn(project, sandbox, gatesLabel(project, ref, id), false, {
+    return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
       gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
       log: gatesLog(project, id),
@@ -1374,7 +1374,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     opener: sandboxOpener(project, image, planFile),
     withdrawal,
     host,
-    gate: (box, id) => runGates(box, id),
+    // Named apart: a green ticket's wait read as if its branch gates had started again.
+    gate: (box, id) => runGates(box, id, "landing gate"),
     landed: new Map(),
     slotWanted,
     reds,

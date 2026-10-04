@@ -20,3 +20,7 @@ test("the gates label names the project before the ticket", () => {
 test("the gates label follows the tracker's ref, as the landing label does", () => {
   assert.equal(gatesLabel({ name: "demo-app" }, (id) => `ENG-${id}`, "7"), "demo-app ENG-7 gates");
 });
+
+test("a landing's gates are named apart from the branch's own", () => {
+  assert.equal(gatesLabel({ name: "demo-app" }, (id) => `#${id}`, "261", "landing gate"), "demo-app #261 landing gate");
+});
