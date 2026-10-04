@@ -474,7 +474,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     },
   });
   const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
-  holds.start(schedule.start);
   const candidates = schedule.start.map((c) => c.ticket);
   const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
   const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
@@ -482,6 +481,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // `order` in run.json: a released ticket queues behind the ones already waiting for a sandbox.
   const order = new Map(candidates.map((t, at) => [t.id, at] as const));
   if (issues.length === 0) {
+    holds.start(schedule.start);
     console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
   }
@@ -502,6 +502,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const later = parked.find((p) => p.ticket.id === i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
+  // After the ticket list, not before its header: the shared-file lines are indented under it.
+  holds.start(schedule.start);
   console.log(versionsLine(versions));
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();
