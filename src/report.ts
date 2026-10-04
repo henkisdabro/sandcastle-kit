@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterTurn, DRAIN_CAP, type Level, rerunnable, stillOpen } from "./autonomy.ts";
+import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
@@ -44,6 +44,10 @@ export type Facts = {
   outcomes?: Record<string, OutcomeKind>;
   /** Blocked tickets whose blockers are all closed now, after landing. */
   runnable: string[];
+  /** Merged partly done (a criterion left unmet) and still in the queue now; undefined when the queue could not be read. */
+  partial?: string[];
+  /** The tracker's hold label, for the step that moves a ticket out of the queue. */
+  holdLabel?: string;
   /** Blocked tickets still waiting, with each open blocker's label. */
   // `why`: by blocker label, what keeps one from closing (not planned, held, not queued).
   blocked: { id: string; on: string[]; why?: Record<string, string> }[];
@@ -210,6 +214,18 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     }
   }
 
+  // A partly-done ticket is merged and open; it runs again only while it is still in the queue.
+  let partial: string[] | undefined;
+  const partlyDone = Object.entries(tickets).filter(([, t]) => t.state === "merged" && t.unmet).map(([id]) => id);
+  if (partlyDone.length) {
+    try {
+      const queued = new Set(makeTracker(project).queued(false).map((t) => t.id));
+      partial = partlyDone.filter((id) => queued.has(id));
+    } catch {
+      partial = undefined;
+    }
+  }
+
   const upstream = git(["rev-parse", "--abbrev-ref", `${base}@{upstream}`], root);
   const ahead = upstream ? Number(git(["rev-list", "--count", `${upstream}..${base}`], root) ?? NaN) : undefined;
   const standing = (git(["branch", "--format=%(refname:short)", "--list", "agent/*"], root) ?? "")
@@ -266,6 +282,8 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     tickets,
     outcomes,
     runnable,
+    partial,
+    holdLabel: project.tracker.held,
     blocked,
     blockCheck,
     ahead: Number.isNaN(ahead) ? undefined : ahead,
@@ -315,7 +333,7 @@ export const settingsLines = (f: Facts): string[] => {
 
   const lines = [`Settings: ${items.join(" · ")}`];
   const again = level === 0 && !f.next ? rerunnable(f) : undefined;
-  const left = again ? [...new Set([...again.conflicted, ...again.unblocked])] : [];
+  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? [])])] : [];
   if (left.length) {
     lines.push(
       `Autonomy 0 makes one turn, and ${left.map(refOf).join(" ")} could run again: \`AUTONOMY_LEVEL=2\` (or \`drain\`) lets one \`sandcastle run\` take ` +
@@ -343,6 +361,13 @@ export const render = (f: Facts, plain = false): string => {
   // Merged with an acceptance criterion knowingly left undone: the ticket was left open on purpose.
   const partly = merged.filter((id) => f.tickets[id].unmet);
   const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
+  // What the next run does with each remainder, as the autonomy loop reads it (`partialRerunnable`): an agent
+  // runs it again while the ticket is queued, unless its own note says the remainder is a person's decision.
+  const partlyRerun = partialRerunnable(f);
+  const partlyDecide = partly.filter((id) => needsDecision(f.tickets[id].unmet!));
+  // Still open but out of the queue (a person held or unlabelled it): no run takes it. Unknown when the queue was unreadable.
+  const partlyAway = f.partial ? partly.filter((id) => !f.partial!.includes(id) && !partlyDecide.includes(id)) : [];
+  const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
@@ -486,7 +511,12 @@ export const render = (f: Facts, plain = false): string => {
       ...partly.map((id) => {
         const note = f.tickets[id].unmet ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
-        return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open, and the next \`sandcastle run\` picks up the remainder`;
+        const then = partlyDecide.includes(id)
+          ? `the remainder needs a person's decision (the agent's note), so a run would only ask it again: decide it and close the ticket, or move it to the hold label${holdLabel}`
+          : partlyAway.includes(id)
+            ? "the ticket is still open but no longer in the queue, so no run takes it"
+            : "and the next `sandcastle run` picks up the remainder";
+        return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open${partlyDecide.includes(id) || partlyAway.includes(id) ? "; " : ", "}${then}`;
       }),
       // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
       ...ungated.map((id) => {
@@ -540,6 +570,7 @@ export const render = (f: Facts, plain = false): string => {
   const runnableWhy = (id: string) => {
     const t = f.tickets[id] ?? {};
     if (t.state === "conflict") return "conflicted - its branch resumes";
+    if (partlyRerun.includes(id)) return "merged partly done - the remainder is still open";
     const overlap = /^waits for (\S+) \(this run\) - next run$/.exec(t.note ?? "");
     if (overlap) {
       const partner = Object.keys(f.tickets).find((k) => refOf(k) === overlap[1] || k === overlap[1]);
@@ -549,7 +580,7 @@ export const render = (f: Facts, plain = false): string => {
     const on = /^waits for (.*)$/.exec(t.note ?? "")?.[1]?.replace(/\s*\([^)]*\)/g, "").split(",").map((l) => l.trim()).filter(Boolean) ?? [];
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable])];
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     `▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`,
@@ -599,7 +630,10 @@ export const render = (f: Facts, plain = false): string => {
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
   if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
-  if (partly.length) next.push(`Read what is left on ${list(partly)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
+  const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
+  if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
+  if (partlyDecide.length) next.push(`Decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is settled, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
+  if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
