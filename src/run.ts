@@ -538,7 +538,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
 // ---------------------------------------------------------------------------
 // Typical times - how long each step of an issue usually takes in this
 // project, from earlier runs' timings. The status view marks a step running
-// at twice its usual time, and estimates when landing starts: a run that is
+// at twice its usual time (and says so in words at three times), and estimates when landing starts: a run that is
 // busy but healthy and one that is stuck looked the same for an hour.
 // ---------------------------------------------------------------------------
 

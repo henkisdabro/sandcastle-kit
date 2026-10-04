@@ -874,10 +874,16 @@ render() {
             fi
           fi
         fi
-        # Busy but healthy, or stuck: a step at twice its usual length says which to suspect.
+        # Busy but healthy, or stuck: a step at twice its usual length says which to suspect,
+        # and at three times it says so in words and in the activity's colour too, since
+        # nothing else bounds an agent pass that keeps producing output.
         typ=$(typical_of "$tstate")
-        if [[ "$typ" =~ ^[0-9]+$ ]] && [ "$typ" -gt 0 ] && [ $(( now_s - since )) -gt $(( typ * 2 )) ]; then
-          age_col="$hot"; activity="usually $(ago "$typ") - $activity"
+        if [[ "$typ" =~ ^[0-9]+$ ]] && [ "$typ" -gt 0 ]; then
+          if [ $(( now_s - since )) -gt $(( typ * 3 )) ]; then
+            age_col="$hot"; act_col="$hot"; activity="3x over, usually $(ago "$typ") - $activity"
+          elif [ $(( now_s - since )) -gt $(( typ * 2 )) ]; then
+            age_col="$hot"; activity="usually $(ago "$typ") - $activity"
+          fi
         fi;;
     esac
     # A ticket landing sent back keeps saying so through its second attempt.
