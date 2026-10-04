@@ -13,9 +13,11 @@ CWD=$(jq -r '.cwd // empty' <<<"$INPUT")
 # The match is on the command string, so a heredoc, commit message or comment body that only quotes
 # a refused command is refused too. The second sentence tells the agent how to carry such text
 # (a file), so it does not have to go against "do not retry" to find out. A refused file write has
-# no text to move, so it passes a second argument to leave the sentence out.
+# no text to move, so it passes a second argument to leave the sentence out. A third is a hint line
+# naming the allowed way to do the same thing.
 deny() {
   echo "BLOCKED: $1. It would damage the .git that other agents share. Continue the ticket without it; do not retry." >&2
+  [ -z "$3" ] || echo "$3" >&2
   [ -n "$2" ] || echo "If this command only quotes that text (a heredoc, a commit message, a comment body) and does not run it, write the text to a file and pass the file instead: --body-file <file>, -F <file>, git commit -F <file>." >&2
   exit 2
 }
@@ -32,7 +34,45 @@ fi
 # The branch rule's flag and ref stay inside the one command (no `;`, `&`, `|` or backtick between
 # them): `.*` ran into a later `git merge --no-ff`, whose `-ff` looked like `-f`.
 GIT='(^|[;&|(`])[[:space:]]*(sudo[[:space:]]+)?git([[:space:]]+(-C[[:space:]]+[^[:space:]]+|-c[[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?))*[[:space:]]+'
-grep -qE "${GIT}(update-ref|gc|prune|push)([[:space:]]|\$)" <<<"$CMD" && deny "git update-ref, gc, prune or push"
+
+# update-ref, gc and prune act on the repository git resolves, so one run with `git -C <path>` in a
+# scratch repository elsewhere (a reviewer's throwaway under the temp dir) damages nothing here. Allowed
+# only when every `-C` resolves to a common dir other than the shared one: a worktree of the shared repo
+# resolves to it and stays refused. A command with no `-C` acts in the hook's cwd, so a leading `cd x &&`
+# is not parsed and stays refused, as does a path git cannot resolve ($VAR, ~, quotes) and `--git-dir`.
+# push is refused everywhere: its danger is the destination, and a scratch repo's remote can be the shared .git.
+# The shared dir here is the one of the dir Claude Code started in (CLAUDE_PROJECT_DIR), not COMMON: the
+# shell's cwd moves with a `cd`, and from inside the scratch repo COMMON is the scratch's own dir, so a
+# `-C` back into the project would pass. Without it the shared dir is unknown and these stay refused.
+PROJECT_COMMON=
+[ -z "$CLAUDE_PROJECT_DIR" ] || PROJECT_COMMON=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+scratch_only() {
+  local words w args=() pending= sub
+  sub=$(sed -E 's/^[;&|(`[:space:]]*(sudo[[:space:]]+)?git[[:space:]]+//' <<<"$1")
+  set -f; read -r -a words <<<"$sub"; set +f
+  unset 'words[${#words[@]}-1]'
+  for w in "${words[@]}"; do
+    if [ -n "$pending" ]; then
+      [ "$pending" = C ] && args+=("$w")
+      pending=
+      continue
+    fi
+    case "$w" in
+      -C) pending=C;;
+      -c) pending=c;;
+      --git-dir*|--work-tree*) return 1;;
+    esac
+  done
+  [ ${#args[@]} -gt 0 ] && [ -n "$PROJECT_COMMON" ] || return 1
+  local target cargs=() a
+  for a in "${args[@]}"; do cargs+=(-C "$a"); done
+  target=$(git -C "${CWD:-.}" "${cargs[@]}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [ -n "$target" ] && [ "$target" != "$PROJECT_COMMON" ]
+}
+while IFS= read -r m; do
+  scratch_only "$m" || deny "git update-ref, gc or prune" "" "It is allowed in a scratch repository elsewhere, run as git -C <path> <command> with <path> outside this project (build one under the temp dir)."
+done < <(grep -oE "${GIT}(update-ref|gc|prune)([[:space:]]|\$)" <<<"$CMD")
+grep -qE "${GIT}push([[:space:]]|\$)" <<<"$CMD" && deny "git push" "" "To test remote handling, build a bare origin under the temp dir and use git fetch, and use git -C <path> for a scratch repository's own plumbing."
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
 grep -qE "${GIT}worktree[[:space:]]+(prune|repair)" <<<"$CMD" && deny "git worktree prune or repair (git worktree remove --force is allowed)"
 grep -qE "${GIT}branch[[:space:]]([^;&|\`]*[[:space:]])?(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]][^;&|\`]*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
