@@ -522,7 +522,7 @@ test("conflict, requeued, merged: the second landing is the outcome and the stat
     },
   }));
   assert.ok(atSecond, "a second attempt began");
-  assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; it is tried again in this run."]);
+  assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; it is tried again in this run.", "#2: merged."]);
   assert.deepEqual(atSecond.record, { ...atSecond.record, state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1" });
   assert.equal(atSecond.requeuedAs, "requeued after conflict with #1");
   assert.deepEqual(atSecond.recorded, [], "nothing is accounted while the second attempt is to come");
@@ -581,7 +581,8 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
   assert.equal(r.seen.line("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
   assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1 (gate test)" }, "conflict", ["1"]]);
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1 (gate test)"]);
-  assert.deepEqual(r.seen.said, []);
+  // Each landing's own line, and no requeue line.
+  assert.deepEqual(r.seen.said, ["#2: red when merged.", "#3: merge conflict."]);
 });
 
 test("requeued, then withdrawn before the second start: withdrawn, not green, and the first pipeline's entry dropped", async () => {
@@ -683,7 +684,7 @@ test("a closed queue is checked before a requeue: the normal conflict outcome, n
   });
   await assert.rejects(run, boom);
   assert.equal(seen.told.some((c) => c.kind === "requeued"), false);
-  assert.deepEqual(seen.said, []);
+  assert.deepEqual(seen.said, ["#2: merge conflict."]);
   assert.equal(seen.ledger.requeuedAs.has("2"), false);
   assert.deepEqual(seen.ledger.entries.get("2")?.ending, { kind: "landing", green: waiting("2"), landed: conflictWith1, attempts: 1 });
   assert.deepEqual(seen.outcomes.get("2"), { kind: "conflict", with: ["1"], text: "merge conflict: with #1: shared.txt" });
