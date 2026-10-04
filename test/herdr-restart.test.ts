@@ -1,8 +1,9 @@
 // A Herdr restart mid-run leaves the run's own tab as idle shells: the status view died with the
 // server. While the run is live, each tab-bar tick that finds the recorded status pane a bare shell
 // starts the view there again. A run that then ends (cleanly, or stopped by the restart's hangup)
-// leaves its live-runs file while its own tab is unreported, so the tick reports there once and the
-// file goes; a run in a tab adopted from a person's terminal removes its file at exit as before.
+// moves its live-runs file to the awaiting directory while its own tab is unreported; after a restart
+// the startup hook puts it back, the tick reports there once and the file goes. A run in a tab adopted
+// from a person's terminal removes its file at exit as before.
 // Real child processes for the exit, a fake `herdr` that logs every call; no Herdr, no network.
 //
 //   pnpm exec tsx --test test/herdr-restart.test.ts
@@ -33,9 +34,9 @@ const log = join(mkdtempSync(join(tmpdir(), "sandcastle-restart-log-")), "calls.
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, FAKE_LOG: log, XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), "sandcastle-restart-cache-")) });
 // The harness may itself run in Herdr: a socket of its own would make every record another server's.
 delete process.env.HERDR_SOCKET_PATH;
-const { replaceDeadTab, runsLine } = await import("../src/herdr-plugin.ts");
+const { replaceDeadTab, requeueAwaiting, runsLine } = await import("../src/herdr-plugin.ts");
 const { restartStatusView, viewRecord } = await import("../src/herdr.ts");
-const { runFile } = await import("../src/live-runs.ts");
+const { awaitingDir, runFile } = await import("../src/live-runs.ts");
 
 const KIT_DIR = "/the/kit";
 const calls = () => (readFileSync(log, "utf8") ? readFileSync(log, "utf8").trim().split("\n") : []);
@@ -97,17 +98,19 @@ const runToEnd = (root: string, signal?: string, plugin = true) => {
   return dir;
 };
 
-test("a clean exit with its own tab unreported keeps its live-runs file", () => {
+test("a clean exit with its own tab unreported moves its live-runs file to the awaiting directory", () => {
   const root = project(OWN);
   const dir = runToEnd(root);
-  assert.equal(readFileSync(runFile(root, dir), "utf8"), root);
+  assert.equal(existsSync(runFile(root, dir)), false, "the tab bar's gate is not held open");
+  assert.equal(readFileSync(runFile(root, awaitingDir(dir)), "utf8"), root);
   assert.ok(JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).finishedAt);
 });
 
-test("a stop on the restart's hangup keeps it too", () => {
+test("a stop on the restart's hangup moves it too", () => {
   const root = project(OWN);
   const dir = runToEnd(root, "SIGHUP");
-  assert.ok(existsSync(runFile(root, dir)));
+  assert.equal(existsSync(runFile(root, dir)), false);
+  assert.ok(existsSync(runFile(root, awaitingDir(dir))));
   assert.equal(JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).stoppedBy, "SIGHUP");
 });
 
@@ -116,6 +119,7 @@ test("an adopted tab, a tab already reported, or no view record: the file goes a
     const root = project(view);
     const dir = runToEnd(root);
     assert.equal(existsSync(runFile(root, dir)), false, JSON.stringify(view));
+    assert.equal(existsSync(runFile(root, awaitingDir(dir))), false, JSON.stringify(view));
   }
   const adopted = project({ ...OWN, adopted: true });
   assert.equal(existsSync(runFile(adopted, runToEnd(adopted, "SIGTERM"))), false, "a signal too");
@@ -123,30 +127,38 @@ test("an adopted tab, a tab already reported, or no view record: the file goes a
 
 test("without the plugin linked, a clean exit removes its file: nothing else would", () => {
   const root = project(OWN);
-  assert.equal(existsSync(runFile(root, runToEnd(root, undefined, false))), false);
+  const dir = runToEnd(root, undefined, false);
+  assert.equal(existsSync(runFile(root, dir)), false);
+  assert.equal(existsSync(runFile(root, awaitingDir(dir))), false);
 });
 
 test("a finished run's bare-shell status pane gets the report once, and the file goes", () => {
   const root = project(OWN);
   const dir = runToEnd(root);
-  // Herdr restarted after the run ended, or the hangup that stopped it was the restart's.
+  // Herdr restarted after the run ended, or the hangup that stopped it was the restart's: its startup
+  // hook puts the file back for the tick.
   reset("-zsh");
+  requeueAwaiting(dir, () => undefined);
   assert.equal(tick(dir), "");
   assert.deepEqual(typed(), [report(root)]);
   assert.equal(record(root).reported, true);
   assert.equal(readdirSync(dir).length, 0);
+  assert.equal(readdirSync(awaitingDir(dir)).length, 0);
   reset("-zsh");
   tick(dir);
   assert.deepEqual(calls(), []);
 });
 
-test("a finished run whose status view still runs keeps its file, with nothing typed", () => {
+test("a finished run whose status view still runs keeps its file awaiting, with nothing typed", () => {
   const root = project(OWN);
   const dir = runToEnd(root);
   reset("bash /kit/status.sh 5");
+  // A restart's startup hook while the view still shows (another server's restart, say): the tick puts it back.
+  requeueAwaiting(dir, () => undefined);
   for (const _ of [1, 2]) assert.equal(tick(dir), "");
   assert.deepEqual(typed(), []);
-  assert.ok(existsSync(runFile(root, dir)));
+  assert.equal(existsSync(runFile(root, dir)), false);
+  assert.ok(existsSync(runFile(root, awaitingDir(dir))));
   assert.equal(record(root).reported, undefined);
 });
 

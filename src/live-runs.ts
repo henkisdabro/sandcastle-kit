@@ -3,17 +3,25 @@
 // started in another directory. Written by the run itself (burndown.ts), with or without Herdr.
 // A run that dies without its exit handler leaves its file; readers ask `liveness` (the mod's
 // run-live.ts) about the run's pid and drop the file when the run is not live. A run whose Herdr
-// tab is still to be told how it ended leaves its file at a clean exit too (`registerRun`).
+// tab is still to be told how it ended moves its file to the awaiting directory beside it
+// (`registerRun`, and the readers for a run that died): the tab bar starts the kit only while
+// `runs` has a file, so a finished run kept there started it every tick for as long as its status
+// view ran, and for good on a Herdr server that never came back.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // `||`, not `??`: an empty XDG_CACHE_HOME is unset (the XDG rule, and the mod's shell reads it so).
 export const KIT_CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "sandcastle-kit");
 export const RUNS_DIR = join(KIT_CACHE, "runs");
+/** Beside the runs directory: finished runs whose own Herdr tab is still to be told how they ended, a file each, named as in `runs`. */
+export const awaitingDir = (runsDir = RUNS_DIR) => join(dirname(runsDir), "awaiting");
+// A tab not told within this many days of its run's end never will be: its server is gone, or the
+// tab was closed while the status view ran. Without an end its file stayed for good.
+export const AWAIT_REPORT_DAYS = 7;
 // Left by `sandcastle herdr configure` while the plugin is linked, and read by status.sh (at
 // this path, in shell) to know that a Ctrl-click on a ticket will open its card.
 export const PLUGIN_MARKER = join(KIT_CACHE, "herdr-plugin-linked");
@@ -55,7 +63,7 @@ export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-v
  * Whether the run's view record is a tab the kit opened for it (not one adopted from a person's
  * terminal) that has not been given the report. A Herdr restart leaves that tab as idle shells, and
  * a run that ends after it (or is stopped by the restart's hangup) has nothing else to say so: the
- * tab bar's tick reports there, but the tab bar runs the kit only while a file is in the directory.
+ * plugin reports there, from the awaiting directory.
  */
 const tabAwaitsReport = (root: string) => {
   try {
@@ -67,12 +75,40 @@ const tabAwaitsReport = (root: string) => {
   }
 };
 
+/** Moves a finished run's file (`file`, in `dir`), holding its root, to the awaiting directory. Best effort, as registering is. */
+export const awaitReport = (root: string, dir = RUNS_DIR, file = runFile(root, dir)): void => {
+  try {
+    mkdirSync(awaitingDir(dir), { recursive: true });
+    writeFileSync(runFile(root, awaitingDir(dir)), root);
+  } catch {
+    /* the tab goes untold, as with no plugin */
+  }
+  rmSync(file, { force: true });
+};
+
+/**
+ * Whether the run of `root` ended more than `AWAIT_REPORT_DAYS` ago: from its record's `finishedAt`,
+ * or, for a killed run that wrote none, the record's last change. No record reads as gone.
+ */
+export const awaitedTooLong = (root: string, now = Date.now()): boolean => {
+  const record = join(root, ".sandcastle/logs/run.json");
+  try {
+    const { finishedAt } = JSON.parse(readFileSync(record, "utf8")) as { finishedAt?: unknown };
+    const finished = typeof finishedAt === "string" ? Date.parse(finishedAt) : Number.NaN;
+    const ended = Number.isNaN(finished) ? statSync(record).mtimeMs : finished;
+    return now - ended > AWAIT_REPORT_DAYS * 24 * 60 * 60 * 1000;
+  } catch {
+    return true;
+  }
+};
+
 const registered = new Set<string>();
 
 /**
  * Registers this process's run of `root` and removes the file when the process exits (a clean end,
  * or a stop on SIGHUP, SIGINT or SIGTERM: run.ts runs the exit handlers), unless the run's own Herdr
- * tab is still to be told how it ended: then the readers remove it once it has been (`tellDeadTab`).
+ * tab is still to be told how it ended: then it moves to the awaiting directory, which the plugin's
+ * readers clear once the tab has been told (`tellDeadTab`).
  * The file holds the root as given: the tab bar compares it with the cwd Herdr reports. Once per
  * file: an autonomy run's next turn is the same process and the same run. Best effort - a cache
  * directory that cannot be written must not stop a run.
@@ -88,6 +124,7 @@ export const registerRun = (root: string, dir = RUNS_DIR): void => {
   if (registered.has(file)) return;
   registered.add(file);
   process.on("exit", () => {
-    if (!tabAwaitsReport(root)) rmSync(file, { force: true });
+    if (tabAwaitsReport(root)) awaitReport(root, dir, file);
+    else rmSync(file, { force: true });
   });
 };

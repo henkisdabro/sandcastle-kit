@@ -24,7 +24,7 @@ import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, restartStatusView, runCounts, tellDeadTab } from "./herdr.ts";
-import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
+import { awaitedTooLong, awaitingDir, awaitReport, commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord, type TicketState, WORDS } from "../mod/hooks/run-record.ts";
 import type { TicketPass } from "./report.ts";
@@ -289,7 +289,8 @@ type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: stri
  * Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed,
  * after `ended` has been told the root of a run whose record says so: its file is the last
  * sign of it, and the tab bar does not tick again for a run that is not registered. So `ended`
- * returning true keeps the file, for a tab still waiting to be told (`tellDeadTab`), or held by another Herdr server.
+ * returning true moves the file to the awaiting directory (`awaitReport`), for a tab still waiting to be
+ * told (`tellDeadTab`), or held by another Herdr server: kept here, it held the tab bar's gate open.
  * `live` is told the root of each live run (the tab bar restarts its status view, `restartStatusView`).
  */
 export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}, live: (root: string) => void = () => {}): Run[] => {
@@ -305,6 +306,7 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root:
     const file = join(dir, f);
     let root: string | undefined;
     let seen: string | undefined;
+    let awaits = false;
     try {
       root = readFileSync(file, "utf8").trim();
       seen = readRecord(root);
@@ -315,23 +317,76 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root:
         runs.push(run);
         continue;
       }
-      if (ended(root)) continue;
+      awaits = !!ended(root);
     } catch {
       /* no record: not a live run */
     }
     // The file is named by the project, so a new run of it registers under the same name: a record
     // that changed since it was judged is that run's, and its file stays for the next reader.
     if (root !== undefined && readRecord(root) !== seen) continue;
-    rmSync(file, { force: true });
+    if (awaits && root !== undefined) awaitReport(root, dir, file);
+    else rmSync(file, { force: true });
   }
   return runs.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 };
 
+/**
+ * The awaiting directory's files (`awaitReport`), as `[file, root]`, after removing those that no
+ * longer await anything: a run that ended more than `AWAIT_REPORT_DAYS` ago (`awaitedTooLong`), and a
+ * project running again, whose own file in the runs directory is the new run's (its view record is the
+ * new run's too, and a report typed into its tab would be a live run's).
+ */
+const awaiting = (dir: string, probe: Probe, now: number): [string, string][] => {
+  const parked = awaitingDir(dir);
+  const left: [string, string][] = [];
+  for (const f of existsSync(parked) ? readdirSync(parked) : []) {
+    const file = join(parked, f);
+    try {
+      const root = readFileSync(file, "utf8").trim();
+      if (!awaitedTooLong(root, now) && liveness({ record: JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")) }, probe).state !== "live") {
+        left.push([file, root]);
+        continue;
+      }
+    } catch {
+      /* no root or no record: nothing to tell */
+    }
+    rmSync(file, { force: true });
+  }
+  return left;
+};
+
+/**
+ * The tab bar, while live runs keep it ticking, tells the awaiting tabs too: `tell` is `replaceDeadTab`,
+ * and its true (the status view still showing, or the tab on another server) keeps the file.
+ */
+export const tellAwaiting = (dir = RUNS_DIR, tell: (root: string) => boolean = replaceDeadTab, probe: Probe = commandOf, now = Date.now()) => {
+  for (const [file, root] of awaiting(dir, probe, now)) if (!tell(root)) rmSync(file, { force: true });
+};
+
+/**
+ * The plugin's startup hook: a Herdr restart is what leaves a showing status view a bare shell, so each
+ * awaiting file goes back to the runs directory and the first tick tells its tab, from a session Herdr has
+ * restored (the hook need not wait for that). A tab still showing, or another server's, comes back here on that tick.
+ * `wx`: a file a new run of the project wrote meanwhile stays the new run's.
+ */
+export const requeueAwaiting = (dir = RUNS_DIR, probe: Probe = commandOf, now = Date.now()) => {
+  for (const [file, root] of awaiting(dir, probe, now)) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, basename(file)), root, { flag: "wx" });
+    } catch {
+      /* the new run's file, or a directory that cannot be written: the tab bar has nothing to tell */
+    }
+    rmSync(file, { force: true });
+  }
+};
+
 // Whichever reader of the runs directory drops a dead run's file first tells the tab: the tab bar's
-// next tick would find no file. A tab whose status view still runs keeps the file until it can be told.
-// A tab on another Herdr server keeps it too: that server's tab bar has yet to tell it. A run's exit
-// leaves its file while its own tab is unreported (live-runs.ts), so a run that ends after a Herdr
-// restart is told here too, and the tab is looked at every tick until it is reported or closed.
+// next tick would find no file. A tab whose status view still runs has its file moved to the awaiting
+// directory until it can be told; a tab on another Herdr server too: that server has yet to tell it.
+// A run's exit moves its file there while its own tab is unreported (live-runs.ts). From there the
+// startup hook after a Herdr restart (`requeueAwaiting`), and the tab bar while live runs keep it
+// ticking (`tellAwaiting`), tell the tab, until it is reported, closed or `AWAIT_REPORT_DAYS` old.
 export const replaceDeadTab = (root: string, kit?: string) => {
   const told = tellDeadTab(root, kit);
   return told === "showing" || told === "elsewhere";
@@ -760,7 +815,10 @@ export const herdrCommand = async (args: string[]) => {
     case "line": {
       // A live run's own tab after a Herdr restart gets its status view back on the next tick.
       const line = runsLine(undefined, undefined, undefined, replaceDeadTab, (root) => void restartStatusView(root));
-      if (line) console.log(line);
+      if (!line) return;
+      console.log(line);
+      // Only while live runs keep the tab bar ticking: with none, it does not start the kit at all.
+      tellAwaiting();
       return;
     }
     case "open": {
@@ -782,6 +840,8 @@ export const herdrCommand = async (args: string[]) => {
     case "view":
       return view(rest[0] === "reapply" ? "reapply" : "toggle");
     case "startup":
+      // First: putting the Agents view back throws outside Herdr, or on a server slow to answer.
+      requeueAwaiting();
       return view("reapply");
     default:
       throw new OperatorError("Usage: sandcastle herdr configure [--remove] [--yes]. The plugin's own verbs: line, open, open-log, card, view, startup.");

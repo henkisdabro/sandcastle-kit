@@ -33,6 +33,7 @@ delete process.env.HERDR_SOCKET_PATH;
 process.env.HERDR_ENV = "1";
 process.env.HERDR_PANE_ID = "p1";
 const { replaceDeadTab, runsLine } = await import("../src/herdr-plugin.ts");
+const { awaitingDir } = await import("../src/live-runs.ts");
 const { viewRecord, openSandboxView } = await import("../src/herdr.ts");
 
 const KIT_DIR = "/the/kit";
@@ -43,7 +44,9 @@ const probe = (pid: number) => (pid === process.pid ? everyPidIsTheKit() : undef
 /** A dead run's project and runs directory, with the view record it left. */
 const setup = (view: object) => {
   writeFileSync(log, "");
-  const dir = mkdtempSync(join(tmpdir(), "sandcastle-socket-runs-"));
+  // Inside a directory of its own: the awaiting directory is the runs directory's sibling.
+  const dir = join(mkdtempSync(join(tmpdir(), "sandcastle-socket-cache-")), "runs");
+  mkdirSync(dir);
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-socket-project-")));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   writeFileSync(join(dir, "run"), root);
@@ -57,12 +60,13 @@ const tick = (dir: string, socket: string | undefined) => {
   return runsLine(dir, undefined, probe, (root) => replaceDeadTab(root, KIT_DIR));
 };
 
-test("a caller on another server makes no herdr call, types nothing and keeps the run's file", () => {
+test("a caller on another server makes no herdr call, types nothing and keeps the run's file awaiting", () => {
   const { dir, root } = setup({ ...OWN, socket: "/run/herdr-a.sock" });
   const before = readFileSync(viewRecord(root), "utf8");
   assert.equal(tick(dir, "/run/herdr-b.sock"), "");
   assert.deepEqual(calls(), []);
-  assert.equal(readdirSync(dir).length, 1, "the file stays for the server that holds the tab");
+  assert.equal(readdirSync(dir).length, 0, "the tab bar's gate is not held open");
+  assert.equal(readdirSync(awaitingDir(dir)).length, 1, "the file stays for the server that holds the tab");
   assert.equal(readFileSync(viewRecord(root), "utf8"), before);
 });
 

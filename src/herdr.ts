@@ -104,8 +104,8 @@ const writeView = (root: string, view: View) => {
  * (a later run inside Herdr still closes that tab). The record is only rewritten by a run that
  * opens a view, so it would otherwise stay an own, unreported tab: the tab bar's tick would type
  * the status view into its pane, ids a Herdr restart may have given to someone's shell, and
- * `registerRun` would keep this run's live-runs file for it. Nothing to do when there is no record
- * or it is already reported; best effort, as the view is.
+ * `registerRun` would park this run's live-runs file in the awaiting directory for it. Nothing to do
+ * when there is no record or it is already reported; best effort, as the view is.
  */
 const retireViewRecord = (root: string) => {
   try {
@@ -166,16 +166,17 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * That one is `showing`, the status view still running in the recorded pane: the tab may yet need
  * the report, once a later restart leaves the pane a bare shell (or a quit, in a record with no
  * `terminal_id`). The live-runs
- * reader keeps the run's file for it, as the tab bar runs the kit only while a file is there, and a
- * kill with no restart until some ticks later would otherwise never be reported.
+ * reader moves the run's file to the awaiting directory for it (`awaitReport`): a kill with no restart
+ * until some ticks later would otherwise never be reported, and kept in the runs directory it would
+ * start the kit on every tab-bar tick for as long as the view ran.
  *
  * `quit`: a person quit the view (`quit`) in the terminal the kit last started it in (`terminal_id`):
  * that pane is their shell now. The record is marked `reported` with nothing typed, and the run's
  * file goes. With another terminal_id, Herdr restarted since, and the report is typed as above.
  *
  * `elsewhere`: the record names the Herdr server that holds the tab (`socket`) and this caller is
- * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader keeps the
- * run's file for the right server. A record without `socket`, or a caller without
+ * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader moves the
+ * run's file to the awaiting directory for the right server. A record without `socket`, or a caller without
  * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
  */
 export type DeadTab = "reported" | "showing" | "quit" | "elsewhere" | "left";
