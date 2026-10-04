@@ -4,7 +4,7 @@
 //   pnpm exec tsx --test test/gates-wait-time.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -45,4 +45,13 @@ test("typicalTimes reads the run time of a gates line, not the wait", () => {
   const typical = typicalTimes({ root, name: "fixture" } as Project);
   assert.equal(typical.gates, 229);
   assert.equal(typical.issue, 229);
+});
+
+// burndown's `timed` is too entangled with a live run to call; its wiring is held here instead.
+test("a step's timings line and this run's usual issue time leave out the gates slot wait", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /times = stepTimes\(Date\.now\(\) - since, result\)/);
+  assert.match(src, /phase, \.\.\.\(times \?\? \{ ms: Date\.now\(\) - since \}\), ok/);
+  assert.match(src, /waited\.set\(issue, \(waited\.get\(issue\) \?\? 0\) \+ times\.waitMs\)/);
+  assert.match(src, /typicalTimes\(project, \[\.\.\.took\]\.map\(\(\[id, ms\]\) => ms - \(waited\.get\(id\) \?\? 0\)\)\)/);
 });

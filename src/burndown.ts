@@ -531,6 +531,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<string, { phase: string; since: number }>();
   const took = new Map<string, number>();
+  // Each issue's waits for a gates slot, inside `took` but not part of its usual time.
+  const waited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Each issue's step, and when it started, go to run.json's tickets: the
@@ -554,6 +556,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     try {
       const result = await fn();
       times = stepTimes(Date.now() - since, result);
+      if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
       red = gateRed(result);
@@ -1349,7 +1352,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
-        run.update({ typical: typicalTimes(project, [...took.values()]) });
+        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });
         // With nothing left to start, the pane closes: five panes each
         // frozen on a finished agent's summary read as five stuck sandboxes.
         // A stopped run starts nothing, whatever is still queued or parked.
