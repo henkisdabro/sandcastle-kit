@@ -554,7 +554,7 @@ gates; a red one stops the run before any agent starts.
 either file reaches the sandboxes and bills API credits, even beside an OAuth token. Whenever one
 would, the run stops before any image, sandbox or model call and asks, in red:
 `This run bills API credits (ANTHROPIC_API_KEY from <file>). Go ahead? [y/N]`. Without a terminal
-(`--detach`, a script, the Herdr plugin) it refuses unless given `--api-key` (or
+(`--detach`, a script) it refuses unless given `--api-key` (or
 `SANDCASTLE_API_KEY=1`), which is the yes; the refusal names the flag and the other way out:
 removing the key. A run that goes ahead says so in red on its start line (`API credits: this run
 bills API credits - the sandboxes spend ANTHROPIC_API_KEY from <file>`, naming an OAuth token beside

@@ -100,7 +100,7 @@ apply it once the user agrees.
        credits` line, an `ANTHROPIC_API_KEY` reaches this project's sandboxes, and Claude Code
        spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: runs bill API credits. Tell the user, naming
        the file the line names; that every run now asks first, and that a run with no terminal
-       (`--detach`, a script, the Herdr plugin) refuses without `--api-key` (or
+       (`--detach`, a script) refuses without `--api-key` (or
        `SANDCASTLE_API_KEY=1`). If they meant to spend their subscription, propose removing the key
        from that file; add `--api-key` to anything that starts runs only on their explicit yes to
        billing API credits.
