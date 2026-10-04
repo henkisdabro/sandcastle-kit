@@ -103,8 +103,8 @@ This continues SKILL.md: run its "Before every action" first.
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
-      If it reads `ended early` or `ended without a clean exit` (Ctrl-C, a crash, a killed
-      process), say that first: the summary is partial, and the tickets it cut short are listed
+      If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
+      `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
       Under it, the `Settings:` line names the run's settings, and a line after it may name the switch
       that would have helped (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run

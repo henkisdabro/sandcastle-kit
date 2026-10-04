@@ -28,6 +28,10 @@ import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord,
 // A detached run (`--detach`) has no terminal to hang up, and a SIGHUP it still gets (the
 // shell that started it closing, on a system that sends one to the session) must not end it:
 // it stops on `sandcastle stop`, which is a SIGINT.
+// How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
+// run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
+let endedBy: string | undefined;
+
 export const exitOnSignal = () => {
   const mapped = { SIGHUP: "SIGTERM", SIGINT: "SIGINT", SIGTERM: "SIGTERM" } as const;
   const detached = process.env.SANDCASTLE_DETACHED === "1";
@@ -37,6 +41,8 @@ export const exitOnSignal = () => {
       continue;
     }
     const onSignal = () => {
+      // Before the library's teardown can end the process: its exit still writes the record.
+      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C") : mapped[sig];
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;
@@ -495,7 +501,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   const finish = (code: number | undefined) => {
     if (finished) return;
     finished = true;
-    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
+    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code, ...(endedBy ? { stoppedBy: endedBy } : {}) };
     write();
     // run.json is overwritten by the next run, so each finished run also leaves one
     // line here. A failed append must never change the process's exit.

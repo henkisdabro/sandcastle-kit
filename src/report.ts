@@ -23,6 +23,9 @@ import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { isTicketState, type OutcomeKind, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
+/** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
+export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
+
 export type Facts = {
   base: string;
   tracker: "github" | "files";
@@ -62,6 +65,8 @@ export type Facts = {
   dryRunCheck?: string;
   /** Why the run stopped before landing, if it did. */
   stopped?: string;
+  /** How a person ended the run (`sandcastle stop`, Ctrl-C, a signal): not a crash, though its exit code is not 0. */
+  stoppedBy?: string;
   /** Files changed per held branch. */
   changed: Record<string, number>;
   /** Held tickets whose branch a person has merged by hand: on the base, the ticket still open until the push. */
@@ -292,6 +297,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     keptWorktrees: run.keptWorktrees ?? [],
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
+    stoppedBy: run.stoppedBy,
     changed,
     mergedByHand: byHand,
     filed,
@@ -392,7 +398,7 @@ export const render = (f: Facts, plain = false): string => {
   // Ended before its summary (Ctrl-C, a crash, kill -9): its tickets mid-work were
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
-    (!!f.killed || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
+    (!!f.killed || !!f.stoppedBy || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
   const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
@@ -418,7 +424,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
@@ -583,7 +589,8 @@ export const render = (f: Facts, plain = false): string => {
   const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
-    `▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`,
+    // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
+    ...(runnable.length || !cut.length ? [`▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`] : []),
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
     ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].requeued ? ` - ${f.tickets[id].requeued}` : ""} - still queued for the next run`),
