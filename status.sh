@@ -75,12 +75,19 @@ if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute='';
 # with the kit's Herdr plugin linked (`sandcastle herdr configure` leaves the marker, `--remove`
 # takes it out): Ctrl-click opens that log in a popup, and without the plugin Herdr does nothing
 # with the click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
-# Read once here, not per redraw; the path is src/live-runs.ts's KIT_CACHE (an empty
-# XDG_CACHE_HOME is unset, as there).
+# Whether this is Herdr and a terminal is decided once here; the marker is re-read each redraw
+# (relink: a file test, no process), as a view opened before `sandcastle herdr configure` linked
+# the plugin would otherwise draw no links until reopened, with nothing to say why. The loop calls
+# relink at its top level, not inside render's $(...), whose assignment would be lost with its
+# subshell. The path is src/live-runs.ts's KIT_CACHE (an empty XDG_CACHE_HOME is unset, as there).
 LINKS="${SANDCASTLE_LINKS:-}"
-if [ -z "$LINKS" ]; then
-  if [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ] && [ -e "${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/herdr-plugin-linked" ]; then LINKS=1; else LINKS=0; fi
-fi
+LINKS_MARKER=""
+if [ -z "$LINKS" ] && [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ]; then LINKS_MARKER="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/herdr-plugin-linked"; fi
+relink() {
+  if [ -n "$LINKS_MARKER" ] && [ -e "$LINKS_MARKER" ]; then LINKS=1
+  elif [ -n "$LINKS_MARKER" ] || [ -z "$LINKS" ]; then LINKS=0; fi
+}
+relink
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -1403,6 +1410,7 @@ while true; do
   fi
   RESIZED=0
   drain
+  relink
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be
