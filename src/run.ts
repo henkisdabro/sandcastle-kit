@@ -414,11 +414,17 @@ const CHANGELOG_ASK =
   "Say what each user-facing change belongs in it as, one line each, in a tag on a line of its own:\n\n" +
   "<changelog>...</changelog>\n\n" +
   "with a sentence in place of the dots, starting `Added:`, `Changed:` or `Fixed:`. Write the sentence for a reader of the " +
-  "changelog, not the diff. ";
+  "changelog, not the diff. " +
+  "A change an existing project must act on - a new default that changes what a run does or spends, a new convention, " +
+  "something `init` now writes differently, a step to run again (a setup or configure command, say) - also needs a line " +
+  "starting `Upgrading:` that says what to do, in its own tag. The closing summary lists it apart from the ordinary lines, " +
+  "so do not fold the instruction into a `Changed:` line. If this project's own rules define an upgrading or migration note, " +
+  "write it in their words. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
 const CHANGELOG_REVIEW =
   `${CHANGELOG_ASK}The implementer has given its own: add a line only for a user-facing change you made yourself in this review, ` +
-  "and none otherwise.\n\n";
+  "and none otherwise - except an `Upgrading:` line, which you add if the change needs one and the implementer's lines have none " +
+  "(do not leave that to a remark in your message).\n\n";
 
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules

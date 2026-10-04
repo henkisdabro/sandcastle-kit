@@ -240,11 +240,11 @@ export const changelogRead = (text: string): { lines: string[]; dropped: number 
 export const changelogOf = (text: string): string[] => changelogRead(text).lines;
 
 // Whether two changelog lines say the same thing in other words: the implementer's line and a reviewer's
-// or a repair's rewording of it. Their words (leaving out the Added/Changed/Fixed label and the short
+// or a repair's rewording of it. Their words (leaving out the Added/Changed/Fixed/Upgrading label and the short
 // ones, and a plural or past tense's ending) overlap by CHANGELOG_SAME or more of all the words either uses.
 export const CHANGELOG_SAME = 0.6;
 const wordsOf = (line: string) =>
-  new Set(line.toLowerCase().replace(/^\s*(?:added|changed|fixed):/, "").split(/[^a-z0-9]+/).filter((w) => w.length > 3).map((w) => w.replace(/(?:ed|s)$/, "")));
+  new Set(line.toLowerCase().replace(/^\s*(?:added|changed|fixed|upgrading):/, "").split(/[^a-z0-9]+/).filter((w) => w.length > 3).map((w) => w.replace(/(?:ed|s)$/, "")));
 export const sameChangelogLine = (a: string, b: string): boolean => {
   const [x, y] = [wordsOf(a), wordsOf(b)];
   const shared = [...x].filter((w) => y.has(w)).length;

@@ -114,7 +114,7 @@ export type ProjectConfig = {
   /**
    * For a project whose rules keep agents out of its changelog: the implement and review prompts
    * ask for each changelog line in a `<changelog>` tag, and the closing summary gathers the lines
-   * of the tickets that merged, grouped Added / Changed / Fixed. Default false.
+   * of the tickets that merged, grouped Added / Changed / Fixed, and any Upgrading line apart. Default false.
    */
   changelog?: boolean;
   /**

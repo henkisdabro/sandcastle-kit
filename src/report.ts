@@ -444,7 +444,11 @@ export const render = (f: Facts, plain = false): string => {
   }
   // Changelog lines the agents suggested (`changelog: true`), for the tickets that landed: the
   // maintainer writes the entries from them. A line starting with none of the three words is a Changed.
-  const lines = merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })));
+  // An `Upgrading:` line is what an existing project must act on: it is listed apart, never among the changes.
+  const all = merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })));
+  const isUpgrading = ({ line }: { line: string }) => /^Upgrading:/.test(line);
+  const lines = all.filter((l) => !isUpgrading(l));
+  const upgrading = all.filter(isUpgrading);
   const dropped = merged.filter((id) => f.tickets[id].changelogDropped);
   if (lines.length) {
     done.push("Changelog lines the agents suggested:");
@@ -452,6 +456,10 @@ export const render = (f: Facts, plain = false): string => {
       const mine = lines.filter(({ line }) => (/^(Added|Changed|Fixed):/.exec(line)?.[1] ?? "Changed") === group);
       for (const { id, line } of mine) done.push(`  ${group}: ${line.replace(/^(Added|Changed|Fixed):\s*/, "")} (${refOf(id)})`);
     }
+  }
+  if (upgrading.length) {
+    done.push("Upgrading notes the agents suggested - an existing project must act on these, so write them under Upgrading, not as changes:");
+    for (const { id, line } of upgrading) done.push(`  Upgrading: ${line.replace(/^Upgrading:\s*/, "")} (${refOf(id)})`);
   }
   // Never shown cut off: a tag too long, a list or holding a commit sha is an agent's message, not a line.
   for (const id of dropped) done.push(`A suggested line for ${refOf(id)} was not a changelog line${f.tickets[id].changelogDropped! > 1 ? ` (${f.tickets[id].changelogDropped} of them)` : ""}: it is left out, so write that entry from the ticket.`);
