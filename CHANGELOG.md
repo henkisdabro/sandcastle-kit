@@ -19,9 +19,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Inside Herdr, run `sandcastle herdr configure` again if the plugin was linked before this
   release.** The status view's ticket links and its Ctrl-click hint now appear only where the
   plugin is linked, and that run leaves the record the view reads. `/sandcastle update` checks it.
-- **`USAGE_CHECK=1` now works with a `claude setup-token` token.** The guard reads plan usage with
-  the host's Claude Code login instead; `sandcastle doctor --verify` says which credential it would
-  use. A project that left the guard off because it had no reading can turn it on.
+- **`USAGE_CHECK=1` now works on a machine logged in to Claude Code**, even when the sandboxes use a
+  `claude setup-token` token, which the usage endpoint refuses: the guard reads plan usage with the
+  host's login instead, read-only. `sandcastle doctor --verify` says which credential it would use.
+  A project that left the guard off because it had no reading can turn it on.
 - **A project that mounts the pnpm store by hand** can switch to `pnpmStore: true`;
   `/sandcastle update` proposes it.
 - **A run started by an older kit ignores shares until it ends.** Live runs now split the machine's
@@ -132,10 +133,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A runaway agent pass is flagged.** The status view marks a pass that has run three times its
   usual time in this project with `3x over, usually Nm` in red; AGE still turns red at twice.
 
-- **A dead run's Herdr tab shows its closing report after a restart.** When the Herdr server comes
-  back after a run was killed or died with the machine, the plugin's next tab-bar tick puts
-  `sandcastle report` in that run's status pane, once. A tab adopted from your own terminal is
-  left alone. A run that ended cleanly before a cold restart is not covered yet.
+- **A dead run's Herdr tab shows its closing report after a restart.** When Herdr comes back after
+  a run was killed outright (the machine went down, or a `kill -9`), the plugin's next tab-bar tick
+  puts `sandcastle report` in that run's status pane, once. A tab adopted from your own terminal is
+  left alone. A run that ended or stopped on a signal leaves no trace to tick on, so it is not
+  covered yet.
 - **The run estimate counts the gates pool.** When the tickets' gate runs, shared over `maxGates`
   slots, take longer than the sandboxes do, they set the estimated time and the line says so; a
   large run was priced as if its gates never waited.
@@ -224,6 +226,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **A project's `setup` steps run in order.** Sandcastle starts every sandbox hook at once, so with
+  `pnpmStore` the store-dir step raced the install, which then filled a store of its own, and any
+  setup whose steps depend on each other could fail now and then. The steps now share one hook.
+- **Agents run the gates in the foreground with the longest timeout.** Claude Code's 2-minute default
+  moved the suite to the background in a fifth of the passes, and an agent then waited minutes on a
+  poll that never ended; the review, repair and resolve prompts had no rule at all.
+- **The run prints each landing's result** (`#270: merged.`): a run that spent its last half hour
+  landing printed nothing between the last agent pass and the closing summary.
+- **A landing's gates wait as `<project> #N landing gate`**, not under the branch gates' label, which
+  read as if a green ticket had gone back to gating.
+- **The status view counts a landed ticket's own commits**, without the base merged into its branch,
+  as the report does, and marks a ticket landed with a criterion left undone `partly done, ticket
+  open` instead of a plain `landed on main`.
+- **The shared-file lines print under the run's ticket list**, not before its header.
+- **A carried green branch's line no longer says it gets no review**: one that conflicts at its base
+  merge still gets the resolver and the narrow review of the resolution.
+- **`sandcastle doctor --verify` asks the usage endpoint once per token**; it asked twice for the
+  same one, and the endpoint is rate-limited.
+- **A red landing reads its base from the merge it made before the gates ran**, so a gate that moves
+  `HEAD` cannot change whether a requeue skips its gate run.
 - **A killed run's recycled process id no longer holds the run lock or a machine slot.** The next
   `sandcastle run` of the project refused with "Another sandcastle run of this project is live" for
   as long as the unrelated process lasted; the run lock and slot locks now check the process is the
