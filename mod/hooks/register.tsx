@@ -508,11 +508,11 @@ export const register: Register = (on) => {
   });
 
   // The turn that used the skill is over: whatever it labelled is labelled, so the count is read
-  // again. The first turn to end after the skill's use is taken as its own: a subagent's turn
-  // ending sooner only brings the read forward, and the age rule still catches the rest.
+  // again. A subagent's turn (one with an `agentId`) is not it: triage reads tickets through
+  // subagents before it labels, so their ends would spend the read too early.
   on("turn.complete", async ($, e, next) => {
     const out = await next(e);
-    if (skillTurn) {
+    if (skillTurn && e.agentId === undefined) {
       skillTurn = false;
       trigger = "skill";
     }

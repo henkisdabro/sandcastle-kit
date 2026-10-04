@@ -78,3 +78,20 @@ test("a turn that did not use the skill reads nothing, and the skill's end is re
   await w.clock.advance(15000);
   expect(w.reads).toBe(2);
 });
+
+test("a subagent's turn ending inside the skill's turn reads nothing; the skill's own end does", async ($, on) => {
+  const w = world(on);
+  await $.session.start(START);
+  await $.skill.prompt(SKILL);
+  await w.clock.advance(15000);
+  expect(w.reads).toBe(1);
+  // Triage reads tickets through subagents before it labels: their ends are not the skill's.
+  await $.turn.complete({ answer: "read the tickets", agentId: "agent-1" });
+  await w.clock.advance(15000);
+  expect(w.reads).toBe(1);
+  w.out = queue("1", "2");
+  await $.turn.complete({ answer: "labelled" });
+  await w.clock.advance(15000);
+  expect(w.reads).toBe(2);
+  expect(w.store.get(KEY)).toMatchObject({ ids: ["1", "2"] });
+});
