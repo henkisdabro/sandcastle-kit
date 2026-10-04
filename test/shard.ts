@@ -10,36 +10,46 @@
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// Seconds per file, startup included, from a one-file-at-a-time run on ubuntu-24.04-arm; every file
-// not listed took under three. To refresh, run the suite with --test-concurrency=1 and a reporter
+// Seconds per file, startup included: the mean of a one-file-at-a-time run on ubuntu-24.04-arm and
+// one on macos-latest. Every file not listed averaged under 2.5. To refresh, run the suite with --test-concurrency=1 and a reporter
 // that sums each file's top-level test:pass and test:fail durations.
 const WEIGHTS: Record<string, number> = {
-  "test/quiet-output.test.ts": 26,
+  "test/quiet-output.test.ts": 30,
   "test/detach.test.ts": 16,
   "test/cap-command.test.ts": 11,
-  "test/doctor-prereqs.test.ts": 11,
-  "test/pool-wait-order.test.ts": 11,
+  "test/doctor-prereqs.test.ts": 10,
   "test/doctor-size-pointer.test.ts": 10,
-  "test/preflight-parallel.test.ts": 8,
+  "test/pool-wait-order.test.ts": 10,
+  "test/preflight-parallel.test.ts": 9,
   "test/doctor-mod.test.ts": 8,
-  "test/doctor-idle-mark.test.ts": 7,
+  "test/landing-queue.test.ts": 8,
+  "test/landing-requeue.test.ts": 8,
+  "test/backup-branches.test.ts": 7,
   "test/lock.test.ts": 7,
-  "test/landing-queue.test.ts": 6,
-  "test/landing-requeue.test.ts": 6,
+  "test/doctor-idle-mark.test.ts": 6,
   "test/notify.test.ts": 6,
-  "test/gh-errors.test.ts": 5,
+  "test/release-dependants.test.ts": 6,
   "test/command-help.test.ts": 5,
-  "test/release-dependants.test.ts": 5,
-  "test/doctor-other-checkout.test.ts": 5,
   "test/detach-gap.test.ts": 5,
-  "test/size.test.ts": 4,
-  "test/doctor-env-committed.test.ts": 4,
+  "test/gh-errors.test.ts": 5,
   "test/cli-spawn.test.ts": 4,
-  "test/settings.test.ts": 4,
-  "test/signals.test.ts": 4,
-  "test/live-runs.test.ts": 3,
-  "test/land-command.test.ts": 3,
+  "test/doctor-env-committed.test.ts": 4,
+  "test/doctor-other-checkout.test.ts": 4,
+  "test/land-command.test.ts": 4,
+  "test/overlap.test.ts": 4,
+  "test/size.test.ts": 4,
+  "test/backup-size.test.ts": 3,
+  "test/cli-first-contact.test.ts": 3,
+  "test/cli.test.ts": 3,
   "test/doctor-path-checkout.test.ts": 3,
+  "test/hand-merged.test.ts": 3,
+  "test/landing.test.ts": 3,
+  "test/live-runs.test.ts": 3,
+  "test/machine-settings-keys.test.ts": 3,
+  "test/preview.test.ts": 3,
+  "test/settings.test.ts": 3,
+  "test/signals.test.ts": 3,
+  "test/status-settings.test.ts": 3,
 };
 
 const [index, total] = (process.env.TEST_SHARD ?? "").split("/").map(Number);
