@@ -40,7 +40,7 @@ test("a requeued ticket's second attempt names its first attempt, not an earlier
 
   assert.equal(
     greenCarriedLine("#139", "16bf0620000", requeued),
-    "#139: reviewed and green at 16bf062 in its first attempt - no implement or review; the gates decide.",
+    "#139: reviewed and green at 16bf062 in its first attempt - no implement or full review; the gates decide.",
   );
   assert.equal(carriedMergeLine("#139", "main", 4, requeued), "#139: merged main (4 commit(s)) into its branch from its first attempt.");
   assert.equal(
@@ -61,7 +61,7 @@ test("a branch kept from an earlier run says so", () => {
 
   assert.equal(
     greenCarriedLine("#140", "16bf0620000", requeued),
-    "#140: reviewed and green at 16bf062 in an earlier run - no implement or review; the gates decide.",
+    "#140: reviewed and green at 16bf062 in an earlier run - no implement or full review; the gates decide.",
   );
   assert.equal(carriedMergeLine("#140", "main", 2, requeued), "#140: merged main (2 commit(s)) into its branch from an earlier run.");
   assert.equal(

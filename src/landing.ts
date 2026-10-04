@@ -623,7 +623,7 @@ export const carriedFrom = (requeued: boolean) => (requeued ? "its first attempt
 
 /** `who` is the tracker's own ref for the ticket. The line for a branch at the head it was reviewed and gated green on, or past it by merge commits only. */
 export const greenCarriedLine = (who: string, head: string, requeued: boolean) =>
-  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - no implement or review; the gates decide.`;
+  `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - no implement or full review; the gates decide.`;
 
 /** The line for the base merged into a carried branch, cleanly or with its generated files regenerated. */
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
