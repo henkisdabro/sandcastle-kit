@@ -17,11 +17,12 @@ export LESSSECURE=1
 # (reverse video) reads on any theme.
 unset LESS_TERMCAP_so LESS_TERMCAP_se
 # What the pager's prompt line says, so a person never has to guess the key (plain words,
-# and none of less's prompt metacharacters: % ? : . \). It replaces less's own prompt, which
-# names the file and the position and not the keys. While following, less draws its own
-# "Waiting for data... (interrupt to abort)" instead, whatever -P says: no option changes
-# that wording, so the popup's title and the README say Ctrl-C is the interrupt key.
+# and none of less's prompt metacharacters: % ? : . \). -Ps replaces less's own prompt, which
+# names the file and the position and not the keys. -Pw replaces the "Waiting for data" that
+# less draws while following (less 376 on); less still appends its own "... (interrupt to
+# abort)", which no option changes, so the words before it name Ctrl-C.
 paged="-Psq closes this popup - F follows new lines (Ctrl-C then closes it)"
+following="-PwFollowing new lines - Ctrl-C closes this popup"
 report_prompt="-Psq closes this popup - space pages down"
 case "${1:-}" in
   # Refreshed every 5 seconds; q or Esc closes the overlay.
@@ -34,7 +35,9 @@ case "${1:-}" in
   # Follows the log live, like tail -f, once it is longer than the popup: +F opens at the end
   # and shows new lines as the agent writes them. While following, less ignores q and takes
   # only Ctrl-C, which stops the following - so -K makes Ctrl-C close the popup outright:
-  # Ctrl-C closes it (q closes it too when it is not following). Esc cannot close either view
+  # Ctrl-C closes it (q closes it too when it is not following). -K is on the short route
+  # too, where F starts the following, so the prompt's "Ctrl-C then closes it" holds on
+  # both, and Ctrl-C closes a paged log as well. Esc cannot close either view
   # through less: it reads no key but Ctrl-C while following, and holds a lone Esc back as the
   # start of a key sequence while paging.
   # A log shorter than the popup keeps the plain view, from its top line: +F, like +G, jumps
@@ -42,7 +45,7 @@ case "${1:-}" in
   # popup. (Chosen for that reason; less was not at hand to prove +F differs.)
   log)
     rows=$(stty size 2>/dev/null | cut -d' ' -f1)
-    if [ "$(wc -l <"$SANDCASTLE_LOG")" -gt "${rows:-40}" ]; then exec less -R -X -K "$paged" +F "$SANDCASTLE_LOG"; fi
-    exec less -R -X "$paged" "$SANDCASTLE_LOG" ;;
+    if [ "$(wc -l <"$SANDCASTLE_LOG")" -gt "${rows:-40}" ]; then exec less -R -X -K "$paged" "$following" +F "$SANDCASTLE_LOG"; fi
+    exec less -R -X -K "$paged" "$following" "$SANDCASTLE_LOG" ;;
   *) exec "$kit/bin/sandcastle" herdr "$@" ;;
 esac

@@ -42,11 +42,13 @@ const pagerArgs = (verb: string, lines = 0) => {
   return readFileSync(out, "utf8").trimEnd().split("\n");
 };
 
-const prompt = (args: string[]) => {
-  const p = args.filter((a) => a.startsWith("-P"));
-  assert.equal(p.length, 1, `one -P in ${args.join(" ")}`);
+// The prompt (-Ps) and, for a log, the message drawn while following (-Pw).
+const promptOf = (args: string[], kind: "s" | "w") => {
+  const p = args.filter((a) => a.startsWith(`-P${kind}`));
+  assert.equal(p.length, 1, `one -P${kind} in ${args.join(" ")}`);
   return p[0];
 };
+const prompt = (args: string[]) => promptOf(args, "s");
 
 test("a finished or short log's prompt says q closes and F follows", () => {
   const p = prompt(pagerArgs("log", 5));
@@ -62,15 +64,28 @@ test("a followed log keeps the same prompt, and Ctrl-C still closes it (-K)", ()
   assert.match(prompt(args), /Ctrl-C/);
 });
 
+test("while following, less's waiting message names Ctrl-C in place of 'Waiting for data'", () => {
+  for (const args of [pagerArgs("log", 100), pagerArgs("log", 5)]) {
+    assert.match(promptOf(args, "w"), /^-PwFollowing new lines - Ctrl-C closes this popup$/);
+  }
+});
+
+test("a short log, once F follows it, closes on Ctrl-C too, as its prompt says (-K)", () => {
+  const args = pagerArgs("log", 5);
+  assert.ok(args.includes("-K"), args.join(" "));
+  assert.ok(!args.includes("+F"));
+});
+
 test("the report popup's prompt says q closes", () => {
   assert.match(prompt(pagerArgs("report")), /-Psq closes this popup/);
 });
 
 test("no prompt says interrupt, and none uses less's prompt metacharacters", () => {
   for (const args of [pagerArgs("log", 5), pagerArgs("log", 100), pagerArgs("report")]) {
-    const p = prompt(args);
-    assert.doesNotMatch(p, /interrupt/i);
-    assert.doesNotMatch(p, /[%?:.\\]/, "a metacharacter would change what less draws");
+    for (const p of args.filter((a) => a.startsWith("-P"))) {
+      assert.doesNotMatch(p, /interrupt/i);
+      assert.doesNotMatch(p, /[%?:.\\]/, "a metacharacter would change what less draws");
+    }
   }
 });
 

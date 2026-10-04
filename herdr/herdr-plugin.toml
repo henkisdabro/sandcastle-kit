@@ -40,7 +40,8 @@ title = "Sandcastle: open a ticket's log"
 contexts = ["pane"]
 command = ["./entry.sh", "open-log"]
 
-# None of these opens by itself. The status view and the report close with q (the log: Ctrl-C while it follows, q otherwise). The status view is an overlay, a real
+# None of these opens by itself. The status view and the report close with q (the log:
+# Ctrl-C while it follows, q too otherwise). The status view is an overlay, a real
 # pane zoomed over the active one, not a popup: Herdr 0.9.3 does not route a Ctrl-click
 # inside a popup to a link handler, and a second popup cannot open over the first.
 [[panes]]
