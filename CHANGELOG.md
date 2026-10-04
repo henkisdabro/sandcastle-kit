@@ -47,6 +47,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   background auto maintenance, which repacked it behind the kit's back and could hold the lock the
   kit's own prune needs, so the prune failed silently and packs piled up. The kit now runs its
   git calls there with auto maintenance off. Nothing to do.
+- **The idle mark steps aside for a run this session follows in another directory.** It hid only
+  for a run of the session's own project, so a run started from a second clone drew its castle and
+  counts under a `sandcastle · 13 ready` that no longer meant anything. Any live run the band draws
+  now hides it; when that run ends the mark returns and its count is read again at once.
 - **A branch red at landing no longer shows as ready after the run.** The status view read the
   outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
   row as ready to land; it now shows gate red, like a red pipeline.

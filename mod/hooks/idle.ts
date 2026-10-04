@@ -146,8 +146,9 @@ export const readyIds = (stdout: string): string[] | undefined => {
 };
 
 /**
- * What makes a read due ahead of its age: a run of the project ended, or the sandcastle skill was
- * used (it may just have labelled tickets). A session's start needs none: its first look applies
+ * What makes a read due ahead of its age: a run ended - the project's own, or one this session
+ * followed elsewhere, perhaps a second clone of it - or the sandcastle skill was used (it may just
+ * have labelled tickets). A session's start needs none: its first look applies
  * the age rule at once, so an entry that is missing or old is read then.
  */
 export type Trigger = "run-ended" | "skill";

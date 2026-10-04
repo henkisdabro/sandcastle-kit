@@ -889,14 +889,14 @@ itself, in the status view's castle, glyphs and colours:
   (`♜`), so the session shows the
   project takes runs. (It is the mod's own row, not Claude Code's status line: that one carries a
   warning triangle and a notice colour the mod cannot change, and is kept for what needs you.) The
-  live band replaces it while a run of the session's project is alive,
-  and it returns after the end notice. A run this session follows in another directory never
-  changes it: the mark is about the session's own project. When **ready tickets** wait - queued
+  live band replaces it while a run is alive - the session's own project's, or one it follows in
+  another directory - and it returns after the end notice. Its count is always the session's own
+  project's. When **ready tickets** wait - queued
   tickets with no open blocker, the ones a run would start now - it reads `sandcastle · 4 ready -
   /sandcastle run`. The count comes from `sandcastle queue --json`, read in the background and
   cached once per project in the mod's store, shared by every Claude Code session on the machine:
   at most one tracker read per project every 10 minutes while nothing changes, plus one when a run
-  of the project ends and one when you use `/sandcastle` (it may just have labelled tickets). A
+  of the project, or one the session follows, ends and one when you use `/sandcastle` (it may just have labelled tickets). A
   read that fails or takes over 20 seconds (offline, rate-limited, signed out of `gh`) keeps the
   last good count for an hour and then shows the bare mark; the line never shows an error -
   `sandcastle queue` and the status view explain one. Turn the mark off for every project with
