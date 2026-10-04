@@ -14,6 +14,7 @@
 // branch delete. The worker moves the run's expected base with each write, so the `.git` check
 // the pipelines make after their sandbox closes still catches any other movement of the base.
 
+import { posix } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { type GateRun, failingTests } from "./gates.ts";
@@ -325,7 +326,7 @@ export type Landed =
   | { kind: "conflict"; files: string[]; with: string[] }
   /**
    * The branch was green alone; its merge with the base was red. Not landed. `with`: the tickets landed since it
-   * forked that changed a file this branch changed (none: red on the merged tree). `failing`: the test ids the red gate named.
+   * forked that changed a file this branch changed or its failing test imports or names (none: red on the merged tree). `failing`: the test ids the red gate named.
    */
   | { kind: "red"; with: string[]; gates: string[]; failing?: string[] }
   /** `by`: what held it - a protected path, a large file, or a repair no review passed. */
@@ -493,7 +494,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     }
     if (result.kind === "red") {
       const gates = [...new Set([...result.run.failures.map((f) => f.name), ...result.run.gates.filter((g) => !g.pass).map((g) => g.name)])];
-      // Named only when it could be the cause: a landed ticket that changed a file this branch changed.
+      // Named only when it could be the cause: a landed ticket that changed a file this branch changed (or the failing test uses, below).
       // The rest of what landed since the fork is no suspect, and listing it sent people through every diff.
       let mine: string[] = [];
       try {
@@ -501,7 +502,28 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       } catch {
         // Unknown files name nobody: "red on the merged tree" claims no more than is known.
       }
-      const earlier = since().filter(([, r]) => r.files.some((f) => mine.includes(f))).map(([id]) => id);
+      // The same for what the failing test is about: a landed ticket that changed a file the test imports or
+      // names is as likely a cause as one that changed a file the branch did, though the branch never touched it.
+      let subject = new Set<string>();
+      if (result.run.failure) {
+        try {
+          const tree = [...new Set([o.head!, result.base].flatMap((rev) => sh("git", ["ls-tree", "-r", "--name-only", rev], root).split("\n").filter(Boolean)))];
+          const read = (file: string) => {
+            for (const rev of [o.head!, result.base]) {
+              try {
+                return sh("git", ["show", `${rev}:${file}`], root);
+              } catch {
+                /* not in this one */
+              }
+            }
+            return undefined;
+          };
+          subject = redSubject(result.run.failure.output, tree, read);
+        } catch {
+          // Unread: the branch's own files still decide.
+        }
+      }
+      const earlier = since().filter(([, r]) => r.files.some((f) => mine.includes(f) || subject.has(f))).map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
       if (result.run.failure) ctx.reds?.set(o.issue, { head: o.head!, base: result.base, failure: result.run.failure, gates: result.run.gates });
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
@@ -595,7 +617,52 @@ export const redDetail = (red?: { gates?: string[]; failing?: string[] }) => {
   return parts.length ? ` (${parts.join("; ")})` : "";
 };
 
-/** What a red merge is red with: the landed tickets that changed a file the branch did, else "on the merged tree". */
+const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".py", ".json"];
+const PATH_TOKEN = /[\w@.\-/]+\.\w+/g;
+
+/**
+ * The files a red gate's failing tests are about, as far as the gate output and the test files show it:
+ * the test files the output names (a "FAIL path" line, a stack frame), what each imports (relative
+ * specifiers, Python's dotted imports) and any path it names in a string. `tree` is every path the
+ * merged tree can hold and `read` the text of one: a landed ticket that changed one of these is a
+ * suspect for the red, though the branch never touched the file. Imports are read one level deep, and
+ * a path the tree does not hold is no file: nothing here claims more than the text shows.
+ */
+export const redSubject = (output: string, tree: string[], read: (file: string) => string | undefined) => {
+  const files = new Set(tree);
+  const subject = new Set<string>();
+  const tests = new Set<string>();
+  // An absolute path from a sandbox is cut from the left until it is a path in the tree.
+  for (const token of output.match(PATH_TOKEN) ?? []) {
+    const parts = token.replace(/^(?:\.\/)+/, "").split("/").filter(Boolean);
+    for (let i = 0; i < parts.length; i++) {
+      const file = parts.slice(i).join("/");
+      if (files.has(file)) {
+        // Only a test: any other path in the output (a lockfile, a stack frame, a fixture) would blame whatever touched it.
+        if (isTestPath(file)) tests.add(file);
+        break;
+      }
+    }
+  }
+  const resolve = (spec: string, from: string) => {
+    const base = spec.startsWith(".") ? posix.normalize(posix.join(posix.dirname(from), spec)) : posix.normalize(spec);
+    const stem = base.replace(/\.(?:m|c)?jsx?$/, "");
+    return [base, ...SOURCE_EXTENSIONS.flatMap((e) => [base + e, stem + e, `${base}/index${e}`])].filter((f) => files.has(f));
+  };
+  for (const test of tests) {
+    subject.add(test);
+    const text = read(test);
+    if (text === undefined) continue;
+    for (const [, spec] of text.matchAll(/["'`]([^"'`\n]{1,200})["'`]/g)) for (const f of resolve(spec!, test)) subject.add(f);
+    for (const [, dotted] of text.matchAll(/^\s*(?:from|import)\s+(\w[\w.]*)/gm)) {
+      const path = dotted!.replace(/\./g, "/");
+      for (const f of [`${path}.py`, `${path}/__init__.py`]) if (files.has(f)) subject.add(f);
+    }
+  }
+  return subject;
+};
+
+/** What a red merge is red with: the landed tickets that changed a file the branch did or its failing test uses, else "on the merged tree". */
 const redWith = (tickets: string[]) => (tickets.length ? `with ${tickets.map(refOf).join(", ")}` : "on the merged tree");
 
 /** "conflicted again with #1, #3 after a requeue", "red again on the merged tree after a requeue (gate test)": what a second conflict or red at landing is held as. */
