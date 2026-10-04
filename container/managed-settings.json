@@ -1,1 +1,1 @@
-{"hooks":{"PreToolUse":[{"matcher":"Bash|Write|Edit","hooks":[{"type":"command","command":"/etc/claude-code/git-guard.sh"}]}]}}
+{"permissions":{"deny":["Monitor","ScheduleWakeup","CronCreate","CronDelete","CronList","RemoteTrigger"]},"hooks":{"PreToolUse":[{"matcher":"Bash|Write|Edit","hooks":[{"type":"command","command":"/etc/claude-code/git-guard.sh"}]}]}}
