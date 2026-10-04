@@ -80,8 +80,13 @@ if (sig) {
 `,
 );
 /** Runs the fixture to its end and returns the runs directory it registered in. */
-const runToEnd = (root: string, signal?: string) => {
+const runToEnd = (root: string, signal?: string, plugin = true) => {
   const cache = fresh("cache");
+  // The plugin's link marker: only its readers remove a kept file, so without it none is kept.
+  if (plugin) {
+    mkdirSync(join(cache, "sandcastle-kit"), { recursive: true });
+    writeFileSync(join(cache, "sandcastle-kit/herdr-plugin-linked"), KIT_DIR);
+  }
   const env: NodeJS.ProcessEnv = { ...process.env, XDG_CACHE_HOME: cache, FIXTURE_ROOT: root, ...(signal ? { FIXTURE_SIGNAL: signal } : {}) };
   // An attached run: a detached one ignores SIGHUP.
   for (const k of ["SANDCASTLE_DETACHED", "CLAUDE_CODE_SESSION_ID", "HERDR_ENV", "HERDR_PANE_ID"]) delete env[k];
@@ -114,6 +119,11 @@ test("an adopted tab, a tab already reported, or no view record: the file goes a
   }
   const adopted = project({ ...OWN, adopted: true });
   assert.equal(existsSync(runFile(adopted, runToEnd(adopted, "SIGTERM"))), false, "a signal too");
+});
+
+test("without the plugin linked, a clean exit removes its file: nothing else would", () => {
+  const root = project(OWN);
+  assert.equal(existsSync(runFile(root, runToEnd(root, undefined, false))), false);
 });
 
 test("a finished run's bare-shell status pane gets the report once, and the file goes", () => {

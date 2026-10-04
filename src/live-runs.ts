@@ -7,7 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -60,7 +60,8 @@ export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-v
 const tabAwaitsReport = (root: string) => {
   try {
     const view = JSON.parse(readFileSync(viewRecord(root), "utf8")) as { adopted?: boolean; reported?: boolean };
-    return view.adopted === false && !view.reported;
+    // Only the plugin's readers remove a kept file: without the plugin it would stay for good.
+    return view.adopted === false && !view.reported && existsSync(PLUGIN_MARKER);
   } catch {
     return false;
   }
