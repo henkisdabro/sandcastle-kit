@@ -116,7 +116,9 @@ This continues SKILL.md: run its "Before every action" first.
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread. When it lists `Changelog lines the agents suggested`
       (the project has `changelog: true`), carry those lines into your message, grouped Added,
-      Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from them.
+      Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from
+      them. A block headed `Upgrading notes` is what an existing project must act on: keep it apart,
+      never among the changes.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
       names one (`sandcastle land` leaves that ticket open), and anything that needs a decision.

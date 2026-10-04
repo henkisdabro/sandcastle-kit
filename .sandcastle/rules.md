@@ -27,7 +27,9 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
 - **Do not edit `CHANGELOG.md`**, even where AGENTS.md or the ticket asks for a line: tickets in one
   run all add at the same spot and would conflict at landing. The maintainer writes the entries
   from the run's closing summary: give each line in a `<changelog>...</changelog>` tag in your final
-  message, as the prompt asks, starting `Added:`, `Changed:` or `Fixed:`.
+  message, as the prompt asks, starting `Added:`, `Changed:` or `Fixed:` - and a line starting
+  `Upgrading:` for a change AGENTS.md -> Conventions gives an **Upgrading** note, saying what an
+  existing project must do (the `skill/update.md` step, if it needs one, is still yours to write).
 - **New tests go in a new file** under `test/`, named for what it tests (`test/preflight.test.ts`),
   not appended to an existing one, for the same reason. `pnpm test` picks up `test/*.test.ts`.
 - `skill/SKILL.md`'s `description` stays under 1,024 characters and the skill stays portable across

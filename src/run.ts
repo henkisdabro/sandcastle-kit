@@ -420,13 +420,20 @@ const CHANGELOG_ASK =
   "Say what each user-facing change belongs in it as, one line each, in a tag on a line of its own:\n\n" +
   "<changelog>...</changelog>\n\n" +
   "with a sentence in place of the dots, starting `Added:`, `Changed:` or `Fixed:`. Write the sentence for a reader of the " +
-  "changelog, not the diff. ";
+  "changelog, not the diff. " +
+  "A change an existing project must act on - a new default that changes what a run does or spends, a new convention, " +
+  "something `init` now writes differently, a step to run again (a setup or configure command, say) - also needs a line " +
+  "starting `Upgrading:` that says what to do, in its own tag. The closing summary lists it apart from the ordinary lines, " +
+  "so do not fold the instruction into a `Changed:` line. If this project's own rules define an upgrading or migration note, " +
+  "write it in their words. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
 const CHANGELOG_REVIEW =
   `${CHANGELOG_ASK}The implementer has given its own, which you cannot see. If the diff shows a user-facing change you made yourself ` +
   "in this review, or a line of the implementer's that would now be wrong, give the full set of lines for the whole branch - " +
   "its changes as well as yours, one line each: your set replaces the implementer's, so a line left out is lost, and a reworded " +
-  "one is not shown twice. Otherwise give none, and the implementer's lines stand.\n\n";
+  "one is not shown twice. Otherwise give none, and the implementer's lines stand. If the change needs an " +
+  "`Upgrading:` line and you cannot tell that the implementer gave one, give the full set with one in it (do not leave that " +
+  "to a remark in your message).\n\n";
 
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
