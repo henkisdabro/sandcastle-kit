@@ -287,6 +287,12 @@ branch 115 1; log 115 impl 'done'
 # The kind decides, never the line: a line no prefix foresaw is still red, and a person's take-back is held.
 branch 116 1; log 116 impl 'done'
 branch 117 1; log 117 impl 'done'
+# Landed partly done, its branch deleted: the row says the ticket is open, and the base merged into
+# the branch is not counted as one of its commits.
+branch 118 1; echo moved >"$REPO/f-118-base"; git_ add f-118-base; git_ commit -q -m "main moves on"
+git_ checkout -q agent/issue-118; git_ merge -q --no-ff -m "Merge main into agent/issue-118" main
+git_ checkout -q main; git_ merge -q --no-ff -m "Merge agent/issue-118 (part of #118)" agent/issue-118
+git_ branch -q -D agent/issue-118; log 118 impl 'done'
 rm -rf "$REPO/.sandcastle/worktrees/agent-issue-101"
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0,
@@ -319,6 +325,8 @@ row '#114' 'gate red' 'red when merged'
 row '#115' 'gate red' 'red again'
 row '#116' 'gate red' 'test red with'
 row '#117' held 'needs a human'
+row '#118' merged 'partly done, ticket open'
+has '^│ +#118 +│ . merged +│[^│]+│ +1 +│'
 git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 agent/issue-116 agent/issue-117 # only this scenario's
 # An older kit's entry carries no kind: its line is shown, and no state is taken from it.
 row '#103' 'left over' 'earlier run: gate red'

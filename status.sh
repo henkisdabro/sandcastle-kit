@@ -757,7 +757,8 @@ landed_commits() {
   local p
   p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
   case "$p" in
-    *' '*) git rev-list --count "${p%% *}..${p#* }" 2>/dev/null || echo -;;
+    # --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
+    *' '*) git rev-list --count --no-merges "${p%% *}..${p#* }" 2>/dev/null || echo -;;
     ?*) echo 1;;
     *) echo -;;
   esac
@@ -800,7 +801,7 @@ emit() {
 }
 
 render() {
-  local now now_s issues n phase log age commits state glyph colour activity activity_note rendered
+  local now now_s issues n phase log age commits state glyph colour activity activity_note landed_subj rendered
   local merged_list cols rows prio cpu mem cpu_col budget hidden key wide WIN BUF BUF_N
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
@@ -992,8 +993,11 @@ render() {
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
       # A landed branch is deleted at landing (merge or squash), so its subject on the base is the proof.
-      if [ -n "$(git log "$BASE" -1 --format=%h --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" --grep="Merge agent/issue-$n (part of $(disp "$n"))" 2>/dev/null)" ]; then
+      landed_subj=$(git log "$BASE" -1 --format=%s --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" --grep="Merge agent/issue-$n (part of $(disp "$n"))" 2>/dev/null)
+      if [ -n "$landed_subj" ]; then
         state="merged"; activity_note="landed on $BASE"
+        # A criterion left undone: the ticket stays open, which the row must not hide.
+        case "$landed_subj" in *"(part of "*) activity_note="partly done, ticket open";; esac
       else
         state="no branch"
       fi
