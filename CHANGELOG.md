@@ -18,6 +18,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Added
 
+- **Agents can suggest an Upgrading note.** With `changelog: true`, a line starting `Upgrading:` says
+  what an existing project must act on; the closing summary lists such lines in a block of their own,
+  apart from the changes, where an instruction used to be folded into a `Changed:` line or left in an
+  agent's prose.
 - **Landing gates are timed and estimated.** Each landing gate writes a `landing gates` line to
   `timings.jsonl`; the estimate counts them in the gates-pool sum and takes the landings in a row,
   one after another on the one worker, as a floor on the run's end ("landing gates, one after
