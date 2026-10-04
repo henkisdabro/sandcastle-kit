@@ -96,6 +96,20 @@ type Outcome = {
 };
 
 /**
+ * A green branch's conflict resolution the kit held (`strayChanges`). The branch is a finished one,
+ * so it reports what it carries - its commits and the gates it passed at its green head - not the
+ * nothing of a ticket that did no work.
+ */
+export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates">): Outcome => ({
+  issue,
+  branch,
+  status: "held",
+  heldNote,
+  repairs: 0,
+  ...carried,
+});
+
+/**
  * The kept worktree of a pipeline that ended with no commits: the agent finished and its commit
  * was refused (a git hook, a full disk, a signing failure), so Sandcastle kept the worktree for
  * its uncommitted files. That is not "nothing to change" - the work exists.
@@ -739,7 +753,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; changelog?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -906,7 +920,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           run.ticket(issue.id, { files: stray });
           notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
           // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
-          return { issue: issue.id, branch, status: "held", heldNote: why, commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+          return heldResolution(issue.id, branch, why, {
+            commits: ownCommits(base, branch),
+            reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
+            gates: readHeads(project.root)[issue.id]?.gates ?? [],
+          });
         }
       }
       // Review passes run on the same warm sandbox and branch. Their commits
@@ -1199,7 +1217,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
       const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, changelog: changelogNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote });
       return {
         issue: issue.id,
         branch,

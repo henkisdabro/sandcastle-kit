@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
+import type { Gate } from "./gates.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
@@ -743,6 +744,8 @@ export type BranchHead = {
   green?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
+  /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
+  gates?: Gate[];
   /** The `<changelog>` lines the agents gave by `green` (`changelog: true`): a later land-only run reads no agent, so without them the lines never reach a closing summary. */
   changelog?: string[];
   /** run.json's startedAt of the run that wrote the record last. */
@@ -761,7 +764,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; changelog?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
