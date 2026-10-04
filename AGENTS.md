@@ -47,7 +47,7 @@ read a module's section there before changing it.
 | `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out: the autonomy level, repair attempts and concurrency, asked and effective) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
 | `src/size.ts` | `sandcastle size`: recommends the pool's `maxSandboxes` and `maxGates` from the runtime's VM (`docker info`) and the measured sandbox peaks (`measuredPeak`), through injectable `Readers`; read-only, the assumed figures are constants at its top |
 | `src/peaks.ts` | Sandbox peak memory: `memory.peak` read inside the container (`samplePeak`, `recordPeak`), and the machine-wide `peaks.jsonl` (`readPeaks`) that `size` reads |
-| `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
+| `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`); `usageToken` picks its credential: the host's Claude Code login, read-only, else `CLAUDE_CODE_OAUTH_TOKEN` |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
 | `src/herdr.ts` | Herdr helpers and the run's view: the tab, panes, agent-state reports, sidebar tokens |

@@ -23,8 +23,9 @@ This continues SKILL.md: run its "Before every action" first.
      to ticket files) and merges into the base branch locally.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. Offer
-     `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with
-     HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that).
+     `USAGE_CHECK=1` if the plan is close to its limit (it reads usage with the host's Claude Code
+     login, read-only, else `CLAUDE_CODE_OAUTH_TOKEN`; a `claude setup-token` token gets HTTP 403 and
+     cannot use the guard, and `sandcastle doctor --verify` shows which credential it would use).
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
