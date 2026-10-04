@@ -73,14 +73,29 @@ moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '16
 if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; wht=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; moon=''; dusk=''; night=''; deep=''; star=''; fi
 # Inside Herdr each ticket links to its latest log (OSC 8), and the note band says so. Only
 # with the kit's Herdr plugin linked (`sandcastle herdr configure` leaves the marker, `--remove`
-# takes it out): Ctrl-click opens that log in a popup, and without the plugin Herdr does nothing
+# takes it out): Ctrl-click opens that ticket's card in a popup, and without the plugin Herdr does nothing
 # with the click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
-# Read once here, not per redraw; the path is src/live-runs.ts's KIT_CACHE (an empty
-# XDG_CACHE_HOME is unset, as there).
+# Whether this is Herdr and a terminal is decided once here; the marker is re-read each redraw
+# (relink: a file test, no process), as a view opened before `sandcastle herdr configure` linked
+# the plugin would otherwise draw no links until reopened, with nothing to say why. The loop calls
+# relink at its top level, not inside render's $(...), whose assignment would be lost with its
+# subshell. The path is src/live-runs.ts's KIT_CACHE (an empty XDG_CACHE_HOME is unset, as there).
 LINKS="${SANDCASTLE_LINKS:-}"
-if [ -z "$LINKS" ]; then
-  if [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ] && [ -e "${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/herdr-plugin-linked" ]; then LINKS=1; else LINKS=0; fi
-fi
+LINKS_MARKER=""
+if [ -z "$LINKS" ] && [ "${HERDR_ENV:-}" = 1 ] && [ -t 1 ]; then LINKS_MARKER="${XDG_CACHE_HOME:-$HOME/.cache}/sandcastle-kit/herdr-plugin-linked"; fi
+relink() {
+  if [ -n "$LINKS_MARKER" ] && [ -e "$LINKS_MARKER" ]; then LINKS=1
+  elif [ -n "$LINKS_MARKER" ] || [ -z "$LINKS" ]; then LINKS=0; fi
+}
+relink
+# The hint's modifier, sensed once by `sandcastle status` from the outer terminal (src/click-hint.ts):
+# Ctrl-click is macOS's right-click in iTerm2, where Cmd-click opens the link itself (the log, not
+# the card Herdr's plugin draws). Unset or unknown: both named.
+case "${SANDCASTLE_CLICK_MOD:-}" in
+  ctrl) CLICK_HINT="ctrl-click a ticket for its card" ;;
+  cmd) CLICK_HINT="cmd-click a ticket for its log" ;;
+  *) CLICK_HINT="ctrl-click a ticket for its card (iTerm2: cmd-click for its log)" ;;
+esac
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -559,6 +574,24 @@ hand_merged() {
   case "$oc" in *'|held|needs a human: handed back') return 1;; *'|held|'*) ;; *) return 1;; esac
   git merge-base --is-ancestor "refs/heads/agent/issue-$1" "refs/heads/$BASE" 2>/dev/null
 }
+# What a hand-merged row says the push still has to do. The view cannot ask the
+# tracker on every refresh, but the merge commit being on origin's base branch
+# says the push happened. The merge commit is the merge that took the branch tip
+# in (the tip as a second parent); a fast-forward has none, so the tip itself -
+# not a later merge onto it, which would wait for a push already made. No
+# origin/<base> ref, or no way to find the commit, keeps "closes on push".
+hand_merged_note() {
+  local tip merge
+  if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null 2>&1 \
+    && tip=$(git rev-parse --verify --quiet "refs/heads/agent/issue-$1" 2>/dev/null) && [ -n "$tip" ]; then
+    merge=$(git rev-list --merges --ancestry-path --parents "$tip..refs/heads/$BASE" 2>/dev/null \
+      | awk -v t="$tip" '{ for (i = 3; i <= NF; i++) if ($i == t) { print $1; exit } }')
+    if git merge-base --is-ancestor "${merge:-$tip}" "refs/remotes/origin/$BASE" 2>/dev/null; then
+      printf 'merged by hand'; return
+    fi
+  fi
+  printf 'merged by hand; closes on push'
+}
 
 # The row state for a recorded outcome's kind (mod/hooks/run-record.ts), in
 # the words the live view uses. Never the line's words: a line the case did
@@ -891,7 +924,7 @@ render() {
         # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
-      held) if hand_merged "$n"; then state=merged; activity="merged by hand; closes on push"; fi;;
+      held) if hand_merged "$n"; then state=merged; activity=$(hand_merged_note "$n"); fi;;
       implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
         if [ -f "$log" ]; then
@@ -1050,7 +1083,7 @@ render() {
       # nothing to change. A branch with no commits is "merged" by git's
       # reckoning, and a question for a human read as done.
       state="$oc_state"; activity_note="${oc_text#*|}"
-      if [ "$oc_state" = held ] && hand_merged "$n"; then state="merged"; activity_note="merged by hand; closes on push"; fi
+      if [ "$oc_state" = held ] && hand_merged "$n"; then state="merged"; activity_note=$(hand_merged_note "$n"); fi
     elif grep -q "agent/issue-${n}$" <<<"$merged_list"; then
       state="merged"
     else
@@ -1153,7 +1186,7 @@ render() {
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
   # Below 80 columns there is no CPU column to explain.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
-  [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}ctrl-click a ticket for its log${off}"
+  [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}${CLICK_HINT}${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
   # columns: eight on one row from 130 columns, else rows of four, or of two
@@ -1403,6 +1436,7 @@ while true; do
   fi
   RESIZED=0
   drain
+  relink
   load_queue
   # Build the whole frame first, then write it in a single call. \e[K clears
   # each line's remainder and \e[J the rows below, so nothing has to be

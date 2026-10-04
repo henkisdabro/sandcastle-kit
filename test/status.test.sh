@@ -414,8 +414,27 @@ rows=$(wc -l <"$TMP/frame")
 # -eq, not =: BSD wc pads its count with spaces, so a text compare fails on macOS alone.
 { [ "$rows" -eq "$plain_rows" ] || [ "$rows" -eq $((plain_rows+1)) ]; } || { echo "FAIL [$SCENARIO] $rows rows with links, $plain_rows without"; fails=$((fails+1)); }
 row '#103' ready
-# The hint that the numbers are clickable is shown with the links, and only then.
-has 'ctrl-click a ticket for its log'
+# The hint that the numbers are clickable is shown with the links, and only then. With no
+# modifier handed in (SANDCASTLE_CLICK_MOD unset) it names both, as Ctrl-click is iTerm2's right-click.
+has 'ctrl-click a ticket for its card \(iTerm2: cmd-click for its log\)'
+
+# ---------------------------------------------------------------------------
+SCENARIO="click hint per modifier"
+# `sandcastle status` senses the outer terminal once and hands status.sh one word; the view only
+# draws its text, and an unknown word draws the fallback.
+hinted() { # SANDCASTLE_CLICK_MOD value, expected hint
+  PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+    SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" \
+    SANDCASTLE_LINKS=1 SANDCASTLE_CLICK_MOD="$1" "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+  sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
+  grep -qF "$2" "$TMP/frame" || { echo "FAIL [$SCENARIO] SANDCASTLE_CLICK_MOD=$1 does not show: $2"; fails=$((fails+1)); }
+}
+hinted ctrl 'ctrl-click a ticket for its card'
+hasnt 'iTerm2'
+hinted cmd 'cmd-click a ticket for its log'
+hasnt 'ctrl-click'
+hinted fallback 'ctrl-click a ticket for its card (iTerm2: cmd-click for its log)'
+hinted bogus 'ctrl-click a ticket for its card (iTerm2: cmd-click for its log)'
 
 # ---------------------------------------------------------------------------
 SCENARIO="links off, or no plugin marker"

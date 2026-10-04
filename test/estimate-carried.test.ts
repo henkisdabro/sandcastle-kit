@@ -56,7 +56,7 @@ test("a run of carried branches, history of one large carried ticket: the high e
   for (const [high, truth] of [[inHigh, real.inTokens], [outHigh, real.out], [minHigh, real.minutes]]) {
     assert.ok(high >= truth / 2 && high <= truth * 2, `${high} is not within 2x of ${truth}: ${text}`);
   }
-  // The five-ticket chain is 5 x 6m = 30m, longer than 3 rounds of 6m.
+  // The five-ticket chain is 5 x 6m = 30m, longer than the 10 tickets' 6m each over 4 slots (15m).
   assert.match(text, /and 30m for 10 ticket\(s\) \(10 carried, 0 fresh\), 4 at a time \(5 tickets in sequence\)\.$/);
   // The same history priced as fresh tickets, as before: about half the real tokens, outside 2x.
   const [, asFresh] = parse(estimate(p, 10, 4, 5)!.match(/about (.*?) tokens in/)![1]);
@@ -68,7 +68,12 @@ test("carried and fresh tickets are priced from their own history, and a range r
   const p = project([...fresh(1, 5, 1_000_000, 10_000), ...fresh(2, 5, 1_000_000, 10_000), ...fresh(3, 15, 3_000_000, 30_000), ...carried(4, 20, 6_000_000, 60_000)]);
   assert.equal(
     estimate(p, 2, 2, 0, undefined, { carried: [true, false] })!,
-    "Estimate (rough, from 4 ticket(s) in the last 3 runs): about 7.0M to 9.0M tokens in / 70k to 90k out and 13m to 18m for 2 ticket(s) (1 carried, 1 fresh), 2 at a time.",
+    "Estimate (rough, from 4 ticket(s) in the last 3 runs): about 7.0M to 9.0M tokens in / 70k to 90k out and 20m for 2 ticket(s) (1 carried, 1 fresh), 2 at a time.",
+  );
+  // The median end is the carried ticket's own 20m (the summed 35m over 2 slots is 17.5m); the high end is 65m over 2 slots.
+  assert.equal(
+    estimate(p, 4, 2, 0, undefined, { carried: [true, false, false, false] })!.match(/and (.*?) for/)![1],
+    "20m to 33m",
   );
   // No carried ticket in the run: no split, and the fresh figures.
   assert.match(estimate(p, 2, 2)!, /about 2\.0M to 6\.0M tokens in \/ 20k to 60k out and 5m to 15m for 2 ticket\(s\), 2 at a time\.$/);

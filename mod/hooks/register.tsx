@@ -64,7 +64,8 @@ const seen = new Map<string, Seen>();
 const seenAt = (root: string): Seen => seen.get(root) ?? (seen.set(root, { primed: false, needs: [] }).get(root) as Seen);
 /**
  * Roots, resolved, of runs this session started outside its own root. Kept once seen: the
- * registry file goes when the run exits, and the end is still to be announced.
+ * registry file goes when the run exits (or later, once its Herdr tab has its report), and the end
+ * is still to be announced.
  */
 const followed = new Set<string>();
 /**

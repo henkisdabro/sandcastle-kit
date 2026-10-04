@@ -9,6 +9,7 @@ import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
@@ -18,13 +19,20 @@ import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
-export const run = (cmd: string, args: string[], cwd?: string) => {
+export const run = (cmd: string, args: string[], cwd?: string, timeout?: number) => {
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd }).trim();
+    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd, timeout }).trim();
   } catch {
     return undefined;
   }
 };
+
+/**
+ * Doctor's build-cache line, or undefined when Docker is down or slow. `docker system df` sizes every
+ * container's files, and with a busy container (a test suite in one) it took over a minute: an info
+ * line is not worth holding doctor for, so it gets a few seconds.
+ */
+export const buildCacheLine = (timeout = 5000) => buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"], undefined, timeout) ?? "");
 
 /** The first Claude Code that loads mods (plugins whose hooks run inside it). */
 const MOD_MIN = [2, 1, 287];
@@ -346,7 +354,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
       const idleMark = machineSettings().idleMark;
       if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
-      return undefined;
+      // The status view falls back on a bad value without a word, so this is the one place it is said.
+      return herdrSettingProblem(machineSettings().herdr, settingsFile);
     } catch (error) {
       return (error as Error).message;
     }
@@ -360,6 +369,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
         : settingsProblem?.startsWith('"idleMark"')
           ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : settingsProblem?.startsWith('"herdr')
+          ? `Set it to \`{"clickHint": "auto"}\` (or "ctrl" or "cmd"), or delete it to sense the terminal.`
           : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
   );
 
@@ -455,6 +466,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         : "`sandcastle herdr configure` (shows what it adds and asks first).",
       true,
     );
+    if (plugin.linkedFrom) console.log(clickHintLine(resolveClickHint()));
   }
 
   // A bare kit clone (no project config) is not a project; checking it would print a false FIX.
@@ -504,7 +516,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
     // Info, never a FIX. Silent when Docker is down.
-    const cache = buildCacheNote(run("docker", ["system", "df", "--format", "{{json .}}"]) ?? "");
+    const cache = buildCacheLine();
     if (cache) console.log(`info ${cache}`);
     const ignored = run("git", ["-C", repoRoot, "check-ignore", "-q", ".sandcastle/logs/x"]) !== undefined;
     if (hasConfig) check(ignored, ".sandcastle/logs is gitignored", gitignoreFix(repoRoot));

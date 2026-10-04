@@ -170,12 +170,16 @@ test("the band is the castle's three rows, the run beside its walls, each row cu
   for (const frame of CASTLE_FRAMES) assert.deepEqual(text(34, frame).map((r) => r.slice(5)), text(34).map((r) => r.slice(5)));
 });
 
-test("the castle builds through five-cell frames and holds complete for most of the cycle", () => {
+test("the castle builds through five-cell frames and loops, holding complete at least as long as it builds", () => {
   const cycle = CASTLE_FRAMES.reduce((n, f) => n + f.ms, 0);
   const held = CASTLE_FRAMES[HELD]!;
   assert.equal(HELD, CASTLE_FRAMES.length - 1);
   assert.deepEqual({ top: held.top, mid: held.mid, base: held.base }, CASTLE);
-  assert.ok(held.ms > cycle * 0.75, `held ${held.ms} of ${cycle} ms`);
+  assert.ok(held.ms >= cycle - held.ms, `held ${held.ms} of ${cycle} ms`);
+  // A loop in time: every frame a whole number of beats, twelve beats in all.
+  const BEAT = 500;
+  for (const f of CASTLE_FRAMES) assert.equal(f.ms % BEAT, 0, `${f.ms} ms is not a whole number of beats`);
+  assert.equal(cycle, 12 * BEAT, `cycle ${cycle} ms`);
   for (const f of CASTLE_FRAMES) {
     for (const row of [f.top, f.mid, f.base]) {
       assert.equal(Array.from(row).length, 5, JSON.stringify(row));

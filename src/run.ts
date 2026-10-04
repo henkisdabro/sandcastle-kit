@@ -475,6 +475,8 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
+    // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
+    if (kind === "review" || kind === "rereview" || kind === "remerge") allowed.add("IMPL_UNMET");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
     if (kind === "remerge") allowed.add("REVIEW_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
@@ -676,7 +678,8 @@ const HIGH = 0.8;
  * A rough estimate for a run about to start, as a range: the median to the 80th percentile of the
  * tokens and time of this project's tickets in its last three runs (from timings.jsonl, see
  * `recentWindow`), summed over `tickets`, with
- * the time divided across `slots`, or the chain's own tickets' times one after another when that is
+ * the time the tickets' summed figures divided across `slots` (floored at the slowest single ticket's figure, at the median and at the
+ * high end alike), or the chain's own tickets' times one after another when that is
  * longer (`chain` is the longest in-run `Blocked by` chain's length; `detail.chainAt` says which
  * tickets, by their place in `models`, and without it each takes the average). Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
@@ -764,8 +767,9 @@ export const estimate = (
   const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
   const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number, land: (p: (typeof per)[number]) => number) => {
-    const rounds = Math.ceil(tickets / slots);
-    const serial = rounds * (sum(pick) / Math.max(tickets, 1));
+    // The tickets' summed figures over the slots, not whole rounds: a sixth ticket on five slots starts when the first slot
+    // frees, so it is not a round of its own. No run is shorter than its slowest ticket, whatever the slots.
+    const serial = Math.max(sum(pick) / Math.max(slots, 1), per.reduce((n, p) => Math.max(n, pick(p)), 0));
     const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? pick(per[at]) : 0), 0) : chain * (sum(pick) / Math.max(tickets, 1));
     // Every ticket's gate passes share the machine's gate slots, whatever the sandboxes: the run cannot finish before they have all run.
     // The landing gates take gates slots too, beside the tickets' own passes.

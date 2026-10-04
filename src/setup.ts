@@ -242,7 +242,7 @@ export const setup = async (repoRoot?: string) => {
   if (process.env.HERDR_ENV === "1") {
     const plugin = pluginState();
     if (!plugin.linkedHere || !plugin.block) {
-      console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its log, and run progress in the sidebar.");
+      console.log("\nInside Herdr, the kit's plugin adds the status view and report over any tab, Ctrl-click on a ticket for its card, and run progress in the sidebar.");
       try {
         await configure(false, false, true);
       } catch (error) {

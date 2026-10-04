@@ -276,7 +276,7 @@ const github = (project: Project): Tracker => {
 
 export const DEFAULT_DONE = ["done", "closed", "resolved", "wontfix"];
 
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 // One "Key: value" line: "Status: x" or "**Status:** x". Not a bullet: a list item
 // under the title is prose.
