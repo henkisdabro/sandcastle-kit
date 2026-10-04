@@ -52,6 +52,7 @@ read a module's section there before changing it.
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
 | `src/herdr.ts` | Herdr helpers and the run's view: the tab, panes, agent-state reports, sidebar tokens |
+| `src/click-hint.ts` | The status view's click hint: the outer terminal sensed from the attached Herdr clients (`ps`, `herdr session list`), the override (`SANDCASTLE_CLICK_HINT`, `herdr.clickHint`), and the modifier `sandcastle status` hands `status.sh` |
 | `src/live-runs.ts` | The machine-wide live-runs directory (`RUNS_DIR`, under `KIT_CACHE`) that the Herdr tab bar and the Claude Code mod read |
 | `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, Ctrl-click logs, the Agents view |
 | `herdr/` | The Herdr plugin: `herdr-plugin.toml` (its `version` follows each release; a test checks) and `entry.sh`, through which every action, pane and hook runs |

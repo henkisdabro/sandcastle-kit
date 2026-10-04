@@ -9,6 +9,7 @@ import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
@@ -346,7 +347,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
       const idleMark = machineSettings().idleMark;
       if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
-      return undefined;
+      // The status view falls back on a bad value without a word, so this is the one place it is said.
+      return herdrSettingProblem(machineSettings().herdr, settingsFile);
     } catch (error) {
       return (error as Error).message;
     }
@@ -360,6 +362,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
         : settingsProblem?.startsWith('"idleMark"')
           ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : settingsProblem?.startsWith('"herdr')
+          ? `Set it to \`{"clickHint": "auto"}\` (or "ctrl" or "cmd"), or delete it to sense the terminal.`
           : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),
   );
 
@@ -455,6 +459,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         : "`sandcastle herdr configure` (shows what it adds and asks first).",
       true,
     );
+    if (plugin.linkedFrom) console.log(clickHintLine(resolveClickHint()));
   }
 
   // A bare kit clone (no project config) is not a project; checking it would print a false FIX.

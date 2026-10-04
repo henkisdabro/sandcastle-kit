@@ -81,6 +81,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
+import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
@@ -345,6 +346,8 @@ try {
           SANDCASTLE_SETTINGS: next,
           SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
           SANDCASTLE_MAX_GATES: String(limit("gates")),
+          // Sensed once here, never per redraw: a `ps` listing every few seconds would cost the pane more than the hint is worth.
+          SANDCASTLE_CLICK_MOD: resolveClickHint().mod,
         },
       });
       process.exit(r.status ?? 0);
