@@ -6,8 +6,10 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statfsSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
+import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 import { poolLimit } from "./pool.ts";
+import { USER_CONFIG } from "./sandbox.ts";
 
 const GIB = 2 ** 30;
 
@@ -156,7 +158,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
     const c = now[key];
     return [
       `  ${name}: ${rec[key]}  (${by})`,
-      `    now ${c.value} (${c.source}) - ${c.value === rec[key] ? "already matches" : `differs; set "${name}": ${rec[key]} in ~/.config/sandcastle-kit/config.json`}`,
+      `    now ${c.value} (${c.source}) - ${c.value === rec[key] ? "already matches" : `differs; set "${name}": ${rec[key]} in ${join(USER_CONFIG, "config.json")}`}`,
     ];
   };
   lines.push("Recommended pool limits:", ...row("maxSandboxes", "sandboxes", rec.sandboxesBy), ...row("maxGates", "gates", rec.gatesBy));

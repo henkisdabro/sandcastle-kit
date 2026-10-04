@@ -61,6 +61,8 @@ test("the current limits are shown beside it with their source, and say when the
   const differs = text(sizeLines(reading(orbstack(8, 8)), {}, {}));
   assert.match(differs, /now 6 \(default\) - differs; set "maxSandboxes": 4/);
   assert.match(differs, /now 2 \(default\) - differs; set "maxGates": 1/);
+  // The settings file this machine reads, which XDG_CONFIG_HOME moves, not a fixed ~/.config.
+  assert.ok(differs.includes(`in ${join(config, "sandcastle-kit", "config.json")}`), differs);
   const matches = text(sizeLines(reading(orbstack(8, 8)), {}, { maxSandboxes: rec.sandboxes, maxGates: rec.gates }));
   assert.match(matches, /now 4 \(config\.json\) - already matches/);
   assert.match(matches, /now 1 \(config\.json\) - already matches/);
@@ -176,7 +178,10 @@ test("sandcastle help size and size --help print its entry", () => {
     assert.ok(!r.stdout.includes("setup  "), "only the command's own entry");
     for (const line of r.stdout.split("\n")) assert.ok(line.length <= 90, `fits the terminal: ${line}`);
   }
-  const listed = size(bin, ["help"]);
-  assert.match(listed.stdout, /^ {2}size /m);
+  for (const args of [["help"], ["help", "size"]]) {
+    const listed = size(bin, args);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.match(listed.stdout, /^ {2}size /m);
+  }
   assert.equal(size(bin, ["size", "extra"]).status, 1);
 });
