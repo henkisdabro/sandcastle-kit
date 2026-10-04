@@ -46,11 +46,16 @@ test("the reader keeps an Upgrading line among the others, in order", () => {
 
 test("a later pass's rewording of an Upgrading line is not added again, and a Changed line is not mistaken for it", () => {
   assert.ok(sameChangelogLine("Upgrading: run the configure command again", "Upgrading: run the configure command again."));
-  assert.ok(sameChangelogLine("Upgrading: run the configure command again", "run the configure command again"));
+  assert.ok(!sameChangelogLine("Changed: run the configure command again", "Upgrading: run the configure command again"));
+  assert.ok(!sameChangelogLine("Upgrading: run the configure command again", "run the configure command again"));
   const have: string[] = [];
   addChangelog(have, "<changelog>Upgrading: run the herdr configure command again</changelog>");
   addChangelog(have, "<changelog>Upgrading: run the herdr configure command again</changelog>");
   assert.equal(have.length, 1);
+  // The reviewer lifts the instruction the implementer folded into a Changed line: both stand.
+  const folded = ["Changed: run the herdr configure command again"];
+  addChangelog(folded, "<changelog>Upgrading: run the herdr configure command again</changelog>");
+  assert.deepEqual(folded, ["Changed: run the herdr configure command again", "Upgrading: run the herdr configure command again"]);
 });
 
 test("the closing summary lists an Upgrading line apart from the changes, for merged tickets only", () => {
