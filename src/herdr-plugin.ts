@@ -22,7 +22,7 @@ import { confirm } from "./autonomy.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
-import { herdr, lineText, runCounts } from "./herdr.ts";
+import { herdr, lineText, reportInDeadTab, runCounts } from "./herdr.ts";
 import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -281,8 +281,12 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
 
 type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: string; finishedAt?: string; share?: number; tickets?: Record<string, TicketRecord> };
 
-/** Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed. */
-export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf): Run[] => {
+/**
+ * Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed,
+ * after `ended` has been told the root of a run whose record says so: its file is the last
+ * sign of it, and the tab bar does not tick again for a run that is not registered.
+ */
+export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => void = () => {}): Run[] => {
   const runs: Run[] = [];
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const file = join(dir, f);
@@ -294,6 +298,7 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf): Run[] => {
         runs.push(run);
         continue;
       }
+      ended(root);
     } catch {
       /* no record: not a live run */
     }
@@ -302,10 +307,14 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf): Run[] => {
   return runs.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 };
 
+// Whichever reader of the runs directory drops a dead run's file first tells the tab: the tab bar's
+// next tick would find no file.
+const replaceDeadTab = (root: string) => void reportInDeadTab(root);
+
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
-export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf) => {
+export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => void) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
-  const runs = liveRuns(dir, probe).sort((a, b) => Number(here(b)) - Number(here(a)));
+  const runs = liveRuns(dir, probe, ended).sort((a, b) => Number(here(b)) - Number(here(a)));
   return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
 };
 
@@ -334,7 +343,7 @@ const runWorkspace = (root: string) => {
  * run, else the one live run whose tab is in this workspace. With several runs and none here,
  * `why` asks the user to pick by focus: showing one at random reads as the right one.
  */
-export const contextProject = (context = process.env.HERDR_PLUGIN_CONTEXT_JSON, runs = () => liveRuns()): { root?: string; why?: string } => {
+export const contextProject = (context = process.env.HERDR_PLUGIN_CONTEXT_JSON, runs = () => liveRuns(undefined, undefined, replaceDeadTab)): { root?: string; why?: string } => {
   const ctx = JSON.parse(context || "{}") as { focused_pane_cwd?: string; workspace_cwd?: string; workspace_id?: string };
   const here = projectAt(ctx.focused_pane_cwd) ?? projectAt(ctx.workspace_cwd);
   if (here) return { root: here };
@@ -458,7 +467,7 @@ export const herdrCommand = async (args: string[]) => {
     case "configure":
       return configure(rest.includes("--remove"), rest.includes("--yes"));
     case "line": {
-      const line = runsLine();
+      const line = runsLine(undefined, undefined, undefined, replaceDeadTab);
       if (line) console.log(line);
       return;
     }

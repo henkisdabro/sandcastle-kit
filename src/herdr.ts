@@ -60,6 +60,36 @@ export const runsStatus = (pane: string) =>
     p.cmdline.includes("status.sh"),
   );
 
+// The tab and panes a run opened, written by `openSandboxView` for the next run (and the plugin) to find.
+export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-view.json");
+
+/**
+ * A run that is no longer live (its pid gone, or its record finished) leaves its tab as the
+ * server last had it, and after a cold Herdr restart that is idle shells with nothing saying the
+ * run ended. The tab the kit opened for it gets the closing report in its status pane, once: the
+ * record is marked, so a later tick finds nothing to do. Left alone: a tab a person's terminal
+ * was adopted into (that terminal is theirs), a tab that is not the recorded one any more, and a
+ * status pane still running the status view (it already shows how the run ended). Any herdr error
+ * leaves the tab as it is. Returns whether the report was started.
+ */
+export const reportInDeadTab = (root: string, kit = KIT): boolean => {
+  try {
+    const file = viewRecord(root);
+    const view = JSON.parse(readFileSync(file, "utf8")) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
+    if (!view.tab || !view.status || view.adopted !== false || view.reported) return false;
+    // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
+    if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return false;
+    if (runsStatus(view.status)) return false;
+    // `cd`: a restored shell does not always start in the project.
+    const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+    herdr(["pane", "run", view.status, `cd ${quote(root)} && ${quote(join(kit, "bin/sandcastle"))} report`]);
+    writeFileSync(file, JSON.stringify({ ...view, reported: true }) + "\n");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Herdr labels a new tab with a bare number; any other label is the operator's. One such ('sandcastle <project> run 4') was overwritten, leaving several tabs with one name.
 export const defaultTabLabel = (label: string | undefined) => !label || /^\d+$/.test(label.trim());
 
@@ -206,7 +236,7 @@ export const openSandboxView = (
 ): SandboxView => {
   if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return NONE;
   const logs = join(project.root, ".sandcastle/logs");
-  const record = join(logs, "herdr-view.json");
+  const record = viewRecord(project.root);
   let failed = false;
   // One warning, then silence: a broken view must not flood the run's output.
   const safe = <T>(fn: () => T): T | undefined => {
