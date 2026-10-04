@@ -160,8 +160,9 @@ export const landInSandbox = async (
         }
         red ??= await gate(box);
         if (red.failures.length || red.gates.some((g) => !g.pass)) {
-          // The merge's own first parent, not the host's read before the sandbox opened: it is the tip this tree was gated on.
-          result = { kind: "red", run: red, base: (await box.exec("git rev-parse HEAD^1")).stdout.trim() };
+          // The merge's own first parent, not the host's read before the sandbox opened: it is the tip this
+          // tree was gated on. Read from `made`, not HEAD: the gates ran the branch's code, which can move HEAD.
+          result = { kind: "red", run: red, base: (await box.exec(`git rev-parse ${made}^1`)).stdout.trim() };
         }
       }
     } finally {
