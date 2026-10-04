@@ -572,7 +572,7 @@ sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when the cap clamped 
 Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
 `○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
-marked `(next run)`, and a bare `status.sh` falls back to the last run's record, marked
+prefixed `next run:` (so it is not read as the ended run's recorded settings), and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
 and draws no row.
 

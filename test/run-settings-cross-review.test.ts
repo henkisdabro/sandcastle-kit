@@ -122,7 +122,7 @@ test("an old record keeps its models string as written, and draws no cross-revie
 test("idle: the next run's setting, passed by `sandcastle status`, gives the row item", () => {
   record({ models: MODELS, settings: { autonomy: 0, turn: 1, cap: 1, crossReview: false } });
   const next = JSON.stringify({ autonomy: 0, turn: 1, cap: 1, crossReview: true, crossReviewModel: "other-model", crossReviewEffort: "xhigh" });
-  assert.match(row(frame(100, next)) ?? "", /· ● cross-review other-model xhigh \(next run\)$/);
+  assert.match(row(frame(100, next)) ?? "", /^settings {2}next run: .*· ● cross-review other-model xhigh$/);
 });
 
 test("a model or effort that is not plain text is never drawn", () => {
