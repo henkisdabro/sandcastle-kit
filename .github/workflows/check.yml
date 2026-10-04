@@ -11,7 +11,7 @@ name: Check
 # bash 3.2, the bash the kit's users have there.
 
 # Push only on main: a branch's pushes are covered by its pull request, and
-# running both doubled every job and queued the macOS shards behind each other.
+# running both doubled every job and queued the macOS jobs behind each other.
 on:
   push:
     branches: [main]
@@ -32,17 +32,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        # About seven minutes of test time on a runner of two or three cores;
-        # split by file, each shard takes a third of it. The status view
-        # checks run in shard 1 (the test script's own rule).
-        shard: [1, 2, 3]
+        # Arm ran the suite 15-35% faster than x64 at every shard count tried,
+        # and 24.04 a little faster than 26.04.
+        os: [ubuntu-24.04-arm, macos-latest]
+        # The status view checks, then the test files in four shards packed by
+        # weight (test/shard.ts). Five jobs is also the free plan's macOS limit.
+        part: [status, 1, 2, 3, 4]
+    name: ${{ matrix.os }} ${{ matrix.part }}
     runs-on: ${{ matrix.os }}
     # Each test has its own five-minute limit; this stops a hung process
     # holding a runner for the default six hours.
     timeout-minutes: 15
-    env:
-      TEST_SHARD: ${{ matrix.shard }}/3
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -51,8 +51,13 @@ jobs:
           node-version: lts/*
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - if: matrix.shard == 1
-        run: pnpm exec tsc --noEmit
-      - run: pnpm test
-      - if: runner.os == 'macOS' && matrix.shard == 1
+      - if: matrix.part == 'status'
+        run: |
+          pnpm exec tsc --noEmit
+          bash test/status.test.sh
+      - if: matrix.part == 'status' && runner.os == 'macOS'
         run: STATUS_BASH=/bin/bash bash test/status.test.sh
+      - if: matrix.part != 'status'
+        run: pnpm test:shard
+        env:
+          TEST_SHARD: ${{ matrix.part }}/4
