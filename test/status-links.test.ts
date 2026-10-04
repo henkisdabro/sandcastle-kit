@@ -2,7 +2,7 @@
 // are emitted only once `sandcastle herdr configure` has left its marker under the kit's cache
 // (no marker, no plugin, so a click would do nothing), and SANDCASTLE_LINKS overrides all of
 // it. The pipe cases are in test/status.test.sh; only a pty from `script` reaches the marker
-// check. No Docker, no network, no model calls.
+// check; a live view reads the marker again on each redraw. No Docker, no network, no model calls.
 //
 //   pnpm exec tsx --test test/status-links.test.ts
 
@@ -71,4 +71,48 @@ test("outside Herdr a marker changes nothing, and SANDCASTLE_LINKS overrides it 
   assert.deepEqual(view({ HERDR_ENV: "1", SANDCASTLE_LINKS: "0" }), { linked: false, hint: false });
   rmSync(MARKER, { force: true });
   assert.deepEqual(view({ SANDCASTLE_LINKS: "1" }), { linked: true, hint: true });
+});
+
+// A live view reads the marker again on each redraw. The marker is changed from inside a frame, by
+// a fake `docker` the view calls while it draws (no sleep race): the first frame is drawn with the
+// marker as it was at the start, the next ones after the change.
+const live = (env: Record<string, string>, docker: string) => {
+  const bin = mkdtempSync(join(TMP, "live-bin-"));
+  script(join(bin, "sandcastle"), `#!/bin/sh\necho '[{"id":"101","title":"t","updated":null,"blockedOn":[]}]'\n`);
+  script(join(bin, "docker"), `#!/bin/sh\n${docker}\nexit 1\n`);
+  const liveWrapper = join(bin, "wrapper.sh");
+  script(liveWrapper, `#!/bin/sh\nbash "${join(KIT, "status.sh")}" 1 all\n`);
+  const args = process.platform === "linux" ? ["-qec", `sh '${liveWrapper}'`, "/dev/null"] : ["-q", "/dev/null", "sh", liveWrapper];
+  const r = spawnSync("script", args, {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SANDCASTLE_PROJECT: REPO, SANDCASTLE_BASE: "main", TERM_COLS: "100", TERM_ROWS: "200", XDG_CACHE_HOME: CACHE, HERDR_ENV: "", SANDCASTLE_LINKS: "", STATUS_FRAMES: "3", ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 60000,
+  });
+  const frames = r.stdout.split("\x1b[H").slice(1).filter((f) => f.includes("#101"));
+  assert.equal(frames.length, 3, `expected three frames with a ticket row: ${r.stdout}${r.stderr}`);
+  return frames.map((f) => ({ linked: f.includes("\x1b]8;;file://"), hint: f.includes("ctrl-click a ticket for its log") }));
+};
+const NONE = { linked: false, hint: false };
+const BOTH = { linked: true, hint: true };
+
+test("a view opened before the plugin was linked shows links once the marker appears", opts, () => {
+  rmSync(MARKER, { force: true });
+  const make = `mkdir -p '${join(CACHE, "sandcastle-kit")}' && : > '${MARKER}'`;
+  assert.deepEqual(live({ HERDR_ENV: "1" }, make), [NONE, BOTH, BOTH]);
+});
+
+test("a view drops its links once the marker goes", opts, () => {
+  mkdirSync(join(CACHE, "sandcastle-kit"), { recursive: true });
+  writeFileSync(MARKER, "");
+  assert.deepEqual(live({ HERDR_ENV: "1" }, `rm -f '${MARKER}'`), [BOTH, NONE, NONE]);
+});
+
+test("a marker that appears mid-view changes nothing outside Herdr or under SANDCASTLE_LINKS", opts, () => {
+  rmSync(MARKER, { force: true });
+  const make = `mkdir -p '${join(CACHE, "sandcastle-kit")}' && : > '${MARKER}'`;
+  assert.deepEqual(live({}, make), [NONE, NONE, NONE]);
+  rmSync(MARKER, { force: true });
+  assert.deepEqual(live({ HERDR_ENV: "1", SANDCASTLE_LINKS: "0" }, make), [NONE, NONE, NONE]);
+  assert.deepEqual(live({ SANDCASTLE_LINKS: "1" }, `rm -f '${MARKER}'`), [BOTH, BOTH, BOTH]);
 });
