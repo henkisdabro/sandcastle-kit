@@ -37,12 +37,13 @@ writeFileSync(join(REPO, ".sandcastle/logs/agent-issue-101-implement-101.log"), 
 const wrapper = join(TMP, "wrapper.sh");
 script(wrapper, `#!/bin/sh\nbash "${join(KIT, "status.sh")}" 0 all\n`);
 
-// util-linux and BSD `script` differ in syntax; no stdin, as BSD refuses Node's socket.
+// util-linux and BSD `script` differ in syntax; no stdin, as BSD refuses Node's socket. HERDR_ENV and
+// SANDCASTLE_LINKS are cleared first: a test run from inside Herdr would otherwise carry its own.
 const view = (env: Record<string, string>) => {
   const args = process.platform === "linux" ? ["-qec", `sh '${wrapper}'`, "/dev/null"] : ["-q", "/dev/null", "sh", wrapper];
   const r = spawnSync("script", args, {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${FAKE}:${process.env.PATH}`, SANDCASTLE_PROJECT: REPO, SANDCASTLE_BASE: "main", TERM_COLS: "100", TERM_ROWS: "200", XDG_CACHE_HOME: CACHE, ...env },
+    env: { ...process.env, PATH: `${FAKE}:${process.env.PATH}`, SANDCASTLE_PROJECT: REPO, SANDCASTLE_BASE: "main", TERM_COLS: "100", TERM_ROWS: "200", XDG_CACHE_HOME: CACHE, HERDR_ENV: "", SANDCASTLE_LINKS: "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 60000,
   });
