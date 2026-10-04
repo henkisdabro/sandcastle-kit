@@ -49,6 +49,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The sandbox image has `less`**, which the Herdr log popup pages with, so an agent can check
+  the popup's prompt. Every project's image rebuilds once.
 - **Ctrl-clicking a ticket in Herdr's status view opens its card**, not its latest raw log: its state
   and how long it has been in it, each pass with its outcome and time, and why it is held, in
   conflict or red. A digit opens that pass's log, `t` prints the tracker link, and `q`, Esc or
@@ -77,6 +79,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The ticket card's `t` key runs nothing from the clicked repo's git config.** A sandbox agent can
+  print a link to a log in a repository it made under its worktree; listing that repository's files
+  ran its `core.fsmonitor` command on the host. git now runs with fsmonitor and hooks off.
+- **The click-hint sensor reads the whole process listing**: on a busy Mac it was cut at 1 MiB and
+  missed the Herdr client. A status view into a pipe no longer lists processes at all.
+- **In Herdr without the plugin, a finished run's live-runs file is not kept**: only the plugin's
+  readers remove a kept file, so it stayed for good.
 - **The Herdr log popup says which key closes it**: a followed log's bottom line reads "Following new
   lines - Ctrl-C closes this popup" in place of "Waiting for data", a finished or short log's says
   that `q` closes it and `F` follows, and Ctrl-C closes a short log's popup too. The report popup
