@@ -206,6 +206,8 @@ export type RunSettings = {
    * without one for now). The only settings field that may change during a turn.
    */
   usageReading?: "unavailable";
+  /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
+  apiKey?: boolean;
 };
 
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */

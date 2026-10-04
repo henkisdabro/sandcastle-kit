@@ -528,6 +528,7 @@ sandcastle run --dry                  # the same, as an argument
 CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
 sandcastle run --concurrency 2        # the same, as an argument
 sandcastle run --detach               # start it as a process of its own and return (see Detached runs)
+sandcastle run --api-key              # the yes to billing API credits, where there is no terminal to ask on (below)
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
 AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted, unblocked and partly-done tickets (see autonomy)
 AUTONOMY_LEVEL=drain sandcastle run   # keep taking turns until the queue is drained or a stop condition holds
@@ -547,6 +548,20 @@ whose blocker is in the run starts when that blocker has landed, one whose block
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
 gates; a red one stops the run before any agent starts.
+
+**Spending an API key is never silent.** Claude Code spends `ANTHROPIC_API_KEY` before
+`CLAUDE_CODE_OAUTH_TOKEN`, and the personal and the project `.env` merge key by key, so an API key in
+either file reaches the sandboxes and bills API credits, even beside an OAuth token. Whenever one
+would, the run stops before any image, sandbox or model call and asks, in red:
+`This run bills API credits (ANTHROPIC_API_KEY from <file>). Go ahead? [y/N]`. Without a terminal
+(`--detach`, a script, the Herdr plugin) it refuses unless given `--api-key` (or
+`SANDCASTLE_API_KEY=1`), which is the yes; the refusal names the flag and the other way out:
+removing the key. A run that goes ahead says so in red on its start line (`API credits: this run
+bills API credits - the sandboxes spend ANTHROPIC_API_KEY from <file>`, naming an OAuth token beside
+it as ignored), in the status view's settings row (`● API credits`) and on the closing summary's
+`Settings:` line. `sandcastle preflight` and `sandcastle lean --measure`, which call the model too,
+ask the same, and take `--api-key` as well. Red only on a terminal and without `NO_COLOR`; the words
+say it either way.
 
 When another run is live and holds or wants sandbox slots, the start also says how the machine is
 split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3; it starts
@@ -587,7 +602,8 @@ The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (
 threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
 When the guard cannot get a reading (a 403 turns it off for the run, a rate limit, an expired
 Claude Code login or no token at all leaves it without one for now, and with an API key it does not apply) the row says so in the warning colour:
-`● usage-guard 90% (no reading - not guarding)`. A row too wide for the pane wraps onto further
+`● usage-guard 90% (no reading - not guarding)`. A run whose sandboxes spend `ANTHROPIC_API_KEY`
+adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
 | State | Means |
@@ -638,6 +654,9 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   output. A detached run ignores SIGHUP.
 - **Not with autonomy level 1**, which asks whether to run again at the end of each turn and has
   no terminal to ask in: `Autonomy level 1 asks a question ... Use level 2 or 3, or run attached.`
+- **Not with an API key, unless told.** A run that would spend `ANTHROPIC_API_KEY` has no terminal
+  to ask on, so `--detach` refuses it before a process starts unless it is given `--api-key` (or
+  `SANDCASTLE_API_KEY=1`) as well ([Run](#-run)).
   Levels 2, 3 and `drain` work as usual.
 - **`sandcastle wait [seconds]`** blocks while the run holds the project's run lock, then prints
   what `sandcastle report` prints and exits with the run's own exit code (recorded in
@@ -1007,7 +1026,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release and every Upgrading note it has now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes superseded tags. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
-| `sandcastle lean [--measure]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras | 💸 only with `--measure` |
+| `sandcastle lean [--measure] [--api-key]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras, asking first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log` | ➖ no |
 | `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. A branch whose agents recorded an unmet acceptance criterion (`.sandcastle/logs/heads.json`, or `unmet` on the last run's ticket) lands as a run lands it: merged as `part of` the ticket, which stays open with the criterion commented. Needs a clean tree on the base branch and no live run. Refuses a closed ticket, a branch that changes hooks, CI or install scripts, and one that adds a file over 50 MB; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
@@ -1016,8 +1035,8 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets that touch a protected path (always held for a human merge), blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them) and a rough estimate. Advice only | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. On GitHub it also reminds you to give the label search a few seconds before `sandcastle run`. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
-| `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
-| `sandcastle run [--detach]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)) | 💸 yes |
+| `sandcastle preflight [--api-key]` | One "Reply OK" from every model, in the project image. Asks first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 yes, briefly |
+| `sandcastle run [--detach] [--api-key]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
@@ -1073,10 +1092,11 @@ Examples: [`examples/`](examples/).
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
 | `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
+| `SANDCASTLE_API_KEY=1` | off | The same as `--api-key`: the yes to billing API credits, for a run (or `preflight`, `lean --measure`) whose sandboxes would spend `ANTHROPIC_API_KEY`. Without it, such a run asks on a terminal and refuses without one ([Run](#-run)) |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
 | `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log, and its `ctrl-click a ticket for its log` hint (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
-| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY` they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY`, alone or beside the token (Claude Code spends it first), they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
 | `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |
@@ -1097,7 +1117,10 @@ Measure before changing it. One ticket can ask for its own implementer with a `m
 What belongs to your machine, not to a project, lives in `~/.config/sandcastle-kit/`, never in the
 kit or a repository. `.env` holds every token (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`,
 `GH_TOKEN`, `LINEAR_API_KEY`); a project's `.sandcastle/.env` overrides it key by key, except
-`LINEAR_API_KEY`, which stays on the host and is refused there. `config.json` is optional:
+`LINEAR_API_KEY`, which stays on the host and is refused there. Key by key means an
+`ANTHROPIC_API_KEY` in either file reaches the sandboxes beside an OAuth token in the other, and
+Claude Code spends the API key first: `sandcastle doctor` then prints a red `warn API credits` line
+naming the file, and every run asks before it bills API credits ([Run](#-run)). `config.json` is optional:
 
 | Key | Default | |
 |---|---|---|
@@ -1327,7 +1350,7 @@ is refused with a reminder to start the runtime.
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
-| `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N` and `--detach` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
+| `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N`, `--detach` and `--api-key` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
 | `"notify" ... must be a list of strings` | `notify` in `~/.config/sandcastle-kit/config.json` is a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`. |
 | `GH_TOKEN is not a fine-grained token` | Create a `github_pat_` token with `sandcastle setup` (or as in [docs/INSTALL.md](docs/INSTALL.md#-installing-by-hand)). A project's `.sandcastle/.env` overrides the shared one - check both. |
 | `Preflight failed` naming a model | Plan limit reached, token expired (`sandcastle doctor --verify` checks), or the image's Claude Code is older than the model needs: a model newer than the `stable` channel needs `claudeCode: "latest"` (or a version) in `.sandcastle/config.ts`, and offline the image used a cached or default version - with the network back, `sandcastle build` picks up the channel's current release. When the model named is the cross-review (Codex) model, the check ran with the host's own `codex` CLI, not the image: sign in again with `codex login`, or update the host's Codex CLI; `CLAUDE_CODE_VERSION` does not apply. |

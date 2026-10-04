@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
@@ -309,6 +310,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
 };
 
 const LEVELS = [0, 1, 2, 3, "drain"];
+const API_CREDITS = "billing API credits (ANTHROPIC_API_KEY)";
 
 /**
  * The run's settings as one line, and the hints its own facts call for. Only a field the record
@@ -316,7 +318,7 @@ const LEVELS = [0, 1, 2, 3, "drain"];
  * file in a repository. A hint is a switch that would have changed this run's outcome, never a
  * catalogue: nothing here is said when nothing calls for it.
  */
-export const settingsLines = (f: Facts): string[] => {
+export const settingsLines = (f: Facts, bare = false): string[] => {
   const s = f.settings;
   if (!s || typeof s !== "object") return [];
   const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
@@ -335,6 +337,8 @@ export const settingsLines = (f: Facts): string[] => {
   const noReading = s.usageGuard === true && s.usageReading === "unavailable";
   if (s.usageGuard === true) items.push(`usage guard on${stop !== undefined ? `, stops at ${stop}%` : ""}${noReading ? ", no reading" : ""}`);
   else if (s.usageGuard === false) items.push("usage guard off");
+  // Never silent: red where colour is wanted, and the words say it where it is not.
+  if (s.apiKey === true) items.push(bare ? API_CREDITS : red(API_CREDITS));
   if (!items.length) return [];
 
   const lines = [`Settings: ${items.join(" · ")}`];
@@ -446,7 +450,7 @@ export const render = (f: Facts, plain = false): string => {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
-  out.push(...settingsLines(f));
+  out.push(...settingsLines(f, plain));
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 

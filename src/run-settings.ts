@@ -17,6 +17,8 @@ export type SettingsSources = {
   project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown } };
   /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;
+  /** Whether the credentials files put `ANTHROPIC_API_KEY` in the sandboxes (`projectApiKeySpend`); read by the caller, so this stays pure. */
+  apiKey?: boolean;
 };
 
 /**
@@ -33,9 +35,11 @@ export type ResolvedSettings = {
   usageGuard: boolean;
   /** The guard's stop threshold in percent; only when it is on. */
   usageStop?: number;
+  /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
+  apiKey?: true;
 };
 
-export const resolveSettings = ({ env, project, machine }: SettingsSources): ResolvedSettings => {
+export const resolveSettings = ({ env, project, machine, apiKey = false }: SettingsSources): ResolvedSettings => {
   const pool = poolLimit("sandboxes", env, machine);
   const asked = wholeNumber("CONCURRENCY", env.CONCURRENCY ?? project.concurrency ?? DEFAULT_CONCURRENCY, 1);
   const usageGuard = env.USAGE_CHECK === "1";
@@ -48,6 +52,7 @@ export const resolveSettings = ({ env, project, machine }: SettingsSources): Res
     concurrency: { asked, effective: Math.min(pipelineWorkers(asked, Infinity, pool, env.DRY_RUN !== "1"), pool) },
     usageGuard,
     ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
+    ...(apiKey ? { apiKey: true as const } : {}),
   };
 };
 
@@ -70,5 +75,7 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     usageGuard: settings.usageGuard,
     ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
     ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
+    // Only when it does: a subscription run's record and view stay as they were.
+    ...(settings.apiKey ? { apiKey: true } : {}),
   };
 };

@@ -6,13 +6,14 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "n
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
+import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
 import { sizePointerNow } from "./size.ts";
-import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
@@ -370,6 +371,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const empty = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
   if (empty.length) check(false, "no empty keys in the credentials file", `Delete the empty line(s) for ${empty.join(", ")} from ${envFile}, or run \`${setup}\`, which drops them whenever it writes the file.`);
   check(!!(env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY), "Claude credential set (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)", `\`${setup}\` (or run \`claude setup-token\` and put the token in ${envFile} as CLAUDE_CODE_OAUTH_TOKEN=...)`);
+  // Never silent: an API key bills API credits, beside an OAuth token too (Claude Code spends it first),
+  // from either file - the project's as well as this one, merged key by key as a run merges them.
+  const spend = apiKeySpend([envFile, ...(isProjectRoot(repoRoot) ? [join(repoRoot, ".sandcastle/.env")] : [])]);
+  if (spend) console.log(red(doctorApiKeyLine(spend)));
   // A missing token and a classic one are different problems; "is a fine-grained token" said the second for both.
   check(!!env.GH_TOKEN?.startsWith("github_pat_"), (env.GH_TOKEN ? "GH_TOKEN is a fine-grained token (github_pat_), not a classic one" : "GH_TOKEN set (a fine-grained token, github_pat_)") + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), `\`${setup}\` (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read - and put it in ${envFile} as GH_TOKEN=...)`, !needsGh);
   if (verify) {
@@ -411,7 +416,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
       // Apart from whether the token is accepted: any 403 from the usage endpoint means the guard cannot read this token's plan usage
       // - unless the guard reads with the Claude Code login instead, which the line after the loop reports.
-      if (key === "CLAUDE_CODE_OAUTH_TOKEN" && status === 403 && guardCredential?.source !== "login" && guardCredential?.source !== "login expired") console.log("warn USAGE_CHECK=1 cannot work with this token: the usage endpoint answered HTTP 403, so the guard would be off for a run.");
+      if (key === "CLAUDE_CODE_OAUTH_TOKEN" && status === 403 && guardCredential?.source === "CLAUDE_CODE_OAUTH_TOKEN") console.log("warn USAGE_CHECK=1 cannot work with this token: the usage endpoint answered HTTP 403, so the guard would be off for a run.");
     }
     // Only the source and the HTTP status are printed, never a character of a token.
     const usage = guardCredential;

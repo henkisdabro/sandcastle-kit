@@ -673,7 +673,8 @@ read_settings() {
     (if .crossReview == true then "on" elif .crossReview == false then "off" else "" end),
     (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
     (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end),
-    (.usageGuard | if . == null then "" else tostring end), (.usageStop // "" | tostring), (.usageReading // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
+    (.usageGuard | if . == null then "" else tostring end), (.usageStop // "" | tostring), (.usageReading // "" | tostring),
+    (if .apiKey == true then "on" else "" end)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -694,11 +695,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap repair conc asked ask cross xmodel xeffort guard stop reading l i n levels="" WRAP_SEP="${rule} · ${off}"
+  local lvl turn cap repair conc asked ask cross xmodel xeffort guard stop reading apikey l i n levels="" WRAP_SEP="${rule} · ${off}"
   SETTINGS_ROWS=(); SET_ITEMS=(); CROSS_SET=""
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap repair conc asked cross xmodel xeffort guard stop reading <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap repair conc asked cross xmodel xeffort guard stop reading apikey <<<"$SET_FIELDS"
   CROSS_SET="$cross"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
@@ -739,6 +740,8 @@ settings_row() {
       else set_item "${grn}●${off} ${mute}usage-guard${off}${stop:+ ${head}${stop}%${off}}"; fi;;
     false) set_item "${gry}○ usage-guard${off}" "" 80;;
   esac
+  # An API key the sandboxes spend: never silent, so it is red, says so in words, and stays at any width.
+  [ "$apikey" = on ] && set_item "${hot}● API credits (ANTHROPIC_API_KEY)${off}" "${hot}● API credits${off}"
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
   # The next run's settings are not the ended run's: "next run:" leads the whole row, so a reader of
   # the closing summary's recorded settings never takes this row for them.

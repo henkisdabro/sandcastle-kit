@@ -51,7 +51,8 @@ install ends with it; to run it again later: `sandcastle setup`.
    newer it also offers [the Claude Code mod](../README.md#-the-claude-code-mod), which shows a
    run in the session that started it; it is code that runs inside Claude Code, so it asks first.
 3. **Claude credential** - offers to run `claude setup-token` for your subscription, or takes an
-   Anthropic API key.
+   Anthropic API key, and drops the other one from the file. A run with an API key bills API
+   credits, and asks before it starts ([Installing by hand](#-installing-by-hand)).
 4. **GitHub token** - opens GitHub's token page pre-filled with the right permissions, then checks
    the token you paste is fine-grained and that GitHub accepts it.
 5. **Writes** `~/.config/sandcastle-kit/.env` with owner-only permissions (600), keeping anything
@@ -90,7 +91,12 @@ cp .env.example ~/.config/sandcastle-kit/.env && chmod 600 ~/.config/sandcastle-
 Then uncomment and fill in `~/.config/sandcastle-kit/.env`:
 
 - `CLAUDE_CODE_OAUTH_TOKEN` - run `claude setup-token` (uses your Claude subscription), **or**
-  `ANTHROPIC_API_KEY` (billed per token).
+  `ANTHROPIC_API_KEY` (billed per token). Set one, not both: Claude Code spends the API key first,
+  so with both it bills API credits and the token is ignored - here or in a project's
+  `.sandcastle/.env`, which overrides this file key by key. Whenever an API key would reach the
+  sandboxes, `sandcastle doctor` prints a red `warn API credits` line naming its file, and every
+  run asks before it starts; without a terminal (`--detach`, a script) a run needs
+  `sandcastle run --api-key` (or `SANDCASTLE_API_KEY=1`) to go ahead.
 - `GH_TOKEN` - a **fine-grained** token (`github_pat_...`) from
   <https://github.com/settings/personal-access-tokens/new>: repository access limited to the
   repos you will run, permissions **Issues: Read and write** and **Metadata: Read**.
