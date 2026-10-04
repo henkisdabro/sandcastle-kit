@@ -29,6 +29,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   and `lean --measure` ask before they start, and `--detach` or a script needs `--api-key` (or
   `SANDCASTLE_API_KEY=1`). To spend your subscription instead, remove the key from the file doctor
   names (`/sandcastle update` checks this).
+- **Tickets may carry a `## Seams` section.** `/sandcastle queue` and `audit` add one where a
+  behaviour change's test boundary is not obvious, naming the interface a test should drive.
+  Existing tickets need nothing: without it, the implementer tests at the highest existing public
+  interface.
 - **With `changelog: true`, agents can now give an `Upgrading:` line.** If your project rules tell
   agents to start each line with `Added:`, `Changed:` or `Fixed:`, add `Upgrading:` there, for what
   an existing project must act on (`/sandcastle update` checks this).
@@ -57,6 +61,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **Implementers test at the ticket's seams and run the full gates once.** A bug is first
+  reproduced by a failing test; expected values come from outside the code and mocks only from
+  real boundaries; single test files run while working, and each gate runs once, in its own
+  command, at the end.
+- **The review checks that each test would fail if the behaviour broke** and survive a refactor
+  that kept it, and tidies duplication or misleading names the branch introduced.
 - **The sandbox image has `less`**, which the Herdr log popup pages with, so an agent can check
   the popup's prompt. Every project's image rebuilds once.
 - **Ctrl-clicking a ticket in Herdr's status view opens its card**, not its latest raw log: its state

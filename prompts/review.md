@@ -38,8 +38,15 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 5. **Docs left describing the old behaviour.** If the diff changes what the project does, grep its
    README, docs, agent instructions and skill files for the words that described the old behaviour,
    not only for the changed function's name. A sentence that is now false is a finding: fix it.
-6. **Tests that do not test.** A test that passes against a broken implementation is worse than no
-   test. If you doubt one, break the implementation and confirm the test fails.
+6. **Tests that do not test.** For each test, ask: would it fail if the behaviour broke, and
+   survive a refactor that kept the behaviour? The usual failures: an expected value recomputed
+   the way the code computes it; a mock of this repository's own code where no boundary is
+   involved; an assertion on calls or private state where the caller sees only the result.
+   Rewrite such a test at the public interface. When you doubt one, break the behaviour, confirm
+   the test fails, then restore the code.
+7. **Leftovers from building in steps.** Fix duplication or a misleading name this branch
+   introduced when it makes the changed behaviour harder to follow. Do not reorganise sound code
+   to your taste.
 
 {{KIT_PROJECT_RULES}}
 
