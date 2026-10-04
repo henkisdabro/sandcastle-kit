@@ -853,10 +853,19 @@ export const forgetHead = (root: string, id: string): boolean => {
   return true;
 };
 
+/** True when everything on `branch` since `from` is merge commits or already on `base`; throws when `from` is not in the branch's history. */
+const onlyMergesSince = (root: string, base: string, branch: string, from: string): boolean => {
+  // A rewritten branch: the recorded commit is no longer in its history.
+  sh("git", ["merge-base", "--is-ancestor", from, branch], root);
+  // Merge commits and what base already holds are not new work; anything else is.
+  return Number(sh("git", ["rev-list", "--count", "--no-merges", `${from}..${branch}`, `^${base}`], root)) === 0;
+};
+
 /**
- * The recorded green head when branch agent/issue-<id> still sits on it and has
- * work not on base; otherwise undefined. Undefined means "run it in full": a
- * missing or doubtful record never skips work.
+ * The recorded green head when branch agent/issue-<id> sits on it, or past it by merge commits
+ * only (the kit's base merge, or a conflict resolution a hold left on the branch), and has work
+ * not on base; otherwise undefined. Undefined means "run it in full": a missing or doubtful
+ * record never skips work, and a branch with a commit of its own since green is new work.
  */
 export const landOnlyHead = (root: string, base: string, id: string): string | undefined => {
   const branch = `agent/issue-${id}`;
@@ -864,11 +873,11 @@ export const landOnlyHead = (root: string, base: string, id: string): string | u
   if (!record?.green || record.branch !== branch) return undefined;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
-    if (sh("git", ["rev-parse", branch], root) !== record.green) return undefined;
+    if (sh("git", ["rev-parse", branch], root) !== record.green && !onlyMergesSince(root, base, branch, record.green)) return undefined;
     // Everything already on base: a reopened ticket, which runs as today.
     return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.green : undefined;
   } catch {
-    return undefined; // no such branch, or git failed
+    return undefined; // no such branch, not an ancestor, or git failed
   }
 };
 
@@ -883,11 +892,7 @@ export const narrowReviewBase = (root: string, base: string, id: string): string
   if (!record?.reviewed || record.branch !== branch) return undefined;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
-    // A rewritten branch: the reviewed commit is no longer in its history.
-    sh("git", ["merge-base", "--is-ancestor", record.reviewed, branch], root);
-    // Merge commits and what base already holds are not new work; anything else is.
-    const fresh = Number(sh("git", ["rev-list", "--count", "--no-merges", `${record.reviewed}..${branch}`, `^${base}`], root));
-    return fresh > 0 ? undefined : record.reviewed;
+    return onlyMergesSince(root, base, branch, record.reviewed) ? record.reviewed : undefined;
   } catch {
     return undefined; // no such branch, not an ancestor, or git failed
   }
