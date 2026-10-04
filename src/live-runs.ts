@@ -14,7 +14,7 @@ import { join } from "node:path";
 export const KIT_CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "sandcastle-kit");
 export const RUNS_DIR = join(KIT_CACHE, "runs");
 // Left by `sandcastle herdr configure` while the plugin is linked, and read by status.sh (at
-// this path, in shell) to know that a Ctrl-click on a ticket will open its log.
+// this path, in shell) to know that a Ctrl-click on a ticket will open its card.
 export const PLUGIN_MARKER = join(KIT_CACHE, "herdr-plugin-linked");
 
 /**

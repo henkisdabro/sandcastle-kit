@@ -1,7 +1,8 @@
 #!/bin/sh
 # Every command of the Herdr plugin (herdr-plugin.toml) starts here. Herdr runs it as
 # argv, with no shell around it: from this directory for an action or hook, from the
-# project for a pane. The pagers stay in shell; the rest is `sandcastle herdr <verb>`.
+# project for a pane. The pagers stay in shell; the rest, the ticket card too, is
+# `sandcastle herdr <verb>`.
 here="${HERDR_PLUGIN_ROOT:-$(dirname "$0")}"
 kit=$(cd "$here/.." && pwd)
 # Herdr hands a plugin its server's environment, not a login shell's: a Herdr started at
@@ -32,6 +33,8 @@ case "${1:-}" in
   # full-screen drawing is fine there, so the cause is narrower than that. The popup closes
   # with less, so nothing is left behind.
   report) "$kit/bin/sandcastle" report 2>&1 | less -R -X "$report_prompt" ;;
+  # One log, paged from the ticket card (`card`, which `sandcastle herdr` draws) when a digit
+  # picks it; the card is drawn again when the pager closes.
   # Follows the log live, like tail -f, once it is longer than the popup: +F opens at the end
   # and shows new lines as the agent writes them. While following, less ignores q and takes
   # only Ctrl-C, which stops the following - so -K makes Ctrl-C close the popup outright:

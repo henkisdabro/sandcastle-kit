@@ -19,6 +19,7 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
+import { LANDING_GATES } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
@@ -185,6 +186,37 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
     byModel[model] = addTokens(byModel[model] ?? NO_TOKENS, line.tokens);
   }
   return total ? { total, byModel } : undefined;
+};
+
+/** The phases of a ticket's timings lines that are a pass of it: its sandbox's setup is not one. */
+export const PASS_PHASES = ["implement", "resolve", "review", "cross-review", "gates", "repair", LANDING_GATES] as const;
+
+/** One pass of a ticket as its timings line has it: `ms` without the slot wait, and the gates a red gate run named. */
+export type TicketPass = { phase: (typeof PASS_PHASES)[number]; ms: number; ok: boolean; red?: string[] };
+
+/**
+ * One ticket's passes in one run from timings.jsonl text, in the order they ended: the run given (the
+ * run record's `startedAt`), else the latest run whose lines name the ticket. The ticket card reads it
+ * on a click, so it takes the text and nothing else: no git, no tracker.
+ */
+export const ticketPasses = (text: string, id: string, runId?: string): TicketPass[] => {
+  const lines: { run: string; pass: TicketPass }[] = [];
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; ms?: unknown; ok?: unknown; red?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || typeof line.run !== "string" || line.issue !== id || !(PASS_PHASES as readonly unknown[]).includes(line.phase)) continue;
+    const red = Array.isArray(line.red) ? line.red.filter((r): r is string => typeof r === "string") : [];
+    lines.push({
+      run: line.run,
+      pass: { phase: line.phase as TicketPass["phase"], ms: typeof line.ms === "number" ? line.ms : 0, ok: line.ok === true, ...(red.length ? { red } : {}) },
+    });
+  }
+  const run = runId ?? lines.at(-1)?.run;
+  return lines.filter((l) => l.run === run).map((l) => l.pass);
 };
 
 /** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */

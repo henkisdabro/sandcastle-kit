@@ -96,5 +96,5 @@ test("the pager stays the restricted one, with no lesskey file", () => {
 
 test("the manifest's popup titles say how each closes", () => {
   assert.match(MANIFEST, /^title = "Sandcastle report - q closes"$/m);
-  assert.match(MANIFEST, /^title = "Sandcastle log - Ctrl-C closes, q too when not following"$/m);
+  assert.match(MANIFEST, /^title = "Sandcastle ticket - q or Esc closes"$/m);
 });

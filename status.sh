@@ -73,7 +73,7 @@ moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '16
 if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then bold=''; off=''; rule=''; mute=''; head=''; accent=''; wht=''; grn=''; ylw=''; cyn=''; blu=''; gry=''; hot=''; moon=''; dusk=''; night=''; deep=''; star=''; fi
 # Inside Herdr each ticket links to its latest log (OSC 8), and the note band says so. Only
 # with the kit's Herdr plugin linked (`sandcastle herdr configure` leaves the marker, `--remove`
-# takes it out): Ctrl-click opens that log in a popup, and without the plugin Herdr does nothing
+# takes it out): Ctrl-click opens that ticket's card in a popup, and without the plugin Herdr does nothing
 # with the click. No links elsewhere or into a pipe. SANDCASTLE_LINKS=1 or 0 overrides (the tests).
 # Whether this is Herdr and a terminal is decided once here; the marker is re-read each redraw
 # (relink: a file test, no process), as a view opened before `sandcastle herdr configure` linked
@@ -89,11 +89,12 @@ relink() {
 }
 relink
 # The hint's modifier, sensed once by `sandcastle status` from the outer terminal (src/click-hint.ts):
-# Ctrl-click is macOS's right-click in iTerm2, where Cmd-click works. Unset or unknown: both named.
+# Ctrl-click is macOS's right-click in iTerm2, where Cmd-click opens the link itself (the log, not
+# the card Herdr's plugin draws). Unset or unknown: both named.
 case "${SANDCASTLE_CLICK_MOD:-}" in
-  ctrl) CLICK_HINT="ctrl-click a ticket for its log" ;;
+  ctrl) CLICK_HINT="ctrl-click a ticket for its card" ;;
   cmd) CLICK_HINT="cmd-click a ticket for its log" ;;
-  *) CLICK_HINT="ctrl-click a ticket for its log (iTerm2: cmd-click)" ;;
+  *) CLICK_HINT="ctrl-click a ticket for its card (iTerm2: cmd-click for its log)" ;;
 esac
 
 # Visible width, and a cut to a width, of a string holding colour codes. The

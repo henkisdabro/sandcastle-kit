@@ -1,4 +1,4 @@
-// The status view's click hint: which modifier opens a ticket's log in the terminal outside Herdr.
+// The status view's click hint: which modifier opens a ticket's card in the terminal outside Herdr.
 //
 // A pane cannot see that terminal: Herdr's server gives every pane TERM_PROGRAM=herdr, and any
 // terminal may attach to the long-lived server. The attached Herdr client process carries the
@@ -16,11 +16,12 @@ export type ClickMod = "ctrl" | "cmd" | "fallback";
 export type ClickSetting = "auto" | "ctrl" | "cmd";
 export const CLICK_SETTINGS: readonly ClickSetting[] = ["auto", "ctrl", "cmd"];
 
-// The note band's words for each; status.sh draws its own copy, which a test holds to these.
+// The note band's words for each; status.sh draws its own copy, which a test holds to these. Ctrl-click
+// reaches Herdr, which opens the ticket's card; iTerm2 takes Cmd-click itself and opens the link, the raw log.
 export const HINT_TEXT: Record<ClickMod, string> = {
-  ctrl: "ctrl-click a ticket for its log",
+  ctrl: "ctrl-click a ticket for its card",
   cmd: "cmd-click a ticket for its log",
-  fallback: "ctrl-click a ticket for its log (iTerm2: cmd-click)",
+  fallback: "ctrl-click a ticket for its card (iTerm2: cmd-click for its log)",
 };
 
 // The variables a terminal leaves in the environment of what it starts.

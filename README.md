@@ -846,20 +846,20 @@ nothing asks. What you get:
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup: `q` closes it, and its bottom line says so. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it, and its bottom line says so (`less` reads no other key while it follows; Esc does nothing in it). A log shorter than the popup opens from its top line and does not follow: `q` or `Ctrl-C` closes it, and its bottom line says so, with `F` to follow new lines. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's card opens in a popup: its number, title, state and how long it has been in it; one line per pass in its last run (implement, review, gates, repair - each attempt -, resolve, landing gates) with its outcome and time; the reason it is held or in conflict, or the last lines of its red gate's log. A digit opens that pass's log: it follows the log live (new lines appear at the bottom as the agent writes them), and `Ctrl-C` closes it, as its bottom line says (`less` reads no other key while it follows; Esc does nothing in it); a log shorter than the popup opens from its top line and does not follow, `q` or `Ctrl-C` closes it, with `F` to follow new lines. Closing the log puts the card back. `t` prints the ticket's tracker link (its GitHub issue, from the `origin` remote, or its ticket file), and `q`, Esc or `Ctrl-C` closes the card. A ticket the last run did not take shows its logs, and says so. |
 | Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 
 **Which click.** The key depends on the terminal Herdr runs in, not on Herdr: Ctrl-click works in
 Terminal.app and Ghostty, but in iTerm2 it is macOS's right-click and never reaches Herdr, and
-Cmd-click opens the log there instead. A pane cannot see that terminal, so when `sandcastle status`
+Cmd-click opens the log there instead (iTerm2 opens the link itself, so the log, not the card). A pane cannot see that terminal, so when `sandcastle status`
 starts a view it looks once (never per redraw) at the Herdr clients attached to the view's own
 server - one `ps` listing of your own processes, and `herdr session list` - and reads the
 terminal from their environment (`TERM_PROGRAM`, `LC_TERMINAL`, `VTE_VERSION`, `KITTY_WINDOW_ID`,
 `WEZTERM_EXECUTABLE`). iTerm2 gets `cmd-click a ticket for its log`, Terminal.app and Ghostty
-`ctrl-click a ticket for its log`; anything else - WezTerm, Kitty, a Linux terminal, no client
-found, or clients in terminals that disagree - gets `ctrl-click a ticket for its log (iTerm2:
-cmd-click)`. If the guess is wrong, set it: `"herdr": {"clickHint": "ctrl"}` (or `"cmd"`; `"auto"`
+`ctrl-click a ticket for its card`; anything else - WezTerm, Kitty, a Linux terminal, no client
+found, or clients in terminals that disagree - gets `ctrl-click a ticket for its card (iTerm2:
+cmd-click for its log)`. If the guess is wrong, set it: `"herdr": {"clickHint": "ctrl"}` (or `"cmd"`; `"auto"`
 senses, the default) in your [personal settings](#personal-settings), or `SANDCASTLE_CLICK_HINT`
 for one view, which wins. `sandcastle doctor` and `sandcastle herdr configure` say which terminal
 was sensed and which hint the view will show.
@@ -867,8 +867,9 @@ was sensed and which hint the view will show.
 The prefix is Herdr's, `ctrl+b` unless you changed it. The keys work on the project of the focused
 pane; from a pane in no project, on the run going (with several, the one whose tab is in this
 workspace, else Herdr asks you to focus the one you mean). They open only when you press them: a
-run never opens one. The log a Ctrl-click opens must be a file in some project's
-`.sandcastle/logs`, and is paged with no shell escape, as an agent's log can print links too.
+run never opens one. The link a Ctrl-click follows must be a log file in some project's
+`.sandcastle/logs` (the card is that log's ticket's), each log is paged with no shell escape, and
+the card draws no control sequence from a title, note or log, as an agent's log can print links too.
 
 With or without the plugin, a run at autonomy level 1 that asks whether to run tickets again
 marks its own pane as waiting for you, so Herdr's sidebar and notifications say so like for any
