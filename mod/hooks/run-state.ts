@@ -24,17 +24,19 @@ export type Castle = { top: string; mid: string; base: string };
 export const CASTLE: Castle = { top: "▄ ▄ ▄", mid: "█████", base: "██▀██" };
 
 // While a ticket is in work the castle builds from level sand, half a row at a time, and holds
-// complete for most of the cycle: a part-built frame reads as going up only when the finished
-// castle is what the eye mostly sees. Every row of every frame is five cells, so the text beside
-// it never moves, and the band's height never changes.
+// complete before it starts again: a loop the eye follows as work going on, where a long hold
+// read as the run standing still. Every frame is a whole number of one 500 ms beat and the loop
+// is twelve of them (three bars of four), so the build keeps time and the restart lands on the
+// bar; the hold is never shorter than the build, so the finished castle is what the eye mostly sees. Every row of every frame is five cells, so the
+// text beside it never moves, and the band's height never changes.
 const AIR = "     ";
 export const CASTLE_FRAMES: (Castle & { ms: number })[] = [
-  { top: AIR, mid: AIR, base: "▁▁▁▁▁", ms: 800 },
-  { top: AIR, mid: AIR, base: "▄▄▄▄▄", ms: 350 },
-  { top: AIR, mid: AIR, base: CASTLE.base, ms: 350 },
-  { top: AIR, mid: "▄▄▄▄▄", base: CASTLE.base, ms: 350 },
-  { top: AIR, mid: CASTLE.mid, base: CASTLE.base, ms: 350 },
-  { ...CASTLE, ms: 16000 },
+  { top: AIR, mid: AIR, base: "▁▁▁▁▁", ms: 500 },
+  { top: AIR, mid: AIR, base: "▄▄▄▄▄", ms: 500 },
+  { top: AIR, mid: AIR, base: CASTLE.base, ms: 500 },
+  { top: AIR, mid: "▄▄▄▄▄", base: CASTLE.base, ms: 500 },
+  { top: AIR, mid: CASTLE.mid, base: CASTLE.base, ms: 500 },
+  { ...CASTLE, ms: 3500 },
 ];
 /** The held frame: the castle as the status view draws it. */
 export const HELD = CASTLE_FRAMES.length - 1;
