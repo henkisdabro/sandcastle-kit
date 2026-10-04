@@ -164,7 +164,7 @@ lands on. Two cases follow from that:
   no action from the user and runs again on the next `sandcastle run`.
 
 In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
-`ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
+`ends ~HH:MM` (when the last pipeline should finish, or when the landing gates, one after another on the one worker, should, if later) rather than `lands ~HH:MM`.
 
 ## Reading the summary
 

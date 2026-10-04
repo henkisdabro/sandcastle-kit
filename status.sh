@@ -479,14 +479,20 @@ load_run() {
   # the sandboxes the run uses at once. Only once there is a typical issue -
   # from earlier runs, or this run's first finished one. A ticket that is
   # landing is neither queued nor working here, so the figure is when the last
-  # pipeline ends. Tickets land as they go green: no landing phase follows.
+  # pipeline ends. Tickets land as they go green, on one worker, one landing gate
+  # after another: the tickets not yet landed times a ticket's usual landing gates
+  # (`typical["landing gates"]`, none for a ticket that landed without one) is a floor
+  # on the end, which the landing queue, not the pipelines, can set.
   RUN_ETA=$(jq -r --argjson now "$(date +%s)" '
     (.typical.issue // null) as $t
     | if $t == null or (.stage // "") != "running" then empty else
       ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
       | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair")))
           | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
-      | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) | floor end' "$f" 2>/dev/null)
+      | ([(.tickets // {})[] | select((.state // "") | IN("queued", "setup", "implement", "resolve", "review", "cross-review", "gates", "repair", "ready", "landing"))] | length) as $n
+      | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) as $p
+      | ($now + $n * (.typical["landing gates"] // 0)) as $l
+      | ([$p, $l] | max) | floor end' "$f" 2>/dev/null)
   return 0
 }
 # "phase|since" for an issue an older live run is working on, or empty.
