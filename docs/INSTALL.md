@@ -111,6 +111,17 @@ Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --ve
 GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value),
 and, inside a GitHub project, whether `GH_TOKEN` can push there - it should not.
 
+## 📏 Sizing the machine pool
+
+Once the container runtime is running, `sandcastle size` recommends the machine pool's limits
+(`maxSandboxes`, `maxGates`) from the runtime's VM, and says where the runtime's own CPU and memory
+setting lives (OrbStack `orb config set memory_mib` and `cpu`, Docker Desktop Settings -> Resources,
+`podman machine set --cpus --memory` with the machine stopped, `colima start --cpu --memory`;
+native Linux Docker has no VM). It is read-only and writes nothing, not even `config.json`: copy the
+numbers into `~/.config/sandcastle-kit/config.json` yourself. Applying a runtime change restarts it
+and stops a live run's containers. The reasoning is in the README's
+[Concurrency](../README.md#-concurrency) section.
+
 ## 🔄 Updating
 
 In a project, ask your agent for `/sandcastle update`: it pulls the kit, rebuilds the images,
