@@ -241,6 +241,16 @@ const lineOf = (tag: string) => (text: string): string | undefined => {
 export const ungatedOf = lineOf("ungated");
 // An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
 export const unmetOf = lineOf("unmet");
+// What a full review is shown of the implementer's `<unmet>` line: its words are dropped from the ticket's
+// leftovers once a full review ran (`left`), so the reviewer must finish the criterion or restate it, or it is lost.
+// Empty when the implementer gave none, so the prompt carries no heading over nothing.
+export const implUnmetView = (unmet: string | undefined): string =>
+  unmet
+    ? "# What the implementer left undone\n\nThe implementer ended with this `<unmet>` line, naming an acceptance criterion it knowingly left undone:\n\n" +
+      `> ${unmet}\n\n` +
+      "Finish it yourself, or restate it in your own `<unmet>` line. A criterion your final message neither " +
+      "finishes nor restates is dropped from the ticket as done.\n\n"
+    : "";
 
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
 // Unlike `<ungated>` every own-line tag counts, not the last alone: a ticket may need several lines. An
@@ -490,7 +500,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
     const implModel = own.model ?? IMPL_MODEL;
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
+    // `IMPL_UNMET` is empty here: only a full review is shown the implementer's line (see `implUnmetView`).
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
@@ -798,7 +809,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             () => {
               return reviewWithFallback(ref(issue.id), (agent, model) => {
                 reviewModel = model;
-                return reviewRun(`review-${issue.id}`)(agent);
+                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) })(agent);
               });
             },
             undefined,
@@ -809,7 +820,7 @@ export const createPipeline = (ctx: PipelineContext) => {
                 issue.id,
                 "cross-review",
                 () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) }));
                 },
                 undefined,
                 () => CROSS_REVIEW_MODEL,
