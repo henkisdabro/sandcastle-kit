@@ -77,24 +77,20 @@ ticket names. The project rules below say what else to read.
 
 # Tests
 
-For a change in behaviour, work test-first, one behaviour at a time:
+For a change in behaviour:
 
 1. **Test where a caller sees it.** Use the ticket's `## Seams` section if it has one; otherwise
    the highest existing public interface that shows the behaviour. No test of a private
    function, no export added only for a test.
-2. **Red for the right reason.** Write one test, run that test file alone, and see it fail
-   because the behaviour is missing. A compile error only shows the interface is missing: add it,
-   then see the test fail on behaviour. A failure for any other reason - a broken fixture, an
-   unrelated test - is not your red. For a bug, this red test is the reproduction.
-3. **Then green.** Write only enough code to pass it, then take the next behaviour.
-4. **Expected values come from outside the code:** the ticket, a worked example, a literal you
+2. **For a bug, first write a test that fails on the bug itself,** then fix it.
+3. **Expected values come from outside the code:** the ticket, a worked example, a literal you
    can check by hand. A value recomputed the way the code computes it passes by construction.
-5. **Mock only real boundaries:** network, clock, randomness, paid services. Run everything else
+4. **Mock only real boundaries:** network, clock, randomness, paid services. Run everything else
    for real.
-6. **Name each test after what a caller sees,** not after the function it calls.
+5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck; run the full gates once, before you
-finish.
+While working, run single test files and the typecheck, and commit each step that is green.
+Before you finish, run each gate once, in its own command.
 
 {{KIT_PROJECT_RULES}}
 

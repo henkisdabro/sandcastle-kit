@@ -47,10 +47,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
-- **Implementers work test-first.** For a change in behaviour, one test at a time at the ticket's
-  seams, each seen failing for the right reason before the code that passes it, with expected
-  values taken from outside the code and mocks only at real boundaries; single test files while
-  working, the full gates once at the end.
+- **Implementers test at the ticket's seams and run the full gates once.** A bug is first
+  reproduced by a failing test; expected values come from outside the code and mocks only from
+  real boundaries; single test files run while working, each green step is committed, and each
+  gate runs once, in its own command, at the end.
 - **The review checks that each test would fail if the behaviour broke** and survive a refactor
   that kept it, and tidies duplication or misleading names the branch introduced.
 - **Sandbox agents can no longer use Monitor, ScheduleWakeup, CronCreate, CronDelete, CronList or
