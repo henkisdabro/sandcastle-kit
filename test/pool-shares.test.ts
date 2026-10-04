@@ -135,14 +135,15 @@ test("an older wait of a run above its share does not hold back a run below its 
 });
 
 test("a run below its share does hold back a younger wait of a run that could take the slot", async () => {
-  // The converse: A is below its share and has waited longer, so the free slot is A's to take.
-  other("alpha", { demand: 5, held: 2 });
+  // The converse: A is below its share (2 of 5, 5, 5 on 6) and has waited longer, so the one free
+  // slot is A's to take, though B is below its share too.
+  other("alpha", { demand: 5, held: 1 });
   other("gamma", { demand: 5, held: 4 });
   waiting("alpha", Date.now() - 5000);
   joinPool("beta", 5, 5);
   const b = ticket("b");
   await until(() => b.why.length > 0, "run B to wait");
-  assert.equal(heldBy(), "2,4");
+  assert.equal(heldBy(), "1,4");
   await steady(() => !b.taken, "run B took a slot A waits for");
   assert.deepEqual(b.why, ["slots"]);
 });
