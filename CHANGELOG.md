@@ -11,9 +11,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **Run `/sandcastle update` in each project, then start a new agent session.** Its new step checks
+  whether an `ANTHROPIC_API_KEY` reaches the project's sandboxes, and a session keeps the skill it
+  loaded at its start.
 - **Autonomy levels 2, 3 and `drain` now re-run a ticket that merged partly done and is still
-  queued.** Move it to the hold label, or close it, if you do not want a turn spent on its remainder;
-  a drain stops after the same ticket is left partly done in two turns running.
+  queued**, unless its agent's note says the rest is a person's decision. Move it to the hold label,
+  or close it, if you do not want a turn spent on its remainder; a drain stops after the same ticket
+  is left partly done in two turns running.
 - **The usage guard reads your Claude Code login only when the sandboxes spend a subscription token.**
   With `ANTHROPIC_API_KEY` it now says it does not apply, where 0.6.0 read the host login's plan,
   which has nothing to do with an API key's spend. The run's start line and `doctor --verify` say
@@ -23,6 +27,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   and `lean --measure` ask before they start, and `--detach` or a script needs `--api-key` (or
   `SANDCASTLE_API_KEY=1`). To spend your subscription instead, remove the key from the file doctor
   names (`/sandcastle update` checks this).
+- **With `changelog: true`, agents can now give an `Upgrading:` line.** If your project rules tell
+  agents to start each line with `Added:`, `Changed:` or `Fixed:`, add `Upgrading:` there, for what
+  an existing project must act on (`/sandcastle update` checks this).
 
 ### Added
 
@@ -37,10 +44,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   apart from the changes, where an instruction used to be folded into a `Changed:` line or left in an
   agent's prose.
 - **Spending an API key is never silent.** Whenever `ANTHROPIC_API_KEY` would reach the sandboxes
-  (from either `.env`, even beside an OAuth token), `sandcastle doctor` warns in red, the run's start
-  line, the status view's settings row and the closing summary say it bills API credits, and
-  `sandcastle run`, `preflight` and `lean --measure` ask before spending it; with no terminal they
-  need `--api-key` (or `SANDCASTLE_API_KEY=1`).
+  (from either `.env`, even beside an OAuth token), `sandcastle doctor` warns in red, and the run's
+  start line, the status view's settings row and the closing summary say it bills API credits;
+  `sandcastle run`, `preflight` and `lean --measure` ask first (see Upgrading).
 - **Landing gates are timed and estimated.** Each landing gate writes a `landing gates` line to
   `timings.jsonl`; the estimate counts them in the gates-pool sum and takes the landings in a row,
   one after another on the one worker, as a floor on the run's end ("landing gates, one after
@@ -53,8 +59,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the popup's prompt. Every project's image rebuilds once.
 - **Ctrl-clicking a ticket in Herdr's status view opens its card**, not its latest raw log: its state
   and how long it has been in it, each pass with its outcome and time, and why it is held, in
-  conflict or red. A digit opens that pass's log, `t` prints the tracker link, and `q`, Esc or
-  Ctrl-C closes it.
+  conflict or red. A digit opens that pass's log, whose bottom line says which key closes it (Ctrl-C
+  while it follows new lines, `q` or Ctrl-C otherwise, `F` to follow); `t` prints the tracker link,
+  and `q`, Esc or Ctrl-C closes the card.
 - **A full review sees the ticket's comments and the implementer's `<unmet>` line**, and is asked to
   finish that criterion or restate it, so scope added in a comment is no longer closed as done.
 - **The run estimate prices the tickets as their summed figures over the slots**, never shorter than
@@ -66,8 +73,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   RemoteTrigger.** The sandbox's managed settings deny them, so a pass cannot sit waiting on a
   backgrounded suite, spending tokens and the machine's shared gate slots.
 - **`test/full-check.sh` runs the suite in CI's weighted shards** and starts the macOS,
-  agent-committer, Linux and scan legs together instead of one after another; `FULL_CHECK_SHARDS`
-  sets the shards per pass.
+  agent-committer, Linux and scan legs together instead of one after another. The passes running at
+  once share the cores, about two per shard; `FULL_CHECK_SHARDS` sets the shards per pass.
 - **The git guard's refusal says how to carry quoted text.** Text that only quotes a refused command
   (a heredoc, a commit message, a comment body) can be written to a file and passed with
   `--body-file`, `-F <file>` or `git commit -F <file>`; what the guard refuses is unchanged.
@@ -82,17 +89,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`sandcastle doctor` no longer waits on a slow Docker** for its build-cache line: `docker system
   df` sizes every container's files and took over a minute beside a busy container; the line now
   gets five seconds and is left out after that.
-- **The ticket card's `t` key runs nothing from the clicked repo's git config.** A sandbox agent can
-  print a link to a log in a repository it made under its worktree; listing that repository's files
-  ran its `core.fsmonitor` command on the host. git now runs with fsmonitor and hooks off.
-- **The click-hint sensor reads the whole process listing**: on a busy Mac it was cut at 1 MiB and
-  missed the Herdr client. A status view into a pipe no longer lists processes at all.
-- **In Herdr without the plugin, a finished run's live-runs file is not kept**: only the plugin's
-  readers remove a kept file, so it stayed for good.
-- **The Herdr log popup says which key closes it**: a followed log's bottom line reads "Following new
-  lines - Ctrl-C closes this popup" in place of "Waiting for data", a finished or short log's says
-  that `q` closes it and `F` follows, and Ctrl-C closes a short log's popup too. The report popup
-  says `q` closes it.
+- **The Herdr report popup says `q` closes it**, on its bottom line and in its title.
 - **The status view no longer says "closes on push"** for a hand merge already on the remote's base
   branch.
 - **A ticket handed back or held for a human prints a line to the run's output** when it happens,
@@ -112,23 +109,19 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   token the usage endpoint refuses, and was off for the run. `doctor --verify` names where it looks.
 - **A landing no longer fails with `spawnSync git ENOBUFS`** when the base moved by, or the branch
   changed, more than about 1 MiB of paths (a vendored directory, a mass rename, a generated tree).
-- **`test/full-check.sh` no longer oversubscribes the machine by default**: its passes, the Linux
-  container's included, share the cores at about two per shard, so a plain run on a loaded machine
-  no longer times out.
 - **A review's commit count is its own**: a reviewer whose only commit merged the base in read as
   `commits=1 (review=14)`, counting the base commits the merge brought in.
-- **A run in a terminal stopped by SIGINT reads as "Ctrl-C or `sandcastle stop`"**: `sandcastle stop`
-  signals any live run, and in a terminal the two cannot be told apart.
-- **Agents never run the gates to time them, nor wait on a backgrounded run with Monitor.** One
-  implementer asked for a before-and-after figure timed the full check four times under load and
-  polled it for half an hour, slowing every other sandbox's gates.
+- **Agents never run the gates to time them.** A ticket that asks for a wall time or a
+  before-and-after figure gets an `<unmet>` line for a person: one implementer timed the full check
+  four times under load and waited on it for half an hour, slowing every other sandbox's gates.
 - **A run ended by `sandcastle stop` or Ctrl-C reads as stopped by a person**: the closing summary
-  says "Run stopped by `sandcastle stop`" and the notify line "run stopped by ...", not "ended early
-  (exit 1)", and Runnable now no longer says "none" above a ticket the run cut short.
-- **A partly-done ticket is listed under Runnable now while it is still queued** and counts as
-  re-runnable at every autonomy level, so the summary's "the next run picks up the remainder" is
-  what the next run does; a drain stops if the same ticket is left partly done in two turns running.
-  The status view names the difference from the summary's needs-you count.
+  says "Run stopped by `sandcastle stop`" for a detached run and "stopped by Ctrl-C or `sandcastle
+  stop`" in a terminal, where the two cannot be told apart, and the notify line "run stopped by
+  ...", not "ended early (exit 1)". Runnable now no longer says "none" above a ticket the run cut
+  short.
+- **A partly-done ticket is listed under Runnable now while it is still queued**, and a further turn
+  takes it (level 1 asks first), so the summary's "the next run picks up the remainder" is what the
+  next run does. The status view names the difference from the summary's needs-you count.
 - **A dead run's report is typed into its Herdr pane only when the pane is a bare shell**, never into
   an editor, `claude` or a REPL started there since, and only once when two readers see the dead run
   together.
@@ -139,11 +132,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The beyond-Touches note leaves out files only a repair or a conflict resolution changed**, and is
   not printed when the overrun is only test and docs files (the paths stay in the run record).
 - **A red requeue line also names an earlier landing that changed a file the failing test imports or
-  names**, not only one that changed a file the branch changed.
-- **A red merge's requeue line no longer blames every landed ticket whose module has a passing
-  test**: it reads only the lines that say a test failed (FAIL lines, failing-test lines, pytest's F
-  and E, stack frames) for vitest, jest, pytest and the others, coloured output and tsc's error
-  lines included.
+  names**, not only one that changed a file the branch changed. Only the lines that say a test
+  failed count (FAIL lines, failing-test lines, pytest's F and E, stack frames, coloured output and
+  tsc's error lines included), so a ticket whose module has only passing tests is not blamed.
 - **With both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` set, the kit named the OAuth token**
   while Claude Code spent the API key; it now names the API key.
 - **A held ticket merged by hand whose branch `sandcastle clean` deleted counts as merged by hand**

@@ -104,6 +104,10 @@ apply it once the user agrees.
        `SANDCASTLE_API_KEY=1`). If they meant to spend their subscription, propose removing the key
        from that file; add `--api-key` to anything that starts runs only on their explicit yes to
        billing API credits.
+   14. **Upgrading lines.** If `.sandcastle/config.ts` sets `changelog: true` and the project's
+       rules file names `Added:`, `Changed:` or `Fixed:` but not `Upgrading:`, propose adding a
+       sentence there: a change an existing project must act on gets a line starting `Upgrading:`.
+       Without it, agents following those rules never suggest one.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: kit version before and after, what changed
