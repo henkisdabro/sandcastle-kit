@@ -1255,7 +1255,8 @@ and the kit narrows what can cross it:
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `push`,
   `reflog expire`, `worktree prune` and `repair`, deleting an `agent/*` branch, `rm` or `mv` inside
   the shared `.git`, and writes to it. Project hooks still run, and `reset --hard`, `clean`,
-  `checkout .` and `worktree remove --force` stay allowed. It reduces accidents and is not a
+  `checkout .` and `worktree remove --force` stay allowed, as do `update-ref`, `gc` and `prune` run as
+  `git -C <path>` in a scratch repository outside the project (`push` stays refused everywhere). It reduces accidents and is not a
   boundary - `sh -c` or a script gets past a command match; the host-side checks here are the real
   protection.
 - 🎯 **Landing checks.** Before a green branch merges, its ticket is read again - closed or

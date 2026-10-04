@@ -6,7 +6,10 @@ answer a question for you.
 prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anything under `.git/`
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is
-removed with `git worktree remove --force <path>` and nothing else. If git ever tells you this
+removed with `git worktree remove --force <path>` and nothing else. A scratch repository to test a
+change, built under the temp dir and not in the project, takes `git -C <path>` for its own plumbing
+(`update-ref`, `gc`, `prune`: the rule above is about the project's `.git`). To test remote handling
+give it a bare origin there and use `git fetch`; `git push` is refused everywhere. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
