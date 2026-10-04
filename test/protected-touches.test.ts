@@ -74,8 +74,9 @@ test("a kept branch that changed a protected path counts, though the Touches lin
 
 test("requeue warns about a protected path and still requeues", () => {
   const { root } = repo({ "01-a.md": ticket("A", "Touches: .sandcastle/rules.md", "ready-for-human") });
+  // The requeue commit needs an identity; a machine with no global git config (a sandbox) has none.
   const run = (id: string) =>
-    runKit(["requeue", id], { cwd: root, env: { ...process.env, XDG_CONFIG_HOME: XDG, GIT_CEILING_DIRECTORIES: tmpdir() }, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+    runKit(["requeue", id], { cwd: root, env: { ...process.env, XDG_CONFIG_HOME: XDG, GIT_CEILING_DIRECTORIES: tmpdir(), GIT_AUTHOR_NAME: "T", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "T", GIT_COMMITTER_EMAIL: "t@example.com" }, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   const r = run("shop-01");
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /shop-01 is back in the queue/);
