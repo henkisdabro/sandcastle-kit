@@ -9,6 +9,55 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **The usage guard reads your Claude Code login only when the sandboxes spend a subscription token.**
+  With `ANTHROPIC_API_KEY` it now says it does not apply, where 0.6.0 read the host login's plan,
+  which has nothing to do with an API key's spend. The run's start line and `doctor --verify` say
+  whose plan is read.
+
+### Added
+
+- **Landing gates are timed and estimated.** Each landing gate writes a `landing gates` line to
+  `timings.jsonl`; the estimate counts them in the gates-pool sum and takes the landings in a row,
+  one after another on the one worker, as a floor on the run's end ("landing gates, one after
+  another, set the time"). The status view's `ends ~HH:MM` follows. They took about half of a
+  recent 44-minute run, and nothing modelled them.
+
+### Changed
+
+- **`test/full-check.sh` runs the suite in CI's weighted shards** and starts the macOS,
+  agent-committer, Linux and scan legs together instead of one after another; `FULL_CHECK_SHARDS`
+  sets the shards per pass.
+- **The git guard's refusal says how to carry quoted text.** Text that only quotes a refused command
+  (a heredoc, a commit message, a comment body) can be written to a file and passed with
+  `--body-file`, `-F <file>` or `git commit -F <file>`; what the guard refuses is unchanged.
+- **A partly-done ticket whose agent says the rest is a person's decision** gets a suggestion to move
+  it to the hold label, in the closing summary and the ticket comment, instead of a promise that the
+  next run picks it up.
+- **The review prompt says a problem named only in prose is lost**: each one is fixed, filed as a
+  ticket, or left as an `<unmet>` line.
+
+### Fixed
+
+- **A run ended by `sandcastle stop` or Ctrl-C reads as stopped by a person**: the closing summary
+  says "Run stopped by `sandcastle stop`" and the notify line "run stopped by ...", not "ended early
+  (exit 1)", and Runnable now no longer says "none" above a ticket the run cut short.
+- **A partly-done ticket is listed under Runnable now while it is still queued** and counts as
+  re-runnable at every autonomy level, so the summary's "the next run picks up the remainder" is
+  what the next run does; a drain stops if the same ticket is left partly done in two turns running.
+  The status view names the difference from the summary's needs-you count.
+- **A dead run's report is typed into its Herdr pane only when the pane is a bare shell**, never into
+  an editor, `claude` or a REPL started there since, and only once when two readers see the dead run
+  together.
+- **A reviewer's rewording of a changelog line replaces the implementer's** instead of showing as a
+  second change: the review prompt asks for the branch's whole set of lines, and the summary keeps
+  the latest pass's set.
+- **The beyond-Touches note leaves out files only a repair or a conflict resolution changed**, and is
+  not printed when the overrun is only test and docs files (the paths stay in the run record).
+- **A red requeue line also names an earlier landing that changed a file the failing test imports or
+  names**, not only one that changed a file the branch changed.
+
 ## [0.6.0] - 2026-10-04
 
 ### Upgrading
