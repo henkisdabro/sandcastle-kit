@@ -206,6 +206,14 @@ export const kitCheckoutOnPath = (onPath: string | undefined) => {
   }
 };
 
+/**
+ * Whether doctor checks `repoRoot` as a project. The kit's own checkout counts when it has a
+ * project config (the kit burns down its own issues); only a bare kit clone is not a project, as
+ * checking it would print a false FIX for the missing config.
+ */
+export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot is string =>
+  !!repoRoot && (existsSync(join(repoRoot, CONFIG_PATH)) || realpathSync(repoRoot) !== realpathSync(kit));
+
 export const doctor = async (repoRoot?: string, verify = false) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
@@ -222,7 +230,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   console.log(`sandcastle-kit ${kitVersion()} at ${KIT}\n`);
   // Whether this project's tickets are GitHub Issues decides what GitHub access is required.
   const project =
-    repoRoot && existsSync(join(repoRoot, CONFIG_PATH)) && realpathSync(repoRoot) !== realpathSync(KIT)
+    repoRoot && existsSync(join(repoRoot, CONFIG_PATH))
       ? await loadProject(repoRoot).catch(() => undefined)
       : undefined;
   const needsGh = project?.tracker.kind !== "files";
@@ -361,7 +369,7 @@ export const doctor = async (repoRoot?: string, verify = false) => {
   check(!!env.GH_TOKEN?.startsWith("github_pat_"), (env.GH_TOKEN ? "GH_TOKEN is a fine-grained token (github_pat_), not a classic one" : "GH_TOKEN set (a fine-grained token, github_pat_)") + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), `\`${setup}\` (or create one at https://github.com/settings/personal-access-tokens/new - only the repos you run, Issues read/write, Metadata read - and put it in ${envFile} as GH_TOKEN=...)`, !needsGh);
   if (verify) {
     // The project's file overrides the shared one key by key, as credentials() in sandbox.ts does.
-    const inProject = !!repoRoot && realpathSync(repoRoot) !== realpathSync(KIT);
+    const inProject = isProjectRoot(repoRoot);
     const files = [envFile, ...(inProject ? [join(repoRoot, ".sandcastle/.env")] : [])];
     const source = (key: string) => {
       let found: { value: string; file: string } | undefined;
@@ -421,8 +429,8 @@ export const doctor = async (repoRoot?: string, verify = false) => {
     );
   }
 
-  // The kit's own clone is not a project; checking it would print a false FIX.
-  if (repoRoot && realpathSync(repoRoot) !== realpathSync(KIT)) {
+  // A bare kit clone (no project config) is not a project; checking it would print a false FIX.
+  if (isProjectRoot(repoRoot)) {
     console.log(`\nproject ${repoRoot}`);
     const otherKit = otherKitCheckoutNote(repoRoot);
     if (otherKit) console.log(otherKit);
