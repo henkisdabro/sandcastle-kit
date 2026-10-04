@@ -14,6 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
+import { recordPeak, samplePeak } from "./peaks.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -23,7 +24,8 @@ import { OperatorError } from "./errors.ts";
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
 type Failure = { name: string; command: string; exitCode: number; output: string };
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number };
+// `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -78,7 +80,8 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       // its own timeout too.
       if (!all || r.exitCode === 124) break;
     }
-    return { gates, failure: failures[0], failures, waitMs };
+    const peakMib = await samplePeak(sandbox);
+    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}) };
   }, progress.wait);
 };
 
@@ -233,7 +236,8 @@ export const gitHooksLine = (g: GitHooks) =>
 // exactly as an agent's is (image, setup, lean plan). `hookTests` also runs
 // the project's hook tests there, against the plan's kept hooks, and probes
 // the repo's git commit hooks.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false) =>
+// `run` is the run these gates belong to, which the sandbox's peak is filed under.
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, run?: string) =>
   withSlot("sandboxes", `${project.name} ${label}`, async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
@@ -247,6 +251,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       };
     } finally {
       unlockWorktree(sandbox.worktreePath);
+      await recordPeak(sandbox, project.root, run);
       await sandbox.close();
       try {
         sh("git", ["branch", "-D", branch]);
@@ -389,7 +394,7 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
  * output in the log. `cached` skips the check when the same base, image and
  * config were green before.
  */
-export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true) => {
+export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string) => {
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
@@ -398,7 +403,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     return;
   }
   console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
-  const run = await gateBase(project, image, planFile, "base-gates", true);
+  const run = await gateBase(project, image, planFile, "base-gates", true, runId);
   console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
   for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
   console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);

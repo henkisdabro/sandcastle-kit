@@ -11,7 +11,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // `||`, not `??`: an empty XDG_CACHE_HOME is unset (the XDG rule, and the mod's shell reads it so).
-export const RUNS_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "sandcastle-kit", "runs");
+export const KIT_CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "sandcastle-kit");
+export const RUNS_DIR = join(KIT_CACHE, "runs");
 
 /**
  * The process check `liveness` is given: the command line of the process with this pid, or
@@ -31,7 +32,7 @@ export const commandOf = (pid: number): string | undefined => {
 };
 
 /** The root with symlinks resolved (macOS: `/tmp` is `/private/tmp`), or as given when it cannot be. */
-const real = (root: string) => {
+export const real = (root: string) => {
   try {
     return realpathSync(root);
   } catch {

@@ -34,6 +34,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
+import { peakOf, recordPeak } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -575,6 +576,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     let ok = false;
     let tokens: Tokens | undefined;
     let gateTimes: Record<string, number> | undefined;
+    let peakMib: number | undefined;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
     try {
@@ -583,6 +585,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
+      peakMib = peakOf(result);
       red = gateRed(result);
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
@@ -599,6 +602,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
+        ...(peakMib ? { peakMib } : {}),
         ...(red?.length ? { red } : {}),
       };
       appendFileSync(timings, JSON.stringify(line) + "\n");
@@ -650,7 +654,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+      await timed("", "base gates", () => requireGreenBase(project, image, planFile, true, runId));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -1250,6 +1254,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
       took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
       unlockWorktree(sandbox.worktreePath);
+      // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
+      await recordPeak(sandbox, project.root, runId);
       // Sandcastle keeps a worktree with uncommitted files rather than lose
       // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
       const closed = await sandbox.close();
@@ -1488,7 +1494,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify")).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);

@@ -23,9 +23,9 @@
 //                    cap. The run keeps the slots it holds. The cap ends with the run;
 //                    --project acts on another project's run from any directory
 //   size             recommend the machine pool's limits (maxSandboxes, maxGates) from the
-//                    container runtime's VM, with the figure that set each, the current
-//                    limits and advice on the runtime's CPU and memory; read-only, writes
-//                    nothing; no model calls
+//                    container runtime's VM and the sandboxes' measured peak memory, with
+//                    the figure that set each, the current limits and advice on the
+//                    runtime's CPU and memory; read-only, writes nothing; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);

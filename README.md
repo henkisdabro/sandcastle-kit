@@ -1011,7 +1011,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
-| `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
+| `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -1276,9 +1276,26 @@ share (`wants 4 · share 2 · cap 2`).
 **Sizing the pool.** `sandcastle size` is read-only: it reads the container runtime's VM
 (`docker info`: its CPUs and memory), the host's RAM and the free disk where images and worktrees
 live, and recommends the limits above, naming the figure that set each. Sandboxes are the smaller
-of `floor((VM memory - 2 GiB) / 1.5 GiB)` and the VM's CPUs, at least 1 and at most 12; gates are
-`floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and 1.5 GiB per sandbox are assumptions, not
-measurements, and are printed with the answer. It shows the current limits beside the
+of `floor((VM memory - 2 GiB) / the sandbox's memory)` and the VM's CPUs, at least 1 and at most
+12; gates are `floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and the 6 CPUs a gate wants are
+assumptions, and are printed with the answer.
+
+The sandbox's memory is **measured** once runs have been recorded, and assumed (1.5 GiB, and the
+answer says so) until then. Every sandbox's peak memory is read from inside it, from the kernel's
+own high-water mark (cgroup v2 `memory.peak`), after each gate pass and again before it closes.
+Gates run in the agent's own sandbox, and the base and verify gates in a throwaway one, so a
+sandbox's peak covers its gates, and a heavy gate (a browser test suite, say) shows in it. The
+largest reading goes into the gate pass's line in the project's `.sandcastle/logs/timings.jsonl`
+(`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
+(`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
+a time, the run's start time, the peak and a hash of the project root: no path and no project name.
+`size` takes each project's highest peak over its last 5 measured runs, then the highest of the
+projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
+project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
+Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
+keeps the assumed one. The peak counts file cache the kernel has not yet reclaimed, so it is on the
+high side, which suits a limit. The pool's shares divide whatever limit you set; nothing about them
+changes. `size` shows the current limits beside the
 recommendation (environment, then `config.json`, then the defaults) and says when they already
 match; it changes nothing, so you copy the numbers into your [personal settings](#personal-settings)
 yourself. It also says where the runtime's own CPU and memory setting lives (OrbStack `orb config

@@ -45,12 +45,13 @@ read a module's section there before changing it.
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out: the autonomy level, repair attempts and concurrency, asked and effective) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
-| `src/size.ts` | `sandcastle size`: recommends the pool's `maxSandboxes` and `maxGates` from the runtime's VM (`docker info`), through injectable `Readers`; read-only, the assumed figures are constants at its top |
+| `src/size.ts` | `sandcastle size`: recommends the pool's `maxSandboxes` and `maxGates` from the runtime's VM (`docker info`) and the measured sandbox peaks (`measuredPeak`), through injectable `Readers`; read-only, the assumed figures are constants at its top |
+| `src/peaks.ts` | Sandbox peak memory: `memory.peak` read inside the container (`samplePeak`, `recordPeak`), and the machine-wide `peaks.jsonl` (`readPeaks`) that `size` reads |
 | `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`) |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
 | `src/herdr.ts` | Herdr helpers and the run's view: the tab, panes, agent-state reports, sidebar tokens |
-| `src/live-runs.ts` | The machine-wide live-runs directory (`RUNS_DIR`) that the Herdr tab bar and the Claude Code mod read |
+| `src/live-runs.ts` | The machine-wide live-runs directory (`RUNS_DIR`, under `KIT_CACHE`) that the Herdr tab bar and the Claude Code mod read |
 | `src/herdr-plugin.ts` | `sandcastle herdr`: `configure` (link the plugin, add or remove the config block), and the plugin's own verbs - the tab bar line, popups, Ctrl-click logs, the Agents view |
 | `herdr/` | The Herdr plugin: `herdr-plugin.toml` (its `version` follows each release; a test checks) and `entry.sh`, through which every action, pane and hook runs |
 | `src/tracker.ts` | The `Tracker` interface and its adapters: GitHub Issues, and Markdown ticket files. Which one a project uses, and its triage label names (`detectFromDocs`) |
