@@ -439,7 +439,7 @@ export const createLanding = <G extends Green>(
 };
 
 /** What a ticket's first attempt collided with at landing: its second attempt carries it. */
-export type Again = { kind: "conflict" | "red"; with: string[] };
+export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[] };
 
 /** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
 export type Withdrawn = { kind: "withdrawn"; reason: string };
@@ -765,7 +765,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (landed.kind !== "conflict" && landed.kind !== "red") return false;
         const t = byId.get(g.issue);
         if (!t || first.has(t.id) || stop.startsNothing || pipelines.closed) return false;
-        const again: Again = { kind: landed.kind, with: landed.with };
+        const again: Again = landed.kind === "red" ? { kind: "red", with: landed.with, gates: landed.gates, ...(landed.failing && { failing: landed.failing }) } : { kind: "conflict", with: landed.with };
         first.set(t.id, again);
         sentBack.set(t.id, { green: g, landed });
         tell({ kind: "requeued", id: t.id, again });

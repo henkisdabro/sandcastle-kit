@@ -310,8 +310,8 @@ export type Landed =
   | { kind: "merged"; regenerated?: { files: string[]; regen: string[] }; squashed?: boolean; overrun?: string[] }
   | { kind: "conflict"; files: string[]; with: string[] }
   /**
-   * The branch was green alone; its merge with the base, which holds `with` landed since it forked, was red. Not landed.
-   * `failing`: the test ids the red gate named.
+   * The branch was green alone; its merge with the base was red. Not landed. `with`: the tickets landed since it
+   * forked that changed a file this branch changed (none: red on the merged tree). `failing`: the test ids the red gate named.
    */
   | { kind: "red"; with: string[]; gates: string[]; failing?: string[] }
   /** `by`: what held it - a protected path, a large file, or a repair no review passed. */
@@ -479,8 +479,15 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     }
     if (result.kind === "red") {
       const gates = [...new Set([...result.run.failures.map((f) => f.name), ...result.run.gates.filter((g) => !g.pass).map((g) => g.name)])];
-      // The pair, named: which tickets this one is red with.
-      const earlier = since().map(([id]) => id);
+      // Named only when it could be the cause: a landed ticket that changed a file this branch changed.
+      // The rest of what landed since the fork is no suspect, and listing it sent people through every diff.
+      let mine: string[] = [];
+      try {
+        mine = sh("git", ["diff", "--name-only", `${before}...${o.head!}`], root).split("\n").filter(Boolean);
+      } catch {
+        // Unknown files name nobody: "red on the merged tree" claims no more than is known.
+      }
+      const earlier = since().filter(([, r]) => r.files.some((f) => mine.includes(f))).map(([id]) => id);
       const failing = result.run.failure ? failingTests(result.run.failure.output) : [];
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
     }
@@ -567,13 +574,29 @@ export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
   },
 });
 
-/** "conflicted again with #1, #3 after a requeue": what a second conflict or red at landing is held as. */
-export const againLine = (kind: "conflict" | "red", tickets: string[]) =>
-  `${kind === "conflict" ? "conflicted" : "red"} again${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} after a requeue`;
+/** The red gate and the failing tests it named: " (gate test; failing a.test.ts, b.test.ts)", or "" when no gate is known. */
+export const redDetail = (red?: { gates?: string[]; failing?: string[] }) => {
+  const parts = [red?.gates?.length ? `${red.gates.length > 1 ? "gates" : "gate"} ${red.gates.join(", ")}` : "", red?.failing?.length ? `failing ${red.failing.join(", ")}` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join("; ")})` : "";
+};
 
-/** "requeued after conflict with #1": the second attempt, as the status view and run.json say it. */
-export const requeuedLine = (kind: "conflict" | "red", tickets: string[]) =>
-  `requeued after ${kind === "conflict" ? "conflict" : "red"}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`;
+/** What a red merge is red with: the landed tickets that changed a file the branch did, else "on the merged tree". */
+const redWith = (tickets: string[]) => (tickets.length ? `with ${tickets.map(refOf).join(", ")}` : "on the merged tree");
+
+/** "conflicted again with #1, #3 after a requeue", "red again on the merged tree after a requeue (gate test)": what a second conflict or red at landing is held as. */
+export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }) =>
+  kind === "conflict"
+    ? `conflicted again${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} after a requeue`
+    : `red again ${redWith(tickets)} after a requeue${redDetail(red)}`;
+
+/** "requeued after conflict with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)": the second attempt, as the status view and run.json say it. */
+export const requeuedLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }) =>
+  kind === "conflict"
+    ? `requeued after conflict${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`
+    : `requeued after red ${redWith(tickets)}${redDetail(red)}`;
+
+/** The note a first red lands on: "red with #1 (gate test; failing a.test.ts)" or "red on the merged tree (gate test)". */
+export const redNote = (red: { with: string[]; gates?: string[]; failing?: string[] }) => `red ${redWith(red.with)}${redDetail(red)}`;
 
 /**
  * Where a carried branch's work came from: the ticket's first attempt when this run requeued it
@@ -617,6 +640,6 @@ export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {
-  const line = againLine(landed.kind, landed.with);
+  const line = againLine(landed.kind, landed.with, landed.kind === "red" ? landed : undefined);
   return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
 };

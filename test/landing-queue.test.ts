@@ -332,22 +332,22 @@ test("a conflict is attributed to the record, so a squashed branch deleted at it
   assert.notEqual(git(root, "branch", "--list", "agent/issue-2"), "");
 });
 
-test("a merged tree red with an earlier ticket names the pair and lands nothing", async () => {
+test("a merged tree red with an earlier ticket that shares no file names no ticket and lands nothing", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" }, 2: { "b.txt": "b\n" } });
   // Each branch is green alone; together they are not.
   const h = harness(root, { gate: async (box) => ((await box.exec("test -e a.txt && test -e b.txt")).exitCode === 0 ? RED : GREEN) });
   await runPipelines(root, h, { 1: 10, 2: 60 });
-  assert.deepEqual(h.settled.map((s) => s.landed), [{ kind: "merged" }, { kind: "red", with: ["1"], gates: ["test"] }]);
+  assert.deepEqual(h.settled.map((s) => s.landed), [{ kind: "merged" }, { kind: "red", with: [], gates: ["test"] }]);
   assert.equal(h.states["2"].state, "red");
-  assert.equal(h.states["2"].note, "red with #1");
+  assert.equal(h.states["2"].note, "red on the merged tree (gate test)");
   assert.deepEqual(mergeOrder(root), ["1"]);
   assert.equal(git(root, "ls-tree", "--name-only", "main", "b.txt"), "");
   assert.deepEqual(h.calls, ["close 1"]);
   assert.equal(git(root, "status", "--porcelain"), "");
   assert.equal(git(root, "branch", "--list", "sandcastle/*"), "");
-  // The one comment the ticket gets says so, with the pair.
+  // The one comment the ticket gets says so, naming the ticket only when it shares a file.
   const comment = notLandedComment(undefined, undefined, { branch: "agent/issue-2", base: "main", with: ["1"], gates: ["test"] });
-  assert.match(comment ?? "", /green on its own, but merged into `main` the gates were red \(test\)\. Landed on `main` since this branch forked: #1\./);
+  assert.match(comment ?? "", /green on its own, but merged into `main` the gates were red \(test\)\. Landed on `main` since this branch forked, changing a file it also changed: #1\./);
 });
 
 test("a branch that holds the base lands without a sandbox", async () => {
