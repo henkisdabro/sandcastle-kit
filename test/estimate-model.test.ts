@@ -39,9 +39,10 @@ const history = [
 
 test("each ticket is estimated from the history of its own implement model", () => {
   const p = project(history);
+  // The summed 50m over 2 slots is 25m, but the Opus ticket alone takes 40m: no run is shorter than its slowest ticket.
   assert.equal(
     estimate(p, 2, 2, 0, [IMPL_MODEL, OPUS]),
-    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 25m for 2 ticket(s), 2 at a time.",
+    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 40m for 2 ticket(s), 2 at a time.",
   );
   // Without models the one median applies to both: the Opus ticket is missed at the median, and only the high end shows it.
   assert.match(estimate(p, 2, 2)!, /about 2\.0M to 16\.0M tokens in \/ 20k to 160k out and 10m to 40m for 2 ticket\(s\)/);

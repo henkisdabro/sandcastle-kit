@@ -1,5 +1,5 @@
 // The run's estimate counts the in-run `Blocked by` chain: a chain runs one ticket after another,
-// so its depth is the serial rounds when it is longer than tickets over slots. The depth comes from
+// so its depth in tickets is its time when that is longer than the tickets' summed time over the slots. The depth comes from
 // src/lint.ts, the code `queue --lint` prints its blocker depth from. Made-up timings and tickets
 // (GitHub-style `#n` refs in the bodies); no tracker, Docker or network.
 //
@@ -30,7 +30,7 @@ const tracker = { declaredBlockers: () => [] as string[] } as unknown as Paramet
 // 9 tickets: #1..#7 one chain, #8 and #9 free; a blocker outside the run (#99) orders nothing.
 const nine = Array.from({ length: 9 }, (_, i) => ({ id: String(i + 1), body: i > 0 && i < 7 ? `Blocked by #${i}` : i === 8 ? "Blocked by #99" : "" }));
 
-test("a chain of 7 among 9 tickets, 5 slots: 7 rounds and the chain note", () => {
+test("a chain of 7 among 9 tickets, 5 slots: the chain sets the time and the note", () => {
   const p = project();
   const chain = blockerChain(p, tracker, nine);
   assert.equal(chain.length, 7);
@@ -40,16 +40,17 @@ test("a chain of 7 among 9 tickets, 5 slots: 7 rounds and the chain note", () =>
   );
 });
 
-test("no chain: the figure is as before, and a blocker outside the run adds no rounds", () => {
+test("no chain: the figure is as before, and a blocker outside the run adds no time", () => {
   const p = project();
   const free = nine.map((t) => ({ ...t, body: t.id === "9" ? "Blocked by #99" : "" }));
   assert.equal(blockerChain(p, tracker, free).length, 1);
   const line = estimate(p, 9, 5, 1)!;
   assert.equal(line, estimate(p, 9, 5));
-  assert.match(line, /and 20m for 9 ticket\(s\), 5 at a time\.$/);
+  assert.match(line, /and 18m for 9 ticket\(s\), 5 at a time\.$/);
 });
 
-test("a chain no longer than tickets over slots sets nothing and says nothing", () => {
+test("a chain no longer than the summed tickets over slots sets nothing and says nothing", () => {
   const p = project();
-  assert.match(estimate(p, 9, 5, 2)!, /20m for 9 ticket\(s\), 5 at a time\.$/);
+  // 12 x 10m over 5 slots is 24m, longer than the 2-ticket chain's 20m.
+  assert.match(estimate(p, 12, 5, 2)!, /24m for 12 ticket\(s\), 5 at a time\.$/);
 });
