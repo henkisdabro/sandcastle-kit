@@ -46,17 +46,17 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import type { RunRecord } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
-import { commandOf, RUNS_DIR } from "./live-runs.ts";
+import { commandOf, KIT_CACHE, RUNS_DIR } from "./live-runs.ts";
 import { machineSettings } from "./sandbox.ts";
 
 export type PoolName = "sandboxes" | "gates";
 
-const DIR = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "sandcastle-kit", "slots");
+// Under live-runs.ts's KIT_CACHE, so an empty XDG_CACHE_HOME is unset here too, not a relative path.
+export const DIR = join(KIT_CACHE, "slots");
 // A subdirectory, so status.sh's `<pool>-*.lock` glob and `usage` never see an entry.
 const WAITS = join(DIR, "waits");
 const RUNS = join(DIR, "runs");
