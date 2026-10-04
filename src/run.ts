@@ -417,8 +417,10 @@ const CHANGELOG_ASK =
   "changelog, not the diff. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
 const CHANGELOG_REVIEW =
-  `${CHANGELOG_ASK}The implementer has given its own: add a line only for a user-facing change you made yourself in this review, ` +
-  "and none otherwise.\n\n";
+  `${CHANGELOG_ASK}The implementer has given its own, which you cannot see. If the diff shows a user-facing change you made yourself ` +
+  "in this review, or a line of the implementer's that would now be wrong, give the full set of lines for the whole branch - " +
+  "its changes as well as yours, one line each: your set replaces the implementer's, so a line left out is lost, and a reworded " +
+  "one is not shown twice. Otherwise give none, and the implementer's lines stand.\n\n";
 
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
