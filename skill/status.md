@@ -43,4 +43,4 @@ marks a failed tool result as `! error: ...` or `! exit N: ...`, and the last li
 run's log hold the real cause (a usage limit usually reads as a "trust dialog" error). How long
 each step took, and each agent pass's tokens, is in `.sandcastle/logs/timings.jsonl`.
 
-In Herdr, Ctrl-clicking a ticket in the status view opens its log in a popup: while the popup follows a live log, `Ctrl-C` closes it (less takes no other key then); on a finished or short log, `q` or `Ctrl-C` closes it. The bottom line says so in both.
+In Herdr, Ctrl-clicking a ticket in the status view opens its card in a popup: its state and time in it, one line per pass of its last run with outcome and duration, and why it is held, in conflict or red. A digit opens that pass's log (while it follows a live log, `Ctrl-C` closes it, as less takes no other key then; on a finished or short log, `q` or `Ctrl-C` does; the bottom line says so in both), and closing the log puts the card back. `t` prints the ticket's tracker link; `q`, Esc or `Ctrl-C` closes the card.

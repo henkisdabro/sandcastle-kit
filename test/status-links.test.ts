@@ -48,7 +48,7 @@ const view = (env: Record<string, string>) => {
     timeout: 60000,
   });
   assert.ok(r.stdout.includes("#101"), `no ticket row drawn: ${r.stdout}${r.stderr}`);
-  return { linked: r.stdout.includes("\x1b]8;;file://"), hint: r.stdout.includes("ctrl-click a ticket for its log") };
+  return { linked: r.stdout.includes("\x1b]8;;file://"), hint: r.stdout.includes("ctrl-click a ticket for its card") };
 };
 const hasScript = spawnSync("script", ["--version"], { stdio: "ignore" }).error === undefined;
 const opts = { skip: hasScript ? false : "script(1) is not installed" };
@@ -91,7 +91,7 @@ const live = (env: Record<string, string>, docker: string) => {
   });
   const frames = r.stdout.split("\x1b[H").slice(1).filter((f) => f.includes("#101"));
   assert.equal(frames.length, 3, `expected three frames with a ticket row: ${r.stdout}${r.stderr}`);
-  return frames.map((f) => ({ linked: f.includes("\x1b]8;;file://"), hint: f.includes("ctrl-click a ticket for its log") }));
+  return frames.map((f) => ({ linked: f.includes("\x1b]8;;file://"), hint: f.includes("ctrl-click a ticket for its card") }));
 };
 const NONE = { linked: false, hint: false };
 const BOTH = { linked: true, hint: true };

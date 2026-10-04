@@ -416,7 +416,7 @@ rows=$(wc -l <"$TMP/frame")
 row '#103' ready
 # The hint that the numbers are clickable is shown with the links, and only then. With no
 # modifier handed in (SANDCASTLE_CLICK_MOD unset) it names both, as Ctrl-click is iTerm2's right-click.
-has 'ctrl-click a ticket for its log \(iTerm2: cmd-click\)'
+has 'ctrl-click a ticket for its card \(iTerm2: cmd-click for its log\)'
 
 # ---------------------------------------------------------------------------
 SCENARIO="click hint per modifier"
@@ -429,12 +429,12 @@ hinted() { # SANDCASTLE_CLICK_MOD value, expected hint
   sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
   grep -qF "$2" "$TMP/frame" || { echo "FAIL [$SCENARIO] SANDCASTLE_CLICK_MOD=$1 does not show: $2"; fails=$((fails+1)); }
 }
-hinted ctrl 'ctrl-click a ticket for its log'
+hinted ctrl 'ctrl-click a ticket for its card'
 hasnt 'iTerm2'
 hinted cmd 'cmd-click a ticket for its log'
 hasnt 'ctrl-click'
-hinted fallback 'ctrl-click a ticket for its log (iTerm2: cmd-click)'
-hinted bogus 'ctrl-click a ticket for its log (iTerm2: cmd-click)'
+hinted fallback 'ctrl-click a ticket for its card (iTerm2: cmd-click for its log)'
+hinted bogus 'ctrl-click a ticket for its card (iTerm2: cmd-click for its log)'
 
 # ---------------------------------------------------------------------------
 SCENARIO="links off, or no plugin marker"

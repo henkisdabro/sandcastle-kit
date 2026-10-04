@@ -8,16 +8,16 @@
 //
 // Nothing here is needed for a run: without the plugin, or outside Herdr, a run and its
 // status view work as before. The plugin adds what only Herdr can host - keys that open the
-// status view (an overlay) or the report (a popup) over any tab, Ctrl-click on a ticket for its log,
+// status view (an overlay) or the report (a popup) over any tab, Ctrl-click on a ticket for its card,
 // and "sandboxes first" in the Agents panel - and `configure` adds the sidebar rows that
 // show the tokens a run reports (src/herdr.ts).
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { confirm } from "./autonomy.ts";
 import { clickHintLine, resolveClickHint } from "./click-hint.ts";
 import { CONFIG_PATH } from "./config.ts";
@@ -26,7 +26,8 @@ import { helpFor, wantsHelp } from "./help.ts";
 import { herdr, lineText, restartStatusView, runCounts, tellDeadTab } from "./herdr.ts";
 import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
-import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { readTickets, type TicketRecord, type TicketState, WORDS } from "../mod/hooks/run-record.ts";
+import type { TicketPass } from "./report.ts";
 import { KIT } from "./sandbox.ts";
 
 export const PLUGIN_ID = "sandcastle-kit";
@@ -272,7 +273,7 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
   console.log(
     `Done${reload.ok ? " - Herdr reloaded its config" : ". Herdr is not running: it reads the block when it starts, and if it reports a problem then, `sandcastle herdr configure --remove` takes the block out"}.` +
       `\n  prefix+shift+s  status view    prefix+shift+e  last run's report    prefix+shift+a  sandboxes first in Agents` +
-      `\n  (the prefix is ctrl+b unless you changed it). A click on a ticket in the status view opens its log, with the key below.`,
+      `\n  (the prefix is ctrl+b unless you changed it). A click on a ticket in the status view opens its card (its passes, and a key for each one's log), with the key below.`,
   );
   // Ctrl-click is macOS's right-click in iTerm2: which key the view will name, said where the plugin is set up.
   console.log(clickHintLine(resolveClickHint()));
@@ -391,10 +392,11 @@ const notify = (body: string) => {
 const openPane = (entrypoint: string, cwd: string, env: Record<string, string> = {}) =>
   herdr(["plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", entrypoint, "--cwd", cwd, ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`])]);
 
-// A ticket's log, from a Ctrl-click in the status view. Herdr routes a matching link from
-// any pane, and an agent's log shown in a sandbox pane can print one, so the link proves
-// nothing: what opens is a regular file whose real path, symlinks resolved, is a log under
-// some project's .sandcastle/logs. entry.sh pages it with LESSSECURE (no shell, no editor).
+// A ticket's latest log, from a Ctrl-click in the status view: the card opens for its ticket. Herdr
+// routes a matching link from any pane, and an agent's log shown in a sandbox pane can print one,
+// so the link proves nothing: what the card is built from is a regular file whose real path,
+// symlinks resolved, is a log under some project's .sandcastle/logs. entry.sh pages each log with
+// LESSSECURE (no shell, no editor).
 export const logOf = (url: string | undefined) => {
   if (!url?.startsWith("file://")) return undefined;
   try {
@@ -403,6 +405,265 @@ export const logOf = (url: string | undefined) => {
   } catch {
     return undefined;
   }
+};
+
+// ---------------------------------------------------------------------------
+// The ticket card: what a Ctrl-click on a ticket opens. The link is still the ticket's latest log
+// (logOf vouches for it), and the card is built for the ticket and project that log belongs to: its
+// state from run.json, its passes from timings.jsonl, and a digit for each pass's log, paged as
+// the log popup always was. Nothing here asks git or the tracker, but `t` asks git for the remote.
+// ---------------------------------------------------------------------------
+
+/** The log each kind of pass writes (burndown's agentLogging names); a landing gate writes the gates log. */
+const PASS_LOG: Record<string, string> = {
+  implement: "impl",
+  resolve: "resolve",
+  review: "review",
+  "cross-review": "review-codex",
+  gates: "gates",
+  repair: "repair",
+  "landing gates": "gates",
+  landing: "gates",
+};
+const LOG_ORDER = ["impl", "resolve", "review", "review-codex", "repair", "gates"];
+// A ticket's state while one of its passes runs: that pass has no timings line until it ends.
+const RUNNING = new Set(["implement", "resolve", "review", "cross-review", "gates", "repair", "landing"]);
+
+// Titles, notes and logs are written by agents and trackers: a control sequence in one must not
+// drive the terminal the card is drawn on.
+const printable = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+
+const duration = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+};
+
+export type CardFacts = {
+  id: string;
+  /** run.json's entry for the ticket; undefined when the last run did not take it. */
+  ticket?: TicketRecord;
+  /** Its passes in that run (ticketPasses in src/report.ts). */
+  passes: TicketPass[];
+  /** The file names of its logs in .sandcastle/logs. */
+  logs: string[];
+  /** The last lines of its gates log, read when it is red. */
+  gateTail?: string[];
+  /** Seconds since the epoch. */
+  now: number;
+  /** What `t` found, once pressed. */
+  tracker?: string;
+};
+
+/** The card's text, and the log each digit opens (`logs[0]` is 1). Pure: a test gives it made-up records. */
+export const ticketCard = (f: CardFacts): { text: string; logs: string[] } => {
+  const ref = /^\d+$/.test(f.id) ? `#${f.id}` : f.id;
+  const t = f.ticket;
+  const out: string[] = [];
+  const logs: string[] = [];
+  const own = (kind: string) => `agent-issue-${f.id}-${kind}-${f.id}.log`;
+  // A digit for a log that exists, up to 9: the card reads one key at a time.
+  const key = (file: string) => {
+    if (!f.logs.includes(file) || logs.length >= 9) return "   ";
+    logs.push(file);
+    return `${logs.length}  `;
+  };
+  if (!t) {
+    out.push(ref, "Not in the last run: run.json has no entry for this ticket.");
+    const kinds = (name: string) => LOG_ORDER.findIndex((k) => name.endsWith(`-${k}-${f.id}.log`));
+    const mine = [...f.logs].sort((a, b) => kinds(a) - kinds(b) || a.localeCompare(b));
+    out.push("", mine.length ? "Its logs:" : "It has no logs here.");
+    for (const file of mine) out.push(`  ${key(file)}${printable(file)}`);
+  } else {
+    out.push(`${ref}${t.title ? `  ${printable(t.title)}` : ""}`);
+    const word = t.state ? (WORDS[t.state] ?? t.state) : "state not recorded";
+    out.push(t.since ? `${word} for ${duration((f.now - t.since) * 1000)}` : word);
+    const rows: [string, string, string][] = [];
+    const keys: string[] = [];
+    for (const p of f.passes) {
+      const gate = p.phase === "gates" || p.phase === "landing gates";
+      const outcome = gate ? (p.ok ? "green" : `red${p.red?.length ? `: ${p.red.join(", ")}` : ""}`) : p.ok ? "ok" : "failed";
+      keys.push(key(own(PASS_LOG[p.phase])));
+      rows.push([WORDS[p.phase as TicketState] ?? p.phase, printable(outcome), duration(p.ms)]);
+    }
+    if (t.state && RUNNING.has(t.state)) {
+      keys.push(key(own(PASS_LOG[t.state])));
+      rows.push([WORDS[t.state] ?? t.state, "running", t.since ? duration((f.now - t.since) * 1000) : ""]);
+    }
+    out.push("");
+    if (!rows.length) out.push("No pass of it is timed in this run yet.");
+    const w0 = Math.max(0, ...rows.map((r) => r[0].length));
+    const w1 = Math.max(0, ...rows.map((r) => r[1].length));
+    rows.forEach((r, i) => out.push(`  ${keys[i]}${r[0].padEnd(w0)}  ${r[1].padEnd(w1)}  ${r[2]}`.trimEnd()));
+    // Why it stopped where it is: a hold's or a conflict's reason, as the record keeps it.
+    const why = [
+      ...(t.note ? [printable(t.note)] : []),
+      ...(t.files?.length ? [`files: ${t.files.map(printable).join(", ")}`] : []),
+      ...(t.failing?.length ? [`failing: ${t.failing.map(printable).join(", ")}`] : []),
+      ...(t.requeued ? [printable(t.requeued)] : []),
+    ];
+    if (why.length) out.push("", ...why);
+    if (f.gateTail?.length) out.push("", "The gates log ends:", ...f.gateTail.map((l) => `  ${printable(l)}`));
+  }
+  const n = logs.length;
+  out.push("", [...(n ? [`${n === 1 ? "1" : `1-${n}`} log`] : []), "t tracker", "q close"].join(" · "));
+  if (f.tracker) out.push(`tracker: ${printable(f.tracker)}`);
+  return { text: out.join("\n"), logs };
+};
+
+export type CardKey = { kind: "page"; index: number } | { kind: "tracker" } | { kind: "close" };
+
+/** What a key read in raw mode does on a card with `logs` numbered logs; undefined does nothing. */
+export const cardKey = (data: string, logs: number): CardKey | undefined => {
+  // A lone Esc closes; an arrow or other escape sequence starts with one and does nothing.
+  if (data === "\x1b" || data === "\x03") return { kind: "close" };
+  if (data.startsWith("\x1b")) return undefined;
+  const c = data[0];
+  if (c === "q" || c === "Q") return { kind: "close" };
+  if (c === "t" || c === "T") return { kind: "tracker" };
+  const d = Number(c);
+  return c >= "1" && c <= "9" && d <= logs ? { kind: "page", index: d - 1 } : undefined;
+};
+
+/** A GitHub issue's page from the origin remote's URL, in any of the forms git takes; undefined when it is not github.com. */
+export const githubIssueUrl = (remote: string, id: string) => {
+  const m = /^(?:[a-z][\w+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(remote.trim());
+  if (!m || !/^(?:.+\.)?github\.com$/i.test(m[1])) return undefined;
+  return `https://github.com/${m[2]}/${m[3]}/issues/${id}`;
+};
+
+/** A ticket file's path among a repository's files: a files-tracker id is its feature folder's slug and its number. */
+export const ticketFileOf = (paths: string[], id: string, slug: (s: string) => string) => {
+  const m = /^(.+)-(\d+)$/.exec(id);
+  if (!m) return undefined;
+  return paths.find((p) => {
+    const f = /(?:^|\/)([^/]+)\/issues\/(\d+)-[^/]+\.md$/.exec(p);
+    return !!f && slug(f[1]) === m[1] && Number(f[2]) === Number(m[2]);
+  });
+};
+
+// `t`: no network call. The GitHub URL comes from the origin remote, a ticket file from git's own list
+// of the repository's files - the card does not load the project's config.ts to learn its tracker.
+const trackerLink = (root: string, id: string, slug: (s: string) => string) => {
+  const git = (args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  if (/^\d+$/.test(id)) {
+    const remote = git(["remote", "get-url", "origin"]);
+    const url = remote.status === 0 ? githubIssueUrl(remote.stdout, id) : undefined;
+    return url ?? `no GitHub origin remote to link #${id} to`;
+  }
+  const listed = git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  const file = listed.status === 0 ? ticketFileOf(listed.stdout.split("\0"), id, slug) : undefined;
+  return file ? join(root, file) : `no ticket file for ${id} in this repository`;
+};
+
+// The red gate's last lines: the end of a gates log is the failure, and the log can be long.
+const tailOf = (file: string, lines = 12) => {
+  try {
+    const size = statSync(file).size;
+    const fd = openSync(file, "r");
+    const buf = Buffer.alloc(Math.min(size, 64 * 1024));
+    try {
+      readSync(fd, buf, 0, buf.length, size - buf.length);
+    } finally {
+      closeSync(fd);
+    }
+    return buf.toString("utf8").replace(/\s+$/, "").split("\n").slice(-lines);
+  } catch {
+    return undefined;
+  }
+};
+
+/** The card pane (`entry.sh card`): draws the card for SANDCASTLE_LOG's ticket and reads keys until it closes. */
+const cardPane = async (logPath: string | undefined) => {
+  const log = logPath ? logOf(pathToFileURL(logPath).href) : undefined;
+  if (!log) {
+    console.error("That is not a sandcastle log.");
+    process.exitCode = 1;
+    return;
+  }
+  // Loaded here, not at the top: the tab bar runs this file every 10 seconds and needs none of them.
+  const [{ ticketPasses }, { logOwner }, { slug }] = await Promise.all([import("./report.ts"), import("./run.ts"), import("./tracker.ts")]);
+  const logsDir = dirname(log);
+  const root = dirname(dirname(logsDir));
+  const id = logOwner(basename(log));
+  // The pager the log popup has always used, with its options and words (entry.sh's `log`).
+  const page = (file: string) => spawnSync("sh", [join(PLUGIN_DIR, "entry.sh"), "log"], { stdio: "inherit", env: { ...process.env, SANDCASTLE_LOG: file } });
+  // A log named by hand, or no terminal to read keys from: the log itself, as before.
+  if (!id || !process.stdin.isTTY) {
+    page(log);
+    return;
+  }
+  const read = (file: string) => {
+    try {
+      return readFileSync(join(logsDir, file), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  let tracker: string | undefined;
+  const facts = (): CardFacts => {
+    let record: unknown;
+    try {
+      record = JSON.parse(read("run.json"));
+    } catch {
+      record = undefined;
+    }
+    const ticket = readTickets(record)[id];
+    const runId = (record as { startedAt?: unknown } | undefined)?.startedAt;
+    const logs = readdirSync(logsDir).filter((f) => f.endsWith(".log") && logOwner(f) === id);
+    return {
+      id,
+      ticket,
+      passes: ticket && typeof runId === "string" ? ticketPasses(read("timings.jsonl"), id, runId) : [],
+      logs,
+      gateTail: ticket?.state === "red" ? tailOf(join(logsDir, `agent-issue-${id}-gates-${id}.log`)) : undefined,
+      now: Math.floor(Date.now() / 1000),
+      tracker,
+    };
+  };
+  const stdin = process.stdin;
+  let card = ticketCard(facts());
+  const draw = () => {
+    card = ticketCard(facts());
+    process.stdout.write(`\x1b[?25l\x1b[H\x1b[2J${card.text}\n`);
+  };
+  // Ctrl-C closes the pager (less -K) and reaches this process too: the card must outlive it.
+  const ignore = () => {};
+  process.on("SIGINT", ignore);
+  await new Promise<void>((done) => {
+    const onKey = (data: Buffer) => {
+      const action = cardKey(data.toString("utf8"), card.logs.length);
+      if (!action) return;
+      if (action.kind === "close") {
+        stdin.off("data", onKey);
+        process.stdout.off("resize", draw);
+        stdin.setRawMode(false);
+        stdin.pause();
+        process.stdout.write("\x1b[?25h");
+        return done();
+      }
+      if (action.kind === "tracker") tracker = trackerLink(root, id, slug);
+      else {
+        // The pager reads the terminal alone: this process reads nothing while spawnSync waits.
+        stdin.off("data", onKey);
+        stdin.setRawMode(false);
+        stdin.pause();
+        page(join(logsDir, card.logs[action.index]));
+        stdin.setRawMode(true);
+        stdin.resume();
+        stdin.on("data", onKey);
+      }
+      draw();
+    };
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("data", onKey);
+    process.stdout.on("resize", draw);
+    draw();
+  });
+  process.off("SIGINT", ignore);
 };
 
 // ---------------------------------------------------------------------------
@@ -508,15 +769,17 @@ export const herdrCommand = async (args: string[]) => {
     case "open-log": {
       const log = logOf(process.env.HERDR_PLUGIN_CLICKED_URL);
       if (!log) return notify("That link is not a sandcastle log.");
-      openPane("log", dirname(log), { SANDCASTLE_LOG: log });
+      openPane("log", dirname(dirname(dirname(log))), { SANDCASTLE_LOG: log });
       return;
     }
+    case "card":
+      return cardPane(process.env.SANDCASTLE_LOG);
     case "view":
       return view(rest[0] === "reapply" ? "reapply" : "toggle");
     case "startup":
       return view("reapply");
     default:
-      throw new OperatorError("Usage: sandcastle herdr configure [--remove] [--yes]. The plugin's own verbs: line, open, open-log, view, startup.");
+      throw new OperatorError("Usage: sandcastle herdr configure [--remove] [--yes]. The plugin's own verbs: line, open, open-log, card, view, startup.");
   }
 };
 
