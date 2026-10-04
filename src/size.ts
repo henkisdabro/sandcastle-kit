@@ -9,7 +9,7 @@ import { availableParallelism, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 import { poolLimit } from "./pool.ts";
-import { USER_CONFIG } from "./sandbox.ts";
+import { machineSettings, USER_CONFIG } from "./sandbox.ts";
 
 const GIB = 2 ** 30;
 
@@ -183,4 +183,26 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
   lines.push(runtime ? `  Where: ${WHERE[runtime]}.` : "  Where: in your runtime's own settings (OrbStack: `orb config set`; Docker Desktop: Settings -> Resources; Podman: `podman machine set`; Colima: `colima start --cpu --memory`).");
   lines.push("  Warning: applying a runtime change restarts it and stops a live run's containers. Wait for runs to finish (`sandcastle wait`).");
   return lines;
+};
+
+/**
+ * One line pointing at `sandcastle size`, while both pool limits are the untouched defaults: no
+ * `maxSandboxes` or `maxGates` in config.json and no `SANDCASTLE_MAX_*` in the environment (a
+ * limit set to the default's own value is still set by a person). Undefined once either is set.
+ */
+export const sizePointer = (env: Record<string, string | undefined>, machine: Record<string, unknown>): string | undefined => {
+  const set = env.SANDCASTLE_MAX_SANDBOXES !== undefined || env.SANDCASTLE_MAX_GATES !== undefined || machine.maxSandboxes !== undefined || machine.maxGates !== undefined;
+  return set ? undefined : "The machine pool's limits are the untouched defaults: run `sandcastle size` to see what this machine can take.";
+};
+
+/**
+ * `sizePointer` for this process. A config.json that cannot be read is no reason to point anywhere:
+ * doctor reports it as a FIX of its own, and setup's doctor says it first.
+ */
+export const sizePointerNow = (): string | undefined => {
+  try {
+    return sizePointer(process.env, machineSettings());
+  } catch {
+    return undefined;
+  }
 };
