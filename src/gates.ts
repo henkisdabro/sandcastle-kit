@@ -236,8 +236,8 @@ export const gitHooksLine = (g: GitHooks) =>
 // exactly as an agent's is (image, setup, lean plan). `hookTests` also runs
 // the project's hook tests there, against the plan's kept hooks, and probes
 // the repo's git commit hooks.
-// `run` is the run these gates belong to, which the sandbox's peak is filed under.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, run?: string) =>
+// `runId` is the run these gates belong to, which the sandbox's peak is filed under.
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string) =>
   withSlot("sandboxes", `${project.name} ${label}`, async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
@@ -251,7 +251,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       };
     } finally {
       unlockWorktree(sandbox.worktreePath);
-      await recordPeak(sandbox, project.root, run);
+      await recordPeak(sandbox, project.root, runId);
       await sandbox.close();
       try {
         sh("git", ["branch", "-D", branch]);
@@ -422,7 +422,8 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     run.failures,
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
-  if (green) return;
+  // The sandbox's peak, for the run's "base gates" timings line, as a ticket's gate pass carries it.
+  if (green) return run.peakMib !== undefined ? { peakMib: run.peakMib } : undefined;
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

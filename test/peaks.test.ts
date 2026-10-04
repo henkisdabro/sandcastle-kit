@@ -15,7 +15,7 @@ process.env.XDG_CACHE_HOME = cache;
 const config = mkdtempSync(join(tmpdir(), "sandcastle-peaks-cfg-"));
 process.env.XDG_CONFIG_HOME = config;
 process.env.HOME = config;
-const { PEAKS_FILE, projectId, readPeakMib, readPeaks, recordPeak, samplePeak } = await import("../src/peaks.ts");
+const { PEAKS_FILE, peakOf, projectId, readPeakMib, readPeaks, recordPeak, samplePeak } = await import("../src/peaks.ts");
 const { runGates } = await import("../src/gates.ts");
 const { measuredPeak, recommend, sizeLines } = await import("../src/size.ts");
 const { typicalTimes } = await import("../src/run.ts");
@@ -39,6 +39,10 @@ test("a gate pass reads the kernel's high-water mark into the result, in MiB rou
   const run = await runGates(project(mkdtempSync(join(tmpdir(), "sandcastle-peaks-root-"))), sandbox(() => 1400 * MIB + 1), "gates");
   assert.equal(run.peakMib, 1401);
   assert.equal(run.gates[0].pass, true);
+  // What timed() in src/burndown.ts puts on the step's timings line.
+  assert.equal(peakOf(run), 1401);
+  assert.equal(peakOf(undefined), undefined, "a step with no result (the image, a requeue) carries none");
+  assert.equal(peakOf({ gates: [] }), undefined);
 });
 
 test("a missing memory.peak records nothing and does not fail the pass", async () => {
