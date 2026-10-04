@@ -77,13 +77,28 @@ const bareShell = (processes: Foreground) => {
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
-type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string };
+type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string; terminal_id?: string; quit?: boolean };
 // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
 // a bare shell of someone else's. A record without `socket`, or a caller without
 // HERDR_SOCKET_PATH, cannot tell.
 const onOtherServer = (view: View) => !!view.socket && !!process.env.HERDR_SOCKET_PATH && view.socket !== process.env.HERDR_SOCKET_PATH;
+type Pane = { tab_id?: string; terminal_id?: string };
+const paneOf = (pane: string) => herdrJson(["pane", "get", pane]).result.pane as Pane;
 // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
-const inRecordedTab = (view: View) => (herdrJson(["pane", "get", view.status!]).result.pane as { tab_id?: string }).tab_id === view.tab;
+const inRecordedTab = (view: View, pane: Pane) => pane.tab_id === view.tab;
+// A person quit the view (Ctrl-C: status.sh's INT trap marks `quit`) and the pane is still the
+// terminal the kit last started it in. Herdr keeps a pane's terminal_id through anything run in it
+// and gives it a new one on each server restart, which a pane id cannot tell (Herdr reuses those).
+// Without it the tab bar typed the view back into that shell every tick, onto anything half-typed.
+// A record with no terminal_id (an older kit's) cannot tell, and acts as before.
+const quitHere = (view: View, pane: Pane) => !!view.quit && !!view.terminal_id && pane.terminal_id === view.terminal_id;
+// Whole or not at all: status.sh's trap and the tab bar read it at any moment.
+const writeView = (root: string, view: View) => {
+  const file = viewRecord(root);
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(view) + "\n");
+  renameSync(tmp, file);
+};
 const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /**
@@ -94,15 +109,23 @@ const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
  * own checkout: the tab bar's is the one the plugin is linked from), else the caller's. Left alone, as `tellDeadTab` leaves
  * them: a tab adopted from a person's terminal, a record already reported (an earlier run's), a
  * tab on another Herdr server or not the recorded one, a pane still running the status view or
- * anything else, and any herdr error. True when the view was started.
+ * anything else, and any herdr error. Also left alone: a view a person quit (`quit`) in the same
+ * terminal (`terminal_id`), which is their shell until the run ends or Herdr restarts. Starting the
+ * view records the pane's terminal_id and clears `quit`. True when the view was started.
  */
 export const restartStatusView = (root: string, kit = KIT): boolean => {
   try {
     const view = JSON.parse(readFileSync(viewRecord(root), "utf8")) as View;
     if (!view.tab || !view.status || view.adopted !== false || view.reported || onOtherServer(view)) return false;
-    if (!inRecordedTab(view) || !bareShell(foreground(view.status))) return false;
+    const pane = paneOf(view.status);
+    if (!inRecordedTab(view, pane) || quitHere(view, pane) || !bareShell(foreground(view.status))) return false;
     // `cd`: a restored shell does not always start in the project, and the view is the project's.
     herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(view.kit ?? kit)}`]);
+    // A quit before the restart does not hold after it; the view now runs in this terminal.
+    if (pane.terminal_id && (view.quit || view.terminal_id !== pane.terminal_id)) {
+      const { quit: _, ...rest } = view;
+      writeView(root, { ...rest, terminal_id: pane.terminal_id });
+    }
     return true;
   } catch {
     return false;
@@ -125,16 +148,21 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * sent, and unmarked if herdr failed.
  *
  * That one is `showing`, the status view still running in the recorded pane: the tab may yet need
- * the report, once a later restart (or the view quit) leaves the pane a bare shell. The live-runs
+ * the report, once a later restart leaves the pane a bare shell (or a quit, in a record with no
+ * `terminal_id`). The live-runs
  * reader keeps the run's file for it, as the tab bar runs the kit only while a file is there, and a
  * kill with no restart until some ticks later would otherwise never be reported.
+ *
+ * `quit`: a person quit the view (`quit`) in the terminal the kit last started it in (`terminal_id`):
+ * that pane is their shell now. The record is marked `reported` with nothing typed, and the run's
+ * file goes. With another terminal_id, Herdr restarted since, and the report is typed as above.
  *
  * `elsewhere`: the record names the Herdr server that holds the tab (`socket`) and this caller is
  * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader keeps the
  * run's file for the right server. A record without `socket`, or a caller without
  * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
  */
-export type DeadTab = "reported" | "showing" | "elsewhere" | "left";
+export type DeadTab = "reported" | "showing" | "quit" | "elsewhere" | "left";
 export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
   const file = viewRecord(root);
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
@@ -144,10 +172,14 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return "left";
     // Before any herdr call, and the record stays as it is.
     if (onOtherServer(view)) return "elsewhere";
-    if (!inRecordedTab(view)) return "left";
-    const processes = foreground(view.status);
-    if (showsStatus(processes)) return "showing";
-    if (!bareShell(processes)) return "left";
+    const pane = paneOf(view.status);
+    if (!inRecordedTab(view, pane)) return "left";
+    const quit = quitHere(view, pane);
+    if (!quit) {
+      const processes = foreground(view.status);
+      if (showsStatus(processes)) return "showing";
+      if (!bareShell(processes)) return "left";
+    }
     // ENOENT here is the other caller having claimed it first.
     renameSync(file, claim);
     // A record a new run wrote meanwhile stays: `wx` never overwrites it.
@@ -162,6 +194,14 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
         rmSync(claim, { force: true });
       }
       return "left";
+    }
+    if (quit) {
+      try {
+        giveBack(JSON.stringify({ ...view, reported: true }) + "\n");
+      } finally {
+        rmSync(claim, { force: true });
+      }
+      return "quit";
     }
     try {
       // `cd`: a restored shell does not always start in the project.
@@ -407,7 +447,31 @@ export const openSandboxView = (
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+  // The status pane's terminal, so a person's quit of the view is told from a Herdr restart
+  // (`restartStatusView`). Without it the view still opens: the record then acts as an older kit's.
+  let terminal: string | undefined;
+  try {
+    terminal = paneOf(statusPane).terminal_id;
+  } catch {
+    /* no terminal_id recorded */
+  }
+  let saved = false;
+  const save = () => {
+    // Others write the record while the run lives: status.sh marks the view quit, and the tab bar
+    // records a restarted view's terminal. A rewrite here (a pane closing, the run's exit) keeps both,
+    // or a quit view would be typed into once the run ended. The first save replaces an earlier run's.
+    let kept: View = { terminal_id: terminal };
+    if (saved) {
+      try {
+        const now = JSON.parse(readFileSync(record, "utf8")) as View;
+        if (now.status === statusPane) kept = { terminal_id: now.terminal_id ?? terminal, ...(now.quit ? { quit: true } : {}) };
+      } catch {
+        /* gone or half-written: what this run knows */
+      }
+    }
+    writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, ...kept, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+    saved = true;
+  };
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);
