@@ -832,6 +832,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // only the merge and the gates stand between it and landing.
       const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
       let landOnly = greenHead !== undefined;
+      // A tip past the green head is merge commits only (landOnlyHead): a resolution a hold left
+      // on the branch was never reviewed, unless a narrow review has since recorded the tip.
+      const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch]) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch]);
       if (greenHead !== undefined) {
         console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
@@ -993,10 +996,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
       let reviewed = false;
       const unmet: string[] = [];
-      if (landOnly && mergeConflicted && greenHead !== undefined) {
-        // The resolver finished the merge on a branch reviewed and green at greenHead:
-        // nobody has seen its resolution. A clean land-only merge needs no review.
-        console.log(`${ref(issue.id)}: conflict resolved - reviewing the resolution only.`);
+      if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
+        // The resolver finished the merge on a branch reviewed and green at greenHead, or the branch
+        // carries a merge from an earlier run that no review has read: nobody has seen its
+        // resolution. A clean land-only merge of the base needs no review.
+        console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
         reviewCommits += resolved.commits.length;
