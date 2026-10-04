@@ -56,10 +56,10 @@ export const STATUS_COMMAND = `"${KIT}/bin/sandcastle" status`;
 
 // Where the status pane opened beside the caller is recorded (run.ts).
 export const statusPaneRecord = (project: Project) => join(project.root, ".sandcastle/logs/status-pane");
-export const runsStatus = (pane: string) =>
-  (herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as { cmdline: string }[]).some((p) =>
-    p.cmdline.includes("status.sh"),
-  );
+type Foreground = { cmdline: string }[];
+const foreground = (pane: string) => herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as Foreground;
+const showsStatus = (processes: Foreground) => processes.some((p) => p.cmdline.includes("status.sh"));
+export const runsStatus = (pane: string) => showsStatus(foreground(pane));
 
 // The tab and panes a run opened, written by `openSandboxView` for the next run (and the plugin) to find.
 export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-view.json");
@@ -69,12 +69,12 @@ export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-v
 // and neither is a pane with no foreground process Herdr can name.
 const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu"]);
 const SHELL_FLAGS = new Set(["-l", "-i", "--login", "--interactive"]);
-export const runsBareShell = (pane: string) => {
-  const processes = herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as { cmdline: string }[];
+const bareShell = (processes: Foreground) => {
   if (processes.length !== 1) return false;
   const [command, ...flags] = processes[0].cmdline.trim().split(/\s+/);
   return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
 };
+export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
 /**
  * A run that is no longer live (its pid gone, or its record finished) leaves its tab as the
@@ -85,22 +85,38 @@ export const runsBareShell = (pane: string) => {
  * status pane that is not a bare shell - the status view still running (it already shows how the
  * run ended), or anything a person started there since (Herdr may reuse a pane id across a
  * restart, and the command would be typed into an editor or a REPL). Any herdr error leaves the
- * tab as it is. Returns whether the report was started.
+ * tab as it is. `reported` when the report was started, and `left` for every case above but one.
  *
  * The record is claimed by renaming it to a name of this caller's own, which only one of two
  * callers can do, before anything is typed; it goes back marked `reported` once the command is
  * sent, and unmarked if herdr failed.
+ *
+ * That one is `showing`, the status view still running in the recorded pane: the tab may yet need
+ * the report, once a later restart (or the view quit) leaves the pane a bare shell. The live-runs
+ * reader keeps the run's file for it, as the tab bar runs the kit only while a file is there, and a
+ * kill with no restart until some ticks later would otherwise never be reported.
+ *
+ * `elsewhere`: the record names the Herdr server that holds the tab (`socket`) and this caller is
+ * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader keeps the
+ * run's file for the right server. A record without `socket`, or a caller without
+ * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
  */
-export const reportInDeadTab = (root: string, kit = KIT): boolean => {
+export type DeadTab = "reported" | "showing" | "elsewhere" | "left";
+export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
   const file = viewRecord(root);
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
   try {
     const read = readFileSync(file, "utf8");
-    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
-    if (!view.tab || !view.status || view.adopted !== false || view.reported) return false;
+    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string };
+    if (!view.tab || !view.status || view.adopted !== false || view.reported) return "left";
+    // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
+    // a bare shell of someone else's. Before any herdr call, and the record stays as it is.
+    if (view.socket && process.env.HERDR_SOCKET_PATH && view.socket !== process.env.HERDR_SOCKET_PATH) return "elsewhere";
     // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
-    if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return false;
-    if (!runsBareShell(view.status)) return false;
+    if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return "left";
+    const processes = foreground(view.status);
+    if (showsStatus(processes)) return "showing";
+    if (!bareShell(processes)) return "left";
     // ENOENT here is the other caller having claimed it first.
     renameSync(file, claim);
     // A record a new run wrote meanwhile stays: `wx` never overwrites it.
@@ -114,7 +130,7 @@ export const reportInDeadTab = (root: string, kit = KIT): boolean => {
       } finally {
         rmSync(claim, { force: true });
       }
-      return false;
+      return "left";
     }
     try {
       // `cd`: a restored shell does not always start in the project.
@@ -127,11 +143,12 @@ export const reportInDeadTab = (root: string, kit = KIT): boolean => {
       rmSync(claim, { force: true });
     }
     giveBack(JSON.stringify({ ...view, reported: true }) + "\n");
-    return true;
+    return "reported";
   } catch {
-    return false;
+    return "left";
   }
 };
+export const reportInDeadTab = (root: string, kit = KIT): boolean => tellDeadTab(root, kit) === "reported";
 
 // Herdr labels a new tab with a bare number; any other label is the operator's. One such ('sandcastle <project> run 4') was overwritten, leaving several tabs with one name.
 export const defaultTabLabel = (label: string | undefined) => !label || /^\d+$/.test(label.trim());
@@ -360,7 +377,7 @@ export const openSandboxView = (
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);

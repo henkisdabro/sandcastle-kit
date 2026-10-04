@@ -611,7 +611,7 @@ lines rather than cut anything off.
 | `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project, and the note starts `3x over, usually 5m` (in red) at three times it |
 | `ready` | Implemented, reviewed, gates green: waits for the landing worker, which lands each ticket as it goes green. `human merge: .github/` means it will be held for a person instead |
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
-| `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push"); `uncommitted`: the agent's work is in its kept worktree, not committed |
+| `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push" until the merge is on `origin`'s base branch); `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
 | `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
@@ -815,7 +815,7 @@ out its own view:
   your [personal settings](#personal-settings) to get one.
 
 When the run ends its sandbox panes (if any) close, so nothing in the sidebar outlives it; the status view
-stays, showing each branch's outcome, and the next run replaces it rather than stacking another. A run killed outright (the machine going down, or a `kill -9`) leaves its tab as idle shells when Herdr comes back: with the plugin's tab bar, the next tick runs `sandcastle report` in the status pane of a tab the run opened (never one adopted from your terminal), once. A run that ended or stopped on a signal (a hangup from a closing Herdr among them) is not covered: its exit clears the trace the tick reads. Outside Herdr none of this happens and nothing else changes - watch with
+stays, showing each branch's outcome, and the next run replaces it rather than stacking another. A run killed outright (the machine going down, or a `kill -9`) leaves its tab as idle shells when Herdr comes back, whether Herdr restarts at the same moment or some time after the kill: with the plugin's tab bar, the first tick that finds the status pane a bare shell runs `sandcastle report` there, in a tab the run opened (never one adopted from your terminal), once. Until then the status view, still running, shows how the run ended. A run that ended or stopped on a signal (a hangup from a closing Herdr among them) is not covered: its exit clears the trace the tick reads. Outside Herdr none of this happens and nothing else changes - watch with
 `sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
 view then opens in a pane beside yours.
 
@@ -844,9 +844,9 @@ nothing asks. What you get:
 | | |
 |---|---|
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
-| `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
+| `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup: `q` closes it, and its bottom line says so. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it, and its bottom line says so (`less` reads no other key while it follows; Esc does nothing in it). A log shorter than the popup opens from its top line and does not follow: `q` or `Ctrl-C` closes it, and its bottom line says so, with `F` to follow new lines. |
 | Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 

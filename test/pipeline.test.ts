@@ -71,7 +71,7 @@ const harness = () => {
   const prompts = Object.fromEntries(
     ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((kind) => {
       const file = join(root, `.sandcastle/.run/${kind}.md`);
-      write(root, `.sandcastle/.run/${kind}.md`, "{{ISSUE_NUMBER}} {{GATE_NAME}} {{GATE_COMMAND}} {{GATE_OUTPUT}} {{REVIEW_BASE}} {{REPAIR_BASE}}\n");
+      write(root, `.sandcastle/.run/${kind}.md`, "{{ISSUE_NUMBER}} {{GATE_NAME}} {{GATE_COMMAND}} {{GATE_OUTPUT}} {{REVIEW_BASE}} {{REPAIR_BASE}} {{IMPL_UNMET}}\n");
       return [kind, file];
     }),
   ) as Ctx["prompts"];
@@ -368,6 +368,40 @@ test("a green head records its changelog lines and unmet criterion, and a later 
   assert.equal(later.unmet, "The second module still uses the old rule.");
   assert.equal(readHeads(h.root)[ID]?.green, h.tip(BRANCH), "the new green head, the base merge on it");
   assert.equal(readHeads(h.root)[ID]?.unmet, "The second module still uses the old rule.");
+});
+
+// The full review judged the body alone and the implementer's line was dropped for it: the ticket closed
+// with real work left. The line now reaches the review prompt, which asks for it finished or restated.
+test("a full review is shown the implementer's unmet line, and a review that neither finishes nor restates it leaves it dropped", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt", "a\n", "<unmet>The owner's added scope in a comment is not done.</unmet>");
+  h.agents.review = () => "All criteria met.";
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  const review = h.passes.find((p) => p.name.startsWith("review-"));
+  const shown = review?.args.IMPL_UNMET ?? "";
+  assert.ok(shown.includes("The owner's added scope in a comment is not done."), "the review prompt carried the line");
+  assert.match(shown, /finish it yourself, or restate it/i);
+  assert.equal(o.unmet, undefined, "the reviewer's silence is its word, as before");
+});
+
+test("a review of an implementer that left nothing undone gets an empty IMPL_UNMET, and a narrow review never gets the line", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.repair = implementing("fix.txt", "fix\n");
+  h.gates.push(red("FAIL: first"), GREEN);
+  await h.attempt();
+  assert.deepEqual(h.passes.filter((p) => p.name.startsWith("review-")).map((p) => p.args.IMPL_UNMET), ["", ""]);
+
+  const g = harness();
+  g.agents.impl = implementing("a.txt", "a\n", "<unmet>Left.</unmet>");
+  g.agents.repair = implementing("fix.txt", "fix\n");
+  g.gates.push(red("FAIL: first"), GREEN);
+  await g.attempt();
+  const reviews = g.passes.filter((p) => p.name.startsWith("review-"));
+  assert.equal(reviews.length, 2);
+  assert.match(reviews[0].args.IMPL_UNMET, /Left\./);
+  assert.equal(reviews[1].args.IMPL_UNMET, "", "the review after a repair sees only the repair's commits");
 });
 
 test("a later green head with every criterion met drops the earlier one from the record", async () => {

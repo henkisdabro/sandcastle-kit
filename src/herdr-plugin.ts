@@ -23,7 +23,7 @@ import { clickHintLine, resolveClickHint } from "./click-hint.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
-import { herdr, lineText, reportInDeadTab, runCounts } from "./herdr.ts";
+import { herdr, lineText, runCounts, tellDeadTab } from "./herdr.ts";
 import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -287,35 +287,53 @@ type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: stri
 /**
  * Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed,
  * after `ended` has been told the root of a run whose record says so: its file is the last
- * sign of it, and the tab bar does not tick again for a run that is not registered.
+ * sign of it, and the tab bar does not tick again for a run that is not registered. So `ended`
+ * returning true keeps the file, for a tab still waiting to be told (`tellDeadTab`), or held by another Herdr server.
  */
-export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => void = () => {}): Run[] => {
+export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}): Run[] => {
   const runs: Run[] = [];
+  const readRecord = (root: string) => {
+    try {
+      return readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const file = join(dir, f);
+    let root: string | undefined;
+    let seen: string | undefined;
     try {
-      const root = readFileSync(file, "utf8").trim();
-      const record = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
+      root = readFileSync(file, "utf8").trim();
+      seen = readRecord(root);
+      const record = JSON.parse(seen ?? "");
       const run = { root, ...record, tickets: readTickets(record) } as Run;
       if (liveness({ record: run }, probe).state === "live") {
         runs.push(run);
         continue;
       }
-      ended(root);
+      if (ended(root)) continue;
     } catch {
       /* no record: not a live run */
     }
+    // The file is named by the project, so a new run of it registers under the same name: a record
+    // that changed since it was judged is that run's, and its file stays for the next reader.
+    if (root !== undefined && readRecord(root) !== seen) continue;
     rmSync(file, { force: true });
   }
   return runs.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 };
 
 // Whichever reader of the runs directory drops a dead run's file first tells the tab: the tab bar's
-// next tick would find no file.
-const replaceDeadTab = (root: string) => void reportInDeadTab(root);
+// next tick would find no file. A tab whose status view still runs keeps the file until it can be told.
+// A tab on another Herdr server keeps it too: that server's tab bar has yet to tell it.
+export const replaceDeadTab = (root: string, kit?: string) => {
+  const told = tellDeadTab(root, kit);
+  return told === "showing" || told === "elsewhere";
+};
 
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
-export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => void) => {
+export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
   const runs = liveRuns(dir, probe, ended).sort((a, b) => Number(here(b)) - Number(here(a)));
   return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";

@@ -573,6 +573,24 @@ hand_merged() {
   case "$oc" in *'|held|needs a human: handed back') return 1;; *'|held|'*) ;; *) return 1;; esac
   git merge-base --is-ancestor "refs/heads/agent/issue-$1" "refs/heads/$BASE" 2>/dev/null
 }
+# What a hand-merged row says the push still has to do. The view cannot ask the
+# tracker on every refresh, but the merge commit being on origin's base branch
+# says the push happened. The merge commit is the merge that took the branch tip
+# in (the tip as a second parent); a fast-forward has none, so the tip itself -
+# not a later merge onto it, which would wait for a push already made. No
+# origin/<base> ref, or no way to find the commit, keeps "closes on push".
+hand_merged_note() {
+  local tip merge
+  if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null 2>&1 \
+    && tip=$(git rev-parse --verify --quiet "refs/heads/agent/issue-$1" 2>/dev/null) && [ -n "$tip" ]; then
+    merge=$(git rev-list --merges --ancestry-path --parents "$tip..refs/heads/$BASE" 2>/dev/null \
+      | awk -v t="$tip" '{ for (i = 3; i <= NF; i++) if ($i == t) { print $1; exit } }')
+    if git merge-base --is-ancestor "${merge:-$tip}" "refs/remotes/origin/$BASE" 2>/dev/null; then
+      printf 'merged by hand'; return
+    fi
+  fi
+  printf 'merged by hand; closes on push'
+}
 
 # The row state for a recorded outcome's kind (mod/hooks/run-record.ts), in
 # the words the live view uses. Never the line's words: a line the case did
@@ -905,7 +923,7 @@ render() {
         # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
-      held) if hand_merged "$n"; then state=merged; activity="merged by hand; closes on push"; fi;;
+      held) if hand_merged "$n"; then state=merged; activity=$(hand_merged_note "$n"); fi;;
       implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
         if [ -f "$log" ]; then
@@ -1064,7 +1082,7 @@ render() {
       # nothing to change. A branch with no commits is "merged" by git's
       # reckoning, and a question for a human read as done.
       state="$oc_state"; activity_note="${oc_text#*|}"
-      if [ "$oc_state" = held ] && hand_merged "$n"; then state="merged"; activity_note="merged by hand; closes on push"; fi
+      if [ "$oc_state" = held ] && hand_merged "$n"; then state="merged"; activity_note=$(hand_merged_note "$n"); fi
     elif grep -q "agent/issue-${n}$" <<<"$merged_list"; then
       state="merged"
     else

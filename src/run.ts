@@ -475,6 +475,8 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // The orchestrator fills these for a repair pass. Sandcastle substitutes
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
+    // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
+    if (kind === "review" || kind === "rereview" || kind === "remerge") allowed.add("IMPL_UNMET");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
     if (kind === "remerge") allowed.add("REVIEW_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
