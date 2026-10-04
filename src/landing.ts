@@ -16,6 +16,7 @@
 
 import { execFileSync } from "node:child_process";
 import { posix } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
@@ -636,12 +637,12 @@ const PATH_TOKEN = /[\w@.\-/]+\.\w+/g;
 
 const PASSING_LINE = /^\s*(?:✓|✔|√|PASS\b|ok\b)/;
 // A failure's own lines: a FAIL / FAILED / ERROR / ✖ / ✗ / × line, vitest's "❯ file (3 tests | 1 failed)", a
-// pytest progress line with an F or E in it ("test_b.py F."), and a stack frame (an "at" line, "file:line:col",
-// pytest's "file:line: Error", Python's `File "file", line N`).
+// pytest progress line with an F or E in it ("test_b.py F."), and a stack frame or error location (an "at" line, "file:line:col",
+// pytest's "file:line: Error", tsc's "file(line,col): error", Python's `File "file", line N`).
 const FAIL_WORD_LINE = /^\s*(?:FAIL|FAILED|ERROR|✖|✗|×)(?=\s|$)/;
 const FAILED_COUNT_LINE = /^\s*❯.*\b[1-9]\d* failed\b/;
 const PYTEST_PROGRESS_RED = /^\s*\S+\.py\s+[.sxX]*[FE][.sxXFE]*\s*(?:\[\s*\d+%\])?\s*$/;
-const STACK_FRAME = /^\s*at\s|[\w.\-/]+:\d+(?::\d+)?(?::|\s|\)|$)|^\s*File "[^"]+", line \d+/;
+const STACK_FRAME = /^\s*at\s|[\w.\-/]+:\d+(?::\d+)?(?::|\s|\)|$)|[\w.\-/]+\(\d+,\d+\)|^\s*File "[^"]+", line \d+/;
 const namesFailure = (line: string) =>
   !PASSING_LINE.test(line) && (namesFailingTest(line) || FAIL_WORD_LINE.test(line) || FAILED_COUNT_LINE.test(line) || PYTEST_PROGRESS_RED.test(line) || STACK_FRAME.test(line));
 
@@ -659,7 +660,8 @@ export const redSubject = (output: string, tree: string[], read: (file: string) 
   const tests = new Set<string>();
   // Only a line that says something failed names a path: vitest's "✓ a.test.ts" and pytest's "test_a.py ...."
   // list every passing file, and blaming those named each landed ticket that touched any tested module.
-  const failingLines = output.split("\n").map((line) => line.replace(/\r$/, "")).filter(namesFailure);
+  // Colour codes go first: a forced-colour runner's "FAIL" starts with one, and the line would read as no failure.
+  const failingLines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, "")).filter(namesFailure);
   // An absolute path from a sandbox is cut from the left until it is a path in the tree.
   for (const token of failingLines.flatMap((line) => line.match(PATH_TOKEN) ?? [])) {
     const parts = token.replace(/^(?:\.\/)+/, "").split("/").filter(Boolean);
