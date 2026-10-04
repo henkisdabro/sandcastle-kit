@@ -41,6 +41,11 @@ GIT='(^|[;&|(`])[[:space:]]*(sudo[[:space:]]+)?git([[:space:]]+(-C[[:space:]]+[^
 # resolves to it and stays refused. A command with no `-C` acts in the hook's cwd, so a leading `cd x &&`
 # is not parsed and stays refused, as does a path git cannot resolve ($VAR, ~, quotes) and `--git-dir`.
 # push is refused everywhere: its danger is the destination, and a scratch repo's remote can be the shared .git.
+# The shared dir here is the one of the dir Claude Code started in (CLAUDE_PROJECT_DIR), not COMMON: the
+# shell's cwd moves with a `cd`, and from inside the scratch repo COMMON is the scratch's own dir, so a
+# `-C` back into the project would pass. Without it the shared dir is unknown and these stay refused.
+PROJECT_COMMON=
+[ -z "$CLAUDE_PROJECT_DIR" ] || PROJECT_COMMON=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 scratch_only() {
   local words w args=() pending= sub
   sub=$(sed -E 's/^[;&|(`[:space:]]*(sudo[[:space:]]+)?git[[:space:]]+//' <<<"$1")
@@ -58,11 +63,11 @@ scratch_only() {
       --git-dir*|--work-tree*) return 1;;
     esac
   done
-  [ ${#args[@]} -gt 0 ] || return 1
+  [ ${#args[@]} -gt 0 ] && [ -n "$PROJECT_COMMON" ] || return 1
   local target cargs=() a
   for a in "${args[@]}"; do cargs+=(-C "$a"); done
   target=$(git -C "${CWD:-.}" "${cargs[@]}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
-  [ -n "$target" ] && [ "$target" != "$COMMON" ]
+  [ -n "$target" ] && [ "$target" != "$PROJECT_COMMON" ]
 }
 while IFS= read -r m; do
   scratch_only "$m" || deny "git update-ref, gc or prune" "" "It is allowed in a scratch repository elsewhere, run as git -C <path> <command> with <path> outside this project (build one under the temp dir)."

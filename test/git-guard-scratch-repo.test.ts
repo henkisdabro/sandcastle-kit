@@ -13,7 +13,7 @@ import { after, test } from "node:test";
 import { KIT } from "../src/sandbox.ts";
 
 const GUARD = join(KIT, "container/git-guard.sh");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k) && k !== "CLAUDE_PROJECT_DIR"));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-git-guard-scratch-")));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -30,9 +30,14 @@ git(main, "worktree", "add", "-q", "-b", "agent/issue-1", worktree);
 git(scratch, "init", "-q", "-b", "main");
 execFileSync("git", ["init", "-q", "--bare", bare], { env });
 
-// What Claude Code pipes to a PreToolUse hook; the agent's cwd is its own worktree.
-const bash = (command: string, cwd = worktree) =>
-  spawnSync("bash", [GUARD], { input: JSON.stringify({ cwd, tool_input: { command } }), encoding: "utf8", env });
+// What Claude Code pipes to a PreToolUse hook; the agent's cwd is its own worktree, which is also
+// the project dir Claude Code started in and hands every hook as CLAUDE_PROJECT_DIR.
+const bash = (command: string, cwd = worktree, projectDir: string | null = worktree) =>
+  spawnSync("bash", [GUARD], {
+    input: JSON.stringify({ cwd, tool_input: { command } }),
+    encoding: "utf8",
+    env: projectDir === null ? env : { ...env, CLAUDE_PROJECT_DIR: projectDir },
+  });
 
 const ALLOWED = [
   `git -C ${scratch} update-ref refs/remotes/origin/main HEAD`,
@@ -79,6 +84,30 @@ for (const command of BLOCKED) {
     assert.match(r.stderr, /git -C <path>/);
   });
 }
+
+// The shell's cwd moves with a `cd`, so it cannot name the shared repo alone: from inside the scratch
+// repo, or from a dir in no repo, a `-C` back into the project is still the shared .git.
+for (const cwd of [scratch, root]) {
+  test(`blocked from a cwd outside the project: ${cwd.replaceAll(root, "<root>")}`, () => {
+    for (const command of [`git -C ${worktree} update-ref -d refs/heads/main`, `git -C ${main} gc`]) {
+      const r = bash(command, cwd);
+      assert.equal(r.status, 2, `${command}\n${r.stderr}`);
+      assert.match(r.stderr, /^BLOCKED: git update-ref, gc or prune\./);
+    }
+    assert.equal(bash(`git -C ${scratch} update-ref refs/remotes/origin/main HEAD`, cwd).status, 0);
+  });
+}
+
+test("from inside the scratch repo, -C . is the scratch repo and is allowed", () => {
+  const r = bash("git -C . gc", scratch);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("with no CLAUDE_PROJECT_DIR the shared repo is unknown, so a scratch -C stays refused", () => {
+  const r = bash(`git -C ${scratch} gc`, worktree, null);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /^BLOCKED: git update-ref, gc or prune\./);
+});
 
 for (const command of [`git -C ${scratch} push origin main`, `git -C ${bare} push`, "git push origin main"]) {
   test(`push stays blocked, and says how to test a remote: ${command.replaceAll(root, "<root>")}`, () => {
