@@ -155,7 +155,14 @@ export const backupRepo = (project: Project) => join(project.root, ".sandcastle"
 
 // `--git-dir` explicit: no discovery of the enclosing project (its config is the sandboxes' to
 // write), and `safe.bareRepository=explicit` in a user's config does not refuse it.
-const backupGit = (project: Project, args: string[]) => sh("git", ["--git-dir", backupRepo(project), ...args], join(project.root, ".sandcastle"));
+// Background maintenance is off: a `fetch` ends by starting a detached `git maintenance run --auto`,
+// and when a user's or runner's config makes that a `gc --auto`, it holds `gc.pid` while `dropBackup`
+// runs its own `gc`, which then refuses ("gc is already running"), is swallowed there, and leaves the
+// dropped work's pack beside the base's. Cruft packs are off too: the prune must leave one pack, not
+// a second holding what it kept for a grace period.
+const BACKUP_GIT_CONFIG = ["maintenance.auto=false", "gc.auto=0", "gc.autoDetach=false", "gc.cruftPacks=false"];
+const backupGit = (project: Project, args: string[]) =>
+  sh("git", [...BACKUP_GIT_CONFIG.flatMap((c) => ["-c", c]), "--git-dir", backupRepo(project), ...args], join(project.root, ".sandcastle"));
 
 const backupTip = (project: Project, branch: string) => {
   if (!existsSync(join(backupRepo(project), "HEAD"))) return "";
