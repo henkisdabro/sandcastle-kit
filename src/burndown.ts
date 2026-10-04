@@ -23,16 +23,16 @@
 // SANDCASTLE_TEST_RED_GATE=1, SKIP_BASE_GATES=1, plus the model variables in agents.ts and the
 // machine-wide limits in pool.ts.
 
-import { createSandbox } from "@ai-hero/sandcastle";
+import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, type Gate, type GateRun, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
-import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
+import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { peakOf, recordPeak } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
@@ -54,7 +54,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -183,6 +183,30 @@ const finishWord = (o: Outcome) =>
 const fence = (text: string) => {
   const f = "`".repeat(Math.max(2, ...[...text.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
   return `${f}\n${text}\n${f}`;
+};
+
+// The last tag wins, an example or a placeholder ("...") does not count, and
+// a hand-back only stands if nothing was reported after it.
+const tags = (text: string) => {
+  const last = (name: string) =>
+    [...text.matchAll(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "g"))]
+      .map((m) => ({ text: m[1].trim(), at: m.index! }))
+      .filter((m) => m.text && m.text !== "...")
+      .at(-1);
+  const report = last("report");
+  const blocked = last("blocked");
+  return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
+};
+
+// A spent plan allowance fails every issue after it the same way, each one
+// after paying for a sandbox and an install. The first one stops the queue.
+const hitLimit = (root: string, issue: string) => {
+  const logs = join(root, ".sandcastle/logs");
+  if (!existsSync(logs)) return false;
+  return readdirSync(logs)
+    // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
+    .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
+    .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
 };
 
 // The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
@@ -367,6 +391,620 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
           waitsFor(run, c.id, c.freed, c.wait?.with);
       }
     },
+  };
+};
+
+/** The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment. */
+type Note = { issue: string; kind: "hold"; text: string };
+
+/** One step of a run or a ticket, timed into logs/timings.jsonl and the run record (burndown's `timed`). */
+export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined) => Promise<T>;
+
+/** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
+export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close">;
+
+/**
+ * What one ticket's pipeline works through, as `LandContext` is what a landing does: its sandbox
+ * (`open`, whose `run` is each agent pass), its gate runs (`gate`), the step timer and what the run
+ * keeps across attempts. burndown() gives the real ones; a test gives fakes, so the pipeline - the
+ * requeue's repair count, the gate run skipped on an unmoved base - runs with no Docker or model.
+ */
+export type PipelineContext = {
+  project: Project;
+  tracker: Tracker;
+  runId: string;
+  dryRun: boolean;
+  /** Repair passes per attempt (`repair.attempts`). */
+  repair: number;
+  /** SANDCASTLE_TEST_RED_GATE: the first gate run counts as red, to test the repair pass. */
+  testRedGate: boolean;
+  prompts: ReturnType<typeof renderPrompts>;
+  /** Each ticket's own implementer (its `model:` and `effort:` labels). */
+  overrides: ReadonlyMap<string, Override>;
+  /** Opens the ticket's sandbox on its branch: Sandcastle's `createSandbox` in a run. */
+  open: (branch: string) => Promise<PipelineBox>;
+  /** One run of the project's gates in the ticket's sandbox. */
+  gate: (box: PipelineBox, id: string) => Promise<GateRun>;
+  timed: Timed;
+  run: { ticket(id: string, fields: TicketRecord): void };
+  view: Pick<SandboxView, "claim">;
+  host: Pick<HostGit, "begin" | "settle">;
+  /** The requeue-once state: a requeued ticket's line, while its second attempt is to come. */
+  requeuedAs: ReadonlyMap<string, string>;
+  /** This run's pipeline results so far: a requeued ticket's first attempt is among them. */
+  results: readonly PromiseSettledResult<Outcome>[];
+  /** Each ticket's red landing gate, for its requeue (`repairFromRed`); read once, by its next pipeline. */
+  reds: Map<string, RedLanding>;
+  /** What the agents reported, by ticket, when they cannot write to the tracker. */
+  reports: Map<string, string>;
+  notes: Note[];
+  /** Each ticket's time in its pipelines, added up over its attempts. */
+  took: Map<string, number>;
+  /** Worktrees Sandcastle kept for their uncommitted files. */
+  keptWorktrees: { issue: string; path: string }[];
+  /** The `.git` check that failed after a ticket's pipeline, by ticket: its attempt stops the run with it. */
+  tampered: Map<string, unknown>;
+};
+
+/** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
+export const createPipeline = (ctx: PipelineContext) => {
+  const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
+  const base = project.baseBranch;
+  const ref = tracker.ref;
+  // A run that died between merging a branch and closing its issue leaves the
+  // issue queued with its work already on base. Re-running it finds nothing
+  // to do and reports `nochange`, so the issue would stay open for good. Our
+  // own merge message finds it instead - unless someone reopened the issue
+  // after that merge, which asks for more work, not for a close. Any doubt
+  // (gh unreachable) means a normal run, which is what happened before.
+  const mergedEarlier = (issue: string, branch: string) => {
+    const found = sh("git", ["log", base, "-1", "--format=%h %cI", "--fixed-strings", `--grep=Merge ${branch} (closes ${ref(issue)})`], project.root);
+    if (!found) return undefined;
+    const [merge, mergedAt] = found.split(" ");
+    return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
+  };
+
+  const addReport = (id: string, heading: string, text: string) =>
+    reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
+
+  // A later run skips work a branch already passed (see recordHead). A dry run's
+  // work must not change what a real run skips, and a failed write never fails
+  // the ticket: the cost is only that a re-run runs it in full.
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
+    if (dryRun) return;
+    try {
+      recordHead(project.root, id, { branch, ...fields }, runId);
+    } catch (error) {
+      console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
+    }
+  };
+
+  return async (issue: Issue): Promise<Outcome> => {
+    const branch = `agent/issue-${issue.id}`;
+    // The ticket's own implementer, for the implement and repair passes only.
+    const own = overrides.get(issue.id) ?? {};
+    const implModel = own.model ?? IMPL_MODEL;
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
+    const merge = mergedEarlier(issue.id, branch);
+    if (merge) {
+      return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
+    }
+    view.claim(issue.id, issue.title);
+
+    const started = Date.now();
+    releaseBranchWorktree(branch, project.root);
+    // From here the agent commits to the branch; the `.git` check lets it move.
+    host.begin(branch);
+    const sandbox = await timed(issue.id, "setup", () =>
+      open(branch),
+      requeuedAs.get(issue.id),
+    ).catch(async (error) => {
+      await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
+      throw error;
+    });
+
+    // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
+      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+
+    try {
+      // Normally already locked by the worktree hook; this covers a worktree
+      // Sandcastle reused.
+      lockWorktree(sandbox.worktreePath, project.root);
+      // A branch kept from an earlier run (red, conflicted, crashed) forks from
+      // an older base. Asked to "merge it in", an agent that found the work
+      // already done said so and stopped, and the branch hit the same conflict
+      // at landing run after run. So the merge is made here: a clean one needs
+      // no agent, and a conflicted one stays in progress for the implementer
+      // to resolve - the prompt names the files, and the gates fail until it does.
+      // Inside the container, never on the host: setup has already run the
+      // branch's own install scripts in there, and the shared .git (or the
+      // worktree's gitdir pointer) could by now name an fsmonitor or merge
+      // driver that a host git in the worktree would execute.
+      const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root)) > 0;
+      // The requeue-once state holds the first attempt's line only on a second attempt in this run.
+      const requeued = requeuedAs.has(issue.id);
+      // The repair passes of the first attempt, so the outcome line counts the ticket's whole run: `repairs` below bounds one attempt's loop only.
+      const earlierRepairs = requeued ? firstAttemptRepairs(results, issue.id) : 0;
+      const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root));
+      // Read before the base merge, which moves the tip. A branch at the head it
+      // was reviewed and gated green on, or past it by merge commits only, needs no
+      // implement or full review: only the merge and the gates stand between it and landing.
+      const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
+      let landOnly = greenHead !== undefined;
+      // A tip past the green head is merge commits only (landOnlyHead): a resolution a hold left
+      // on the branch was never reviewed, unless a narrow review has since recorded the tip.
+      const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
+      if (greenHead !== undefined) {
+        console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
+        run.ticket(issue.id, { note: "land only - reviewed earlier" });
+      }
+      let mergeConflicted = false;
+      // The base commit the merge below joined, for checking the resolution against git's own
+      // merge. Read from the merge itself: the landing worker can move the base between a host
+      // rev-parse and the merge, and the newly landed lines would then read as strays.
+      let baseTip: string | undefined;
+      // A clean merge of the base into the branch: what the requeue compares with its landing gate's red (`repairFromRed`).
+      let joined: { merge: string; head: string; base: string } | undefined;
+      if (behind > 0 && carried) {
+        const identity = hostIdentity(project.root);
+        const merge = `git ${identity} merge --no-edit ${shq(base)}`;
+        const pull = await sandbox.exec(merge);
+        const unmerged = pull.exitCode === 0 ? "" : (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.trim();
+        const files = unmerged.split("\n").filter(Boolean);
+        if (unmerged && regensFor(files, project.generated)) {
+          // A conflict confined to declared generated files needs no agent: regenerate them.
+          const r = await resolveGenerated(sandbox, {
+            files,
+            generated: project.generated,
+            setup: project.setup,
+            message: `Merge ${base} into ${branch} (generated files regenerated)`,
+            identity,
+          });
+          if (r.ok) {
+            console.log(carriedMergeLine(ref(issue.id), base, behind, requeued, { files, regen: r.regen }));
+          } else {
+            // Back to the merge as it stood, for the implementer (or, on a green
+            // branch, the resolver) to resolve.
+            await sandbox.exec("git merge --abort");
+            await sandbox.exec(merge);
+            mergeConflicted = true;
+            console.log(
+              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+            );
+          }
+        } else if (pull.exitCode === 0) {
+          console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
+          // The merge commit and the two commits it joined, read in the sandbox that made it: a base that moved
+          // between a host read and the merge is then never mistaken for the tip the landing gate ran on.
+          const [merge, head, joinedBase] = (await sandbox.exec("git rev-list --parents -n 1 HEAD")).stdout.trim().split(/\s+/);
+          if (joinedBase) joined = { merge, head, base: joinedBase };
+        }
+        else if (unmerged) {
+          mergeConflicted = true;
+          console.log(
+            landOnly
+              ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
+              : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
+          );
+        }
+        else {
+          // Refused outright (untracked files it would overwrite, say): no
+          // merge in progress, so nothing for the prompt to name.
+          await sandbox.exec("git merge --abort");
+          console.log(`${ref(issue.id)}: could not merge ${base} into its branch (${(pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160)}); it may conflict at landing.`);
+        }
+      }
+      if (mergeConflicted) {
+        const head = await sandbox.exec("git rev-parse -q --verify MERGE_HEAD");
+        if (head.exitCode === 0) {
+          // Read inside the sandbox, after the branch's own setup ran there: trusted only when the
+          // host finds it on the base's history. Otherwise the resolution has nothing sound to be
+          // checked against, so the full implement and review take the branch.
+          const tip = head.stdout.trim();
+          try {
+            sh("git", ["merge-base", "--is-ancestor", tip, `refs/heads/${base}`], project.root);
+            baseTip = tip;
+          } catch {
+            console.log(`${ref(issue.id)}: the merge in its sandbox names ${tip.slice(0, 12)}, which is not on ${base} - the full implement and review run.`);
+            landOnly = false;
+          }
+        }
+      }
+      // A conflicted merge on a branch that is already reviewed and green needs
+      // only the merge resolved, not the issue implemented again: a short prompt
+      // on the same sandbox. A resolver that leaves the merge in progress could
+      // not resolve it without changing what the ticket does, so the full
+      // implementer takes the branch, as it does for any carried branch.
+      if (landOnly && mergeConflicted) {
+        await timed(issue.id, "resolve", () => {
+          const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
+          return pass({
+            name: `resolve-${issue.id}`,
+            logging,
+            agent: implAgent(own),
+            promptFile: prompts.resolve,
+            promptArgs: usedArgs(prompts.resolve, promptArgs),
+            maxIterations: project.repair.maxIterations ?? 4,
+            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
+          });
+        },
+          "resolving the base merge",
+          () => implModel,
+        ).catch((error) => {
+          if (hitLimit(project.root, issue.id)) throw error;
+          console.log(`${ref(issue.id)}: the resolver failed (${String(error).slice(0, 120)}).`);
+        });
+        if ((await sandbox.exec("git rev-parse -q --verify MERGE_HEAD")).exitCode === 0) {
+          console.log(`${ref(issue.id)}: the merge is still unresolved - the full implement and review run.`);
+          landOnly = false;
+        }
+      }
+      if (landOnly && mergeConflicted && greenHead !== undefined && baseTip !== undefined) {
+        // A resolution may touch only what git could not merge itself: a change to any other
+        // path can drop another ticket's landed lines with every gate green.
+        const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch], project.root), generated: project.generated });
+        if (stray?.length) {
+          const why = strayNote(stray);
+          // No `files` on the record: the report reads them as a protected-path hold ("changes X") and would hide this note.
+          console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
+          notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
+          // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
+          return heldResolution(issue.id, branch, why, {
+            commits: ownCommits(base, branch, project.root),
+            reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
+            repairs: earlierRepairs,
+            gates: readHeads(project.root)[issue.id]?.gates ?? [],
+          });
+        }
+      }
+      // Review passes run on the same warm sandbox and branch. Their commits
+      // ride the same gates as the implementer's, so a review that breaks the
+      // build cannot merge either. Log names keep `-review-` for status.sh.
+      const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
+        pass({
+          name,
+          logging: agentLogging(project, issue.id, name, runId),
+          agent,
+          promptFile,
+          promptArgs: usedArgs(promptFile, args),
+          maxIterations: project.review.maxIterations ?? 3,
+          idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
+        });
+      // The narrow review, as after a repair: only what is new since `since`, which
+      // is a base merge and its conflict resolution. No cross-review. A review that
+      // throws behaves as the full one does.
+      const narrowReview = (since: string, note: string) => {
+        let narrowModel: string | undefined;
+        return timed(
+          issue.id,
+          "review",
+          () => {
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              narrowModel = model;
+              return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since })(agent);
+            });
+          },
+          note,
+          () => narrowModel,
+        );
+      };
+      // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
+      let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
+      // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
+      const ungated: string[] = [];
+      // The lines of every agent's final message, only when the project asked for them. A land-only
+      // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
+      const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
+      let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
+      // The implementer's lines come first; a later pass that gives lines restates the branch's whole set
+      // and replaces them (see addChangelog).
+      const noteChangelog = (text: string | undefined) => {
+        if (!project.changelog || !text) return;
+        changelogDropped += addChangelog(changelog, text);
+      };
+      // What the agents knowingly left undone. The implementer's word stands only until a full
+      // review has read the branch after it: the reviewer may have finished the criterion.
+      // A land-only branch runs no implementer or review: what its agents said stands from its head record.
+      let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
+      let reviewed = false;
+      const unmet: string[] = [];
+      if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
+        // The resolver finished the merge on a branch reviewed and green at greenHead, or the branch
+        // carries a merge from an earlier run that no review has read: nobody has seen its
+        // resolution. A clean land-only merge of the base needs no review.
+        console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
+        const resolved = await narrowReview(greenHead, "after conflict resolution");
+        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+        reviewCommits += resolved.commits.length;
+        noteChangelog(resolved.stdout);
+        const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
+        if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
+        const u = unmetOf(resolved.stdout);
+        if (u) unmet.push(u);
+      }
+      if (!landOnly) {
+        const impl = await timed(issue.id, "implement", () => {
+          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
+          return pass({
+            name: `impl-${issue.id}`,
+            logging,
+            agent: implAgent(own),
+            promptFile: prompts.implement,
+            promptArgs: usedArgs(prompts.implement, promptArgs),
+            maxIterations: project.implement.maxIterations ?? 8,
+            idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
+          });
+        },
+          undefined,
+          () => implModel,
+        );
+
+        if (!tracker.agentsWrite) {
+          const { blocked, report } = tags(impl.stdout);
+          if (blocked) {
+            notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
+            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
+          }
+          if (report) addReport(issue.id, "Implementer", report);
+        }
+        noteChangelog(impl.stdout);
+        implUnmet = unmetOf(impl.stdout);
+
+        // `impl.commits` counts what THIS run added, which is zero in two very
+        // different cases: the agent found nothing to do, and the agent found the
+        // work already done on the branch from an earlier run. Only the first is
+        // `nochange`. How far the branch is ahead of the base tells them apart -
+        // without it, a branch whose review died could never be reviewed by
+        // re-running the issue: it came straight back as `nochange` with the work
+        // still standing, unreviewed and unmerged.
+        const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root));
+        if (impl.commits.length === 0 && branchCommits === 0) {
+          // Nothing lands for a nochange, so nothing else would carry the report.
+          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
+        }
+
+        // Only a base merge since the last completed review: review the merge, not the branch.
+        const since = narrowReviewBase(project.root, base, issue.id);
+        if (since !== undefined && since === sh("git", ["rev-parse", branch], project.root)) {
+          console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
+        } else if (since !== undefined) {
+          console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
+          const merged = await narrowReview(since, "after base merge");
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+          reviewCommits = merged.commits.length;
+          noteChangelog(merged.stdout);
+          const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
+          if (said) addReport(issue.id, "Reviewer (after base merge)", said);
+          const u = unmetOf(merged.stdout);
+          if (u) unmet.push(u);
+        } else {
+          let reviewModel: string | undefined;
+          const review = await timed(
+            issue.id,
+            "review",
+            () => {
+              return reviewWithFallback(ref(issue.id), (agent, model) => {
+                reviewModel = model;
+                return reviewRun(`review-${issue.id}`)(agent);
+              });
+            },
+            undefined,
+            () => reviewModel,
+          );
+          const cross = CROSS_REVIEW
+            ? await timed(
+                issue.id,
+                "cross-review",
+                () => {
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
+                },
+                undefined,
+                () => CROSS_REVIEW_MODEL,
+              )
+            : undefined;
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+          reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+          reviewed = true;
+          for (const r of [review, cross]) {
+            const u = r && ungatedOf(r.stdout);
+            if (u) ungated.push(u);
+            noteChangelog(r?.stdout);
+            const m = r && unmetOf(r.stdout);
+            if (m) unmet.push(m);
+          }
+          if (!tracker.agentsWrite) {
+            for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
+              const said = r && tags(r.stdout).report;
+              if (said) addReport(issue.id, who, said);
+            }
+          }
+        }
+      }
+
+      // Gates are checked here, in the orchestrator. No agent gets to tell us
+      // they passed - `exitCode` is returned rather than thrown.
+      // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
+      // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red, and the
+      // repair starts from the landing gate's own output.
+      const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch], project.root) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
+      reds.delete(issue.id);
+      let gated: GateRun;
+      if (redAtLanding) {
+        console.log(`${ref(issue.id)}: ${base} has not moved since ${redAtLanding.failure.name} went red at landing - no gate run; the repair starts from that output.`);
+        gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
+      } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+      // The forced red is named as such everywhere it shows: "ruff red" for a
+      // gate that passed sent a reader looking for a ruff failure.
+      let forced = false;
+      if (testRedGate && !gated.failure) {
+        forced = true;
+        const g = project.gates[0];
+        const failure = {
+          name: g.name,
+          command: g.command,
+          exitCode: 1,
+          output:
+            "SANDCASTLE_TEST_RED_GATE=1: the orchestrator counted this gate run as red to test the repair pass. " +
+            "The gate itself passed. Run the gates to confirm; if they are green there is nothing to fix, so commit nothing.",
+        };
+        gated = { gates: [{ name: g.name, pass: false }], failure, failures: [failure] };
+      }
+
+      // A red gate is often one type error or one broken test away from green,
+      // and the sandbox is still warm. Repair commits ride the same gates and
+      // the same protected-path check, and a green repaired branch is reviewed
+      // again (below). Not after a timeout (124): a hung gate leaves nothing
+      // to repair from and would hang again.
+      //
+      // `attempts` passes, plus up to two more while each one turns up a
+      // failure no earlier pass saw: a gate that stops at its first failure
+      // (`pytest -x`) showed a repair one test, hid a second, and a branch one
+      // line from green stayed unmerged. The same failure twice stops it.
+      const attempts = repair;
+      const preRepair = sh("git", ["rev-parse", branch], project.root);
+      const seen = new Set<string>();
+      let repairs = 0;
+      for (
+        let red = gated.failure;
+        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || !seen.has(failureKey(red)));
+        red = gated.failure
+      ) {
+        const failure = red;
+        seen.add(failureKey(failure));
+        repairs++;
+        const why = forced ? "test red gate" : `${failure.name} red`;
+        console.log(
+          `${ref(issue.id)}: ${forced ? `test red gate (SANDCASTLE_TEST_RED_GATE; ${failure.name} passed)` : why} - repair pass ${repairs}`,
+        );
+        forced = false;
+        // A repair that dies (idle timeout, agent exit) leaves the branch red,
+        // not the issue crashed: the gate results stay in the report. A spent
+        // allowance still has to stop the queue, so that one is rethrown.
+        const fixed = await timed(issue.id, "repair", () => {
+          const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
+          return pass({
+            name: `repair-${issue.id}`,
+            logging,
+            agent: implAgent(own),
+            promptFile: prompts.repair,
+            promptArgs: usedArgs(prompts.repair, {
+              ...promptArgs,
+              GATE_NAME: failure.name,
+              GATE_COMMAND: failure.command,
+              GATE_OUTPUT: fence(failure.output),
+            }),
+            maxIterations: project.repair.maxIterations ?? 4,
+            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
+          });
+        },
+          `${why} - pass ${repairs}`,
+          () => implModel,
+        ).then(
+          (fixedRun) => {
+            const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
+            if (said) addReport(issue.id, "Repair", said);
+            return true;
+          },
+          (error) => {
+            if (hitLimit(project.root, issue.id)) throw error;
+            console.log(`${ref(issue.id)}: repair pass failed (${String(error).slice(0, 120)}); leaving the branch red.`);
+            return false;
+          },
+        );
+        if (!fixed) break;
+        gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+      }
+      // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
+      // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
+      if (repairs) {
+        const earlier = readHeads(project.root)[issue.id];
+        const made = sh("git", ["rev-list", "--no-merges", `${preRepair}..${branch}`], project.root).split("\n").filter(Boolean);
+        if (made.length) noteHead(issue.id, branch, { repaired: [...new Set([...(earlier?.branch === branch ? (earlier.repaired ?? []) : []), ...made])] });
+      }
+
+      // A repair works against a red gate, and the easy way to green is to
+      // weaken the test - which the gate then passes. The prompt forbids it,
+      // but a rule is not a check: a green branch whose repair committed gets
+      // the review pass again, on the repair commits. Its own commits are
+      // gated once more; a red there is final, with no second repair loop.
+      let unreviewed = false;
+      if (!gated.failure && sh("git", ["rev-parse", branch], project.root) !== preRepair) {
+        // A review that dies leaves the branch held, not the ticket crashed:
+        // like a failed repair, only a spent allowance stops the queue.
+        let afterModel: string | undefined;
+        const after = await timed(
+          issue.id,
+          "review",
+          () => {
+            return reviewWithFallback(ref(issue.id), (agent, model) => {
+              afterModel = model;
+              return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
+            });
+          },
+          "after repair",
+          () => afterModel,
+        ).catch((error) => {
+          if (hitLimit(project.root, issue.id)) throw error;
+          console.log(`${ref(issue.id)}: the review after repair failed (${String(error).slice(0, 120)}); holding the branch for a human.`);
+          unreviewed = true;
+          return undefined;
+        });
+        if (after) {
+          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
+          reviewCommits += after.commits.length;
+          const u = ungatedOf(after.stdout);
+          if (u) ungated.push(u);
+          noteChangelog(after.stdout);
+          const m = unmetOf(after.stdout);
+          if (m) unmet.push(m);
+          const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
+          if (said) addReport(issue.id, "Reviewer (after repair)", said);
+          if (after.commits.length) gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+        }
+      }
+
+      const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
+      const head = sh("git", ["rev-parse", branch], project.root);
+      const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
+      const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
+      // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
+      return {
+        issue: issue.id,
+        branch,
+        status: gated.failure ? "gate-failed" : "green",
+        // Branch total, so a re-run of an already-implemented branch does not
+        // report 0 commits while shipping its work. Without the kit's base merge-ins.
+        commits: ownCommits(base, branch, project.root),
+        reviewCommits,
+        repairs: earlierRepairs + repairs,
+        gates: gated.gates,
+        failing: gated.failure ? failingTests(gated.failure.output) : undefined,
+        head,
+        carried,
+        unreviewed,
+        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        changelog: changelogNote,
+        changelogDropped: changelogDropped || undefined,
+        unmet: unmetNote,
+      };
+    } finally {
+      // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
+      took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
+      unlockWorktree(sandbox.worktreePath, project.root);
+      // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
+      await recordPeak(sandbox, project.root, runId);
+      // Sandcastle keeps a worktree with uncommitted files rather than lose
+      // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
+      const closed = await sandbox.close();
+      if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
+      // A failed check stops the run; the pipeline keeps its own result, or its own error.
+      await settleAfter(
+        () => host.settle(branch, `after ${ref(issue.id)}`),
+        (error) => tampered.set(issue.id, error),
+      );
+    }
   };
 };
 
@@ -749,19 +1387,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   }, 5 * 60_000);
   heartbeat.unref();
 
-  // A run that died between merging a branch and closing its issue leaves the
-  // issue queued with its work already on base. Re-running it finds nothing
-  // to do and reports `nochange`, so the issue would stay open for good. Our
-  // own merge message finds it instead - unless someone reopened the issue
-  // after that merge, which asks for more work, not for a close. Any doubt
-  // (gh unreachable) means a normal run, which is what happened before.
-  const mergedEarlier = (issue: string, branch: string) => {
-    const found = sh("git", ["log", base, "-1", "--format=%h %cI", "--fixed-strings", `--grep=Merge ${branch} (closes ${ref(issue)})`]);
-    if (!found) return undefined;
-    const [merge, mergedAt] = found.split(" ");
-    return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
-  };
-
   // The ticket can change during a long run: closed by hand, taken out of the
   // queue (its label, or its status in a ticket file), or sent to a human.
   // Asked before a pipeline starts, so nobody's allowance goes on work already
@@ -787,575 +1412,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // landing, on the landing worker (concurrent commits to the base branch would race on its index).
   const reports = new Map<string, string>();
   // The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment.
-  const notes: { issue: string; kind: "hold"; text: string }[] = [];
-  const addReport = (id: string, heading: string, text: string) =>
-    reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
-  // The last tag wins, an example or a placeholder ("...") does not count, and
-  // a hand-back only stands if nothing was reported after it.
-  const tags = (text: string) => {
-    const last = (name: string) =>
-      [...text.matchAll(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "g"))]
-        .map((m) => ({ text: m[1].trim(), at: m.index! }))
-        .filter((m) => m.text && m.text !== "...")
-        .at(-1);
-    const report = last("report");
-    const blocked = last("blocked");
-    return blocked && (!report || blocked.at > report.at) ? { blocked: blocked.text } : { report: report?.text };
-  };
-
-  // A later run skips work a branch already passed (see recordHead). A dry run's
-  // work must not change what a real run skips, and a failed write never fails
-  // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
-    if (DRY_RUN) return;
-    try {
-      recordHead(project.root, id, { branch, ...fields }, runId);
-    } catch (error) {
-      console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
-    }
-  };
+  const notes: Note[] = [];
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
-
-  const pipeline = async (issue: Issue): Promise<Outcome> => {
-    const branch = `agent/issue-${issue.id}`;
-    // The ticket's own implementer, for the implement and repair passes only.
-    const own = overrides.get(issue.id) ?? {};
-    const implModel = own.model ?? IMPL_MODEL;
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), ...tracker.promptArgs(issue.id) };
-    const merge = mergedEarlier(issue.id, branch);
-    if (merge) {
-      return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
-    }
-    view.claim(issue.id, issue.title);
-
-    const started = Date.now();
-    releaseBranchWorktree(branch);
-    // From here the agent commits to the branch; the `.git` check lets it move.
-    host.begin(branch);
-    const sandbox = await timed(issue.id, "setup", () =>
-      createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
-      requeuedAs.get(issue.id),
-    ).catch(async (error) => {
-      await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
-      throw error;
-    });
-
-    // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
-    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
-      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
-
-    try {
-      // Normally already locked by the worktree hook; this covers a worktree
-      // Sandcastle reused.
-      lockWorktree(sandbox.worktreePath);
-      // A branch kept from an earlier run (red, conflicted, crashed) forks from
-      // an older base. Asked to "merge it in", an agent that found the work
-      // already done said so and stopped, and the branch hit the same conflict
-      // at landing run after run. So the merge is made here: a clean one needs
-      // no agent, and a conflicted one stays in progress for the implementer
-      // to resolve - the prompt names the files, and the gates fail until it does.
-      // Inside the container, never on the host: setup has already run the
-      // branch's own install scripts in there, and the shared .git (or the
-      // worktree's gitdir pointer) could by now name an fsmonitor or merge
-      // driver that a host git in the worktree would execute.
-      const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
-      // The requeue-once state holds the first attempt's line only on a second attempt in this run.
-      const requeued = requeuedAs.has(issue.id);
-      // The repair passes of the first attempt, so the outcome line counts the ticket's whole run: `repairs` below bounds one attempt's loop only.
-      const earlierRepairs = requeued ? firstAttemptRepairs(results, issue.id) : 0;
-      const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
-      // Read before the base merge, which moves the tip. A branch at the head it
-      // was reviewed and gated green on, or past it by merge commits only, needs no
-      // implement or full review: only the merge and the gates stand between it and landing.
-      const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
-      let landOnly = greenHead !== undefined;
-      // A tip past the green head is merge commits only (landOnlyHead): a resolution a hold left
-      // on the branch was never reviewed, unless a narrow review has since recorded the tip.
-      const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch]) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch]);
-      if (greenHead !== undefined) {
-        console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
-        run.ticket(issue.id, { note: "land only - reviewed earlier" });
-      }
-      let mergeConflicted = false;
-      // The base commit the merge below joined, for checking the resolution against git's own
-      // merge. Read from the merge itself: the landing worker can move the base between a host
-      // rev-parse and the merge, and the newly landed lines would then read as strays.
-      let baseTip: string | undefined;
-      // A clean merge of the base into the branch: what the requeue compares with its landing gate's red (`repairFromRed`).
-      let joined: { merge: string; head: string; base: string } | undefined;
-      if (behind > 0 && carried) {
-        const identity = hostIdentity(project.root);
-        const merge = `git ${identity} merge --no-edit ${shq(base)}`;
-        const pull = await sandbox.exec(merge);
-        const unmerged = pull.exitCode === 0 ? "" : (await sandbox.exec("git diff --name-only --diff-filter=U")).stdout.trim();
-        const files = unmerged.split("\n").filter(Boolean);
-        if (unmerged && regensFor(files, project.generated)) {
-          // A conflict confined to declared generated files needs no agent: regenerate them.
-          const r = await resolveGenerated(sandbox, {
-            files,
-            generated: project.generated,
-            setup: project.setup,
-            message: `Merge ${base} into ${branch} (generated files regenerated)`,
-            identity,
-          });
-          if (r.ok) {
-            console.log(carriedMergeLine(ref(issue.id), base, behind, requeued, { files, regen: r.regen }));
-          } else {
-            // Back to the merge as it stood, for the implementer (or, on a green
-            // branch, the resolver) to resolve.
-            await sandbox.exec("git merge --abort");
-            await sandbox.exec(merge);
-            mergeConflicted = true;
-            console.log(
-              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
-            );
-          }
-        } else if (pull.exitCode === 0) {
-          console.log(carriedMergeLine(ref(issue.id), base, behind, requeued));
-          // The merge commit and the two commits it joined, read in the sandbox that made it: a base that moved
-          // between a host read and the merge is then never mistaken for the tip the landing gate ran on.
-          const [merge, head, joinedBase] = (await sandbox.exec("git rev-list --parents -n 1 HEAD")).stdout.trim().split(/\s+/);
-          if (joinedBase) joined = { merge, head, base: joinedBase };
-        }
-        else if (unmerged) {
-          mergeConflicted = true;
-          console.log(
-            landOnly
-              ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
-              : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
-          );
-        }
-        else {
-          // Refused outright (untracked files it would overwrite, say): no
-          // merge in progress, so nothing for the prompt to name.
-          await sandbox.exec("git merge --abort");
-          console.log(`${ref(issue.id)}: could not merge ${base} into its branch (${(pull.stderr || pull.stdout).trim().split("\n").at(-1)?.slice(0, 160)}); it may conflict at landing.`);
-        }
-      }
-      if (mergeConflicted) {
-        const head = await sandbox.exec("git rev-parse -q --verify MERGE_HEAD");
-        if (head.exitCode === 0) {
-          // Read inside the sandbox, after the branch's own setup ran there: trusted only when the
-          // host finds it on the base's history. Otherwise the resolution has nothing sound to be
-          // checked against, so the full implement and review take the branch.
-          const tip = head.stdout.trim();
-          try {
-            sh("git", ["merge-base", "--is-ancestor", tip, `refs/heads/${base}`]);
-            baseTip = tip;
-          } catch {
-            console.log(`${ref(issue.id)}: the merge in its sandbox names ${tip.slice(0, 12)}, which is not on ${base} - the full implement and review run.`);
-            landOnly = false;
-          }
-        }
-      }
-      // A conflicted merge on a branch that is already reviewed and green needs
-      // only the merge resolved, not the issue implemented again: a short prompt
-      // on the same sandbox. A resolver that leaves the merge in progress could
-      // not resolve it without changing what the ticket does, so the full
-      // implementer takes the branch, as it does for any carried branch.
-      if (landOnly && mergeConflicted) {
-        await timed(issue.id, "resolve", () => {
-          const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
-          return pass({
-            name: `resolve-${issue.id}`,
-            logging,
-            agent: implAgent(own),
-            promptFile: prompts.resolve,
-            promptArgs: usedArgs(prompts.resolve, promptArgs),
-            maxIterations: project.repair.maxIterations ?? 4,
-            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-          });
-        },
-          "resolving the base merge",
-          () => implModel,
-        ).catch((error) => {
-          if (hitLimit(issue.id)) throw error;
-          console.log(`${ref(issue.id)}: the resolver failed (${String(error).slice(0, 120)}).`);
-        });
-        if ((await sandbox.exec("git rev-parse -q --verify MERGE_HEAD")).exitCode === 0) {
-          console.log(`${ref(issue.id)}: the merge is still unresolved - the full implement and review run.`);
-          landOnly = false;
-        }
-      }
-      if (landOnly && mergeConflicted && greenHead !== undefined && baseTip !== undefined) {
-        // A resolution may touch only what git could not merge itself: a change to any other
-        // path can drop another ticket's landed lines with every gate green.
-        const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
-        if (stray?.length) {
-          const why = strayNote(stray);
-          // No `files` on the record: the report reads them as a protected-path hold ("changes X") and would hide this note.
-          console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
-          notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
-          // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
-          return heldResolution(issue.id, branch, why, {
-            commits: ownCommits(base, branch),
-            reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
-            repairs: earlierRepairs,
-            gates: readHeads(project.root)[issue.id]?.gates ?? [],
-          });
-        }
-      }
-      // Review passes run on the same warm sandbox and branch. Their commits
-      // ride the same gates as the implementer's, so a review that breaks the
-      // build cannot merge either. Log names keep `-review-` for status.sh.
-      const reviewRun = (name: string, promptFile = prompts.review, args: Record<string, string> = promptArgs) => (agent: Parameters<typeof sandbox.run>[0]["agent"]) =>
-        pass({
-          name,
-          logging: agentLogging(project, issue.id, name, runId),
-          agent,
-          promptFile,
-          promptArgs: usedArgs(promptFile, args),
-          maxIterations: project.review.maxIterations ?? 3,
-          idleTimeoutSeconds: project.review.idleTimeoutSeconds ?? 2400,
-        });
-      // The narrow review, as after a repair: only what is new since `since`, which
-      // is a base merge and its conflict resolution. No cross-review. A review that
-      // throws behaves as the full one does.
-      const narrowReview = (since: string, note: string) => {
-        let narrowModel: string | undefined;
-        return timed(
-          issue.id,
-          "review",
-          () => {
-            return reviewWithFallback(ref(issue.id), (agent, model) => {
-              narrowModel = model;
-              return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since })(agent);
-            });
-          },
-          note,
-          () => narrowModel,
-        );
-      };
-      // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
-      let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
-      // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
-      const ungated: string[] = [];
-      // The lines of every agent's final message, only when the project asked for them. A land-only
-      // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
-      const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
-      let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
-      // The implementer's lines come first; a later pass that gives lines restates the branch's whole set
-      // and replaces them (see addChangelog).
-      const noteChangelog = (text: string | undefined) => {
-        if (!project.changelog || !text) return;
-        changelogDropped += addChangelog(changelog, text);
-      };
-      // What the agents knowingly left undone. The implementer's word stands only until a full
-      // review has read the branch after it: the reviewer may have finished the criterion.
-      // A land-only branch runs no implementer or review: what its agents said stands from its head record.
-      let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
-      let reviewed = false;
-      const unmet: string[] = [];
-      if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
-        // The resolver finished the merge on a branch reviewed and green at greenHead, or the branch
-        // carries a merge from an earlier run that no review has read: nobody has seen its
-        // resolution. A clean land-only merge of the base needs no review.
-        console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
-        const resolved = await narrowReview(greenHead, "after conflict resolution");
-        noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-        reviewCommits += resolved.commits.length;
-        noteChangelog(resolved.stdout);
-        const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
-        if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
-        const u = unmetOf(resolved.stdout);
-        if (u) unmet.push(u);
-      }
-      if (!landOnly) {
-        const impl = await timed(issue.id, "implement", () => {
-          const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
-          return pass({
-            name: `impl-${issue.id}`,
-            logging,
-            agent: implAgent(own),
-            promptFile: prompts.implement,
-            promptArgs: usedArgs(prompts.implement, promptArgs),
-            maxIterations: project.implement.maxIterations ?? 8,
-            idleTimeoutSeconds: project.implement.idleTimeoutSeconds ?? 2400,
-          });
-        },
-          undefined,
-          () => implModel,
-        );
-
-        if (!tracker.agentsWrite) {
-          const { blocked, report } = tags(impl.stdout);
-          if (blocked) {
-            notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
-            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
-          }
-          if (report) addReport(issue.id, "Implementer", report);
-        }
-        noteChangelog(impl.stdout);
-        implUnmet = unmetOf(impl.stdout);
-
-        // `impl.commits` counts what THIS run added, which is zero in two very
-        // different cases: the agent found nothing to do, and the agent found the
-        // work already done on the branch from an earlier run. Only the first is
-        // `nochange`. How far the branch is ahead of the base tells them apart -
-        // without it, a branch whose review died could never be reviewed by
-        // re-running the issue: it came straight back as `nochange` with the work
-        // still standing, unreviewed and unmerged.
-        const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`]));
-        if (impl.commits.length === 0 && branchCommits === 0) {
-          // Nothing lands for a nochange, so nothing else would carry the report.
-          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
-        }
-
-        // Only a base merge since the last completed review: review the merge, not the branch.
-        const since = narrowReviewBase(project.root, base, issue.id);
-        if (since !== undefined && since === sh("git", ["rev-parse", branch])) {
-          console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
-        } else if (since !== undefined) {
-          console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
-          const merged = await narrowReview(since, "after base merge");
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-          reviewCommits = merged.commits.length;
-          noteChangelog(merged.stdout);
-          const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
-          if (said) addReport(issue.id, "Reviewer (after base merge)", said);
-          const u = unmetOf(merged.stdout);
-          if (u) unmet.push(u);
-        } else {
-          let reviewModel: string | undefined;
-          const review = await timed(
-            issue.id,
-            "review",
-            () => {
-              return reviewWithFallback(ref(issue.id), (agent, model) => {
-                reviewModel = model;
-                return reviewRun(`review-${issue.id}`)(agent);
-              });
-            },
-            undefined,
-            () => reviewModel,
-          );
-          const cross = CROSS_REVIEW
-            ? await timed(
-                issue.id,
-                "cross-review",
-                () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`));
-                },
-                undefined,
-                () => CROSS_REVIEW_MODEL,
-              )
-            : undefined;
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-          reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
-          reviewed = true;
-          for (const r of [review, cross]) {
-            const u = r && ungatedOf(r.stdout);
-            if (u) ungated.push(u);
-            noteChangelog(r?.stdout);
-            const m = r && unmetOf(r.stdout);
-            if (m) unmet.push(m);
-          }
-          if (!tracker.agentsWrite) {
-            for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
-              const said = r && tags(r.stdout).report;
-              if (said) addReport(issue.id, who, said);
-            }
-          }
-        }
-      }
-
-      // Gates are checked here, in the orchestrator. No agent gets to tell us
-      // they passed - `exitCode` is returned rather than thrown.
-      // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
-      // the merge: that merge is the tree the landing gate ran, so a gate run would return the same red, and the
-      // repair starts from the landing gate's own output.
-      const redAtLanding = requeued && joined && sh("git", ["rev-parse", branch]) === joined.merge ? repairFromRed(reds.get(issue.id), joined) : undefined;
-      reds.delete(issue.id);
-      let gated: Awaited<ReturnType<typeof runGates>>;
-      if (redAtLanding) {
-        console.log(`${ref(issue.id)}: ${base} has not moved since ${redAtLanding.failure.name} went red at landing - no gate run; the repair starts from that output.`);
-        gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
-      } else gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
-      // The forced red is named as such everywhere it shows: "ruff red" for a
-      // gate that passed sent a reader looking for a ruff failure.
-      let forced = false;
-      if (TEST_RED_GATE && !gated.failure) {
-        forced = true;
-        const g = project.gates[0];
-        const failure = {
-          name: g.name,
-          command: g.command,
-          exitCode: 1,
-          output:
-            "SANDCASTLE_TEST_RED_GATE=1: the orchestrator counted this gate run as red to test the repair pass. " +
-            "The gate itself passed. Run the gates to confirm; if they are green there is nothing to fix, so commit nothing.",
-        };
-        gated = { gates: [{ name: g.name, pass: false }], failure, failures: [failure] };
-      }
-
-      // A red gate is often one type error or one broken test away from green,
-      // and the sandbox is still warm. Repair commits ride the same gates and
-      // the same protected-path check, and a green repaired branch is reviewed
-      // again (below). Not after a timeout (124): a hung gate leaves nothing
-      // to repair from and would hang again.
-      //
-      // `attempts` passes, plus up to two more while each one turns up a
-      // failure no earlier pass saw: a gate that stops at its first failure
-      // (`pytest -x`) showed a repair one test, hid a second, and a branch one
-      // line from green stayed unmerged. The same failure twice stops it.
-      const attempts = settings.repair;
-      const preRepair = sh("git", ["rev-parse", branch]);
-      const seen = new Set<string>();
-      let repairs = 0;
-      for (
-        let red = gated.failure;
-        red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || !seen.has(failureKey(red)));
-        red = gated.failure
-      ) {
-        const failure = red;
-        seen.add(failureKey(failure));
-        repairs++;
-        const why = forced ? "test red gate" : `${failure.name} red`;
-        console.log(
-          `${ref(issue.id)}: ${forced ? `test red gate (SANDCASTLE_TEST_RED_GATE; ${failure.name} passed)` : why} - repair pass ${repairs}`,
-        );
-        forced = false;
-        // A repair that dies (idle timeout, agent exit) leaves the branch red,
-        // not the issue crashed: the gate results stay in the report. A spent
-        // allowance still has to stop the queue, so that one is rethrown.
-        const fixed = await timed(issue.id, "repair", () => {
-          const logging = agentLogging(project, issue.id, `repair-${issue.id}`, runId);
-          return pass({
-            name: `repair-${issue.id}`,
-            logging,
-            agent: implAgent(own),
-            promptFile: prompts.repair,
-            promptArgs: usedArgs(prompts.repair, {
-              ...promptArgs,
-              GATE_NAME: failure.name,
-              GATE_COMMAND: failure.command,
-              GATE_OUTPUT: fence(failure.output),
-            }),
-            maxIterations: project.repair.maxIterations ?? 4,
-            idleTimeoutSeconds: project.repair.idleTimeoutSeconds ?? 2400,
-          });
-        },
-          `${why} - pass ${repairs}`,
-          () => implModel,
-        ).then(
-          (fixedRun) => {
-            const said = tracker.agentsWrite ? undefined : tags(fixedRun.stdout).report;
-            if (said) addReport(issue.id, "Repair", said);
-            return true;
-          },
-          (error) => {
-            if (hitLimit(issue.id)) throw error;
-            console.log(`${ref(issue.id)}: repair pass failed (${String(error).slice(0, 120)}); leaving the branch red.`);
-            return false;
-          },
-        );
-        if (!fixed) break;
-        gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
-      }
-      // Remembered across attempts and runs: a repair fixes what the gate named, often a file the ticket's
-      // `Touches:` line has no reason to list, so landing leaves what only these commits changed out of its overrun.
-      if (repairs) {
-        const earlier = readHeads(project.root)[issue.id];
-        const made = sh("git", ["rev-list", "--no-merges", `${preRepair}..${branch}`]).split("\n").filter(Boolean);
-        if (made.length) noteHead(issue.id, branch, { repaired: [...new Set([...(earlier?.branch === branch ? (earlier.repaired ?? []) : []), ...made])] });
-      }
-
-      // A repair works against a red gate, and the easy way to green is to
-      // weaken the test - which the gate then passes. The prompt forbids it,
-      // but a rule is not a check: a green branch whose repair committed gets
-      // the review pass again, on the repair commits. Its own commits are
-      // gated once more; a red there is final, with no second repair loop.
-      let unreviewed = false;
-      if (!gated.failure && sh("git", ["rev-parse", branch]) !== preRepair) {
-        // A review that dies leaves the branch held, not the ticket crashed:
-        // like a failed repair, only a spent allowance stops the queue.
-        let afterModel: string | undefined;
-        const after = await timed(
-          issue.id,
-          "review",
-          () => {
-            return reviewWithFallback(ref(issue.id), (agent, model) => {
-              afterModel = model;
-              return reviewRun(`review-${issue.id}`, prompts.rereview, { ...promptArgs, REPAIR_BASE: preRepair })(agent);
-            });
-          },
-          "after repair",
-          () => afterModel,
-        ).catch((error) => {
-          if (hitLimit(issue.id)) throw error;
-          console.log(`${ref(issue.id)}: the review after repair failed (${String(error).slice(0, 120)}); holding the branch for a human.`);
-          unreviewed = true;
-          return undefined;
-        });
-        if (after) {
-          noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch]) });
-          reviewCommits += after.commits.length;
-          const u = ungatedOf(after.stdout);
-          if (u) ungated.push(u);
-          noteChangelog(after.stdout);
-          const m = unmetOf(after.stdout);
-          if (m) unmet.push(m);
-          const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
-          if (said) addReport(issue.id, "Reviewer (after repair)", said);
-          if (after.commits.length) gated = await timed(issue.id, "gates", () => runGates(sandbox, issue.id));
-        }
-      }
-
-      const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
-      const head = sh("git", ["rev-parse", branch]);
-      const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
-      const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
-      // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
-      return {
-        issue: issue.id,
-        branch,
-        status: gated.failure ? "gate-failed" : "green",
-        // Branch total, so a re-run of an already-implemented branch does not
-        // report 0 commits while shipping its work. Without the kit's base merge-ins.
-        commits: ownCommits(base, branch),
-        reviewCommits,
-        repairs: earlierRepairs + repairs,
-        gates: gated.gates,
-        failing: gated.failure ? failingTests(gated.failure.output) : undefined,
-        head,
-        carried,
-        unreviewed,
-        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
-        changelog: changelogNote,
-        changelogDropped: changelogDropped || undefined,
-        unmet: unmetNote,
-      };
-    } finally {
-      // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
-      took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
-      unlockWorktree(sandbox.worktreePath);
-      // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
-      await recordPeak(sandbox, project.root, runId);
-      // Sandcastle keeps a worktree with uncommitted files rather than lose
-      // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
-      const closed = await sandbox.close();
-      if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
-      // A failed check stops the run; the pipeline keeps its own result, or its own error.
-      await settleAfter(
-        () => host.settle(branch, `after ${ref(issue.id)}`),
-        (error) => tampered.set(issue.id, error),
-      );
-    }
-  };
-
-  // A spent plan allowance fails every issue after it the same way, each one
-  // after paying for a sandbox and an install. The first one stops the queue.
-  const hitLimit = (issue: string) => {
-    const logs = join(project.root, ".sandcastle/logs");
-    if (!existsSync(logs)) return false;
-    return readdirSync(logs)
-      // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
-      .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-      .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
-  };
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
 
@@ -1414,6 +1474,30 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const ledger = createLedger({ run, outcomes: outcomesFile(project, runId), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
   // The line a requeued ticket's second attempt's setup carries.
   const { requeuedAs } = ledger;
+  const pipeline = createPipeline({
+    project,
+    tracker,
+    runId,
+    dryRun: DRY_RUN,
+    repair: settings.repair,
+    testRedGate: TEST_RED_GATE,
+    prompts,
+    overrides,
+    open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
+    gate: (box, id) => runGates(box, id),
+    timed,
+    run,
+    view,
+    host,
+    requeuedAs,
+    results,
+    reds,
+    reports,
+    notes,
+    took,
+    keptWorktrees,
+    tampered,
+  });
 
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
@@ -1484,7 +1568,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     bookkeep(issue.id, () => {
       // Kept open even at the end of the queue: a crash is for a human to read.
       view.finish(issue.id, "crashed");
-      limited = hitLimit(issue.id);
+      limited = hitLimit(project.root, issue.id);
     });
     // A pipeline that crashed on its own keeps its own error; a failed check after it stops the run all the same.
     return attempted(issue.id, ended, check, limited);

@@ -179,8 +179,3 @@ test("`changelog` must be true or false", async (t) => {
   assert.equal((await load("changelog: true")).changelog, true);
   await assert.rejects(load('changelog: "yes"'), /`changelog` must be true or false, not "yes"/);
 });
-
-test("the pipeline counts what it dropped and records the count", () => {
-  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /changelogDropped \+= addChangelog\(changelog, text\);/);
-});

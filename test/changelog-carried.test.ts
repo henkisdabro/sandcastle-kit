@@ -1,12 +1,13 @@
 // `changelog: true`: a green branch that did not land in its own run (held, a conflict at landing, a
 // stopped run) lands in a later one as land-only, with no implementer or review to give its
 // `<changelog>` lines again: its head record carries them, or they reach no closing summary. Plain
-// temp directories; no git, Docker, model or network.
+// temp directories; no git, Docker, model or network. The pipeline that writes and reads them is
+// driven in test/pipeline.test.ts.
 //
 //   pnpm exec tsx --test test/changelog-carried.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -34,14 +35,4 @@ test("a later green head with no lines drops the earlier ones", (t) => {
   recordHead(dir, "4", { branch: "agent/issue-4", green: "aaa", changelog: ["Added: a key"] }, "run-1");
   recordHead(dir, "4", { branch: "agent/issue-4", green: "bbb", changelog: undefined }, "run-2");
   assert.equal(readHeads(dir)["4"].changelog, undefined);
-});
-
-test("the pipeline writes the lines with the green head and reads them back for a land-only branch", () => {
-  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  // Without the record, a land-only branch's lines start empty and its landing lists none.
-  assert.match(src, /const changelog: string\[\] = landOnly \? \[\.\.\.\(readHeads\(project\.root\)\[issue\.id\]\?\.changelog \?\? \[\]\)\] : \[\];/);
-  // Written even when undefined, so a later green head with no lines replaces an earlier one.
-  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote, gates: gated\.gates, changelog: changelogNote, changelogDropped: changelogDropped \|\| undefined \}\)/);
-  // The same lines the outcome carries to the run record.
-  assert.match(src, /changelog: changelogNote,/);
 });

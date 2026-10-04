@@ -4,7 +4,6 @@
 //   pnpm exec tsx --test test/report-stray-hold.test.ts
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { type Facts, render } from "../src/report.ts";
 import { strayNote } from "../src/resolution.ts";
@@ -41,11 +40,4 @@ test("a stray hold prints its note, and a protected-path hold still prints the f
   assert.match(needs, /- #1 stray - conflict resolution changed test\/a\.test\.ts, which merged cleanly - check no other ticket's lines were lost - 2 file\(s\)\n/);
   assert.doesNotMatch(needs, /#1 stray - changes /);
   assert.match(needs, /- #2 protected - changes \.githooks\/pre-push - 1 file\(s\)\n/);
-});
-
-test("burndown's stray hold records no files, which the report would read as a protected-path hold", () => {
-  const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  const hold = src.slice(src.indexOf("if (stray?.length) {"), src.indexOf("// Review passes run on the same warm sandbox"));
-  assert.ok(hold.includes("strayNote(stray)"));
-  assert.doesNotMatch(hold, /files:/);
 });

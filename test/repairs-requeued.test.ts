@@ -1,10 +1,11 @@
 // A ticket repaired once, requeued and repaired again reports every repair in its outcome line: the
-// repair counter is per attempt, so the second attempt starts from the first's. No Docker, model or network.
+// repair counter is per attempt, so the second attempt starts from the first's. No Docker, model or network. The pipeline itself,
+// repaired on both attempts, is driven in test/pipeline.test.ts.
 //
 //   pnpm exec tsx --test test/repairs-requeued.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -27,12 +28,4 @@ test("no first attempt in this run counts 0", () => {
   assert.equal(firstAttemptRepairs([done("1", 2)], "193"), 0);
   assert.equal(firstAttemptRepairs([{ status: "rejected", reason: new Error("x") }], "193"), 0);
   assert.equal(firstAttemptRepairs([], "193"), 0);
-});
-
-test("one repair per attempt reports repaired=2: the second attempt adds its own to the first's", () => {
-  const src = readFileSync(join(import.meta.dirname, "..", "src", "burndown.ts"), "utf8");
-  assert.match(src, /const earlierRepairs = requeued \? firstAttemptRepairs\(results, issue\.id\) : 0;/);
-  assert.match(src, /repairs: earlierRepairs \+ repairs,/);
-  // The first attempt's one repair plus the second's one.
-  assert.equal(firstAttemptRepairs([done("193", 1)], "193") + 1, 2);
 });
