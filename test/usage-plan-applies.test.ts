@@ -17,7 +17,8 @@ process.env.USAGE_CHECK = "1";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-usage-plan-xdg-"));
 const { usageToken, usageLine, usageStop, usageReadingLost } = await import("../src/usage.ts");
 
-const NOW = Date.UTC(2026, 9, 4, 12);
+// The real clock: usageLine reads it itself, so a fixed date would leave the login expired once it passed.
+const NOW = Date.now();
 const login = JSON.stringify({ claudeAiOauth: { accessToken: "login-token-xyz", expiresAt: NOW + 3_600_000 } });
 const readers = { keychain: () => login, file: () => login };
 

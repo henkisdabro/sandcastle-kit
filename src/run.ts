@@ -673,6 +673,8 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
+/** Tickets of one model in the window that make its own history solid; fewer are blended with all tickets. */
+const SOLID_HISTORY = 5;
 
 /**
  * A rough estimate for a run about to start, as a range: the median to the 80th percentile of the
@@ -690,7 +692,8 @@ const HIGH = 0.8;
  * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
  * several times a Sonnet one. A history ticket's model is the one on its implement or repair
  * lines; lines with none (older ones) count as the default model. A model with no history falls
- * back to all of them, and the line says it is low. Without `models` every ticket is estimated
+ * back to all of them, and the line says it is low. A model with fewer than `SOLID_HISTORY` tickets
+ * is blended with all of them, and the line says so (`<model> from 2 tickets, blended`). Without `models` every ticket is estimated
  * from all of them.
  *
  * `detail.carried` says which tickets of the run are carried branches (`isCarried`). A carried
@@ -753,12 +756,15 @@ export const estimate = (
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
+  const thin = new Map<string, number>();
   const per = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
     const model = models?.[at];
     const ofModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
     if (!ofModel.length) unknown++;
-    const pool = ofModel.length ? ofModel : counted;
+    // A model with a few tickets only is blended with all of them: two dear tickets in the window are not a median to price a run by.
+    else if (ofModel.length < SOLID_HISTORY && model !== undefined) thin.set(model, ofModel.length);
+    const pool = ofModel.length >= SOLID_HISTORY ? ofModel : counted;
     const same = pool.filter((g) => g.carried === carried);
     if (carried && !same.length) lowCarried++;
     const use = same.length ? same : pool;
@@ -794,6 +800,7 @@ export const estimate = (
     ? " (landing gates, one after another, set the time)"
     : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
   const low = [
+    ...[...thin].map(([model, n]) => ` ${model} from ${n} ticket${n === 1 ? "" : "s"}, blended.`),
     unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
   ].join("");
