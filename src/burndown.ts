@@ -28,7 +28,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -531,6 +531,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<string, { phase: string; since: number }>();
   const took = new Map<string, number>();
+  // Each issue's waits for a gates slot, inside `took` but not part of its usual time.
+  const waited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Each issue's step, and when it started, go to run.json's tickets: the
@@ -550,8 +552,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     let tokens: Tokens | undefined;
     let gateTimes: Record<string, number> | undefined;
     let red: string[] | undefined;
+    let times: ReturnType<typeof stepTimes> | undefined;
     try {
       const result = await fn();
+      times = stepTimes(Date.now() - since, result);
+      if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
       red = gateRed(result);
@@ -566,7 +571,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       active.delete(issue);
       const m = model?.();
       const line = {
-        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok,
+        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? { ms: Date.now() - since }), ok,
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
@@ -1347,7 +1352,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
-        run.update({ typical: typicalTimes(project, [...took.values()]) });
+        run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });
         // With nothing left to start, the pane closes: five panes each
         // frozen on a finished agent's summary read as five stuck sandboxes.
         // A stopped run starts nothing, whatever is still queued or parked.
