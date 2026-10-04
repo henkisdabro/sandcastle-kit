@@ -52,6 +52,12 @@ implementer's.
 Constraints:
 
 - **Do not expand scope.** If you find a real problem outside this ticket, {{KIT_NEW_TICKET_REVIEW}} rather than fixing it here.
+- **A problem named only in prose is lost.** The closing summary carries the tagged lines of your
+  final message, not its prose, so a "not fixed (minor)" or a "this probably needs an Upgrading note"
+  that you write there and do nothing else about is never seen. Each problem you find ends one of
+  three ways: fixed (if it is in scope - and a missing changelog or Upgrading note for this change
+  is), filed as a new ticket as above (if it is not), or, for an acceptance criterion you cannot do,
+  left as an `<unmet>` line under "Finishing".
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
   the implementation is the suspect, not the test.
 - **Do not rewrite work that is merely not how you would have done it.** Style disagreement is not
