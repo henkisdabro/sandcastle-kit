@@ -16,7 +16,7 @@
 # workarounds there. Switching to `-slim` to save space breaks projects' gates.
 FROM node:24-trixie
 
-RUN apt-get update && apt-get install -y git curl jq \
+RUN apt-get update && apt-get install -y git curl jq less \
   && rm -rf /var/lib/apt/lists/*
 
 # `sandcastle preview` needs git 2.47 (`git merge-tree --write-tree`). Fail the
