@@ -59,13 +59,18 @@ test("a landing gate writes a line of its own phase: green, red, and one that th
 
 test("the slot wait of a landing gate is `waitMs`, not part of its `ms`", async () => {
   const timings = join(TMP, "wait.jsonl");
+  // The whole call is the wait, measured inside it: a fixed sleep and margin failed under load,
+  // when the timer itself overran the margin.
+  let wait = 0;
   await timedLandingGate(timings, { run: "r1", project: "fixture", issue: "7" }, async () => {
+    const start = Date.now();
     await new Promise((r) => setTimeout(r, 30));
-    return { gates: [], waitMs: 25 };
+    wait = Date.now() - start;
+    return { gates: [], waitMs: wait };
   });
   const l = JSON.parse(readFileSync(timings, "utf8"));
-  assert.equal(l.waitMs, 25);
-  assert.ok(l.ms < 25 + 20, `ms ${l.ms} holds the wait`);
+  assert.equal(l.waitMs, wait);
+  assert.ok(l.ms < l.waitMs, `ms ${l.ms} holds the wait (${l.waitMs})`);
 });
 
 test("typicalTimes: the landing gates are a figure of their own, and no part of an issue's time", () => {
