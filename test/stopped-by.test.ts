@@ -71,7 +71,7 @@ test("the notify line says stopped by `sandcastle stop`", () => {
   assert.match(endSummary({ exitCode: 1, tickets }), /^run ended with exit 1/);
 });
 
-test("a detached run that gets a SIGINT records stoppedBy: sandcastle stop; one in a terminal, Ctrl-C; a hangup, SIGHUP", async () => {
+test("a detached run that gets a SIGINT records stoppedBy: sandcastle stop; one in a terminal, Ctrl-C or sandcastle stop; a hangup, SIGHUP", async () => {
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-stopped-by-"));
   const href = (f: string) => JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", f)).href);
   const fixture = join(dir, "fixture.mts");
@@ -114,6 +114,6 @@ setInterval(() => {}, 1000);
   const detached = await stopped(true);
   assert.equal(detached.stoppedBy, "sandcastle stop");
   assert.equal(detached.exitCode, 130);
-  assert.equal((await stopped(false)).stoppedBy, "Ctrl-C");
+  assert.equal((await stopped(false)).stoppedBy, "Ctrl-C or `sandcastle stop`");
   assert.equal((await stopped(false, "SIGHUP")).stoppedBy, "SIGHUP");
 });

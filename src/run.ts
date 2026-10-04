@@ -42,7 +42,8 @@ export const exitOnSignal = () => {
     }
     const onSignal = () => {
       // Before the library's teardown can end the process: its exit still writes the record.
-      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C") : sig;
+      // `sandcastle stop` sends SIGINT to any live run: in a terminal it cannot be told from Ctrl-C.
+      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C or `sandcastle stop`") : sig;
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;

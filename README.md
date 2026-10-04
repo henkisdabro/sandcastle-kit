@@ -529,7 +529,7 @@ CONCURRENCY=2 sandcastle run          # parallel sandboxes for this run
 sandcastle run --concurrency 2        # the same, as an argument
 sandcastle run --detach               # start it as a process of its own and return (see Detached runs)
 CROSS_REVIEW=1 sandcastle run         # add the Codex review
-AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted and unblocked tickets (see autonomy)
+AUTONOMY_LEVEL=1 sandcastle run       # offer to re-run conflicted, unblocked and partly-done tickets (see autonomy)
 AUTONOMY_LEVEL=drain sandcastle run   # keep taking turns until the queue is drained or a stop condition holds
 ```
 
