@@ -36,7 +36,7 @@ test("each live run's share ends its part of the line; a run with none shows non
   register(dir, c, { orchestrator: "old", pid: process.pid, startedAt: "2026-10-02T00:00:00Z", tickets: { 1: { state: "review" } } });
   assert.equal(
     runsLine(dir, undefined, everyPidIsTheKit),
-    "🏰 api 0/1 · 1 working · share 1  |  shop 1/2 · 1 working · share 3  |  old 0/1 · 1 working",
+    "♜ api 0/1 · 1 working · share 1  |  shop 1/2 · 1 working · share 3  |  old 0/1 · 1 working",
   );
 });
 

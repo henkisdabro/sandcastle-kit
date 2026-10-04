@@ -59,7 +59,7 @@ test("panes none: no sandbox pane opens, and the run is one agent on the status 
   const meta = calls.filter((c) => c.startsWith("pane report-metadata p9")).at(-1) ?? "";
   assert.ok(meta.includes("--agent sandcastle --title shop run --display-agent sandcastle"), meta);
   // The workspace token is #119's, unchanged.
-  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 working --ttl-ms 150000"), calls.join("\n"));
+  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=♜ 0/2 · 1 working --ttl-ms 150000"), calls.join("\n"));
 
   // One merged, one red: while the run goes it is still working; at the end it needs you.
   tickets["12"] = { state: "merged" };

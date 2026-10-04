@@ -88,9 +88,9 @@ test("runCounts: the status view's groups, so the sidebar and the grid never dis
 });
 
 test("the workspace row says what needs you first; the tab bar names the run", () => {
-  assert.equal(spaceText({ working: 2, needsYou: 1, merged: 4, total: 9 }), "🏰 4/9 · 1 needs you");
-  assert.equal(spaceText({ working: 2, needsYou: 0, merged: 4, total: 9 }), "🏰 4/9 · 2 working");
-  assert.equal(spaceText({ working: 0, needsYou: 0, merged: 9, total: 9 }), "🏰 9/9");
+  assert.equal(spaceText({ working: 2, needsYou: 1, merged: 4, total: 9 }), "♜ 4/9 · 1 needs you");
+  assert.equal(spaceText({ working: 2, needsYou: 0, merged: 4, total: 9 }), "♜ 4/9 · 2 working");
+  assert.equal(spaceText({ working: 0, needsYou: 0, merged: 9, total: 9 }), "♜ 9/9");
   assert.equal(lineText("shop", { working: 2, needsYou: 1, merged: 4, total: 9 }), "shop 4/9 · 2 working · 1 needs you");
   // About 22 columns of sidebar: the usual case has to fit.
   assert.ok([...spaceText({ working: 0, needsYou: 3, merged: 12, total: 20 })].length <= 22);
@@ -118,14 +118,14 @@ test("a sandbox's row is named after its ticket and carries its step; the worksp
   // unless re-sent, so a killed run leaves nothing behind for long.
   assert.ok(meta.at(-1)?.includes("--state-label working=review · 0m"), meta.join("\n"));
   assert.ok(meta.at(-1)?.endsWith("--ttl-ms 150000"), meta.join("\n"));
-  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 working --ttl-ms 150000"), calls.join("\n"));
+  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=♜ 0/2 · 1 working --ttl-ms 150000"), calls.join("\n"));
   // A red branch is a finished result: idle, its outcome in place of the step, no clock.
   tickets["12"] = { state: "red" };
   run.view.finish("12", "red");
   calls = run.calls();
   assert.ok(calls.some((c) => c.startsWith("pane report-agent p2") && c.includes("--state idle --message red")), calls.join("\n"));
   assert.ok(calls.filter((c) => c.startsWith("pane report-metadata p2")).at(-1)?.includes("--token sc_phase=red --clear-token sc_elapsed"));
-  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=🏰 0/2 · 1 needs you --ttl-ms 150000"), calls.join("\n"));
+  assert.ok(calls.includes("workspace report-metadata w1 --source sandcastle-kit --token sandcastle=♜ 0/2 · 1 needs you --ttl-ms 150000"), calls.join("\n"));
   // Landing that needs a human turns the same pane blocked.
   run.view.landed("12", false, "merge conflict");
   assert.ok(run.calls().some((c) => c.startsWith("pane report-agent p2") && c.includes("--state blocked --message merge conflict")));

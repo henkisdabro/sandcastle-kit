@@ -95,7 +95,7 @@ const progress = (c: RunCounts) => `${c.merged}/${c.total}` + (c.needsYou ? ` ·
 
 // The workspace row in the sidebar, about 22 columns wide. A `contains = "needs you"` rule in
 // the sidebar config turns it red.
-export const spaceText = (c: RunCounts) => `🏰 ${progress(c)}`;
+export const spaceText = (c: RunCounts) => `♜ ${progress(c)}`;
 
 /**
  * The run as one agent, for a view with no sandbox panes. Working while the run is going, whatever

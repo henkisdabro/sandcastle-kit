@@ -20,6 +20,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **Herdr's sidebar row and tab bar lead with the mod's castle tower (`♜`), in plain text**, not the
+  🏰 emoji: the same mark the Claude Code mod draws, in the terminal's own font and colour.
 - **The `/sandcastle` skill loads only what the action needs.** `SKILL.md` is now a short router
   and each action's steps live in a file of their own (`init.md`, `queue.md`, `run.md`,
   `status.md` beside `audit.md` and `update.md`), so a `status` check no longer loads the

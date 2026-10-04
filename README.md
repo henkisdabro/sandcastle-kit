@@ -768,7 +768,7 @@ out its own view:
   run with `sandcastle run --detach` and waits for it with `sandcastle wait` (see
   [Detached runs](#-detached-runs)).
 - 🚦 **The run in the sidebar.** Herdr cannot see an agent inside a container, so the run
-  reports itself. The workspace shows `🏰 4/9 · 1 needs you` (red when something needs you) and the
+  reports itself. The workspace shows `♜ 4/9 · 1 needs you` (red when something needs you) and the
   tab bar a line per run. The status view's pane is one agent, `sandcastle` titled `<project> run`:
   *working* while the run goes, then at its end *blocked* when a ticket is held, failed or
   conflicted, else *idle*.
@@ -819,8 +819,8 @@ nothing asks. What you get:
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
 | Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
-| Sidebar rows | The run's workspace shows `🏰 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
-| Tab bar | Every live run on the machine, from any tab: `🏰 shop 4/9 · 2 working · 1 needs you`. |
+| Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
+| Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 
 The prefix is Herdr's, `ctrl+b` unless you changed it. The keys work on the project of the focused
 pane; from a pane in no project, on the run going (with several, the one whose tab is in this
