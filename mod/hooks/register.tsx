@@ -78,6 +78,8 @@ let trigger: Trigger | undefined;
 let reading = false;
 /** A trigger fired during that read, which may have started before what the trigger is about. */
 let again = false;
+/** The sandcastle skill was used and its turn has not ended: the labelling it may do is still to come. */
+let skillTurn = false;
 /** The `sandcastle` to run, found once: the kit's own `bin/sandcastle` beside the mod, else the one on PATH. */
 let kitBin: string | undefined;
 /** The last round drew the idle mark (no needs-you text, no live run of the root): a choice made now redraws it at once. */
@@ -495,12 +497,26 @@ export const register: Register = (on) => {
     // the project after this session started; a `/cd` leaves the watch on the first root, which
     // the id-based follow does not depend on.)
     await me($);
-    // The skill may just have labelled tickets: the next idle look reads the count.
+    // The skill may just have labelled tickets: the next idle look reads the count. Triaging
+    // labels them well after this hook, so the end of the turn asks for one more read.
     trigger = "skill";
+    skillTurn = true;
     await begin($, root, true);
     await remember($, root);
     armed = true;
     return { text: out.text + NOTE };
+  });
+
+  // The turn that used the skill is over: whatever it labelled is labelled, so the count is read
+  // again. The first turn to end after the skill's use is taken as its own: a subagent's turn
+  // ending sooner only brings the read forward, and the age rule still catches the rest.
+  on("turn.complete", async ($, e, next) => {
+    const out = await next(e);
+    if (skillTurn) {
+      skillTurn = false;
+      trigger = "skill";
+    }
+    return out;
   });
 
   on("command.run", { command: "sandcastle-status" }, async ($) => {

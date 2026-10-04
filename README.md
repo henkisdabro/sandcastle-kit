@@ -952,7 +952,8 @@ all of it. The mod:
   a 20 second timeout, one at a time per session, and keeps the ids in its store (one entry per
   project, shared by every session). That read is the one place the mod reaches the tracker, and
   it does it through the kit, never itself. It makes none while an entry under 10 minutes old
-  stands;
+  stands, except when you use `/sandcastle` and again when that turn ends (triage labels tickets
+  in between);
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -973,7 +974,7 @@ numeric exit code. Ticket titles are shown as written, as `sandcastle status` sh
 running it:
 
 ```
-❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
+❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, turn.complete, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
 ❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 
