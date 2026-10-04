@@ -789,7 +789,7 @@ out its own view:
   your [personal settings](#personal-settings) to get one.
 
 When the run ends its sandbox panes (if any) close, so nothing in the sidebar outlives it; the status view
-stays, showing each branch's outcome, and the next run replaces it rather than stacking another. Outside Herdr none of this happens and nothing else changes - watch with
+stays, showing each branch's outcome, and the next run replaces it rather than stacking another. A run that went down with the Herdr server (a cold restart, or the machine going down) leaves its tab as idle shells when Herdr comes back: with the plugin's tab bar, the next tick runs `sandcastle report` in the status pane of a tab the run opened (never one adopted from your terminal), once. A run that ended, or was killed, while Herdr kept running is not covered by a later restart: by then the kit has no trace of it to tick on. Outside Herdr none of this happens and nothing else changes - watch with
 `sandcastle status` in a second terminal. `SANDCASTLE_HERDR_VIEW=0` skips the tab; the status
 view then opens in a pane beside yours.
 

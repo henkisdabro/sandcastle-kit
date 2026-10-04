@@ -73,7 +73,7 @@ Whether a pulled kit has **Upgrading** notes a project has not had: the project'
 
 ## `src/herdr.ts`
 
-Herdr helpers and the run's view: the tab (adopted only from a terminal), per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status pane), agent-state reports, sidebar tokens, the workspace's run summary
+Herdr helpers and the run's view: the tab (adopted only from a terminal), per-sandbox panes only with `herdr.panes: "all"` (otherwise the run is one agent on the status pane), agent-state reports, sidebar tokens, the workspace's run summary. `reportInDeadTab(root)` is for a run that is no longer live: Herdr's cold restart leaves its tab as idle shells, so the status pane of the tab the kit opened (`herdr-view.json`: `adopted` false, the pane still in the recorded tab, not running the status view) runs `sandcastle report`, and the record is marked `reported` so it is shown once. An adopted tab is a person's terminal and is never touched. `liveRuns` in `src/herdr-plugin.ts` calls it for each run file it drops whose record says finished or dead (the tab bar's tick, and the actions' project lookup: the first reader to drop the file tells the tab); a run that ended cleanly removes its own file, and a killed run's file is dropped by the first tick while its status view still runs, so either one's tab is left as it is by a later restart (the tab bar's command runs the kit only while the runs directory has a file)
 
 ## `src/live-runs.ts`
 
