@@ -436,6 +436,14 @@ const CHANGELOG_REVIEW =
   "`Upgrading:` line and you cannot tell that the implementer gave one, give the full set with one in it (do not leave that " +
   "to a remark in your message).\n\n";
 
+// A narrow review (after a repair, a base merge or a conflict resolution) sees only what it reviews, so it
+// gives lines for its own changes and the orchestrator adds them (see `addChangelog`).
+const CHANGELOG_NARROW =
+  `${CHANGELOG_ASK}The implementer has given its own, which you cannot see, and you see only the commits above, not the ` +
+  "branch. Give lines only for a user-facing change you made yourself in this review, one line each; they are added to the " +
+  "implementer's, so do not restate the branch's changes. If you made none, give none. If a change you made needs an " +
+  "`Upgrading:` line, give it (do not leave that to a remark in your message).\n\n";
+
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
   const rules = project.rules
     ? `# Project rules\n\n${readFileSync(join(project.root, project.rules), "utf8").trim()}\n`
@@ -457,7 +465,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
-      .replaceAll("{{KIT_CHANGELOG}}", () => (!project.changelog ? "" : kind === "implement" ? CHANGELOG_IMPLEMENT : CHANGELOG_REVIEW))
+      .replaceAll("{{KIT_CHANGELOG}}", () => (!project.changelog ? "" : kind === "implement" ? CHANGELOG_IMPLEMENT : kind === "rereview" || kind === "remerge" ? CHANGELOG_NARROW : CHANGELOG_REVIEW))
       .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? tracker.dryRunNote : ""));
     // Sandcastle refuses a prompt with any other {{NAME}} - but only inside
     // the sandbox, after the install. Refuse it here instead. (A literal

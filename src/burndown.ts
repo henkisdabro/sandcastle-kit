@@ -263,15 +263,20 @@ export const changelogRead = (text: string): { lines: string[]; dropped: number 
 };
 export const changelogOf = (text: string): string[] => changelogRead(text).lines;
 
-// Adds one pass's lines to the ticket's and returns how many tags were no line. A later pass that gives
-// any lines gives the full set for the branch (the review prompt asks it to restate the implementer's
-// along with its own), so its set replaces the earlier one: a rewording then shows once however few
-// words it shares, and a distinct change that shares words is not dropped for it. A pass that gives
-// none leaves the earlier set standing. Two lines of one pass are two changes, however alike their words
-// ("`size --json` prints ..." and "`status --json` prints ...").
-export const addChangelog = (have: string[], text: string): number => {
+// Adds one pass's lines to the ticket's and returns how many tags were no line. A full review that gives
+// any lines gives the full set for the branch (its prompt asks it to restate the implementer's along with
+// its own), so its set replaces the earlier one: a rewording then shows once however few words it shares,
+// and a distinct change that shares words is not dropped for it. A narrow pass (after a conflict
+// resolution, a base merge or a repair) sees only what it reviewed, not the branch: its set is lines for
+// what it changed itself, so it adds to the earlier set - replacing would drop every line the implementer
+// gave. A pass that gives none leaves the earlier set standing. Two lines of one pass are two changes,
+// however alike their words ("`size --json` prints ..." and "`status --json` prints ...").
+export const addChangelog = (have: string[], text: string, narrow = false): number => {
   const read = changelogRead(text);
-  if (read.lines.length) have.splice(0, have.length, ...read.lines);
+  if (!read.lines.length) return read.dropped;
+  if (narrow) {
+    for (const line of read.lines) if (!have.includes(line)) have.push(line);
+  } else have.splice(0, have.length, ...read.lines);
   return read.dropped;
 };
 
@@ -700,11 +705,11 @@ export const createPipeline = (ctx: PipelineContext) => {
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
       let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
-      // The implementer's lines come first; a later pass that gives lines restates the branch's whole set
-      // and replaces them (see addChangelog).
-      const noteChangelog = (text: string | undefined) => {
+      // The implementer's lines come first; a later full review that gives lines restates the branch's whole
+      // set and replaces them, a narrow pass adds its own (see addChangelog).
+      const noteChangelog = (text: string | undefined, narrow = false) => {
         if (!project.changelog || !text) return;
-        changelogDropped += addChangelog(changelog, text);
+        changelogDropped += addChangelog(changelog, text, narrow);
       };
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
@@ -721,7 +726,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
-        noteChangelog(resolved.stdout);
+        noteChangelog(resolved.stdout, true);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
         const u = unmetOf(resolved.stdout);
@@ -778,7 +783,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
           reviewCommits = ownNow() - beforeMerged;
-          noteChangelog(merged.stdout);
+          noteChangelog(merged.stdout, true);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
           const u = unmetOf(merged.stdout);
@@ -962,7 +967,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           reviewCommits += ownNow() - beforeAfter;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
-          noteChangelog(after.stdout);
+          noteChangelog(after.stdout, true);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
