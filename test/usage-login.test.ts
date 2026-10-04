@@ -41,7 +41,7 @@ test("the real file reader looks under CLAUDE_CONFIG_DIR, and finds nothing wher
     process.env.CLAUDE_CONFIG_DIR = dir;
     assert.equal(hostLoginReaders.file(), undefined);
     writeFileSync(join(dir, ".credentials.json"), login("dir-token"));
-    assert.deepEqual(usageToken({}, "linux", hostLoginReaders, NOW), { source: "login", token: "dir-token" });
+    assert.deepEqual(usageToken(env, "linux", hostLoginReaders, NOW), { source: "login", token: "dir-token" });
   } finally {
     if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = before;

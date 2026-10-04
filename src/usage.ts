@@ -9,9 +9,12 @@
 // open - an unknown reading never blocks a run. A failed reading is asked for again before the next
 // ticket, except a 403 (this token cannot read usage): that turns the guard off for the run.
 //
-// The token comes from the host's Claude Code login when there is a readable one (`usageToken`): a
-// `claude setup-token` token is inference-only and the endpoint answers it 403, while the login's
-// access token carries the `user:profile` scope. It is read on the host, at each reading, and only
+// The guard applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`):
+// with `ANTHROPIC_API_KEY` they spend API credits, which no plan's usage describes, so it says it does
+// not apply. Then the token comes from the host's Claude Code login when there is a readable one
+// (`usageToken`): a `claude setup-token` token is inference-only and the endpoint answers it 403, while
+// the login's access token carries the `user:profile` scope. The kit cannot tell whether the login and
+// the token are one account, so the start line and `doctor --verify` say whose plan is read. It is read on the host, at each reading, and only
 // ever sent to the usage endpoint: never refreshed (a refresh rotates the token and could sign
 // Claude Code out), never written anywhere, never in a sandbox's environment or mounts, never printed.
 
@@ -39,8 +42,14 @@ export const checkUsageSettings = () => {
   if (USAGE_CHECK) usageStopPercent();
 };
 
-/** What the guard reads the plan's usage with: the Claude Code login's access token, the setup token, or a login that has run out. */
-export type UsageToken = { source: "login" | "CLAUDE_CODE_OAUTH_TOKEN"; token: string } | { source: "login expired" } | undefined;
+/** What the guard reads the plan's usage with: the Claude Code login's access token, the setup token, a login that has run out, or nothing because the sandboxes spend an API key (no plan to read). */
+export type UsageToken = { source: "login" | "CLAUDE_CODE_OAUTH_TOKEN"; token: string } | { source: "login expired" } | { source: "api key" } | undefined;
+
+/** Whose plan a reading is of, for the start line and `doctor --verify`: the host login's account, or the setup token's. */
+export const usageWhose = (source: "login" | "CLAUDE_CODE_OAUTH_TOKEN") =>
+  source === "login"
+    ? "the Claude Code login's account on this machine (the sandboxes spend CLAUDE_CODE_OAUTH_TOKEN, assumed to be the same account)"
+    : "CLAUDE_CODE_OAUTH_TOKEN's account (no readable Claude Code login on this machine)";
 
 /** The host's Claude Code login as JSON text, or undefined when there is none to read. Injected, so a test needs no real keychain or file. */
 export type LoginReaders = { keychain(): string | undefined; file(): string | undefined };
@@ -66,8 +75,11 @@ export const hostLoginReaders: LoginReaders = {
 };
 
 /**
- * The token a usage reading is made with: the host's Claude Code login (macOS keychain, else the
- * credentials file) while it has not expired, else `CLAUDE_CODE_OAUTH_TOKEN`, else nothing. An
+ * The token a usage reading is made with, when the sandboxes spend a subscription token
+ * (`CLAUDE_CODE_OAUTH_TOKEN` in `env`, which wins over an API key as in `credentialSource`): the
+ * host's Claude Code login (macOS keychain, else the credentials file) while it has not expired, else
+ * that token. With no such token the host login is never read: an API key is `api key` (no plan is
+ * spent), and nothing at all is nothing. An
  * expired login is its own answer, not a reason to fall back: the setup token would only get a 403,
  * which turns the guard off for the whole run, while the login comes back when Claude Code next
  * refreshes it. A missing or unreadable login (no entry, malformed JSON, no access token) falls
@@ -79,6 +91,7 @@ export const usageToken = (
   readers: LoginReaders = hostLoginReaders,
   now = Date.now(),
 ): UsageToken => {
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) return env.ANTHROPIC_API_KEY ? { source: "api key" } : undefined;
   const login = (() => {
     try {
       const raw = platform === "darwin" ? readers.keychain() : readers.file();
@@ -90,7 +103,7 @@ export const usageToken = (
   })();
   // No usable expiry is read as expired: a token of unknown age is not sent.
   if (login) return login.expiresAt > now ? { source: "login", token: login.token } : { source: "login expired" };
-  return env.CLAUDE_CODE_OAUTH_TOKEN ? { source: "CLAUDE_CODE_OAUTH_TOKEN", token: env.CLAUDE_CODE_OAUTH_TOKEN } : undefined;
+  return { source: "CLAUDE_CODE_OAUTH_TOKEN", token: env.CLAUDE_CODE_OAUTH_TOKEN };
 };
 
 type Window = { kind: string; percent: number };
@@ -178,7 +191,11 @@ export const usageLine = async (env: Record<string, string>, readers: LoginReade
   const credential = usageToken(env, process.platform, readers);
   if (!credential) {
     lastReading = "none";
-    return "Plan usage: not checked - it needs a Claude Code login on this machine (`claude`, then /login) or CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
+    return "Plan usage: not checked - it needs the sandboxes to spend a subscription token (CLAUDE_CODE_OAUTH_TOKEN), and none is set.";
+  }
+  if (credential.source === "api key") {
+    lastReading = "none";
+    return "Plan usage: the guard does not apply - the sandboxes spend ANTHROPIC_API_KEY (API credits, no plan), so there is no plan usage to read; USAGE_CHECK=1 does nothing for this run.";
   }
   if (!("token" in credential)) {
     lastReading = "none";
@@ -186,9 +203,10 @@ export const usageLine = async (env: Record<string, string>, readers: LoginReade
   }
   const windows = await read(credential.token);
   lastReading = Array.isArray(windows) ? "got" : "none";
-  if (Array.isArray(windows)) return `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`;
-  if (windows.off) return `Plan usage: the usage guard is off for this run (${windows.why}; USAGE_CHECK=1 cannot work with it, and the endpoint is not asked again).`;
-  return `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.`;
+  const whose = ` Read for ${usageWhose(credential.source)}.`;
+  if (Array.isArray(windows)) return `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).${whose}`;
+  if (windows.off) return `Plan usage: the usage guard is off for this run (${windows.why}; USAGE_CHECK=1 cannot work with it, and the endpoint is not asked again).${whose}`;
+  return `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.${whose}`;
 };
 
 /** Why no further issue should start, or undefined to carry on. */
