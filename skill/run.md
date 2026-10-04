@@ -81,7 +81,9 @@ This continues the run steps 1-3 in SKILL.md.
    why: they change hooks, CI, install scripts or a `protectedPaths` path, add a file over 50 MB,
    carry repair commits no review passed or a conflict resolution that dropped merged lines - or a
    person marked the ticket `ready-for-human` during the run; `held` with "no commits" is a ticket an
-   agent handed back - it needs an answer, not a merge. `withdrawn` tickets were closed or
+   agent handed back - it needs an answer, not a merge. A held branch a person has since merged by
+   hand reads "merged by hand; closes on push" under Done: nothing is left for them but the push.
+   `withdrawn` tickets were closed or
    unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
    after its gates or the merge failed for a reason other than a conflict. A run headed **Run
    STOPPED** landed nothing after the stop (the heading says how many merged before it): it names
