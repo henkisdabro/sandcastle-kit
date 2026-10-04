@@ -78,6 +78,23 @@ ticket names. The project rules below say what else to read.
   hook, a full disk or a signing failure can refuse a commit. If one does, quote the last lines of
   the refusal in your hand-back and never write "done" or "committed".
 
+# Tests
+
+For a change in behaviour:
+
+1. **Test where a caller sees it.** Use the ticket's `## Seams` section if it has one; otherwise
+   the highest existing public interface that shows the behaviour. No test of a private
+   function, no export added only for a test.
+2. **For a bug, first write a test that fails on the bug itself,** then fix it.
+3. **Expected values come from outside the code:** the ticket, a worked example, a literal you
+   can check by hand. A value recomputed the way the code computes it passes by construction.
+4. **Mock only real boundaries:** network, clock, randomness, paid services. Run everything else
+   for real.
+5. **Name each test after what a caller sees,** not after the function it calls.
+
+While working, run single test files and the typecheck. Before you finish, run each gate once,
+in its own command.
+
 {{KIT_PROJECT_RULES}}
 
 # Gates
