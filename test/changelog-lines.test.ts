@@ -15,7 +15,7 @@ import type { Project } from "../src/config.ts";
 // Importing run.ts must not read the real user config or take real cache slots.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { changelogOf, CHANGELOG_MAX } = await import("../src/burndown.ts");
+const { addChangelog, changelogOf, changelogRead, sameChangelogLine, CHANGELOG_MAX } = await import("../src/burndown.ts");
 const { loadProject } = await import("../src/config.ts");
 const { renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
@@ -56,9 +56,30 @@ test("changelogOf ignores the placeholder, an empty tag and no tag", () => {
   assert.deepEqual(changelogOf("<changelog>...</changelog>\n<changelog>  </changelog>\nnothing"), []);
 });
 
-test("changelogOf cuts a long line at a word", () => {
-  const [line] = changelogOf(`<changelog>Fixed: ${"word ".repeat(300)}</changelog>`);
-  assert.ok(line.length <= CHANGELOG_MAX && line.endsWith("…"), line);
+test("a tag that is no changelog line is dropped and counted, never cut off", () => {
+  const long = `<changelog>Fixed: ${"word ".repeat(300)}</changelog>`;
+  const sha = "<changelog>Fixed: the reader, in commit 3f2a9c1d, takes the line</changelog>";
+  const list = "<changelog>Fixed: the reader\n- takes the base's line\n- not the branch's</changelog>";
+  const fine = "<changelog>Fixed: the reader takes the branch's line in version 1315 of the 7 gates.</changelog>";
+  assert.deepEqual(changelogRead(long), { lines: [], dropped: 1 });
+  assert.deepEqual(changelogRead(sha), { lines: [], dropped: 1 });
+  assert.deepEqual(changelogRead(list), { lines: [], dropped: 1 });
+  assert.deepEqual(changelogRead(`${long}\n${sha}\n${fine}\n<changelog>...</changelog>`), { lines: ["Fixed: the reader takes the branch's line in version 1315 of the 7 gates."], dropped: 2 });
+  assert.ok(changelogOf(`<changelog>Fixed: ${"x".repeat(CHANGELOG_MAX - 7)}</changelog>`).length === 1, "a line at the limit stays");
+  // A word that merely looks like a hash is no sha.
+  assert.equal(changelogRead("<changelog>Fixed: a defaced label is kept</changelog>").dropped, 0);
+});
+
+test("a final message that names the tag in prose, then closes it, is not a line", () => {
+  const message = ["Done: commit 0123abc.", "<changelog> tag reader now takes the last one", "", "- the typecheck and all tests pass (1315 pass, 0 fail)", "- it ignores fenced tags</changelog>"].join("\n");
+  assert.deepEqual(changelogRead(message), { lines: [], dropped: 1 });
+});
+
+test("sameChangelogLine matches a rewording and keeps two different changes apart", () => {
+  assert.ok(sameChangelogLine("Fixed: the report repeats a suggested changelog line", "Fixed: The closing report repeats the suggested changelog lines."));
+  assert.ok(sameChangelogLine("Fixed: the report drops a line", "Changed: the report drops a line"));
+  assert.ok(!sameChangelogLine("Fixed: the report repeats a suggested changelog line", "Added: `sandcastle size` recommends the pool's maxSandboxes"));
+  assert.ok(!sameChangelogLine("Fixed: the report drops a line", "Fixed: the report drops a header"));
 });
 
 test("the closing summary lists merged tickets' lines under Done, grouped, with the ticket", () => {
@@ -82,6 +103,24 @@ test("the closing summary lists merged tickets' lines under Done, grouped, with 
     "  Fixed: the report drops a line (#3)",
   ]);
   assert.ok(!out.includes("never landed"), out);
+});
+
+test("a merged ticket whose suggested line was dropped says so, and a ticket that did not land says nothing", () => {
+  const out = render(
+    facts({
+      tickets: {
+        "3": { state: "merged", title: "a", changelog: ["Fixed: kept"], changelogDropped: 1 },
+        "4": { state: "merged", title: "b", changelogDropped: 1 },
+        "5": { state: "held", title: "c", files: ["a"], changelogDropped: 1 },
+      },
+      changed: { "5": 1 },
+    }),
+  );
+  const done = body(out, "## ✅ Done");
+  assert.match(done, /A suggested line for #3 was not a changelog line/);
+  assert.match(done, /A suggested line for #4 was not a changelog line/);
+  assert.ok(!done.includes("#5 was not"), done);
+  assert.ok(!out.includes("…"), out);
 });
 
 test("with no lines recorded the summary has no changelog block", () => {
@@ -146,4 +185,20 @@ test("`changelog` must be true or false", async (t) => {
   };
   assert.equal((await load("changelog: true")).changelog, true);
   await assert.rejects(load('changelog: "yes"'), /`changelog` must be true or false, not "yes"/);
+});
+
+test("a ticket with an implement pass and a repair pass shows each change once", () => {
+  const lines: string[] = [];
+  const implement = "Done.\n<changelog>Fixed: the closing summary repeats a suggested changelog line</changelog>";
+  const review = "<changelog>Fixed: the closing summary repeated the suggested changelog lines</changelog>\n<changelog>Added: a note when a suggested line is dropped</changelog>";
+  const repair = "<changelog>Fixed: closing summary repeats suggested changelog lines</changelog>\n<changelog>Fixed: a commit 3f2a9c1d in it</changelog>";
+  assert.equal(addChangelog(lines, implement), 0);
+  assert.equal(addChangelog(lines, review), 0);
+  assert.equal(addChangelog(lines, repair), 1);
+  assert.deepEqual(lines, ["Fixed: the closing summary repeats a suggested changelog line", "Added: a note when a suggested line is dropped"]);
+});
+
+test("the pipeline counts what it dropped and records the count", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /changelogDropped \+= addChangelog\(changelog, text\);/);
 });

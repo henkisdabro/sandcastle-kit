@@ -438,6 +438,7 @@ export const render = (f: Facts, plain = false): string => {
   // Changelog lines the agents suggested (`changelog: true`), for the tickets that landed: the
   // maintainer writes the entries from them. A line starting with none of the three words is a Changed.
   const lines = merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })));
+  const dropped = merged.filter((id) => f.tickets[id].changelogDropped);
   if (lines.length) {
     done.push("Changelog lines the agents suggested:");
     for (const group of ["Added", "Changed", "Fixed"]) {
@@ -445,6 +446,8 @@ export const render = (f: Facts, plain = false): string => {
       for (const { id, line } of mine) done.push(`  ${group}: ${line.replace(/^(Added|Changed|Fixed):\s*/, "")} (${refOf(id)})`);
     }
   }
+  // Never shown cut off: a tag too long, a list or holding a commit sha is an agent's message, not a line.
+  for (const id of dropped) done.push(`A suggested line for ${refOf(id)} was not a changelog line${f.tickets[id].changelogDropped! > 1 ? ` (${f.tickets[id].changelogDropped} of them)` : ""}: it is left out, so write that entry from the ticket.`);
   section(h("## ✅ Done", "## Done"), done);
 
   // Needs you

@@ -815,6 +815,8 @@ export type BranchHead = {
   gates?: Gate[];
   /** The `<changelog>` lines the agents gave by `green` (`changelog: true`): a later land-only run reads no agent, so without them the lines never reach a closing summary. */
   changelog?: string[];
+  /** How many `<changelog>` tags by `green` were no changelog line and were left out, carried like `changelog`. */
+  changelogDropped?: number;
   /** run.json's startedAt of the run that wrote the record last. */
   run: string;
   at: string;
@@ -831,7 +833,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

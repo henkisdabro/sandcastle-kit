@@ -155,6 +155,8 @@ export type TicketRecord = {
   ungated?: string;
   /** Changelog lines the implementer and reviewer asked for (`changelog: true`), each starting Added:, Changed: or Fixed:. */
   changelog?: string[];
+  /** How many `<changelog>` tags were no changelog line (too long, a list, a commit sha) and were left out of `changelog`. */
+  changelogDropped?: number;
   /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */
   unmet?: string;
   /** Paths the branch changed beyond its ticket's `Touches:` line. */

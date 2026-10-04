@@ -92,6 +92,8 @@ type Outcome = {
   ungated?: string;
   /** The `<changelog>` lines of the implementer and reviewers (`changelog: true`), for the closing summary. */
   changelog?: string[];
+  /** How many `<changelog>` tags were no changelog line (too long, a list, a commit sha) and were left out: the summary says so. */
+  changelogDropped?: number;
   /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
   unmet?: string;
 };
@@ -217,13 +219,46 @@ export const unmetOf = lineOf("unmet");
 
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
 // Unlike `<ungated>` every own-line tag counts, not the last alone: a ticket may need several lines. An
-// empty tag or the echoed placeholder "..." does not count; a line is cut at CHANGELOG_MAX.
+// empty tag or the echoed placeholder "..." does not count. A changelog line is one or two sentences, so a
+// tag that is longer than CHANGELOG_MAX, spans list items or holds a commit sha is an agent's whole message
+// (a prose mention of the tag can pair with a later closing tag), not a line: it is counted in `dropped`
+// and never shown, least of all cut off.
 export const CHANGELOG_MAX = 500;
-export const changelogOf = (text: string): string[] =>
-  ownLineTags(text, "changelog")
-    .map((said) => said.replace(/\s+/g, " ").trim())
-    .filter((said) => said && said !== "...")
-    .map((said) => cutAtWord(said, CHANGELOG_MAX));
+const listItem = /^[ \t]*(?:[-*+•]|\d+[.)])[ \t]/m;
+const commitSha = /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/;
+export const changelogRead = (text: string): { lines: string[]; dropped: number } => {
+  const lines: string[] = [];
+  let dropped = 0;
+  for (const raw of ownLineTags(text, "changelog")) {
+    const said = raw.replace(/\s+/g, " ").trim();
+    if (!said || said === "...") continue;
+    if (said.length > CHANGELOG_MAX || listItem.test(raw) || commitSha.test(said)) dropped++;
+    else lines.push(said);
+  }
+  return { lines, dropped };
+};
+export const changelogOf = (text: string): string[] => changelogRead(text).lines;
+
+// Whether two changelog lines say the same thing in other words: the implementer's line and a reviewer's
+// or a repair's rewording of it. Their words (leaving out the Added/Changed/Fixed label and the short
+// ones, and a plural or past tense's ending) overlap by CHANGELOG_SAME or more of all the words either uses.
+export const CHANGELOG_SAME = 0.6;
+const wordsOf = (line: string) =>
+  new Set(line.toLowerCase().replace(/^\s*(?:added|changed|fixed):/, "").split(/[^a-z0-9]+/).filter((w) => w.length > 3).map((w) => w.replace(/(?:ed|s)$/, "")));
+export const sameChangelogLine = (a: string, b: string): boolean => {
+  const [x, y] = [wordsOf(a), wordsOf(b)];
+  const shared = [...x].filter((w) => y.has(w)).length;
+  const all = x.size + y.size - shared;
+  return all === 0 ? a.trim().toLowerCase() === b.trim().toLowerCase() : shared / all >= CHANGELOG_SAME;
+};
+
+// Adds one pass's lines to the ticket's, in order, and returns how many tags were no line. The first
+// pass's lines stand; a later one adds only what no line already there says.
+export const addChangelog = (have: string[], text: string): number => {
+  const read = changelogRead(text);
+  for (const line of read.lines) if (!have.some((kept) => sameChangelogLine(kept, line))) have.push(line);
+  return read.dropped;
+};
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
@@ -778,7 +813,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -993,8 +1028,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
+      let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
+      // The implementer's lines come first and stand: a later pass (a reviewer, a repair) adds a line only
+      // for a change of its own, so one that says what a line already there says is left out.
       const noteChangelog = (text: string | undefined) => {
-        if (project.changelog && text) changelog.push(...changelogOf(text));
+        if (!project.changelog || !text) return;
+        changelogDropped += addChangelog(changelog, text);
       };
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
@@ -1246,7 +1285,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
       const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
       return {
         issue: issue.id,
         branch,
@@ -1263,6 +1302,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
         changelog: changelogNote,
+        changelogDropped: changelogDropped || undefined,
         unmet: unmetNote,
       };
     } finally {
@@ -1399,6 +1439,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
+          ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
         run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });
