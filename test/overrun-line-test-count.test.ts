@@ -1,4 +1,4 @@
-// The overrun line lists the source and docs a ticket's Touches line missed in full and folds test
+// The overrun line lists the source files a ticket's Touches line missed in full and folds test
 // paths into a count: a refactor edits many tests, and listing them buries the real overruns.
 //
 //   pnpm exec tsx --test test/overrun-line-test-count.test.ts
@@ -16,7 +16,7 @@ const { overrunLine } = await import("../src/report.ts");
 const HEAD = "changed beyond its Touches line:";
 
 test("test files fold into a count, other paths stay listed", () => {
-  assert.equal(overrunLine(["test/a.test.ts", "src/b.ts", "test/c.test.ts", "docs/d.md"]), `${HEAD} src/b.ts, docs/d.md, +2 test files`);
+  assert.equal(overrunLine(["test/a.test.ts", "src/b.ts", "test/c.test.ts", "docs/d.md"]), `${HEAD} src/b.ts, +2 test files, +1 docs file`);
 });
 
 test("one test file is singular", () => {
@@ -28,5 +28,5 @@ test("test files alone are still reported, as a count", () => {
 });
 
 test("no test files, no count", () => {
-  assert.equal(overrunLine(["src/b.ts", "docs/d.md"]), `${HEAD} src/b.ts, docs/d.md`);
+  assert.equal(overrunLine(["src/b.ts", "src/c.ts"]), `${HEAD} src/b.ts, src/c.ts`);
 });

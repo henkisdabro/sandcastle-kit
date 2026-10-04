@@ -50,12 +50,12 @@ const ROWS: Row[] = [
   ["merged", landing({ kind: "merged" }), {}, "merged - merged and closed", "merged - merged", "merged (landed)", `close: ${CLOSE}`],
   [
     "merged, generated files regenerated and an overrun",
-    landing({ kind: "merged", regenerated: { files: ["out.css"], regen: ["make css"] }, overrun: ["docs/x.md"] }),
+    landing({ kind: "merged", regenerated: { files: ["out.css"], regen: ["make css"] }, overrun: ["src/x.ts"] }),
     { report: REPORT },
     "merged - merged and closed (generated files regenerated)",
     "merged - merged",
     "merged (landed)",
-    `close: ${CLOSE} Conflicts in generated files (out.css) were resolved by running \`make css\`.\n\nchanged beyond its Touches line: docs/x.md\n\n${REPORT}`,
+    `close: ${CLOSE} Conflicts in generated files (out.css) were resolved by running \`make css\`.\n\nchanged beyond its Touches line: src/x.ts\n\n${REPORT}`,
   ],
   ["merged, closing failed", landing({ kind: "close-failed", error: "gh: HTTP 502" }), {}, "merged - merged; closing the ticket failed", "merged - merged (ticket not closed)", "merged, not closed (landed)", `close: ${CLOSE}`],
   [

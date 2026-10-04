@@ -149,6 +149,6 @@ test("the closing report carries the line for a merged ticket", () => {
     runnable: [], blocked: [], standing: [], keptWorktrees: [], changed: {}, stage: "report", exitCode: 0,
   } as unknown as Facts;
   const text = render(facts, true);
-  assert.ok(text.includes("#1 t changed beyond its Touches line: src/other.ts, docs/x.md"), text);
-  assert.equal(text.split("changed beyond its Touches line").length, 2);
+  assert.ok(text.includes("#1 t - beyond Touches: src/other.ts, +1 docs file"), text);
+  assert.equal(text.split("beyond Touches").length, 2);
 });
