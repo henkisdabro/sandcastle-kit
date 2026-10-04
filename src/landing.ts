@@ -603,6 +603,15 @@ export const firstAttemptReviewCommits = (results: readonly PromiseSettledResult
   return first?.status === "fulfilled" ? first.value.reviewCommits : 0;
 };
 
+/**
+ * The repair passes a requeued ticket's first attempt made. The count is per attempt, so the second
+ * attempt starts from this one: its outcome line reports every repair the ticket had in the run.
+ */
+export const firstAttemptRepairs = (results: readonly PromiseSettledResult<{ issue: string; repairs: number }>[], id: string) => {
+  const first = results.find((r) => r.status === "fulfilled" && r.value.issue === id);
+  return first?.status === "fulfilled" ? first.value.repairs : 0;
+};
+
 /** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
 export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);
 
