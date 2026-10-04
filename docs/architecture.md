@@ -83,7 +83,7 @@ What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and 
 
 ## `src/touches.ts`
 
-The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun, and `overrunLine` folds the modified ones into a count, "+7 test files", listing only the other paths), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). A scheduling hint and warning source, never a guard
+The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a ref's tree, and `unmergeableFiles` (lockfiles, `generated` paths, minified blobs; sizes from one cached `ls-tree` per commit), and `isTestPath` (conventional test names; a test file a branch adds is not a `Touches:` overrun, and `overrunPaths` (`src/report.ts`) folds the modified ones into a count, "+7 test files"), `isDocPath` (any `*.md`, and `docs/` and `skill/`: the docs a repo's rules have every change edit, folded by `overrunPaths` into "+2 docs files", so the listed paths are the source files a ticket missed; the close comment says "changed beyond its Touches line: ...", the report "<title> - beyond Touches: ..."), and `isAgentDoc` (`AGENTS.md` and `CLAUDE.md` at any depth; a change to one is not an overrun when the branch adds a file). A scheduling hint and warning source, never a guard
 
 ## `src/lint.ts`
 

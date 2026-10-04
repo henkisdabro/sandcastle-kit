@@ -18,7 +18,7 @@ import type { Project } from "./config.ts";
 import { addTokens, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
-import { isTestPath } from "./touches.ts";
+import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { isTicketState, type OutcomeKind, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -76,17 +76,22 @@ export type Facts = {
 };
 
 /**
- * The one line the close comment and the closing report share for a diff that left its `Touches:` line.
- * Test files only follow a refactor (a renamed import), so they fold into a count ("+7 test files")
- * and the paths that stay listed are the source and docs a ticket's line missed. The run record keeps
- * every path; only this line folds them.
+ * The paths of a diff that left its `Touches:` line, as the close comment and the closing report
+ * both list them. Test files only follow a refactor (a renamed import), and docs are what the repo's
+ * rules have every change edit (README, architecture notes, the skill), so each folds into a count
+ * ("+7 test files", "+2 docs files"). The paths that stay listed are the source files a ticket's
+ * line missed - the overrun worth reading. The run record keeps every path; only this line folds them.
  */
-export const overrunLine = (paths: string[]) => {
+export const overrunPaths = (paths: string[]) => {
   const tests = paths.filter(isTestPath).length;
-  const listed = paths.filter((p) => !isTestPath(p));
-  const folded = tests ? [`+${tests} test file${tests === 1 ? "" : "s"}`] : [];
-  return `changed beyond its Touches line: ${[...listed, ...folded].join(", ")}`;
+  const docs = paths.filter((p) => !isTestPath(p) && isDocPath(p)).length;
+  const listed = paths.filter((p) => !isTestPath(p) && !isDocPath(p));
+  const count = (n: number, what: string) => (n ? [`+${n} ${what} file${n === 1 ? "" : "s"}`] : []);
+  return [...listed, ...count(tests, "test"), ...count(docs, "docs")].join(", ");
 };
+
+/** The close comment's paragraph for a diff that left its `Touches:` line. */
+export const overrunLine = (paths: string[]) => `changed beyond its Touches line: ${overrunPaths(paths)}`;
 
 /**
  * The report's own sections, finer than the status view's groups: where a ticket's part in a run
@@ -422,7 +427,7 @@ export const render = (f: Facts, plain = false): string => {
     done.push(`Dry run - green, would merge: ${list(wouldMerge)}. Nothing was merged or closed.${together}`);
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
-  for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} ${overrunLine(f.tickets[id].overrun!)}`);
+  for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
   if (byHand.length) done.push(`${byHand.length} held, merged by hand; closes on push: ${list(byHand)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
