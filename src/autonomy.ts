@@ -28,7 +28,16 @@ export const autonomyLevel = (env: string | undefined, config: unknown): Level =
   return level;
 };
 
-export type Rerun = { conflicted: string[]; unblocked: string[] };
+/** `partial`: merged tickets with a criterion left undone, still queued, whose remainder an agent can do. */
+export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[] };
+
+/**
+ * Whether an `<unmet>` line says the remainder is a person's to decide ("is the maintainer's decision"):
+ * another run would spend an agent on a question for a person, so the ticket is not re-runnable.
+ * Read from the agent's own words, so it errs towards a person looking: a false hit costs one
+ * manual `sandcastle run`, a miss costs an agent run that comes back with the same question.
+ */
+export const needsDecision = (unmet: string): boolean => /\b(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)\b/i.test(unmet);
 
 /** Why no further turn should follow a turn, or undefined when one may: the cause `drain` prints. */
 export const noRerunCause = (facts: Facts): string | undefined => {
@@ -42,6 +51,19 @@ export const noRerunCause = (facts: Facts): string | undefined => {
 };
 
 /**
+ * What happens to the remainder of a partly-done ticket, as the tracker comment and the report say it:
+ * the next run picks it up, unless the agent's own `<unmet>` line says it is a person's decision.
+ */
+export const remainderNote = (unmet: string, run = "run"): string =>
+  needsDecision(unmet)
+    ? "The agent's note says the remainder needs a person's decision: decide it and close the ticket, or move it to the hold label so a run does not spend an agent on it."
+    : `The next ${run} picks up the remainder.`;
+
+/** Merged partly done, still in the queue, and the remainder is not a person's to decide: the next run takes it. */
+export const partialRerunnable = (facts: Facts): string[] =>
+  (facts.partial ?? []).filter((id) => facts.tickets[id]?.state === "merged" && !!facts.tickets[id].unmet && !needsDecision(facts.tickets[id].unmet!));
+
+/**
  * What a further turn would take, or undefined when none should follow: a dry run changed
  * nothing, a stopped run or one that hit a usage limit should not be restarted by itself, and
  * a red base is not built on. An "uncommitted" ticket is not counted: its commit was refused,
@@ -53,6 +75,7 @@ export const rerunnable = (facts: Facts): Rerun | undefined => {
   return {
     conflicted: tickets.filter(([, t]) => t.state === "conflict").map(([id]) => id),
     unblocked: facts.runnable,
+    partial: partialRerunnable(facts),
   };
 };
 
@@ -61,7 +84,7 @@ export const turnCap = (level: Level): number | undefined => (level === 0 ? 1 : 
 
 /** `turn` is the number of the turn that just ended (1-based). */
 export const nextTurn = (level: Level, turn: number, again: Rerun | undefined): "stop" | "ask" | "run" | "cap" => {
-  if (!again || level === 0 || again.conflicted.length + again.unblocked.length === 0) return "stop";
+  if (!again || level === 0 || again.conflicted.length + again.unblocked.length + (again.partial?.length ?? 0) === 0) return "stop";
   if (level === 1) return "ask";
   return turn < turnCap(level)! ? "run" : "cap";
 };
@@ -83,6 +106,8 @@ export type DrainTurn = {
   released: string[];
   /** Tickets whose outcome from this turn is a merge conflict (outcomes.json). */
   conflicted: string[];
+  /** Tickets this turn merged partly done and left queued. */
+  partial?: string[];
 };
 
 /**
@@ -93,6 +118,9 @@ export type DrainTurn = {
 export const drainStop = (turn: DrainTurn, earlier: DrainTurn | undefined, ref: (id: string) => string = (id) => id): string | undefined => {
   const again = earlier ? turn.conflicted.filter((id) => earlier.conflicted.includes(id)) : [];
   if (again.length) return `${again.map(ref).join(", ")} conflicted in two turns running`;
+  // A third try would leave the same remainder: the agents do not see it as theirs to finish.
+  const partly = earlier?.partial ? (turn.partial ?? []).filter((id) => earlier.partial!.includes(id)) : [];
+  if (partly.length) return `${partly.map(ref).join(", ")} left partly done in two turns running`;
   if (turn.landed === 0 && turn.released.length === 0) return "no progress: the turn landed nothing and released nothing";
   return undefined;
 };
@@ -129,10 +157,11 @@ export const lateQueueLines = async (
 };
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
-  const all = [...again.conflicted, ...again.unblocked].map(ref).join(", ");
+  const all = [...again.conflicted, ...again.unblocked, ...(again.partial ?? [])].map(ref).join(", ");
   const parts = [
     again.conflicted.length ? `conflicted: ${again.conflicted.map(ref).join(", ")}` : "",
     again.unblocked.length ? `unblocked: ${again.unblocked.map(ref).join(", ")}` : "",
+    again.partial?.length ? `partly done: ${again.partial.map(ref).join(", ")}` : "",
   ].filter(Boolean);
   return `${all} (${parts.join("; ")})`;
 };
@@ -155,8 +184,8 @@ export const stillOpen = (tracker: Tracker) => (id: string): boolean => {
 export const afterTurn = (facts: Facts, level: Level, turn: number, open: (id: string) => boolean) => {
   const again = rerunnable(facts);
   if (!again) return undefined;
-  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open) };
-  return { left, ids: [...left.conflicted, ...left.unblocked], verdict: nextTurn(level, turn, left) };
+  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open), partial: (again.partial ?? []).filter(open) };
+  return { left, ids: [...left.conflicted, ...left.unblocked, ...left.partial!], verdict: nextTurn(level, turn, left) };
 };
 
 /** undefined without reading when the input is not a terminal: a pipe, CI or `nohup` never blocks. Default No. */

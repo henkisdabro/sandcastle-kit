@@ -260,6 +260,7 @@ try {
             landed: Object.values(facts.tickets).filter((t) => t.state === "merged").length,
             released: left.unblocked.filter((id) => !drain.unblocked.includes(id)),
             conflicted: conflictedIn(readOutcomes(root), facts.started),
+            partial: left.partial,
           };
           const why = drainStop(now, drain.last, tracker.ref);
           drain.last = now;

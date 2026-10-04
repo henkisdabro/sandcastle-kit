@@ -788,6 +788,7 @@ emit() {
   cells_line; rendered="$REPLY"
   out[n_out]="$prio	$key	$n	$grp	$rendered"; n_out=$((n_out+1))
   if [ "$1" = 1 ]; then c_out=$((c_out+1)); return 0; fi
+  case "${activity_note:-}" in "partly done"*) c_partly=$((c_partly+1));; esac
   case "$grp" in
     working) c_work=$((c_work+1));;
     "needs you") c_attn=$((c_attn+1));;
@@ -803,7 +804,7 @@ emit() {
 render() {
   local now now_s issues n phase log age commits state glyph colour activity activity_note landed_subj rendered
   local merged_list cols rows prio cpu mem cpu_col budget hidden key wide WIN BUF BUF_N
-  local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0
+  local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0 c_partly=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text oc_kind oc_state hidden_list group summary act since
   local tstate started order note typ pos upstream ahead unpushed=
@@ -1124,6 +1125,8 @@ render() {
     "${gry}- left over ${bold}${c_left}${off}" "${gry}· idle ${bold}${c_idle}${off}")
   NOTE=()
   [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
+  # The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
+  [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open): in merged here, in needs you in the closing summary${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
   # Below 80 columns there is no CPU column to explain.
