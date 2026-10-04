@@ -403,3 +403,16 @@ test("a reviewer that only merges the base in adds no review commits", async () 
   assert.equal(o.commits, 1);
   assert.equal(o.reviewCommits, 0);
 });
+
+test("a repair's review that gives one line adds it to the implementer's, and a full review's set replaces", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt", "a\n", "<changelog>Added: a key</changelog>\n<changelog>Fixed: a crash</changelog>");
+  h.agents.repair = implementing("fix.txt", "fix\n");
+  // The first review is the full one and gives nothing; the second sees only the repair commits.
+  let reviews = 0;
+  h.agents.review = () => (++reviews === 2 ? "<changelog>Changed: the report names the repair</changelog>" : "");
+  h.gates.push(red("FAIL: first"), GREEN);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate", "review"]);
+  assert.deepEqual(o.changelog, ["Added: a key", "Fixed: a crash", "Changed: the report names the repair"]);
+});
