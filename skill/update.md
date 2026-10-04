@@ -87,9 +87,10 @@ was set up with.
        `ready-for-human` to it in `triage-labels.md`. Apply after the user agrees.
    12. **Literal pnpm store mount.** If `.sandcastle/config.ts` has a `mounts` entry whose
        `sandboxPath` is `/home/agent/.pnpm-store` (a host path such as `~/Library/pnpm/store/v11`,
-       valid on one OS only), propose replacing it with `pnpmStore: true`, and dropping the
+       valid on one OS only, and a versioned directory, so the sandbox's pnpm nests a second
+       `v11` store inside the host's), propose replacing it with `pnpmStore: true`, and dropping the
        `pnpm config set store-dir /home/agent/.pnpm-store` line from `setup`: the kit now resolves
-       the store with `pnpm store path` on the host and adds both. Leave any other mount alone.
+       the host's store-dir with `pnpm store path` and adds both. Leave any other mount alone.
        Apply after the user agrees, then `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file

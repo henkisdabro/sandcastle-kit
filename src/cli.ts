@@ -22,6 +22,10 @@
 //                    its concurrency), or lift the cap; bare, print its demand, share and
 //                    cap. The run keeps the slots it holds. The cap ends with the run;
 //                    --project acts on another project's run from any directory
+//   size             recommend the machine pool's limits (maxSandboxes, maxGates) from the
+//                    container runtime's VM, with the figure that set each, the current
+//                    limits and advice on the runtime's CPU and memory; read-only, writes
+//                    nothing; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -98,6 +102,7 @@ import { herdrCommand } from "./herdr-plugin.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
+import { realReaders, sizeLines } from "./size.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
 // Every command the help names, and the internal hook. Checked before the repository is, so a
@@ -150,6 +155,11 @@ try {
     if (given.cap === "off") console.log(`Cap lifted for ${name}.`);
     else if (given.cap !== undefined) console.log(`Capped ${name} at ${given.cap} sandbox slot(s). It keeps the slots it holds, and takes no more while it holds ${given.cap} or more.`);
     console.log(standingLine(now));
+    process.exit(0);
+  }
+  if (command === "size") {
+    if (args.length) throw new OperatorError(`Unknown argument "${args[0]}" for sandcastle size: it takes none.`);
+    for (const line of sizeLines(realReaders(), process.env, machineSettings())) console.log(line);
     process.exit(0);
   }
   if (!repoRoot) throw new OperatorError("Not inside a git repository. Run sandcastle from inside the project you want it to work on.");

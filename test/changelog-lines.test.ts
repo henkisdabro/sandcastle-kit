@@ -49,11 +49,11 @@ const body = (text: string, heading: string) => {
 };
 
 test("changelogOf reads every tag, in order, one line each", () => {
-  assert.deepEqual(changelogOf("<changelog>Fixed: a\n  b</changelog> and <changelog>Added: c</changelog>"), ["Fixed: a b", "Added: c"]);
+  assert.deepEqual(changelogOf("<changelog>Fixed: a\n  b</changelog>\nand\n<changelog>Added: c</changelog>"), ["Fixed: a b", "Added: c"]);
 });
 
 test("changelogOf ignores the placeholder, an empty tag and no tag", () => {
-  assert.deepEqual(changelogOf("<changelog>...</changelog><changelog>  </changelog> nothing"), []);
+  assert.deepEqual(changelogOf("<changelog>...</changelog>\n<changelog>  </changelog>\nnothing"), []);
 });
 
 test("changelogOf cuts a long line at a word", () => {

@@ -39,7 +39,7 @@ const load = (extra: string) => {
 
 test("pnpmStore: the host's store is mounted and the sandbox's pnpm pointed at it before setup", async () => {
   const project = await withPath([fakeBin(STORE)], () => load('pnpmStore: true, setup: ["pnpm install --frozen-lockfile"]'));
-  assert.deepEqual(project.mounts, [{ hostPath: "/fake/pnpm-store/v11", sandboxPath: "/home/agent/.pnpm-store" }]);
+  assert.deepEqual(project.mounts, [{ hostPath: "/fake/pnpm-store", sandboxPath: "/home/agent/.pnpm-store" }]);
   assert.deepEqual(project.setup, ["pnpm config set store-dir /home/agent/.pnpm-store", "pnpm install --frozen-lockfile"]);
 });
 

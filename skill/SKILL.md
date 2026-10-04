@@ -302,7 +302,7 @@ working, ready to land, need you, queued, blocked, merged. The states:
 
 - **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
-  has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
+  has taken twice its usual time, and `3x over, usually 5m` (the note in red too) three times; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
 - **`ready`** - gates green, waiting for the landing worker, which lands each ticket as it goes
   green while the others still run. Once every sandbox has finished, the `run` line counts what is

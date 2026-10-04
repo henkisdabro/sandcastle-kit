@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterTurn, DRAIN_CAP, type Level, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { isTestPath } from "./touches.ts";
@@ -60,6 +60,8 @@ export type Facts = {
   stopped?: string;
   /** Files changed per held branch. */
   changed: Record<string, number>;
+  /** Held tickets whose branch a person has merged by hand: on the base, the ticket still open until the push. */
+  mergedByHand?: string[];
   /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
   filed?: { id: string; title: string }[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
@@ -207,6 +209,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     const files = git(["diff", "--name-only", `${base}...agent/issue-${id}`], root);
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
+  const byHand = Object.keys(changed).filter((id) => changed[id] === 0 && mergedByHand(root, base, id));
 
   // Issues opened during the run: open, carrying the triage label, created between its start
   // and its end. Agents file with the person's own token, so the author cannot say who opened
@@ -260,6 +263,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     changed,
+    mergedByHand: byHand,
     filed,
     stage: run.stage,
     exitCode: run.exitCode,
@@ -330,7 +334,9 @@ export const render = (f: Facts, plain = false): string => {
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
-  const held = ids(["held"]);
+  // Held work a person has merged by hand: on the base already, so not theirs to merge or redo; the push closes it.
+  const byHand = ids(["held"]).filter((id) => f.mergedByHand?.includes(id));
+  const held = ids(["held"]).filter((id) => !byHand.includes(id));
   // Held with nothing on its branch: an agent handed it back, or a person took
   // it before any commit. There is nothing to review or merge - only a question.
   const handedBack = held.filter((id) => f.changed[id] === 0);
@@ -417,6 +423,7 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
   for (const id of merged.filter((id) => f.tickets[id].overrun?.length)) done.push(`${name(id)} ${overrunLine(f.tickets[id].overrun!)}`);
+  if (byHand.length) done.push(`${byHand.length} held, merged by hand; closes on push: ${list(byHand)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {

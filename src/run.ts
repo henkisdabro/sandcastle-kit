@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
+import type { Gate } from "./gates.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
@@ -538,7 +539,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
 // ---------------------------------------------------------------------------
 // Typical times - how long each step of an issue usually takes in this
 // project, from earlier runs' timings. The status view marks a step running
-// at twice its usual time, and estimates when landing starts: a run that is
+// at twice its usual time (and says so in words at three times), and estimates when landing starts: a run that is
 // busy but healthy and one that is stuck looked the same for an hour.
 // ---------------------------------------------------------------------------
 
@@ -720,6 +721,26 @@ export const readOutcomes = (root: string): Outcomes => {
   );
 };
 
+/** The outcome text of a ticket an agent handed back: held, like work the kit held, but with nothing to merge. */
+export const HANDED_BACK = "needs a human: handed back";
+
+/**
+ * A branch the kit held for a person - at landing, or a conflict resolution it would not trust - which a
+ * person has since merged by hand: its tip is on the base, so its diff is empty, as a hand-back's is.
+ * Only the outcome tells the two apart, and only an ancestor check says the merge happened. The ticket
+ * stays open until the push closes it.
+ */
+export const mergedByHand = (root: string, base: string, id: string): boolean => {
+  const o = readOutcomes(root)[id];
+  if (o?.kind !== "held" || o.text === HANDED_BACK) return false;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", `refs/heads/agent/issue-${id}`, `refs/heads/${base}`], { cwd: root, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
   const all = readOutcomes(project.root);
@@ -743,6 +764,8 @@ export type BranchHead = {
   green?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
+  /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
+  gates?: Gate[];
   /** The `<changelog>` lines the agents gave by `green` (`changelog: true`): a later land-only run reads no agent, so without them the lines never reach a closing summary. */
   changelog?: string[];
   /** run.json's startedAt of the run that wrote the record last. */
@@ -761,7 +784,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; changelog?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
