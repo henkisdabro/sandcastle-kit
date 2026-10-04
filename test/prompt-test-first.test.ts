@@ -12,13 +12,13 @@ import { test } from "node:test";
 
 const read = (...p: string[]) => readFileSync(join(import.meta.dirname, "..", ...p), "utf8").replace(/\s+/g, " ");
 
-test("the implementer tests at the seam, reproduces a bug first, and commits each green step", () => {
+test("the implementer tests at the seam, reproduces a bug first, and runs each gate once", () => {
   const p = read("prompts", "implement.md");
   assert.match(p, /Use the ticket's `## Seams` section if it has one/);
   assert.match(p, /For a bug, first write a test that fails on the bug itself/);
   assert.match(p, /A value recomputed the way the code computes it passes by construction/);
   assert.match(p, /Mock only real boundaries/);
-  assert.match(p, /run single test files and the typecheck, and commit each step that is green/);
+  assert.match(p, /While working, run single test files and the typecheck\./);
   assert.match(p, /Before you finish, run each gate once, in its own command/);
 });
 

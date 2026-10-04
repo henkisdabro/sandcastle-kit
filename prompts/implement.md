@@ -89,8 +89,8 @@ For a change in behaviour:
    for real.
 5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck, and commit each step that is green.
-Before you finish, run each gate once, in its own command.
+While working, run single test files and the typecheck. Before you finish, run each gate once,
+in its own command.
 
 {{KIT_PROJECT_RULES}}
 

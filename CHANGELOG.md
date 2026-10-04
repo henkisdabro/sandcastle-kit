@@ -49,8 +49,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 - **Implementers test at the ticket's seams and run the full gates once.** A bug is first
   reproduced by a failing test; expected values come from outside the code and mocks only from
-  real boundaries; single test files run while working, each green step is committed, and each
-  gate runs once, in its own command, at the end.
+  real boundaries; single test files run while working, and each gate runs once, in its own
+  command, at the end.
 - **The review checks that each test would fail if the behaviour broke** and survive a refactor
   that kept it, and tidies duplication or misleading names the branch introduced.
 - **Sandbox agents can no longer use Monitor, ScheduleWakeup, CronCreate, CronDelete, CronList or
