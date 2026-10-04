@@ -28,7 +28,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -550,8 +550,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     let tokens: Tokens | undefined;
     let gateTimes: Record<string, number> | undefined;
     let red: string[] | undefined;
+    let times: ReturnType<typeof stepTimes> | undefined;
     try {
       const result = await fn();
+      times = stepTimes(Date.now() - since, result);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
       red = gateRed(result);
@@ -566,7 +568,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       active.delete(issue);
       const m = model?.();
       const line = {
-        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ms: Date.now() - since, ok,
+        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? { ms: Date.now() - since }), ok,
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),

@@ -22,7 +22,8 @@ import { OperatorError } from "./errors.ts";
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
 type Failure = { name: string; command: string; exitCode: number; output: string };
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[] };
+// `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -52,8 +53,10 @@ export const seconds = (ms: number) => (ms < 9_950 ? `${(ms / 1000).toFixed(1)}s
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}) =>
-  withSlot("gates", label, async (): Promise<GateRun> => {
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}) => {
+  const asked = Date.now();
+  return withSlot("gates", label, async (): Promise<GateRun> => {
+    const waitMs = Date.now() - asked;
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     const log = progress.log;
@@ -75,8 +78,9 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       // its own timeout too.
       if (!all || r.exitCode === 124) break;
     }
-    return { gates, failure: failures[0], failures };
+    return { gates, failure: failures[0], failures, waitMs };
   }, progress.wait);
+};
 
 // ---------------------------------------------------------------------------
 // Hook tests. A guard that never ran and a guard that allowed everything look
@@ -301,6 +305,17 @@ export const failingTests = (output: string) =>
 export const gateRed = (result: unknown): string[] | undefined => {
   const gates = (result as { gates?: Gate[] } | undefined)?.gates;
   return Array.isArray(gates) ? gates.filter((g) => !g.pass).map((g) => g.name) : undefined;
+};
+
+/**
+ * The `ms` and `waitMs` of a step's timings line, given its elapsed time. A gate run's slot wait is
+ * `waitMs`, not part of `ms`: a ticket that queued behind others for a slot once recorded the queue
+ * as gate time, which `typicalTimes`, the status view's "twice the usual" age and the estimate read.
+ */
+export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitMs?: number } => {
+  const w = (result as { waitMs?: unknown } | undefined)?.waitMs;
+  const waitMs = typeof w === "number" && w > 0 ? Math.min(Math.round(w), elapsed) : 0;
+  return { ms: elapsed - waitMs, ...(waitMs ? { waitMs } : {}) };
 };
 const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
