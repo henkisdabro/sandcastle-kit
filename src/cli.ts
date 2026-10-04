@@ -77,7 +77,7 @@ import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -428,6 +428,10 @@ try {
       const { message, relabelled } = requeueTicketWithEffect(tracker, project.label, args);
       console.log(message);
       if (relabelled) console.log(LABEL_LAG_REMINDER);
+      // Warn only: a re-run of such a ticket costs a pipeline and ends held for the same paths.
+      const requeued = parseRequeueArgs(args).id;
+      const protectedPaths = protectedForTicket(project, requeued, tracker.get(requeued).body ?? "");
+      if (protectedPaths.length) console.log(`${tracker.ref(requeued)} ${protectedWarning(protectedPaths)}`);
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
       const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);

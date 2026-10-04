@@ -1003,7 +1003,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
-| `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them) and a rough estimate. Advice only | ➖ no |
+| `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets that touch a protected path (always held for a human merge), blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them) and a rough estimate. Advice only | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. On GitHub it also reminds you to give the label search a few seconds before `sandcastle run`. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
@@ -1218,7 +1218,9 @@ and the kit narrows what can cross it:
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
   `ready-for-human` and left for you to merge; `sandcastle land` refuses it too. A branch that adds
   a file over 50 MB is held the same way: GitHub refuses a push with one over 100 MB, and a file
-  that size stays in the history for good.
+  that size stays in the history for good. A ticket whose work lies in a protected path therefore
+  always ends held, so `sandcastle queue --lint` and `sandcastle requeue` warn about one (its `Touches:`
+  line, or a kept branch, names the path): merge it by hand rather than queue it.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.

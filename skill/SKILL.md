@@ -220,6 +220,8 @@ comments, and the gates can prove it.
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
    `Touches:`, wide tickets, hot and unmergeable files, and a rough turn count. It is advice, so
    quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags; do not edit unasked.
+   A ticket it lists under protected paths will always be held for a human merge: say so, and offer
+   to unqueue it (or to leave the protected file to the user) rather than spend a pipeline on it.
 
 ## run - start a burndown
 
