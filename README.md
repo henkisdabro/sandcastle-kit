@@ -694,10 +694,11 @@ A queued ticket with a branch from an earlier run builds on that branch:
 
 - The base is merged into the branch first. A conflict goes to the implementer; a conflict only in
   [`generated`](#-a-gate-for-generated-files) paths is resolved by regenerating them, with no agent.
-- A branch that was reviewed and green, and has not moved since, skips implement and review: a clean
-  base merge goes straight to the gates, a conflicted one gets a short resolver prompt first. A
-  re-run whose only change since its last review is the base merge gets a review of the merge
-  alone. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+- A branch that was reviewed and green, and has gained nothing since but merge commits, skips
+  implement and review: a clean base merge goes straight to the gates, a conflicted one gets a short
+  resolver prompt first, and a merge an earlier run left on it that no review has read (a held
+  resolution, say) gets a review of the merge alone. A re-run whose only change since its last
+  review is the base merge gets a review of the merge alone too. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
   agents left undone, so a branch that skips them still lands as partly done, and their
   [`changelog`](#-configuration) lines, so its closing summary still lists them; `sandcastle requeue`
   clears a ticket's entry.

@@ -827,9 +827,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // The requeue-once state holds the first attempt's line only on a second attempt in this run.
       const requeued = requeuedAs.has(issue.id);
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
-      // Read before the base merge, which moves the tip. A branch still at the
-      // head it was reviewed and gated green on needs no implement or review:
-      // only the merge and the gates stand between it and landing.
+      // Read before the base merge, which moves the tip. A branch at the head it
+      // was reviewed and gated green on, or past it by merge commits only, needs no
+      // implement or full review: only the merge and the gates stand between it and landing.
       const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
       let landOnly = greenHead !== undefined;
       // A tip past the green head is merge commits only (landOnlyHead): a resolution a hold left
