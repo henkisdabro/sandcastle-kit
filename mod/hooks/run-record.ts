@@ -239,6 +239,8 @@ export type RunRecord = {
   tokens?: string;
   /** Why the run stopped before the end of its queue. */
   stopped?: string;
+  /** How a person ended the run: "sandcastle stop", "Ctrl-C", or the signal's name. Absent for a crash, a kill -9 and a run that ended by itself. */
+  stoppedBy?: string;
   baseGates?: unknown;
   verify?: { green: boolean; line: string } | null;
   keptWorktrees?: { issue: string; path: string }[];

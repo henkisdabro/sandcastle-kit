@@ -15,6 +15,10 @@ import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandb
 import { OperatorError } from "./errors.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
+// How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
+// run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
+let endedBy: string | undefined;
+
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
 // finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
@@ -37,6 +41,8 @@ export const exitOnSignal = () => {
       continue;
     }
     const onSignal = () => {
+      // Before the library's teardown can end the process: its exit still writes the record.
+      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C") : sig;
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;
@@ -495,7 +501,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   const finish = (code: number | undefined) => {
     if (finished) return;
     finished = true;
-    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code };
+    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code, ...(endedBy ? { stoppedBy: endedBy } : {}) };
     write();
     // run.json is overwritten by the next run, so each finished run also leaves one
     // line here. A failed append must never change the process's exit.

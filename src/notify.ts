@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 import type { RunRecord, TicketState } from "../mod/hooks/run-record.ts";
-import { NEEDS_FIXING } from "./report.ts";
+import { NEEDS_FIXING, stoppedByText } from "./report.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
 
 // Refused before the run starts: a typo found at the end of a six-hour run would be a
@@ -30,7 +30,7 @@ export const endSummary = (run: RunRecord): string => {
   const needYou = count(["held"]) + tickets.filter((t) => t.state === "merged" && (t.closeFailed || t.unmet)).length;
   const fixing = count(NEEDS_FIXING);
   const head =
-    (run.stopped ? "run STOPPED before landing" : run.exitCode === 0 ? "run finished" : `run ended with exit ${run.exitCode}`) +
+    (run.stoppedBy ? `run ${stoppedByText(run.stoppedBy)}` : run.stopped ? "run STOPPED before landing" : run.exitCode === 0 ? "run finished" : `run ended with exit ${run.exitCode}`) +
     (run.dryRun ? " (dry run)" : "");
   return `${head} - ${merged} merged, ${needYou} need you, ${fixing} need fixing, of ${tickets.length}`;
 };
