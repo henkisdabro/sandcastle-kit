@@ -131,7 +131,9 @@ export const attachedClients = (procs: Proc[], sessions: ReturnType<typeof parse
   });
 
 // Short: the view waits on these before its first frame, and an answer that slow is no answer.
-const QUICK: SpawnSyncOptionsWithStringEncoding = { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] };
+// `ps -E` lists every process's environment: over 1 MiB on a busy Mac, past spawnSync's default
+// buffer, which cuts the listing and silently misses the Herdr client.
+const QUICK: SpawnSyncOptionsWithStringEncoding = { encoding: "utf8", timeout: 2000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] };
 
 /**
  * Linux: procps prints no environment, so `ps -u <uid> -o pid=,args=` gives the pids and /proc

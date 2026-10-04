@@ -347,7 +347,8 @@ try {
           SANDCASTLE_MAX_SANDBOXES: String(limit("sandboxes")),
           SANDCASTLE_MAX_GATES: String(limit("gates")),
           // Sensed once here, never per redraw: a `ps` listing every few seconds would cost the pane more than the hint is worth.
-          SANDCASTLE_CLICK_MOD: resolveClickHint().mod,
+          // Only where the view can show the hint: `status 0` into a pipe never draws it.
+          SANDCASTLE_CLICK_MOD: process.stdout.isTTY && process.env.HERDR_ENV === "1" ? resolveClickHint().mod : "",
         },
       });
       process.exit(r.status ?? 0);
