@@ -403,7 +403,8 @@ while IFS= read -r l; do
 done <"$TMP/frame"
 # The hint may take one more note row: nothing else changes the frame's height.
 rows=$(wc -l <"$TMP/frame")
-{ [ "$rows" = "$plain_rows" ] || [ "$rows" = $((plain_rows+1)) ]; } || { echo "FAIL [$SCENARIO] $rows rows with links, $plain_rows without"; fails=$((fails+1)); }
+# -eq, not =: BSD wc pads its count with spaces, so a text compare fails on macOS alone.
+{ [ "$rows" -eq "$plain_rows" ] || [ "$rows" -eq $((plain_rows+1)) ]; } || { echo "FAIL [$SCENARIO] $rows rows with links, $plain_rows without"; fails=$((fails+1)); }
 row '#103' ready
 # The hint that the numbers are clickable is shown with the links, and only then.
 has 'ctrl-click a ticket for its log'
