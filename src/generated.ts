@@ -29,9 +29,11 @@ export const regensFor = (files: string[], generated: Generated[]): Generated[] 
 
 export const shq = (t: string) => `'${t.replaceAll("'", "'\\''")}'`;
 
-// Sandcastle sets the container's git identity when an agent run starts; a merge made
-// before the first one needs it too. The host's is the author; the container's AGENT_COMMITTER env (sandboxEnv) is the committer.
-export const hostIdentity = (root: string) => {
+// Sandcastle sets the container's git identity only when an agent run starts, and the kit's
+// own sandboxes (landing, base gates, a requeue's gates) run no agent: `sandboxConfig` sets it
+// from this in every sandbox's ready hook. The host's is the author; the container's
+// AGENT_COMMITTER env (sandboxEnv) is the committer.
+export const hostIdentityParts = (root: string) => {
   const who = (key: string, fallback: string) => {
     try {
       return execFileSync("git", ["config", key], { encoding: "utf8", cwd: root }).trim() || fallback;
@@ -39,7 +41,13 @@ export const hostIdentity = (root: string) => {
       return fallback;
     }
   };
-  return `-c user.name=${shq(who("user.name", "Sandcastle"))} -c user.email=${shq(who("user.email", "sandcastle@localhost"))}`;
+  return { name: who("user.name", "Sandcastle"), email: who("user.email", "sandcastle@localhost") };
+};
+
+// The same identity as `-c` flags, for a merge the kit makes itself.
+export const hostIdentity = (root: string) => {
+  const { name, email } = hostIdentityParts(root);
+  return `-c user.name=${shq(name)} -c user.email=${shq(email)}`;
 };
 
 const lastLine = (r: { stdout: string; stderr: string }) => (r.stderr + "\n" + r.stdout).trim().split("\n").at(-1)?.slice(0, 160) ?? "";
