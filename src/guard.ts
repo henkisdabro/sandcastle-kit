@@ -9,6 +9,7 @@ import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+import { expandTouches, parseTouches } from "./touches.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Git hooks on the host. `git merge --no-verify` still runs post-merge, and
@@ -348,11 +349,45 @@ const DEFAULT_PROTECTED = [
 ];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
+/** The files among `files` that lie in a protected path: the default set and the project's `protectedPaths`. */
+export const protectedAmong = (project: Project, files: string[]): string[] => {
+  const prefixes = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])];
+  return files.filter((f) => prefixes.some((p) => f === p || f.startsWith(p)));
+};
+
+/**
+ * The protected files a ticket body's `Touches:` line names, read against the base branch's tree.
+ * A branch holds for these however good its work, so a ticket that declares one is warned about
+ * before it costs a pipeline. Only a hint: the line is agent-written, and `package.json`'s
+ * install scripts cannot be read from it.
+ */
+export const protectedTouches = (project: Project, body: string): string[] =>
+  protectedAmong(project, expandTouches(project.root, project.baseBranch, parseTouches(body)));
+
+/**
+ * `protectedTouches`, and the protected files the ticket's kept branch `agent/issue-<id>` changes:
+ * the paths a requeue's earlier hold was for, which the Touches line may never have named.
+ */
+export const protectedForTicket = (project: Project, id: string, body: string): string[] => {
+  const paths = protectedTouches(project, body);
+  const branch = `agent/issue-${id}`;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], project.root);
+    for (const p of protectedChanges(project, branch)) if (!paths.includes(p)) paths.push(p);
+  } catch {
+    // No branch, or an unreadable one: the Touches line alone.
+  }
+  return paths;
+};
+
+/** What `queue --lint` and `requeue` say of a ticket whose work lies in a protected path. */
+export const protectedWarning = (paths: string[]) =>
+  `will always be held; merge by hand: ${paths.join(", ")} is protected, so a run holds the branch for a person however good the work, and a re-run holds it again`;
+
 export const protectedChanges = (project: Project, branch: string) => {
   const base = project.baseBranch;
   const changed = sh("git", ["diff", "--name-only", `${base}...${branch}`], project.root).split("\n").filter(Boolean);
-  const prefixes = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])];
-  const hits = changed.filter((f) => prefixes.some((p) => f === p || f.startsWith(p)));
+  const hits = protectedAmong(project, changed);
   // package.json only when an install-time script changed.
   for (const f of changed.filter((f) => f === "package.json" || f.endsWith("/package.json"))) {
     const scripts = (ref: string) => {

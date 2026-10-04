@@ -344,9 +344,11 @@ has '^│ +#101 .*│ +1\.5c +│'
 # ---------------------------------------------------------------------------
 SCENARIO="a state written after the frame's clock"
 # The frame reads the clock before run.json, so a state the run wrote in between is "in the future".
+# The clock is read afresh: the script's own $now is minutes old on a loaded machine, and 30s ahead of
+# it is then already in the past.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
-  "issues": ["103"], "tickets": { "103": { "state": "ready", "since": $((now + 30)), "note": "gates green" } } }
+  "issues": ["103"], "tickets": { "103": { "state": "ready", "since": $(($(date +%s) + 30)), "note": "gates green" } } }
 EOF
 render "103"
 row '#103' ready

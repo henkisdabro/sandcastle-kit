@@ -87,7 +87,7 @@ The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a 
 
 ## `src/lint.ts`
 
-`lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, `blockerProblems` and blockers listed under a heading (which the parser does not read), a rough estimate. Read-only advice
+`lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `blockerProblems` and blockers listed under a heading (which the parser does not read), a rough estimate. Read-only advice
 
 ## `src/detach.ts`
 
