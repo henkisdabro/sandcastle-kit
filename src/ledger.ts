@@ -22,7 +22,7 @@ import { largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine } from "./landing.ts";
 import { overrunLine } from "./report.ts";
-import { recordOutcomes } from "./run.ts";
+import { HELD_WORK, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending } from "./schedule.ts";
 import { refOf } from "./tracker.ts";
@@ -242,7 +242,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
               : `Gated green on \`${g.branch}\` after a repair, but not merged: ${UNREVIEWED}. Review the repair commits and merge by hand.`;
         return {
           record: { state: "held", note: landed.reason, ...(landed.paths.length ? { files: landed.paths } : {}) },
-          outcome: { kind: "held", text: "needs a human merge" },
+          outcome: { kind: "held", text: HELD_WORK },
           view: NEEDS_A_HUMAN,
           tracker: { kind: "hold", text },
         };

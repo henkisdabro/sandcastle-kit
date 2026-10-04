@@ -721,6 +721,25 @@ export const readOutcomes = (root: string): Outcomes => {
   );
 };
 
+/** The outcome text of a finished branch the kit held for a person: what tells it from a hand-back, which has no commits either. */
+export const HELD_WORK = "needs a human merge";
+
+/**
+ * A branch the kit held for a human merge, which a person has since merged by hand: its tip is on the
+ * base, so its diff is empty, as a hand-back's is. Only the held-work outcome tells the two apart, and
+ * only an ancestor check says the merge happened. The ticket stays open until the push closes it.
+ */
+export const mergedByHand = (root: string, base: string, id: string): boolean => {
+  const o = readOutcomes(root)[id];
+  if (o?.kind !== "held" || o.text !== HELD_WORK) return false;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", `refs/heads/agent/issue-${id}`, `refs/heads/${base}`], { cwd: root, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
   const all = readOutcomes(project.root);
