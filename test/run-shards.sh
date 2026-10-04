@@ -6,21 +6,16 @@
 #
 #   bash test/run-shards.sh LOGDIR [SHARDS]
 #
-# SHARDS defaults to FULL_CHECK_SHARDS, else half the cores (two passes run at once, so together
-# they fill the machine) but at least 1 and at most 6: the slowest file's weight is a floor, and
-# past that more shards only add startup. SHARD_CONCURRENCY (default 1) is the test files each
-# shard runs at once.
+# SHARDS defaults to FULL_CHECK_SHARDS, else what test/shard-count.sh gives for this machine's
+# cores and one pass. SHARD_CONCURRENCY (default 1) is the test
+# files each shard runs at once.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 dir="${1:?usage: run-shards.sh LOGDIR [SHARDS]}"
 mkdir -p "$dir" && rm -f "$dir"/shard-*
 
-cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
 n="${2:-${FULL_CHECK_SHARDS:-}}"
-if [ -z "$n" ]; then
-  n=$((cores / 2))
-  [ "$n" -le 6 ] || n=6
-fi
+[ -n "$n" ] || n=$(bash test/shard-count.sh "" 1)
 [ "$n" -ge 1 ] 2>/dev/null || n=1
 conc="${SHARD_CONCURRENCY:-1}"
 
