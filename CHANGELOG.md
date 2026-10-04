@@ -11,6 +11,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Upgrading
 
+- **Autonomy levels 2, 3 and `drain` now re-run a ticket that merged partly done and is still
+  queued.** Move it to the hold label, or close it, if you do not want a turn spent on its remainder;
+  a drain stops after the same ticket is left partly done in two turns running.
 - **The usage guard reads your Claude Code login only when the sandboxes spend a subscription token.**
   With `ANTHROPIC_API_KEY` it now says it does not apply, where 0.6.0 read the host login's plan,
   which has nothing to do with an API key's spend. The run's start line and `doctor --verify` say
@@ -44,6 +47,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The usage guard finds the Claude Code login when `CLAUDE_CONFIG_DIR` is set.** Claude Code keeps
+  that login in the keychain as `Claude Code-credentials-<h>` (the first 8 hex characters of the
+  SHA-256 of the directory's path); the guard looked only for the default name, fell back to a setup
+  token the usage endpoint refuses, and was off for the run. `doctor --verify` names where it looks.
+- **A landing no longer fails with `spawnSync git ENOBUFS`** when the base moved by, or the branch
+  changed, more than about 1 MiB of paths (a vendored directory, a mass rename, a generated tree).
+- **`test/full-check.sh` no longer oversubscribes the machine by default**: its passes, the Linux
+  container's included, share the cores at about two per shard, so a plain run on a loaded machine
+  no longer times out.
+- **A review's commit count is its own**: a reviewer whose only commit merged the base in read as
+  `commits=1 (review=14)`, counting the base commits the merge brought in.
+- **A run in a terminal stopped by SIGINT reads as "Ctrl-C or `sandcastle stop`"**: `sandcastle stop`
+  signals any live run, and in a terminal the two cannot be told apart.
+- **Agents never run the gates to time them, nor wait on a backgrounded run with Monitor.** One
+  implementer asked for a before-and-after figure timed the full check four times under load and
+  polled it for half an hour, slowing every other sandbox's gates.
 - **A run ended by `sandcastle stop` or Ctrl-C reads as stopped by a person**: the closing summary
   says "Run stopped by `sandcastle stop`" and the notify line "run stopped by ...", not "ended early
   (exit 1)", and Runnable now no longer says "none" above a ticket the run cut short.
