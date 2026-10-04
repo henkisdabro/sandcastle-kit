@@ -28,7 +28,7 @@ import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, reviewWithFallback, ticketOverride } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, type Gate, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -1384,7 +1384,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: (box, id) => runGates(box, id, "landing gate"),
+    gate: (box, id) =>
+      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate")),
     landed: new Map(),
     slotWanted,
     reds,

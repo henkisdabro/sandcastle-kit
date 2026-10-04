@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
-import { recordPeak, samplePeak } from "./peaks.ts";
+import { peakOf, recordPeak, samplePeak } from "./peaks.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -322,6 +322,43 @@ export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitM
   const waitMs = typeof w === "number" && w > 0 ? Math.min(Math.round(w), elapsed) : 0;
   return { ms: elapsed - waitMs, ...(waitMs ? { waitMs } : {}) };
 };
+/**
+ * The phase of a landing gate's timings line (a tree merged in the landing worker's sandbox). Apart from
+ * `gates`, a ticket's own passes: landings run one after another on one worker, so they are summed on
+ * their own, and are no part of a ticket's pipeline time.
+ */
+export const LANDING_GATES = "landing gates";
+
+/**
+ * Runs a landing gate and appends its timings line (`LANDING_GATES`, the slot wait out of `ms` as in
+ * `stepTimes`) to `timings`, whether it came back red or threw. Not the run's `timed`: that writes the
+ * ticket's state, and a ticket landing already holds the landing stage `landOne` wrote.
+ */
+export const timedLandingGate = async <T>(
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+): Promise<T> => {
+  const since = Date.now();
+  let result: T | undefined;
+  let done = false;
+  try {
+    result = await fn();
+    done = true;
+    return result;
+  } finally {
+    const red = done ? gateRed(result) : undefined;
+    const gateTimes = done ? gateMs(result) : undefined;
+    const peakMib = done ? peakOf(result) : undefined;
+    const line = {
+      ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING_GATES, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
+      ...(who.carried ? { carried: true } : {}),
+      ...(gateTimes ? { gates: gateTimes } : {}),
+      ...(peakMib ? { peakMib } : {}),
+      ...(red?.length ? { red } : {}),
+    };
+    appendFileSync(timings, JSON.stringify(line) + "\n");
+  }
+};
+
 const gateTimeLine =(gates: Gate[]) =>
   [...gates].filter((g) => g.ms !== undefined).sort((a, b) => b.ms! - a.ms!).map((g) => `${g.name} ${seconds(g.ms!)}`).join(", ");
 
