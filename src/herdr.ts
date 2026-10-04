@@ -77,7 +77,7 @@ const bareShell = (processes: Foreground) => {
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
-type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string };
+type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string };
 // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
 // a bare shell of someone else's. A record without `socket`, or a caller without
 // HERDR_SOCKET_PATH, cannot tell.
@@ -90,7 +90,8 @@ const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
  * A live run's own tab after a cold Herdr restart: the panes come back as idle shells, and the
  * status view died with the server. The tab bar's tick starts it again in the recorded status
  * pane, with the command the run used, whenever it finds that pane a bare shell: nothing marks it
- * done, as a second restart in the same run needs it again. Left alone, as `tellDeadTab` leaves
+ * done, as a second restart in the same run needs it again. The kit is the record's (`kit`, the run's
+ * own checkout: the tab bar's is the one the plugin is linked from), else the caller's. Left alone, as `tellDeadTab` leaves
  * them: a tab adopted from a person's terminal, a record already reported (an earlier run's), a
  * tab on another Herdr server or not the recorded one, a pane still running the status view or
  * anything else, and any herdr error. True when the view was started.
@@ -101,7 +102,7 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
     if (!view.tab || !view.status || view.adopted !== false || view.reported || onOtherServer(view)) return false;
     if (!inRecordedTab(view) || !bareShell(foreground(view.status))) return false;
     // `cd`: a restored shell does not always start in the project, and the view is the project's.
-    herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(kit)}`]);
+    herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(view.kit ?? kit)}`]);
     return true;
   } catch {
     return false;
@@ -111,7 +112,7 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
 /**
  * A run that is no longer live (its pid gone, or its record finished) leaves its tab as the
  * server last had it, and after a cold Herdr restart that is idle shells with nothing saying the
- * run ended. The tab the kit opened for it gets the closing report in its status pane, once: the
+ * run ended. The tab the kit opened for it gets the closing report in its status pane (from the record's `kit`, else the caller's), once: the
  * record is marked, so a later tick finds nothing to do. Left alone: a tab a person's terminal
  * was adopted into (that terminal is theirs), a tab that is not the recorded one any more, and a
  * status pane that is not a bare shell - the status view still running (it already shows how the
@@ -164,7 +165,7 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     }
     try {
       // `cd`: a restored shell does not always start in the project.
-      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(kit, "bin/sandcastle"))} report`]);
+      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(view.kit ?? kit, "bin/sandcastle"))} report`]);
     } catch (error) {
       giveBack(read);
       throw error;
@@ -406,7 +407,7 @@ export const openSandboxView = (
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);
