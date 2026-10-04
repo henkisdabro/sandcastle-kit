@@ -408,11 +408,14 @@ test("a repair's review that gives one line adds it to the implementer's, and a 
   const h = harness();
   h.agents.impl = implementing("a.txt", "a\n", "<changelog>Added: a key</changelog>\n<changelog>Fixed: a crash</changelog>");
   h.agents.repair = implementing("fix.txt", "fix\n");
-  // The first review is the full one and gives nothing; the second sees only the repair commits.
+  // The first review is the full one and restates the set with a rewording; the second sees only the repair commits.
   let reviews = 0;
-  h.agents.review = () => (++reviews === 2 ? "<changelog>Changed: the report names the repair</changelog>" : "");
+  h.agents.review = () =>
+    ++reviews === 2
+      ? "<changelog>Changed: the report names the repair</changelog>"
+      : "<changelog>Added: a key for the base</changelog>\n<changelog>Fixed: a crash</changelog>";
   h.gates.push(red("FAIL: first"), GREEN);
   const o = await h.attempt();
   assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate", "review"]);
-  assert.deepEqual(o.changelog, ["Added: a key", "Fixed: a crash", "Changed: the report names the repair"]);
+  assert.deepEqual(o.changelog, ["Added: a key for the base", "Fixed: a crash", "Changed: the report names the repair"]);
 });
