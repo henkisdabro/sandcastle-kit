@@ -561,14 +561,16 @@ hand_merged() {
 }
 # What a hand-merged row says the push still has to do. The view cannot ask the
 # tracker on every refresh, but the merge commit being on origin's base branch
-# says the push happened. The merge commit is the earliest merge on the way from
-# the branch tip to the base (a fast-forward has none: the tip itself). No
+# says the push happened. The merge commit is the merge that took the branch tip
+# in (the tip as a second parent); a fast-forward has none, so the tip itself -
+# not a later merge onto it, which would wait for a push already made. No
 # origin/<base> ref, or no way to find the commit, keeps "closes on push".
 hand_merged_note() {
   local tip merge
   if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null 2>&1 \
     && tip=$(git rev-parse --verify --quiet "refs/heads/agent/issue-$1" 2>/dev/null) && [ -n "$tip" ]; then
-    merge=$(git rev-list --merges --ancestry-path --topo-order --reverse "$tip..refs/heads/$BASE" 2>/dev/null | sed -n 1p)
+    merge=$(git rev-list --merges --ancestry-path --parents "$tip..refs/heads/$BASE" 2>/dev/null \
+      | awk -v t="$tip" '{ for (i = 3; i <= NF; i++) if ($i == t) { print $1; exit } }')
     if git merge-base --is-ancestor "${merge:-$tip}" "refs/remotes/origin/$BASE" 2>/dev/null; then
       printf 'merged by hand'; return
     fi

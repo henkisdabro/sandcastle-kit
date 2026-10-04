@@ -16,12 +16,13 @@ const started = "2026-10-01T08:00:00.000Z";
 const git = (root: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
-type Remote = "none" | "before the merge" | "after the merge" | "branch only";
+type Remote = "none" | "before the merge" | "after the merge" | "branch only" | "fast-forward, then a local merge";
 
 /**
  * A project whose held branch agent/issue-7 was merged by hand. `remote` is what origin has: nothing,
  * the base as it was before the merge, the base with the merge pushed, or only the branch's commit
- * pushed to the base (its tip is on origin's base, the merge commit is not).
+ * pushed to the base (its tip is on origin's base, the merge commit is not), or the branch fast-forwarded
+ * into the base and pushed, with another branch merged on top locally since.
  * `fromRun` records the ticket as held in run.json (the live view's row) instead of only in the outcomes.
  */
 const repo = (remote: Remote, fromRun: boolean) => {
@@ -43,7 +44,16 @@ const repo = (remote: Remote, fromRun: boolean) => {
   git(root, "commit", "-qm", "the work");
   if (remote === "branch only") git(root, "push", "-q", "origin", "agent/issue-7:main");
   git(root, "checkout", "-q", "main");
-  git(root, "merge", "--no-ff", "-qm", "Merge agent/issue-7", "agent/issue-7");
+  if (remote === "fast-forward, then a local merge") {
+    git(root, "merge", "--ff-only", "-q", "agent/issue-7");
+    git(root, "push", "-q", "origin", "main");
+    git(root, "checkout", "-q", "-b", "other");
+    writeFileSync(join(root, "other.txt"), "other\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "other work");
+    git(root, "checkout", "-q", "main");
+    git(root, "merge", "--no-ff", "-qm", "Merge other", "other");
+  } else git(root, "merge", "--no-ff", "-qm", "Merge agent/issue-7", "agent/issue-7");
   if (remote === "after the merge") git(root, "push", "-q", "origin", "main");
   if (remote !== "none") git(root, "fetch", "-q", "origin");
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
@@ -84,9 +94,11 @@ const rowOf = (root: string) => {
 for (const fromRun of [false, true]) {
   const via = fromRun ? "a held ticket in the run record" : "an outcome with no commits";
   test(`status: a hand merge already on origin's base drops "closes on push" (${via})`, () => {
-    const row = rowOf(repo("after the merge", fromRun));
-    assert.match(row, /merged .*merged by hand/, row);
-    assert.doesNotMatch(row, /closes on push/, row);
+    for (const remote of ["after the merge", "fast-forward, then a local merge"] as const) {
+      const row = rowOf(repo(remote, fromRun));
+      assert.match(row, /merged .*merged by hand/, `${remote}: ${row}`);
+      assert.doesNotMatch(row, /closes on push/, `${remote}: ${row}`);
+    }
   });
 
   test(`status: a hand merge not yet pushed keeps "closes on push" (${via})`, () => {
