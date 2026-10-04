@@ -41,7 +41,7 @@ test("the pipeline writes the lines with the green head and reads them back for 
   // Without the record, a land-only branch's lines start empty and its landing lists none.
   assert.match(src, /const changelog: string\[\] = landOnly \? \[\.\.\.\(readHeads\(project\.root\)\[issue\.id\]\?\.changelog \?\? \[\]\)\] : \[\];/);
   // Written even when undefined, so a later green head with no lines replaces an earlier one.
-  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote, gates: gated\.gates, changelog: changelogNote \}\)/);
+  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote, gates: gated\.gates, changelog: changelogNote, changelogDropped: changelogDropped \|\| undefined \}\)/);
   // The same lines the outcome carries to the run record.
   assert.match(src, /changelog: changelogNote,/);
 });
