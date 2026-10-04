@@ -333,10 +333,10 @@ test("a merged tree that is red is requeued once too, and a second red holds it"
     return outcome(root, issue.id, { carried: attempt > 1 });
   };
   const r = await run(root, ["1", "2"], pipeline, together);
-  assert.deepEqual(r.sentBack, ["2: requeued after red with #1"]);
+  assert.deepEqual(r.sentBack, ["2: requeued after red on the merged tree (gate test)"]);
   const two = r.final.find((f) => f.issue === "2")!;
-  assert.deepEqual(two.landed, { kind: "red", with: ["1"], gates: ["test"] });
-  assert.equal(r.states["2"].note, "red again with #1 after a requeue");
+  assert.deepEqual(two.landed, { kind: "red", with: [], gates: ["test"] });
+  assert.equal(r.states["2"].note, "red again on the merged tree after a requeue (gate test)");
   assert.equal(r.attempts.get("2"), 2);
   assert.deepEqual(mergeOrder(root), ["1"]);
 });
@@ -488,7 +488,7 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
     told.flatMap((c) => (c.kind === "requeued" ? [[c.id, c.again]] : [])),
     [
       ["2", { kind: "conflict", with: ["1"] }],
-      ["3", { kind: "red", with: ["1"] }],
+      ["3", { kind: "red", with: ["1"], gates: ["test"] }],
     ],
   );
   assert.deepEqual(n, { 2: [1, 2], 3: [1, 2], 4: [1], 5: [1], 6: [1] });
@@ -496,7 +496,7 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
     Object.fromEntries([...endings].map(([id, e]) => [id, e.kind === "landing" ? [e.landed.kind, e.attempts] : e.kind])),
     { 2: ["conflict", 2], 3: ["merged", 2], 4: ["merged", 1], 5: ["not-landed", 1], 6: ["held", 1] },
   );
-  assert.equal(requeuedLine("red", []), "requeued after red");
+  assert.equal(requeuedLine("red", []), "requeued after red on the merged tree");
   assert.equal(requeuedLine("conflict", ["1"]), "requeued after conflict with #1");
   assert.equal(againLine("conflict", ["1", "3"]), "conflicted again with #1, #3 after a requeue");
 });
@@ -552,13 +552,13 @@ test("red, requeued, red again: no doubled 'red', and the comment names both att
       return { kind: "green", green: waiting(t.id) };
     },
   }));
-  assert.equal(requeued, "requeued after red with #1");
-  assert.equal(r.seen.line("2"), "red again with #1, #3 after a requeue");
+  assert.equal(requeued, "requeued after red with #1 (gate test)");
+  assert.equal(r.seen.line("2"), "red again with #1, #3 after a requeue (gate test)");
   // Red at landing again is still `red`, the kind every reader decides on, whatever the line says.
   assert.equal(r.seen.outcomes.get("2")?.kind, "red");
-  assert.equal(r.written()["2"].note, "red again with #1, #3 after a requeue");
+  assert.equal(r.written()["2"].note, "red again with #1, #3 after a requeue (gate test)");
   assert.deepEqual(r.seen.landed("2"), { kind: "red", with: ["1", "3"], gates: ["test"] });
-  assert.match(r.seen.comment("2") ?? "", /since this branch forked: #1, #3/);
+  assert.match(r.seen.comment("2") ?? "", /since this branch forked, changing a file it also changed: #1, #3/);
 });
 
 test("a first red or conflict that is not requeued keeps the plain outcome lines", async () => {
@@ -577,10 +577,10 @@ test("a first red or conflict that is not requeued keeps the plain outcome lines
       return { kind: "green", green: waiting(t.id) };
     },
   }));
-  assert.equal(r.seen.line("2"), "red when merged with #1");
+  assert.equal(r.seen.line("2"), "red when merged with #1 (gate test)");
   assert.equal(r.seen.line("3"), "merge conflict: with #1: a.txt, b.txt, c.txt and 1 more");
-  assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1" }, "conflict", ["1"]]);
-  assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1"]);
+  assert.deepEqual([r.seen.outcomes.get("2"), r.seen.outcomes.get("3")?.kind, r.seen.outcomes.get("3")?.with], [{ kind: "red", with: ["1"], text: "red when merged with #1 (gate test)" }, "conflict", ["1"]]);
+  assert.deepEqual([r.written()["2"].state, r.written()["2"].note], ["red", "red with #1 (gate test)"]);
   assert.deepEqual(r.seen.said, []);
 });
 
@@ -630,9 +630,9 @@ test("requeued, then the run stops: the first outcome stands, and the status vie
   assert.deepEqual([r.seen.landed("2")?.kind, r.seen.landed("3")?.kind], ["conflict", "red"]);
   assert.equal(accountLanding(r.seen.ledger.entries.values()).notLanded, 2);
   assert.equal(r.seen.line("2"), "merge conflict: with #1: shared.txt");
-  assert.equal(r.seen.line("3"), "red when merged with #1");
+  assert.equal(r.seen.line("3"), "red when merged with #1 (gate test)");
   assert.deepEqual([r.written()["2"].state, r.written()["2"].note, r.written()["2"].requeued], ["conflict", "with #1: shared.txt", null]);
-  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "red with #1", null]);
+  assert.deepEqual([r.written()["3"].state, r.written()["3"].note, r.written()["3"].requeued], ["red", "red with #1 (gate test)", null]);
   assert.deepEqual(r.seen.dropped, []);
 });
 

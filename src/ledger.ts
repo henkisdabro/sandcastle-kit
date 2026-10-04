@@ -20,7 +20,7 @@ import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { type Gate, gateLine } from "./gates.ts";
 import { largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
-import { againNoteOf, conflictLine, type Landable, type Landed, requeuedLine } from "./landing.ts";
+import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
 import { overrunLine } from "./report.ts";
 import { HANDED_BACK, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
@@ -126,12 +126,15 @@ export const partlyDoneComment = (
 export const notLandedComment = (
   report: string | undefined,
   conflict: { branch: string; base: string; files: string[]; with: string[] } | undefined,
-  red?: { branch: string; base: string; with: string[]; gates: string[] },
+  red?: { branch: string; base: string; with: string[]; gates: string[]; failing?: string[] },
 ): string | undefined => {
   if (red) {
     return (
       `Sandcastle ran this ticket and did not land it: \`${red.branch}\` was green on its own, but merged into \`${red.base}\` the gates were red (${red.gates.join(", ")}). ` +
-      (red.with.length ? `Landed on \`${red.base}\` since this branch forked: ${red.with.map(refOf).join(", ")}. ` : "") +
+      (red.failing?.length ? `Failing: ${red.failing.join(", ")}. ` : "") +
+      (red.with.length
+        ? `Landed on \`${red.base}\` since this branch forked, changing a file it also changed: ${red.with.map(refOf).join(", ")}. `
+        : "Red on the merged tree: no ticket landed since this branch forked changed a file it changed. ") +
       `Nothing was merged. The next run merges \`${red.base}\` into the branch and tries again.` +
       (report === undefined ? "" : `\n\nWhat the agents reported:\n\n${report}`)
     );
@@ -223,12 +226,12 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
           // The pair, named: which tickets this one is red with.
           record: {
             state: "red",
-            note: e.again ? againNoteOf(landed) : landed.with.length ? `red with ${refs}` : "red on the merged tree",
+            note: e.again ? againNoteOf(landed) : redNote(landed),
             ...(landed.failing?.length ? { failing: landed.failing } : {}),
           },
-          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed) : `red when merged${landed.with.length ? ` with ${refs}` : ""}` },
+          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed) : `red when merged${landed.with.length ? ` with ${refs}` : ""}${redDetail(landed)}` },
           view: { word: "red when merged", landed: false },
-          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates })),
+          tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing })),
         };
       }
       case "held": {
@@ -406,7 +409,7 @@ export const createLedger = (d: {
   // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
   let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
-    const line = requeuedLine(again.kind, again.with);
+    const line = requeuedLine(again.kind, again.with, again);
     sentBack.set(id, line);
     requeuedAs.set(id, line);
     d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));

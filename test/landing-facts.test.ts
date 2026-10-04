@@ -143,9 +143,9 @@ test("a merged tree that is red returns its failing tests, and the ledger record
   const together: Ctx["gate"] = async (box) => ((await box.exec("test -e a.txt && test -e b.txt")).exitCode === 0 ? RED : GREEN);
   const h = harness(root, { gate: together });
   await h.land("1");
-  assert.deepEqual(await h.land("2"), { kind: "red", with: ["1"], gates: ["test"], failing: ["src/pair.test.ts"] });
+  assert.deepEqual(await h.land("2"), { kind: "red", with: [], gates: ["test"], failing: ["src/pair.test.ts"] });
   assert.deepEqual(h.byLanding.filter(([id]) => id === "2"), [["2", { state: "landing" }]]);
-  assert.deepEqual(h.byLedger["2"], { state: "red", note: "red with #1", failing: ["src/pair.test.ts"] });
+  assert.deepEqual(h.byLedger["2"], { state: "red", note: "red on the merged tree (gate test; failing src/pair.test.ts)", failing: ["src/pair.test.ts"] });
 });
 
 test("a held branch, a failed close and a Touches overrun are facts landOne returns and the ledger records", async () => {
