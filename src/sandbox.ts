@@ -49,8 +49,13 @@ export const machineSettings = (): Record<string, unknown> => {
 // stderr is captured, never passed through: a failing gh or git printed its raw line ("no git
 // remotes found", "HTTP 502") above the kit's own explanation of it. It stays on the thrown
 // error's `stderr` for the caller to explain.
+//
+// `maxBuffer` is raised from execFileSync's 1 MiB: a path list (`git diff --name-only`, `ls-tree`,
+// `status`) grows with the tree, and a vendored directory or a mass rename passes 1 MiB, which
+// threw ENOBUFS on a merge that was fine. The size matches the other whole-tree listings.
+export const MAX_OUTPUT = 256 * 1024 * 1024;
 export const sh = (cmd: string, args: string[], cwd?: string, env?: Record<string, string>) =>
-  execFileSync(cmd, args, { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"], ...(env && { env: { ...process.env, ...env } }) }).trim();
+  execFileSync(cmd, args, { encoding: "utf8", cwd, stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT, ...(env && { env: { ...process.env, ...env } }) }).trim();
 
 // Who git records as the committer of a sandbox's commits and the kit's merges. Only the
 // committer: the operator stays the author (git leaves that to config), so ownership stays
