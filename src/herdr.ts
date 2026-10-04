@@ -99,6 +99,22 @@ const writeView = (root: string, view: View) => {
   writeFileSync(tmp, JSON.stringify(view) + "\n");
   renameSync(tmp, file);
 };
+/**
+ * A run that opens no view marks an earlier run's record `reported`, keeping its tab and pane ids
+ * (a later run inside Herdr still closes that tab). The record is only rewritten by a run that
+ * opens a view, so it would otherwise stay an own, unreported tab: the tab bar's tick would type
+ * the status view into its pane, ids a Herdr restart may have given to someone's shell, and
+ * `registerRun` would keep this run's live-runs file for it. Nothing to do when there is no record
+ * or it is already reported; best effort, as the view is.
+ */
+const retireViewRecord = (root: string) => {
+  try {
+    const view = JSON.parse(readFileSync(viewRecord(root), "utf8")) as View;
+    if (!view.reported) writeView(root, { ...view, reported: true });
+  } catch {
+    /* no record, or not readable: nothing for a reader to act on */
+  }
+};
 const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /**
@@ -364,7 +380,12 @@ export const openSandboxView = (
   // word on it keeps a pane per sandbox.
   mode: SandboxPanes = "all",
 ): SandboxView => {
-  if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return NONE;
+  // Every way out before this run writes its own record retires the earlier one.
+  const none = () => {
+    retireViewRecord(project.root);
+    return NONE;
+  };
+  if (!IN_HERDR || process.env.SANDCASTLE_HERDR_VIEW === "0" || panes < 1) return none();
   const logs = join(project.root, ".sandcastle/logs");
   const record = viewRecord(project.root);
   let failed = false;
@@ -382,7 +403,7 @@ export const openSandboxView = (
 
   const mine = process.env.HERDR_PANE_ID;
   const me = safe(() => (mine ? (herdrJson(["pane", "get", mine]).result.pane as { tab_id: string; workspace_id: string }) : undefined));
-  if (failed) return NONE;
+  if (failed) return none();
   const myTab = me?.tab_id;
 
   // A previous run's view is replaced, not stacked. Only ids from our own
@@ -410,7 +431,7 @@ export const openSandboxView = (
 
   // Alone in its tab, in a terminal: adopt it. The status view splits off the run's pane.
   const myTabInfo = safe(() => (myTab ? (herdrJson(["tab", "get", myTab]).result.tab as { pane_count: number; label?: string }) : undefined));
-  if (failed) return NONE;
+  if (failed) return none();
   const alone = adoptsTab(myTabInfo?.pane_count === 1, !!process.stdout.isTTY);
   let tab: string;
   let statusPane: string;
@@ -421,7 +442,7 @@ export const openSandboxView = (
       .find((p) => p.pane_id === mine)?.rect.width) ?? 0) >= 160;
     const ratio = String(layoutRatios(true, wide).status);
     const split = safe(() => herdrJson(["pane", "split", mine, "--direction", wide ? "right" : "down", "--ratio", ratio, "--cwd", project.root, "--no-focus"]));
-    if (!split) return NONE;
+    if (!split) return none();
     tab = myTab;
     statusPane = split.result.pane.pane_id as string;
     safe(() => {
@@ -437,7 +458,7 @@ export const openSandboxView = (
         "--cwd", project.root, "--no-focus",
       ]),
     );
-    if (!created) return NONE;
+    if (!created) return none();
     tab = created.result.tab.tab_id as string;
     statusPane = created.result.root_pane.pane_id as string;
     workspace = created.result.tab.workspace_id as string;
