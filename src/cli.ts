@@ -6,13 +6,15 @@
 //                    check this machine and (inside a repo) this project are
 //                    set up; prints what is missing and how to fix it;
 //                    --verify also asks GitHub and Anthropic whether the tokens are accepted
-//   run [TICKET ...] [--dry] [--concurrency N] [--detach]
+//   run [TICKET ...] [--dry] [--concurrency N] [--detach] [--api-key]
 //                    burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge;
 //                    the arguments are the same as TICKETS, DRY_RUN and CONCURRENCY;
 //                    --detach (or SANDCASTLE_DETACH=1) starts it as a process of its own,
 //                    output in .sandcastle/logs/run-output.log, and returns once it is going
-//                    (not with autonomy level 1, which asks a question a detached run cannot)
+//                    (not with autonomy level 1, which asks a question a detached run cannot);
+//                    a run that would spend ANTHROPIC_API_KEY asks first, and without a
+//                    terminal needs --api-key (or SANDCASTLE_API_KEY=1), which is the yes
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
@@ -31,7 +33,9 @@
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
 //   build [--force]  build the base and project images
-//   preflight        one reply from every model, nothing else
+//   preflight [--api-key]
+//                    one reply from every model, nothing else; asks first, as a run
+//                    does, when it would spend ANTHROPIC_API_KEY
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
 //                    GitHub issues or ticket files; see README, Trackers); no model calls
 //   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
@@ -51,10 +55,12 @@
 //   preview          dry-merge every unlanded agent branch onto the base, oldest first,
 //                    in the project image; lists clean and conflicting branches with their
 //                    files; merges nothing; no model calls
-//   lean [--measure] what the repo's skills, agents, MCP servers and plugins
+//   lean [--measure] [--api-key]
+//                    what the repo's skills, agents, MCP servers and plugins
 //                    would cost each sandbox, which hooks are kept and whether
 //                    they can run in the image; --measure runs one real turn
-//                    with and without the extras
+//                    with and without the extras (asking first, as a run does,
+//                    when it would spend ANTHROPIC_API_KEY)
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
@@ -67,13 +73,14 @@
 //                    and keys to Herdr's config (shows them and asks first); --remove
 //                    takes all of it out. Works from anywhere
 //
-// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, SANDCASTLE_API_KEY:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
+import { confirmApiKey } from "./api-key.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
@@ -89,7 +96,7 @@ import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { cleanProject, ensureImage, KIT, machineSettings } from "./sandbox.ts";
+import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
@@ -180,6 +187,7 @@ try {
       }
       if (given.dry) process.env.DRY_RUN = "1";
       if (given.concurrency !== undefined) process.env.CONCURRENCY = String(given.concurrency);
+      if (given.apiKey) process.env.SANDCASTLE_API_KEY = "1";
       // The same run again, as a process of its own. Everything a run refuses on is refused here,
       // before a process starts; the child (SANDCASTLE_DETACHED) runs the checks again for itself.
       if ((given.detach || process.env.SANDCASTLE_DETACH === "1") && process.env.SANDCASTLE_DETACHED !== "1") {
@@ -195,6 +203,8 @@ try {
             `Another sandcastle run of this project is live (pid ${owner}). One run per project at a time: \`sandcastle wait\` blocks until it ends, \`sandcastle stop\` stops it.`,
           );
         }
+        // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
+        await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
         const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR });
         for (const line of started.lines) console.log(line);
         process.exitCode = started.code;
@@ -214,12 +224,14 @@ try {
       // Read before burndown, so a bad level is refused before Docker or any spend.
       const project = await loadProject(root);
       // The run's settings, resolved once: every turn's record carries them.
-      const settings = resolveSettings({ env: process.env, project, machine: machineSettings() });
+      const settings = resolveSettings({ env: process.env, project, machine: machineSettings(), apiKey: !!projectApiKeySpend(project) });
       const level = settings.autonomy;
       sandboxPanes(project);
       checkUsageSettings();
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
       for (const line of upgradeLines(root, KIT, false)) console.log(line);
+      // Once for the whole run, every turn included, and before any image, sandbox or model call.
+      await confirmApiKey(projectApiKeySpend(project), "This run", { ask: (q) => askingInPane("asks whether to bill API credits", () => confirm(q)) });
       // `drain` keeps its own tally: each turn still prints its closing report, and the last line
       // says how many turns ran, what they landed and why the loop stopped.
       const drain = { turns: 0, landed: 0, last: undefined as DrainTurn | undefined, inRun: new Set<string>(), unblocked: [] as string[], cause: undefined as string | undefined };
@@ -317,7 +329,7 @@ try {
       // the last run's as if they were next.
       let next = "{}";
       try {
-        next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings() }), 1));
+        next = JSON.stringify(settingsGroup(resolveSettings({ env: process.env, project, machine: machineSettings(), apiKey: !!projectApiKeySpend(project) }), 1));
       } catch {}
       const r = spawnSync(join(KIT, "status.sh"), args, {
         stdio: "inherit",
@@ -378,6 +390,8 @@ try {
     }
     case "preflight": {
       const project = await loadProject(root);
+      if (args.includes("--api-key")) process.env.SANDCASTLE_API_KEY = "1";
+      await confirmApiKey(projectApiKeySpend(project), "Preflight");
       await preflight(project, await ensureImage(project));
       break;
     }
@@ -509,6 +523,11 @@ try {
     case "lean": {
       const project = await loadProject(root);
       const p = leanPlan(project);
+      // Asked before the image and the report, so a no costs nothing.
+      if (args.includes("--measure")) {
+        if (args.includes("--api-key")) process.env.SANDCASTLE_API_KEY = "1";
+        await confirmApiKey(projectApiKeySpend(project), "lean --measure");
+      }
       leanReport(project, p);
       const image = await ensureImage(project);
       reportHookCheck(checkHooks(project, image, p), p.hooks.length);

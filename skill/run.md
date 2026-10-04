@@ -24,10 +24,18 @@ This continues SKILL.md: run its "Before every action" first.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. Offer
      `USAGE_CHECK=1` if the plan is close to its limit (it applies only when the sandboxes spend
-     `CLAUDE_CODE_OAUTH_TOKEN`, and with `ANTHROPIC_API_KEY` it says it does not apply; it reads usage
+     `CLAUDE_CODE_OAUTH_TOKEN`, and with `ANTHROPIC_API_KEY`, alone or beside it, it says it does not apply; it reads usage
      with the host's Claude Code login, read-only, else that token; a `claude setup-token` token gets
      HTTP 403 and cannot use the guard, and `sandcastle doctor --verify` shows which credential it
      would use and whose plan that is).
+   - **API credits.** If `sandcastle doctor` prints a `warn API credits` line, an
+     `ANTHROPIC_API_KEY` (in the personal or the project `.env`) reaches the sandboxes, and Claude
+     Code spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: the run bills API credits, not the plan.
+     Say so, naming the file the line names, before asking for the yes, and offer the other way:
+     removing the key. The run itself asks, or with no terminal refuses without `--api-key`; add
+     `--api-key` (or `SANDCASTLE_API_KEY=1`) only when the user has said yes to billing API credits
+     in so many words - a yes to the run is not that yes. `sandcastle preflight` and
+     `sandcastle lean --measure` ask the same.
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
@@ -52,7 +60,8 @@ This continues SKILL.md: run its "Before every action" first.
    or tab of your own. It checks what a run checks (clean tree, no other run, autonomy level),
    starts the run as a process of its own that outlives this session, and returns once the run is
    going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
-   `drain`, or run it attached (below). Inside Herdr the run opens a tab of its own holding only
+   `drain`, or run it attached (below); and it refuses a run that would bill API credits unless
+   given `--api-key`, which only the user's own yes to that (step 1) allows. Inside Herdr the run opens a tab of its own holding only
    the status view, which is the one status view; expect no pane per sandbox unless the config
    sets `herdr.panes: "all"` (the sidebar carries the run). It prints:
 

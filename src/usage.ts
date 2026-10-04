@@ -11,7 +11,7 @@
 //
 // The guard applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`):
 // with `ANTHROPIC_API_KEY` they spend API credits, which no plan's usage describes, so it says it does
-// not apply. Then the token comes from the host's Claude Code login when there is a readable one
+// not apply - beside an OAuth token too, since Claude Code puts the API key first. Then the token comes from the host's Claude Code login when there is a readable one
 // (`usageToken`): a `claude setup-token` token is inference-only and the endpoint answers it 403, while
 // the login's access token carries the `user:profile` scope. The kit cannot tell whether the login and
 // the token are one account, so the start line and `doctor --verify` say whose plan is read. It is read on the host, at each reading, and only
@@ -91,10 +91,10 @@ export const hostLoginReaders: LoginReaders = {
 
 /**
  * The token a usage reading is made with, when the sandboxes spend a subscription token
- * (`CLAUDE_CODE_OAUTH_TOKEN` in `env`, which wins over an API key as in `credentialSource`): the
- * host's Claude Code login (macOS keychain, else the credentials file) while it has not expired, else
- * that token. With no such token the host login is never read: an API key is `api key` (no plan is
- * spent), and nothing at all is nothing. An
+ * (`CLAUDE_CODE_OAUTH_TOKEN` in `env` and no `ANTHROPIC_API_KEY`, which Claude Code spends first, as
+ * `credentialSource` has it): the host's Claude Code login (macOS keychain, else the credentials file)
+ * while it has not expired, else that token. Otherwise the host login is never read: an API key is
+ * `api key` (no plan is spent), and nothing at all is nothing. An
  * expired login is its own answer, not a reason to fall back: the setup token would only get a 403,
  * which turns the guard off for the whole run, while the login comes back when Claude Code next
  * refreshes it. A missing or unreadable login (no entry, malformed JSON, no access token) falls
@@ -106,7 +106,8 @@ export const usageToken = (
   readers: LoginReaders = hostLoginReaders,
   now = Date.now(),
 ): UsageToken => {
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN) return env.ANTHROPIC_API_KEY ? { source: "api key" } : undefined;
+  if (env.ANTHROPIC_API_KEY) return { source: "api key" };
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) return undefined;
   const login = (() => {
     try {
       const raw = platform === "darwin" ? readers.keychain() : readers.file();

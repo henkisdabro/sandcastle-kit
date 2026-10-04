@@ -27,6 +27,7 @@ import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, type Gate, type GateRun, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
@@ -43,7 +44,7 @@ import {
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { credentials, ensureImage, errorLine, machineSettings, ownCommits, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -1142,6 +1143,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   }
   // After the ticket list, not before its header: the shared-file lines are indented under it.
   holds.start(schedule.start);
+  // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
+  const spend = projectApiKeySpend(project);
+  if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();

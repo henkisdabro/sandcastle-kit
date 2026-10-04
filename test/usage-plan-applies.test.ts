@@ -1,5 +1,5 @@
 // The usage guard reads the host's Claude Code login only when the sandboxes spend a subscription
-// token (CLAUDE_CODE_OAUTH_TOKEN): with ANTHROPIC_API_KEY it says it does not apply, and where it
+// token (CLAUDE_CODE_OAUTH_TOKEN): with ANTHROPIC_API_KEY, alone or beside it, it says it does not apply, and where it
 // reads, the start line and `doctor --verify` say whose plan that is. Injected login readers, a
 // stubbed fetch and a stub `security`; no real keychain, network or model calls.
 //
@@ -32,8 +32,13 @@ test("with no credential at all the host login is not read either", () => {
   assert.equal(usageToken({}, "linux", readers, NOW), undefined);
 });
 
-test("a subscription token wins over an API key, as the kit's credentialSource has it, and the login is read", () => {
-  assert.deepEqual(usageToken({ CLAUDE_CODE_OAUTH_TOKEN: "setup", ANTHROPIC_API_KEY: "sk-ant-api03-fake" }, "linux", readers, NOW), { source: "login", token: "login-token-xyz" });
+test("an API key wins over a subscription token, as Claude Code spends it first: the guard does not apply and the login is not read", () => {
+  const unread = { keychain: () => assert.fail("the login is not read") as never, file: () => assert.fail("the login is not read") as never };
+  assert.deepEqual(usageToken({ CLAUDE_CODE_OAUTH_TOKEN: "setup", ANTHROPIC_API_KEY: "sk-ant-api03-fake" }, "linux", unread, NOW), { source: "api key" });
+});
+
+test("a subscription token alone reads the login", () => {
+  assert.deepEqual(usageToken({ CLAUDE_CODE_OAUTH_TOKEN: "setup" }, "linux", readers, NOW), { source: "login", token: "login-token-xyz" });
 });
 
 const withFetch = async (body: () => Promise<void>) => {

@@ -252,22 +252,46 @@ export const HOST_ONLY_KEYS = ["LINEAR_API_KEY"];
 
 const readEnv = (file: string) => (existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {});
 
+/** The credentials files, in the order `credentials` merges them: the user file, then the project's on top. */
+const credentialFiles = (project: Project) => [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
+
 /**
- * Which key and file the Claude credential came from, for a message that names it (never the value):
- * the OAuth token if set, else the API key; the project's file when it defines the key (it overrides the user file).
+ * Which key and file the Claude credential the sandboxes spend came from, for a message that names it
+ * (never the value): the API key if set, else the OAuth token - Claude Code's own order, so with both
+ * set the key named is the one billed; the project's file when it defines the key (it overrides the user file).
  */
 export const credentialSource = (project: Project): { key: string; file: string } | undefined => {
-  const files = [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
+  const files = credentialFiles(project);
   const [user, local] = files.map(readEnv);
-  for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]) {
+  for (const key of ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]) {
     if (local[key]) return { key, file: files[1] };
     if (user[key]) return { key, file: files[0] };
   }
   return undefined;
 };
 
+/**
+ * An API key the sandboxes would spend: `file` is the one its value comes from (the last of `files`
+ * that sets it), `files` every one that sets it (removing it means removing it from each), and
+ * `oauth` the file of a `CLAUDE_CODE_OAUTH_TOKEN` beside it, which Claude Code then ignores.
+ */
+export type ApiKeySpend = { file: string; files: string[]; oauth?: string };
+
+/** The API key `files` (merged key by key, later over earlier) would put in a sandbox, or undefined when none would. */
+export const apiKeySpend = (files: string[]): ApiKeySpend | undefined => {
+  const read = files.map((file) => ({ file, env: readEnv(file) }));
+  const setting = (key: string) => read.filter((r) => r.env[key]).map((r) => r.file);
+  const keyFiles = setting("ANTHROPIC_API_KEY");
+  if (!keyFiles.length) return undefined;
+  const oauth = setting("CLAUDE_CODE_OAUTH_TOKEN").at(-1);
+  return { file: keyFiles.at(-1)!, files: keyFiles, ...(oauth ? { oauth } : {}) };
+};
+
+/** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
+export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
+
 export const credentials = (project: Project): Record<string, string> => {
-  const files = [join(USER_CONFIG, ".env"), join(project.root, ".sandcastle/.env")];
+  const files = credentialFiles(project);
   const env: Record<string, string | undefined> = { ...readEnv(files[0]), ...readEnv(files[1]) };
   for (const k of HOST_ONLY_KEYS) delete env[k];
   // Sandcastle forwards every key of the project's .sandcastle/.env into the

@@ -81,9 +81,11 @@ test("the credential comes from the project's file when it defines the key, else
   writeFileSync(userFile, "ANTHROPIC_API_KEY=sk-user\nGH_TOKEN=github_pat_x\n");
   assert.deepEqual(credentialSource(project), { key: "ANTHROPIC_API_KEY", file: userFile });
 
+  // Both: the API key, which Claude Code spends first, is the one named.
   writeFileSync(userFile, "CLAUDE_CODE_OAUTH_TOKEN=tok-user\nANTHROPIC_API_KEY=sk-user\n");
-  assert.deepEqual(credentialSource(project), { key: "CLAUDE_CODE_OAUTH_TOKEN", file: userFile });
+  assert.deepEqual(credentialSource(project), { key: "ANTHROPIC_API_KEY", file: userFile });
 
+  writeFileSync(userFile, "CLAUDE_CODE_OAUTH_TOKEN=tok-user\n");
   writeFileSync(projectFile, "CLAUDE_CODE_OAUTH_TOKEN=tok-project\n");
   assert.deepEqual(credentialSource(project), { key: "CLAUDE_CODE_OAUTH_TOKEN", file: projectFile });
 });
