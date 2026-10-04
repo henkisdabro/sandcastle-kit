@@ -12,6 +12,8 @@ import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
+import { KIT_CACHE } from "./live-runs.ts";
+import { withLock } from "./pool.ts";
 import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
@@ -362,11 +364,23 @@ const build = (tag: string, dockerfile: string, args: Record<string, string>, pu
   }
 };
 
+// A docker call that fails is a refusal naming what it was doing and docker's own message, not the
+// stack trace of the exec error.
+const dockerCall = (what: string, args: string[]) => {
+  try {
+    return sh("docker", args);
+  } catch (e) {
+    const { stderr, message } = e as { stderr?: string | Buffer; message: string };
+    const said = String(stderr ?? "").trim() || message;
+    throw new OperatorError(`Docker failed ${what} (docker ${args.join(" ")}): ${said}`);
+  }
+};
+
 // A superseded tag of the same repository is removed once its successor is
 // built; these images are several GB each. An image a container still uses
 // is left alone (docker refuses), and so is any other repository.
 const prune = (repo: string, keep: string) => {
-  const tags = sh("docker", ["image", "ls", repo, "--format", "{{.Repository}}:{{.Tag}}"]).split("\n").filter(Boolean);
+  const tags = dockerCall("listing the images of " + repo, ["image", "ls", repo, "--format", "{{.Repository}}:{{.Tag}}"]).split("\n").filter(Boolean);
   for (const t of tags.filter((t) => t !== keep && !t.endsWith(":latest"))) {
     try {
       sh("docker", ["image", "rm", t]);
@@ -390,17 +404,31 @@ export const baseImage = (versions: Pick<Versions, "claude" | "codex">) => {
   return { file, ids, tag: `sandcastle-base:${hash(file, ...Object.values(ids))}` };
 };
 
+/** The lock the base image's build, prune and tag are taken under, machine-wide. */
+export const BASE_LOCK = join(KIT_CACHE, "locks", "base-image.lock");
+
 /** `versions` is what the caller already resolved and showed; left out, they are resolved here. */
 export const ensureImage = async (project: Project, force = false, versions?: Versions): Promise<string> => {
   const { file: baseFile, ids, tag: baseTag } = baseImage(versions ?? (await resolveVersions(project)));
-  if (force || !imageExists(baseTag)) {
-    // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
-    // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
-    build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
-    prune("sandcastle-base", baseTag);
-  }
-  // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
-  sh("docker", ["tag", baseTag, "sandcastle-base:latest"]);
+  // The whole base step is one machine-wide critical section, for any base tag: projects share the
+  // images, and every project rebuilds after an update. Two builds of one tag race to `docker tag` an
+  // image the other is still making, and two tags (each project's Claude Code version is in it) have
+  // each prune the other's fresh image. The second waits, then finds the image built.
+  await withLock(
+    BASE_LOCK,
+    `${project.name} ${baseTag}`,
+    () => {
+      if (force || !imageExists(baseTag)) {
+        // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
+        // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
+        build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
+        prune("sandcastle-base", baseTag);
+      }
+      // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
+      dockerCall(`tagging ${baseTag} as sandcastle-base:latest`, ["tag", baseTag, "sandcastle-base:latest"]);
+    },
+    (owner) => console.log(`Waiting for another sandcastle build of the base image${owner ? ` (pid ${owner})` : ""} to finish ...`),
+  );
   if (!project.dockerfile) {
     // Written by hand from the template, it does nothing until the config names it.
     if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {

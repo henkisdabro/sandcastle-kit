@@ -46,7 +46,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import type { RunRecord } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
@@ -221,6 +221,35 @@ process.on("exit", () => {
   for (const file of waiting) rmSync(file, { force: true });
   if (joined) rmSync(joined.file, { force: true });
 });
+
+/**
+ * Runs `fn` holding the lock `file` (its directory made), waiting while a live process of the kit
+ * holds it: the lock a step that must not overlap another project's takes, as the base image's
+ * build does. `onWait` is told the owner's pid once, when the lock was taken; `pollMs` is how
+ * often a wait looks again. A lock whose owner died is taken over by `takeLock`, and one this
+ * process still holds at exit is released.
+ */
+export const withLock = async <T>(file: string, label: string, fn: () => Promise<T> | T, onWait?: (owner?: number) => void, pollMs = 1000): Promise<T> => {
+  mkdirSync(dirname(file), { recursive: true });
+  let told = false;
+  let taken = takeLock(file, label);
+  while (!taken.mine) {
+    if (!told) {
+      told = true;
+      onWait?.(taken.owner);
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+    taken = takeLock(file, label);
+  }
+  const { mine } = taken;
+  held.set(file, mine);
+  try {
+    return await fn();
+  } finally {
+    held.delete(file);
+    releaseLock(file, mine);
+  }
+};
 
 export type SlotLock = { pid: number; run: string; label: string };
 
