@@ -17,6 +17,8 @@ import { runKit, startKit } from "./cli-spawn.ts";
 
 // An image is a file under $STATE/img. A build takes a second and logs when it starts and ends; `tag`
 // of an image that is not there fails with the daemon's words; `FAKE_TAG_FAILS` makes every tag fail.
+// With `FAKE_BUILD_HOLDS`, a build also holds until $STATE/go exists (at most 15 s), so the two
+// processes overlap however unevenly a loaded machine starts them.
 const DOCKER = `#!/bin/sh
 img="$FAKE_DOCKER_STATE/img"
 mkdir -p "$img"
@@ -35,6 +37,10 @@ case "$1" in
     tag="$2"
     echo "start $tag" >> "$FAKE_DOCKER_STATE/log"
     sleep 1
+    if [ -n "$FAKE_BUILD_HOLDS" ]; then
+      n=0
+      while [ ! -e "$FAKE_DOCKER_STATE/go" ] && [ $n -lt 150 ]; do sleep 0.1; n=$((n + 1)); done
+    fi
     : > "$img/$(name "$tag")"
     echo "end $tag" >> "$FAKE_DOCKER_STATE/log"
     exit 0;;
@@ -81,16 +87,23 @@ const env = (m: ReturnType<typeof machine>, claude: string, extra: Record<string
   ...extra,
 });
 
-const buildInBackground = (m: ReturnType<typeof machine>, name: string, claude: string) => {
-  const child = startKit(["build"], { cwd: project(name), env: env(m, claude), stdio: ["ignore", "pipe", "pipe"] });
-  return finished(child);
+const WAITING = /Waiting for another sandcastle build of the base image/;
+
+// `hold`: the build holds until a process prints that it waits for it, then lets it go.
+const buildInBackground = (m: ReturnType<typeof machine>, name: string, claude: string, hold = false) => {
+  const child = startKit(["build"], { cwd: project(name), env: env(m, claude, hold ? { FAKE_BUILD_HOLDS: "1" } : {}), stdio: ["ignore", "pipe", "pipe"] });
+  return finished(child, hold ? join(m.state, "go") : undefined);
 };
 
-const finished = (child: ChildProcess) =>
+const finished = (child: ChildProcess, go?: string) =>
   new Promise<{ status: number | null; out: string }>((resolve) => {
     let out = "";
-    child.stdout?.on("data", (d) => (out += d));
-    child.stderr?.on("data", (d) => (out += d));
+    const add = (d: Buffer) => {
+      out += d;
+      if (go && WAITING.test(out)) writeFileSync(go, "");
+    };
+    child.stdout?.on("data", add);
+    child.stderr?.on("data", add);
     child.once("exit", (status) => resolve({ status, out }));
   });
 
@@ -98,11 +111,11 @@ const log = (m: ReturnType<typeof machine>) => (existsSync(join(m.state, "log"))
 
 test("two projects building the same new base tag build it once, and both succeed", async () => {
   const m = machine();
-  const [a, b] = await Promise.all([buildInBackground(m, "one", "1.0.0"), buildInBackground(m, "two", "1.0.0")]);
+  const [a, b] = await Promise.all([buildInBackground(m, "one", "1.0.0", true), buildInBackground(m, "two", "1.0.0", true)]);
   assert.equal(a.status, 0, a.out);
   assert.equal(b.status, 0, b.out);
   assert.equal(log(m).filter((l) => l.startsWith("start ")).length, 1, `built twice:\n${log(m).join("\n")}`);
-  assert.match(a.out + b.out, /Waiting for another sandcastle build of the base image/);
+  assert.match(a.out + b.out, WAITING);
 });
 
 test("two projects building different base tags build one after the other, each tagging its own image", async () => {
