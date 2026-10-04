@@ -1,6 +1,7 @@
 // Doctor says so when the project is a different checkout of the kit than the one running: a bare
 // `sandcastle` then runs the other checkout's code, and `./bin/sandcastle` runs the project's. An
-// ordinary project, and the kit's own checkout, get no such line. No Docker, no network.
+// ordinary project, and the kit's own checkout, get no such line; the kit's own checkout is checked
+// as a project, as it has a project config. No Docker, no network.
 //
 //   pnpm exec tsx --test test/doctor-other-checkout.test.ts
 
@@ -48,6 +49,10 @@ test("an ordinary project prints nothing new", () => {
   assert.doesNotMatch(doctor(project({ "package.json": '{ "name": "something-else" }\n' })), /different checkout/);
 });
 
-test("the kit's own checkout prints nothing new", () => {
-  assert.doesNotMatch(doctor(KIT), /different checkout/);
+test("the kit's own checkout gets no such line, and is checked as a project", () => {
+  const out = doctor(KIT);
+  assert.doesNotMatch(out, /different checkout/);
+  assert.doesNotMatch(out, /not inside a project/);
+  assert.match(out, /^project .+\n/m);
+  assert.match(out, /^ok {3}\.sandcastle\/config\.ts$/m);
 });
