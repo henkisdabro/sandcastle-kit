@@ -76,8 +76,10 @@ test("with an API key the start line says the guard does not apply, asks nothing
 test("the start line says whose plan is read: the login's account, or the token's", async () => {
   let viaLogin: string | undefined;
   let viaToken: string | undefined;
+  // A login live at the real clock, not at NOW: usageLine checks expiry against Date.now().
+  const live = JSON.stringify({ claudeAiOauth: { accessToken: "login-token-xyz", expiresAt: Date.now() + 3_600_000 } });
   await withFetch(async () => {
-    viaLogin = await usageLine({ CLAUDE_CODE_OAUTH_TOKEN: "setup" }, readers);
+    viaLogin = await usageLine({ CLAUDE_CODE_OAUTH_TOKEN: "setup" }, { keychain: () => live, file: () => live });
   });
   assert.match(viaLogin ?? "", /^Plan usage: five_hour 99% \(no new ticket starts at 90%\)\. Read for the Claude Code login's account on this machine \(the sandboxes spend CLAUDE_CODE_OAUTH_TOKEN/);
   await withFetch(async () => {

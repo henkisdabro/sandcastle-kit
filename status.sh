@@ -1415,8 +1415,22 @@ restore() {
   TTY_SAVED=""
   printf '\e[?1007h\e[?7h\e[?25h\e[?1049l'
 }
+# Ctrl-C in the run's own status pane is a person quitting the view: the view record says so
+# (`quit`), and the tab bar then leaves that shell to them instead of typing the view back into it
+# every tick (src/herdr.ts, `restartStatusView`). INT only: a Herdr server stop sends HUP, and the
+# view must come back after the restart; a TERM is nobody's choice either. One jq and a rename, as
+# the pane may be torn down before a slow trap finishes. The pane is checked against the record, so
+# the plugin's popup and a view a person opened elsewhere mark nothing.
+mark_quit() {
+  [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] && [ -f logs/herdr-view.json ] || return 0
+  local tmp="logs/herdr-view.json.$$.quit"
+  jq -c --arg pane "$HERDR_PANE_ID" 'select(.status == $pane) | .quit = true' logs/herdr-view.json >"$tmp" 2>/dev/null \
+    && [ -s "$tmp" ] && mv -f "$tmp" logs/herdr-view.json
+  rm -f "$tmp"
+}
 trap restore EXIT
-trap 'restore; exit 130' INT TERM
+trap 'mark_quit; restore; exit 130' INT
+trap 'restore; exit 130' TERM
 trap '' TTIN TTOU
 if [ -n "$TTY_SAVED" ]; then { stty -echo -icanon min 0 time 0 </dev/tty; } 2>/dev/null || TTY_SAVED=""; fi
 printf '\e[?1049h\e[?25l\e[?7l\e[?1007l\e[2J'
