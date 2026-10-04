@@ -12,6 +12,10 @@ apply it once the user agrees.
      `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
      the user that block, and once they agree run it again with `--yes`. It edits Herdr's own
      config, not the project, so it is theirs to decline.
+   - If doctor lists the Herdr plugin as `ok` but `${XDG_CACHE_HOME:-~/.cache}/sandcastle-kit/herdr-plugin-linked`
+     does not exist (the plugin was linked by an older kit), run `sandcastle herdr configure --yes`
+     once: it leaves that file, without which the status view shows no ticket links or Ctrl-click
+     hint. It replaces its own block, so running it again is safe.
    - If doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
      shows a live run above the prompt, says when a ticket needs the user, and tells the session
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the

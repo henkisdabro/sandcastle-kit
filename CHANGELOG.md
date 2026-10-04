@@ -9,6 +9,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Run `/sandcastle update` in each project, then start a new agent session.** The skill is now a
+  router with one file per action, and a session keeps the skill it loaded at its start.
+- **Run `sandcastle size` once per machine** while the pool's limits are the defaults: it
+  recommends `maxSandboxes` and `maxGates` from the container runtime's VM and, after a run, from
+  the memory sandboxes really used. It writes nothing.
+- **Inside Herdr, run `sandcastle herdr configure` again if the plugin was linked before this
+  release.** The status view's ticket links and its Ctrl-click hint now appear only where the
+  plugin is linked, and that run leaves the record the view reads. `/sandcastle update` checks it.
+- **`USAGE_CHECK=1` now works with a `claude setup-token` token.** The guard reads plan usage with
+  the host's Claude Code login instead; `sandcastle doctor --verify` says which credential it would
+  use. A project that left the guard off because it had no reading can turn it on.
+- **A project that mounts the pnpm store by hand** can switch to `pnpmStore: true`;
+  `/sandcastle update` proposes it.
+
 ### Added
 
 - **`queue --lint` flags blockers listed under a heading.** A `## Blocked by` heading over `- #12`
@@ -28,8 +44,30 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A runaway agent pass is flagged.** The status view marks a pass that has run three times its
   usual time in this project with `3x over, usually Nm` in red; AGE still turns red at twice.
 
+- **A dead run's Herdr tab shows its closing report after a restart.** When the Herdr server comes
+  back after a run was killed or died with the machine, the plugin's next tab-bar tick puts
+  `sandcastle report` in that run's status pane, once. A tab adopted from your own terminal is
+  left alone. A run that ended cleanly before a cold restart is not covered yet.
+- **The run estimate counts the gates pool.** When the tickets' gate runs, shared over `maxGates`
+  slots, take longer than the sandboxes do, they set the estimated time and the line says so; a
+  large run was priced as if its gates never waited.
+- **`sandcastle doctor --verify` names the usage guard's credential** and the HTTP status the usage
+  endpoint answers it with, never the token.
+
 ### Changed
 
+- **The usage guard reads plan usage with the host's Claude Code login**, read-only and never
+  refreshed (the macOS keychain, or `.credentials.json` in the Claude config directory), and falls
+  back to `CLAUDE_CODE_OAUTH_TOKEN`. The usage endpoint answers a `claude setup-token` token with
+  HTTP 403, so the guard had nothing to read with one.
+- **Ticket links and a new `ctrl-click a ticket for its log` hint appear in the status view inside
+  Herdr only once the plugin is linked** (`sandcastle herdr configure`): without it a click did
+  nothing. `SANDCASTLE_LINKS` still overrides.
+- **The beyond-Touches note counts docs paths as "+N docs files"**, as it does test files, so a
+  source-file overrun is no longer buried under the docs every change must edit. The closing
+  report separates a ticket's title from the note ("<title> - beyond Touches: ...").
+- **A red requeue line names the failing gate and tests**, and names a landed ticket only when it
+  changed a file the branch also changed; otherwise it says "red on the merged tree".
 - **The run estimate is a range**, from the median to the 80th percentile. It prices carried
   branches (ahead of the base, often conflicting) from earlier carried tickets, apart from fresh
   ones, and counts a `Blocked by` chain's own times, so a run of carried branches is no longer
@@ -113,6 +151,24 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   view now also checks that the process is the kit's.
 - **`sandcastle clean` unlocks each sandbox worktree only as it removes it**, and only those under
   `.sandcastle/worktrees/`, instead of unlocking every live sandbox's worktree before it starts.
+- **Suggested changelog lines are not repeated or cut off.** The closing summary showed a change
+  several agents each described once per agent, and could show an agent's whole final message as
+  one line; a line that is too long, spans list items or holds a commit sha is now left out with a
+  note.
+- **Every sandbox has a git identity before any gate runs**, so a test that makes a commit gives
+  the same result at landing, in the base gates and in a requeue's gates as on its branch, instead
+  of failing with "Author identity unknown" where no agent had worked first.
+- **A requeue on a base that has not moved goes straight to the repair**, fed the landing gate's
+  failing output, instead of running the same red gates again.
+- **A ticket repaired in both attempts around a requeue reports `repaired=2`**; the requeue reset
+  the count.
+- **The git guard no longer refuses a `git branch` command because a later command on the line has
+  `--no-ff`.** Deleting or force-moving an agent branch is still refused.
+- **The gates wait line names the project** (`<project> #N gates`), as the landing one does.
+- **The archive line gives the raw-stream limit its unit**, and an empty `XDG_CACHE_HOME` is read
+  as unset, so the machine pool's slots directory is never relative to the current directory.
+- **`landing.test.ts` no longer waits on a live run's slots**: it uses a cache directory of its
+  own, so it cannot hang, or show up as another run, while a run holds the machine.
 
 ## [0.5.0] - 2026-10-02
 
