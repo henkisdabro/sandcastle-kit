@@ -14,7 +14,7 @@ import { limit } from "./pool.ts";
 import { sizePointerNow } from "./size.ts";
 import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
-import { probeOAuth, usageToken, usageWhose } from "./usage.ts";
+import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string) => {
@@ -418,8 +418,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     if (usage?.source === "api key") console.log("info usage guard (USAGE_CHECK=1) does not apply: the sandboxes spend ANTHROPIC_API_KEY (API credits, no plan), so there is no plan usage to read");
     else if (usage && "token" in usage) {
       const status = usage.source === "login" || oauthStatus === undefined ? await probeOAuth(usage.token) : oauthStatus;
-      console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`} - ${usageWhose(usage.source)}`);
-    } else if (usage) console.log("warn usage guard (USAGE_CHECK=1) would find the Claude Code login expired, so it would have no reading until Claude Code refreshes it (any use of Claude Code does)");
+      console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`} - ${usageWhose(usage.source)} - login looked up in ${loginLocation()}`);
+    } else if (usage) console.log(`warn usage guard (USAGE_CHECK=1) would find the Claude Code login expired, so it would have no reading until Claude Code refreshes it (any use of Claude Code does) - login read from ${loginLocation()}`);
     else console.log("info usage guard (USAGE_CHECK=1) has no credential: the sandboxes spend no subscription token (CLAUDE_CODE_OAUTH_TOKEN is not set)");
     console.log();
   }

@@ -19,6 +19,7 @@
 // Claude Code out), never written anywhere, never in a sandbox's environment or mounts, never printed.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -56,11 +57,25 @@ export type LoginReaders = { keychain(): string | undefined; file(): string | un
 
 const KEYCHAIN_SERVICE = "Claude Code-credentials";
 
-/** The real readers: the macOS keychain's generic password, and `.credentials.json` under `CLAUDE_CONFIG_DIR` (else `~/.claude`). A failure is no login. */
+/**
+ * The keychain service Claude Code keeps its login under: with `CLAUDE_CONFIG_DIR` set, the name takes
+ * the first 8 hex characters of the SHA-256 of that value (a trailing slash removed first) as a suffix,
+ * so reading the plain name finds nothing, or another configuration's login; with it unset or empty, the plain name.
+ */
+export const keychainService = (configDir = process.env.CLAUDE_CONFIG_DIR) => {
+  const dir = configDir?.replace(/\/+$/, "");
+  return dir ? `${KEYCHAIN_SERVICE}-${createHash("sha256").update(dir).digest("hex").slice(0, 8)}` : KEYCHAIN_SERVICE;
+};
+
+/** Where the guard looks for the host's Claude Code login on `platform`, for `doctor --verify` to name (a service or file name, never the token). */
+export const loginLocation = (platform: NodeJS.Platform = process.platform) =>
+  platform === "darwin" ? `keychain service "${keychainService()}"` : `credentials file ${join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), ".credentials.json")}`;
+
+/** The real readers: the macOS keychain's generic password (`keychainService`), and `.credentials.json` under `CLAUDE_CONFIG_DIR` (else `~/.claude`). A failure is no login. */
 export const hostLoginReaders: LoginReaders = {
   keychain: () => {
     try {
-      return execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
+      return execFileSync("security", ["find-generic-password", "-s", keychainService(), "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
     } catch {
       return undefined;
     }
