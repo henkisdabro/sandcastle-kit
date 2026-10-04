@@ -718,8 +718,11 @@ settings_row() {
     false) set_item "${gry}○ usage-guard${off}" "" 80;;
   esac
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
+  # The next run's settings are not the ended run's: "next run:" leads the whole row, so a reader of
+  # the closing summary's recorded settings never takes this row for them.
+  [ "$SET_MARK" = "next run" ] && SET_ITEMS[0]="${gry}next run:${off} ${SET_ITEMS[0]}"
   wrap_items $(( cols - 14 )) "${SET_ITEMS[@]}"
-  if [ -n "$SET_MARK" ]; then
+  if [ "$SET_MARK" = "last run" ]; then
     # The mark ends the last line, or stands on a line of its own when that would cut the line.
     n=$(( ${#WRAPPED[@]} - 1 ))
     vlen "${WRAPPED[n]} (${SET_MARK})"

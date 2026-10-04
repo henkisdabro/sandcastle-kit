@@ -49,7 +49,7 @@ const body = (text: string, heading: string) => {
 
 test("ungatedOf reads one tag, and the last of two", () => {
   assert.equal(ungatedOf("done.\n<ungated>open the page</ungated>\n"), "open the page");
-  assert.equal(ungatedOf("<ungated>first</ungated> then <ungated>second</ungated>"), "second");
+  assert.equal(ungatedOf("<ungated>first</ungated>\nthen\n<ungated>second</ungated>"), "second");
 });
 
 test("ungatedOf ignores the placeholder, an empty tag and no tag", () => {

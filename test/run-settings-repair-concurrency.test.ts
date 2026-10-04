@@ -122,7 +122,7 @@ test("repair 0 is a greyed ○ repair, and it drops below 80 columns", () => {
 
 test("idle: the next run's repair and concurrency come from the settings passed in", () => {
   record({ settings: { repair: 1, concurrency: 4, asked: 4 } });
-  assert.equal(row(frame(100, JSON.stringify({ repair: 0, concurrency: 5, asked: 8 }))), "settings  ○ repair · concurrency 5 (asked 8) (next run)");
+  assert.equal(row(frame(100, JSON.stringify({ repair: 0, concurrency: 5, asked: 8 }))), "settings  next run: ○ repair · concurrency 5 (asked 8)");
 });
 
 test("a field the record lacks, or holds as junk, is not drawn", () => {

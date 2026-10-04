@@ -572,7 +572,7 @@ sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when the cap clamped 
 Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
 `○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
-marked `(next run)`, and a bare `status.sh` falls back to the last run's record, marked
+prefixed `next run:` (so it is not read as the ended run's recorded settings), and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
 and draws no row.
 
@@ -727,7 +727,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`. The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with any criterion left undone and changelog lines, and each branch's last outcome |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
@@ -1011,6 +1011,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
+| `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -1271,6 +1272,23 @@ any share, it is never taken from a run that holds slots: a run above its cap ke
 and shrinks as its tickets finish. The cap lives in the run's registration and ends with the run: the
 next run of the project starts uncapped. The status header's `this run` row shows it beside demand and
 share (`wants 4 · share 2 · cap 2`).
+
+**Sizing the pool.** `sandcastle size` is read-only: it reads the container runtime's VM
+(`docker info`: its CPUs and memory), the host's RAM and the free disk where images and worktrees
+live, and recommends the limits above, naming the figure that set each. Sandboxes are the smaller
+of `floor((VM memory - 2 GiB) / 1.5 GiB)` and the VM's CPUs, at least 1 and at most 12; gates are
+`floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and 1.5 GiB per sandbox are assumptions, not
+measurements, and are printed with the answer. It shows the current limits beside the
+recommendation (environment, then `config.json`, then the defaults) and says when they already
+match; it changes nothing, so you copy the numbers into your [personal settings](#personal-settings)
+yourself. It also says where the runtime's own CPU and memory setting lives (OrbStack `orb config
+set`, Docker Desktop Settings -> Resources, `podman machine set`, `colima start`; native Linux
+Docker has none) and, only when the VM has more than half of the host's RAM or all of its CPUs,
+why to lower it: leave the host room for your other apps, memory beyond what the containers use
+only grows the VM's file cache (which the host then swaps), and too few CPUs slow gates and can
+flake timing-sensitive tests (2 gates want about 8 CPUs). Applying a runtime change restarts it
+and stops a live run's containers, so wait for runs to finish first. A `docker info` that fails
+is refused with a reminder to start the runtime.
 
 ## 🩺 Troubleshooting
 

@@ -99,8 +99,8 @@ test("only what the record holds is shown: no level it lacks, no turn it lacks, 
 
 test("idle: the settings `sandcastle status` passes are the next run's, over the last run's record", () => {
   record({ settings: { autonomy: 0, turn: 1, cap: 1 } });
-  assert.equal(row(frame(100, JSON.stringify(group))), "settings  autonomy 0 1 2 [3] drain · turn 2/3 (next run)");
-  assert.equal(row(frame(80, JSON.stringify(group))), "settings  autonomy 3 · turn 2/3 (next run)");
+  assert.equal(row(frame(100, JSON.stringify(group))), "settings  next run: autonomy 0 1 2 [3] drain · turn 2/3");
+  assert.equal(row(frame(80, JSON.stringify(group))), "settings  next run: autonomy 3 · turn 2/3");
   // Passed with nothing in them (a bad level): no row, not the last run's as if it were next.
   assert.equal(row(frame(100, "{}")), undefined);
   // Not passed (a bare status.sh): the last run's record.
@@ -110,5 +110,5 @@ test("idle: the settings `sandcastle status` passes are the next run's, over the
 test("idle with no record at all draws no row, and the next run's settings still show", () => {
   rmSync(join(LOGS, "run.json"), { force: true });
   assert.equal(row(frame(100)), undefined);
-  assert.equal(row(frame(100, JSON.stringify(group))), "settings  autonomy 0 1 2 [3] drain · turn 2/3 (next run)");
+  assert.equal(row(frame(100, JSON.stringify(group))), "settings  next run: autonomy 0 1 2 [3] drain · turn 2/3");
 });

@@ -96,6 +96,20 @@ type Outcome = {
 };
 
 /**
+ * A green branch's conflict resolution the kit held (`strayChanges`). The branch is a finished one,
+ * so it reports what it carries - its commits and the gates it passed at its green head - not the
+ * nothing of a ticket that did no work.
+ */
+export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates">): Outcome => ({
+  issue,
+  branch,
+  status: "held",
+  heldNote,
+  repairs: 0,
+  ...carried,
+});
+
+/**
  * The kept worktree of a pipeline that ended with no commits: the agent finished and its commit
  * was refused (a git hook, a full disk, a signing failure), so Sandcastle kept the worktree for
  * its uncommitted files. That is not "nothing to change" - the work exists.
@@ -181,9 +195,19 @@ export const cutAtWord = (text: string, max: number): string => {
   const space = head.lastIndexOf(" ");
   return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
 };
+// The texts of every `<tag>...</tag>` an agent put on lines of its own, in order. A tag named in
+// prose - inside inline code, a fenced block or mid-sentence - is the agent explaining, not
+// reporting, and the lazy match would otherwise run from that mention to the next real closing
+// tag and record the prose between. So fenced blocks are blanked first, then the opening tag must
+// start its line and the closing tag end one (the prompts ask for "a line of its own"); the
+// content may still wrap over several lines but never holds another opening tag. A fence never closed blanks nothing: dropping a real
+// tag after a stray one costs more than reading a mention.
+const ownLineTags = (text: string, tag: string): string[] => {
+  const unfenced = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
+  return [...unfenced.matchAll(new RegExp(`^[ \\t]*<${tag}>((?:(?!<${tag}>)[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => m[1]);
+};
 const lineOf = (tag: string) => (text: string): string | undefined => {
-  const last = [...text.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))].at(-1);
-  const said = last?.[1].replace(/\s+/g, " ").trim();
+  const said = ownLineTags(text, tag).at(-1)?.replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 export const ungatedOf = lineOf("ungated");
@@ -191,12 +215,12 @@ export const ungatedOf = lineOf("ungated");
 export const unmetOf = lineOf("unmet");
 
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
-// Unlike `<ungated>` every tag counts, not the last alone: a ticket may need several lines. An
+// Unlike `<ungated>` every own-line tag counts, not the last alone: a ticket may need several lines. An
 // empty tag or the echoed placeholder "..." does not count; a line is cut at CHANGELOG_MAX.
 export const CHANGELOG_MAX = 500;
 export const changelogOf = (text: string): string[] =>
-  [...text.matchAll(/<changelog>([\s\S]*?)<\/changelog>/g)]
-    .map((m) => m[1].replace(/\s+/g, " ").trim())
+  ownLineTags(text, "changelog")
+    .map((said) => said.replace(/\s+/g, " ").trim())
     .filter((said) => said && said !== "...")
     .map((said) => cutAtWord(said, CHANGELOG_MAX));
 
@@ -739,7 +763,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; changelog?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[] }) => {
     if (DRY_RUN) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -906,7 +930,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           run.ticket(issue.id, { files: stray });
           notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
           // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
-          return { issue: issue.id, branch, status: "held", heldNote: why, commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+          return heldResolution(issue.id, branch, why, {
+            commits: ownCommits(base, branch),
+            reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
+            gates: readHeads(project.root)[issue.id]?.gates ?? [],
+          });
         }
       }
       // Review passes run on the same warm sandbox and branch. Their commits
@@ -1199,7 +1227,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
       const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, changelog: changelogNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote });
       return {
         issue: issue.id,
         branch,
