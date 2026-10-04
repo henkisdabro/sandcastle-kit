@@ -1,6 +1,6 @@
-// The skill is split across files so SKILL.md, which loads whole for every action, stays short:
-// the run action's closing hand-off lives in run.md and the update action in update.md, each
-// named in SKILL.md's prose (Codex and OpenCode do not fill $action, so they find the file from
+// The skill is split across files so SKILL.md, which loads whole for every action, stays a short
+// router: each action's steps live in a file of its own (init.md, audit.md, queue.md, run.md,
+// status.md, update.md), each named in SKILL.md's prose (Codex and OpenCode do not fill $action, so they find the file from
 // the text). This pins the split: nothing left behind, nothing lost, every pointer in place.
 //
 //   pnpm exec tsx --test test/skill-split.test.ts
@@ -30,13 +30,15 @@ test("run.md and update.md exist and are not empty", () => {
   assert.ok(update.trim().length > 0);
 });
 
-test("SKILL.md names both files in prose", () => {
-  assert.ok(skill.includes("run.md"));
-  assert.ok(skill.includes("update.md"));
+test("SKILL.md names every action file in prose, and each exists", () => {
+  for (const file of ["init.md", "audit.md", "queue.md", "run.md", "status.md", "update.md"]) {
+    assert.ok(skill.includes(file), `SKILL.md does not name ${file}`);
+    assert.ok(read(file).trim().length > 0, `${file} is empty`);
+  }
 });
 
 test("the moved text is no longer in SKILL.md", () => {
-  for (const moved of ["## 🏁 Run finished", "Reading the summary:", "pull --ff-only"]) {
+  for (const moved of ["## 🏁 Run finished", "Reading the summary", "pull --ff-only", "Brief for each subagent", "Keep the enforcement", "sandcastle run --detach", "IMPL_MODEL"]) {
     assert.ok(!skill.includes(moved), `SKILL.md still contains "${moved}"`);
   }
 });
@@ -59,10 +61,10 @@ test("run.md holds the seven summary headings, in order", () => {
   }
 });
 
-test("update.md says SKILL.md's init step wherever it points at one", () => {
-  assert.ok(!/as in init step/.test(update), "a bare `as in init step` is left");
-  assert.match(update, /as in SKILL\.md's init step 4/);
-  assert.match(update, /as in SKILL\.md's init step 6/);
+test("update.md names init.md wherever it points at an init step", () => {
+  assert.ok(!/as in (SKILL\.md's )?init step/.test(update), "an init step without its file is left");
+  assert.match(update, /as in init\.md step 4/);
+  assert.match(update, /as in init\.md step 6/);
   assert.match(update, /re-read SKILL\.md and this file before going on/);
 });
 

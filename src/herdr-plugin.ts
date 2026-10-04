@@ -302,7 +302,7 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf): Run[] => {
 export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
   const runs = liveRuns(dir, probe).sort((a, b) => Number(here(b)) - Number(here(a)));
-  return runs.length ? `🏰 ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
+  return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
 };
 
 // ---------------------------------------------------------------------------

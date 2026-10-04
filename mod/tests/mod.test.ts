@@ -524,12 +524,15 @@ test("a needs-you line keeps its place in the status line, and the mark follows 
   expect(await markNow($)).toBe("sandcastle");
 });
 
-test("a followed run in another directory leaves the mark about the session's own project", async ($, on) => {
+test("a followed run in another directory hides the mark while it lives, and the mark returns when it ends", async ($, on) => {
   const w = world(on);
   w.pid = false;
   w.file = record({ 105: { state: "merged" } }, { startedAt: OLD, ...FINISHED });
   await $.session.start(START);
   await $.skill.prompt(SKILL);
+  // The read the skill triggers is done before the run starts, so the read below is the end's own.
+  await w.clock.advance(15000);
+  await w.clock.settle();
   expect(await markNow($)).toBe("sandcastle");
   // The session started a run in /elsewhere: the registry lists it, its record names this session, its process is alive.
   w.registry = "/work\n/elsewhere\n";
@@ -540,5 +543,15 @@ test("a followed run in another directory leaves the mark about the session's ow
   const ui = await $.ui.mount({ ...band(120), surface: "terminal" });
   expect(await ui.find({ type: "Text", text: "demo" })).toBeDefined();
   await ui.unmount();
+  // The followed run's castle and counts take over: no mark above them.
+  expect(await markNow($)).toBeUndefined();
+  const before = JSON.stringify(w.store.get("ready:/work"));
+  w.other = record({ 7: { state: "merged" } }, { session: "session-1", pid: 43, ...FINISHED });
+  w.pid = false;
+  await w.clock.advance(3000);
   expect(await markNow($)).toBe("sandcastle");
+  // The followed run may be a second clone burning down this project's tracker: its end reads the
+  // count again, though the entry is minutes from due, so the mark does not return with a stale one.
+  await w.clock.settle();
+  expect(JSON.stringify(w.store.get("ready:/work"))).not.toBe(before);
 });

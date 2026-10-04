@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -94,6 +94,23 @@ test("a fetch after the last drop is thin: the base's history is not sent again"
   const total = Number(/^in-pack: (\d+)$/m.exec(git(dir, "count-objects", "-v"))![1]);
   // 120 files, their tree, the root tree and the commit: the work's own objects, not the base's 150 files again.
   assert.ok(total - held < 130, `${total - held} objects came in for a 123-object branch`);
+});
+
+// A fetch starts `git maintenance run --auto --detach`, which repacked the backup in the
+// background and raced the pack counts above (and the drop's own gc) on a loaded CI machine.
+test("a backup and a drop start no background maintenance in the backup repo", () => {
+  const root = join(TMP, "repo");
+  const p = project(root);
+  const trace = join(TMP, "git-trace.log");
+  branchWork(root, 10);
+  process.env.GIT_TRACE = trace;
+  try {
+    backupBranch(p, "agent/issue-10");
+    dropBackup(p, "agent/issue-10");
+  } finally {
+    delete process.env.GIT_TRACE;
+  }
+  assert.doesNotMatch(readFileSync(trace, "utf8"), /run_command: git maintenance run/);
 });
 
 test("a vanished branch is restored from the pruned backup after the shared .git lost its objects", async () => {

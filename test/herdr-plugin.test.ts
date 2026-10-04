@@ -127,7 +127,7 @@ test("the tab bar line: every live run, newest first; a finished or dead run's f
   register(dir, b, { orchestrator: "api", pid: process.pid, startedAt: "2026-10-02T02:00:00Z", tickets: { 1: { state: "review" } } });
   register(dir, c, { orchestrator: "done", pid: process.pid, startedAt: "2026-10-02T03:00:00Z", finishedAt: "2026-10-02T04:00:00Z" });
   register(dir, d, { orchestrator: "dead", pid: 2 ** 22 + 12345, startedAt: "2026-10-02T03:00:00Z" });
-  assert.equal(runsLine(dir, undefined, (pid) => (pid === process.pid ? everyPidIsTheKit() : undefined)), "🏰 api 0/1 · 1 working  |  shop 1/3 · 1 working · 1 needs you");
+  assert.equal(runsLine(dir, undefined, (pid) => (pid === process.pid ? everyPidIsTheKit() : undefined)), "♜ api 0/1 · 1 working  |  shop 1/3 · 1 working · 1 needs you");
   assert.equal(readdirSync(dir).length, 2, "the finished and the dead run are forgotten");
   assert.equal(runsLine(mkdtempSync(join(tmpdir(), "sandcastle-plugin-none-")), undefined, everyPidIsTheKit), "", "no run, no entry: Herdr hides an empty one");
 });

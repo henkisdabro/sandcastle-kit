@@ -12,10 +12,11 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Normalise line endings so the test reads the same checked out on either platform.
-const skill = readFileSync(join(root, "skill", "SKILL.md"), "utf8").replace(/\r\n/g, "\n");
+const read = (name: string) => readFileSync(join(root, "skill", name), "utf8").replace(/\r\n/g, "\n");
+const skill = read("SKILL.md");
 
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
-const queue = skill.match(/^## queue[\s\S]*?(?=^## |(?![\s\S]))/m)?.[0] ?? "";
+const queue = read("queue.md");
 // The fence sits inside a numbered list item, so its lines are indented; strip that.
 const brief = (queue.match(/```[a-z]*\n\s*(Brief for each subagent[\s\S]*?)```/)?.[1] ?? "")
   .replace(/^ +/gm, "");
@@ -27,8 +28,8 @@ test("the frontmatter name is sandcastle and the description fits OpenCode's lim
   assert.ok(description.length < 1024, `description is ${description.length} characters`);
 });
 
-test("the queue section holds a triage brief in a fenced block", () => {
-  assert.ok(queue.length > 0, "queue section not found");
+test("queue.md holds a triage brief in a fenced block", () => {
+  assert.ok(queue.length > 0, "queue.md is empty");
   assert.ok(brief.length > 0, "brief not found");
   const lines = brief.trim().split("\n").length;
   assert.ok(lines >= 12 && lines <= 18, `brief is ${lines} lines`);

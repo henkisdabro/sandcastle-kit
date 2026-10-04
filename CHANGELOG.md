@@ -17,9 +17,34 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The review agent checks the docs for old behaviour.** A change to what the project does now has
   the reviewer grep the README, docs, agent instructions and skill files for wording that described
   the old behaviour, and fix what is now false. The audit's docs lens checks the same.
+- **`sandcastle size`** recommends the machine pool's `maxSandboxes` and `maxGates` from the
+  container runtime's VM, names the figure that set each, shows the current limits and advises on
+  the runtime's own CPU and memory settings. It writes nothing. Once a run has been measured, it
+  sizes sandboxes from the peak memory they really used (read inside each sandbox), not an assumed
+  1.5 GiB. `sandcastle setup` and `doctor` point to it while the pool's limits are untouched defaults.
+- **Protected paths are flagged before a run.** `sandcastle queue --lint` and `sandcastle requeue`
+  warn when a ticket's `Touches:` line names a protected path (or its kept branch changed one): it
+  will always be held for a human merge. Nothing is refused.
+- **A runaway agent pass is flagged.** The status view marks a pass that has run three times its
+  usual time in this project with `3x over, usually Nm` in red; AGE still turns red at twice.
 
 ### Changed
 
+- **The run estimate is a range**, from the median to the 80th percentile. It prices carried
+  branches (ahead of the base, often conflicting) from earlier carried tickets, apart from fresh
+  ones, and counts a `Blocked by` chain's own times, so a run of carried branches is no longer
+  priced at about half its real cost.
+- **Agent tags are read only on lines of their own.** `<changelog>`, `<ungated>` and `<unmet>` named
+  in an agent's prose (or inside a code block) no longer count as the tag.
+- **Herdr's sidebar row and tab bar lead with the mod's castle tower (`♜`), in plain text**, not the
+  🏰 emoji: the same mark the Claude Code mod draws, in the terminal's own font and colour.
+- **The `/sandcastle` skill loads only what the action needs.** `SKILL.md` is now a short router
+  and each action's steps live in a file of their own (`init.md`, `queue.md`, `run.md`,
+  `status.md` beside `audit.md` and `update.md`), so a `status` check no longer loads the
+  init, queue and run instructions. The ticket-body rules (blocker line, `Touches:`, evidence)
+  are written once, in `queue.md`, and the audit follows them; long steps such as the run's
+  pre-start check are broken into checklists. An open session keeps the skill it loaded, so
+  start a new one after updating.
 - **The idle mark is drawn in sand above the prompt, not pinned in the status line.** Claude Code gives
   every pinned status line a warning triangle and its notice colour, which a mod cannot change, so
   the quiet `sandcastle · 3 ready` read as a warning and clashed with its own indicators. The mod
@@ -36,6 +61,36 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **The tip backup is pruned reliably.** Every fetch into `.sandcastle/backup.git` started git's
+  background auto maintenance, which repacked it behind the kit's back and could hold the lock the
+  kit's own prune needs, so the prune failed silently and packs piled up. The kit now runs its
+  git calls there with auto maintenance off, detached gc off and cruft packs off, so a prune ends
+  with one pack. Nothing to do.
+- **`pnpmStore` mounts the host's store-dir**, not its versioned `vN` directory, so sandboxes install
+  from the host's own store instead of building a second one nested inside it. `/sandcastle update`
+  checks a project that mounts the store by hand.
+- **Doctor checks the kit's own checkout as a project** when it has a `.sandcastle/config.ts`,
+  instead of skipping every project check as "not inside a project".
+- **The idle mark's count follows triage.** It is read again when the turn that used `/sandcastle`
+  ends, not only when the skill starts, so tickets labelled during triage show within about 15 s.
+- **A held branch merged by hand reads "merged by hand; closes on push"** in `sandcastle report`
+  (under Done) and `sandcastle status`, and `sandcastle queue` words its dependants as waiting for a
+  blocker merged locally. It used to read as a branch the agent handed back with no commits.
+- **A held conflict resolution reports what it is.** Its outcome, history and run record carry the
+  real commit count and gate results, not `commits=0` and blank gates, and Needs you gives the real
+  reason (the resolution edited files git had merged cleanly), not "changes <files>".
+- **A carried branch is not redone in full.** A branch that is only a base merge or a held
+  resolution past its last green head lands without being re-implemented and re-reviewed; a merge
+  carried from an earlier run gets the narrow review first.
+- **The pool tests take about 2 s**, not 10-100 s, and no longer slow the test gate or flake under load.
+- **Gate time no longer counts the wait for a gates slot.** The wait is recorded apart as `waitMs`
+  in `timings.jsonl`, so usual times, the "twice the usual" age and the estimate stop counting it.
+- **An ended run's settings row reads "next run:"**, so it cannot be mistaken for the settings the
+  closing summary recorded for the run that ended.
+- **The idle mark steps aside for a run this session follows in another directory.** It hid only
+  for a run of the session's own project, so a run started from a second clone drew its castle and
+  counts under a `sandcastle · 13 ready` that no longer meant anything. Any live run the band draws
+  now hides it; when that run ends the mark returns and its count is read again at once.
 - **A branch red at landing no longer shows as ready after the run.** The status view read the
   outcome "red when merged" (and "red again ... after a requeue") as nothing it knew, and drew the
   row as ready to land; it now shows gate red, like a red pipeline.

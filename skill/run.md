@@ -1,22 +1,104 @@
-# sandcastle run - closing the run
+# sandcastle run - start a burndown and close it
 
-This continues the run steps 1-3 in SKILL.md.
+This continues SKILL.md: run its "Before every action" first.
 
+1. **Check, tell, confirm.** Done when the user has said yes to the exact command, or holds it to
+   run themselves.
+   - **The tree.** `git status --porcelain` empty, the base branch checked out, and
+     `git log --oneline -5` plus `git reflog -5` look as expected (another session may be using
+     the same checkout).
+   - **The base gates.** Every run gates the base commit first and stops if a gate is red there.
+     If the project has never had a green `sandcastle gates`, run that first (no model calls)
+     rather than finding out after the image build.
+   - **Label lag.** After labelling tickets on GitHub (or a `sandcastle requeue`), give GitHub a
+     few seconds before `sandcastle run`: its label search can lag, and a run started at once may
+     miss them.
+
+   Then tell the user, before asking:
+   - **What runs.** The queue (`sandcastle queue`) and the models: a ticket whose label sets its
+     own implementer shows `[implement <model>/<effort>]` after its title there ("Models and
+     effort" below has the order). Whether it is a dry run: `DRY_RUN=1` merges and closes nothing,
+     and its agents are told to write nothing to the tracker.
+   - **What it writes.** A run comments on and closes tickets in the tracker (GitHub, or commits
+     to ticket files) and merges into the base branch locally.
+   - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
+     repair that turns it green a second review - more allowance, fewer red branches. Offer
+     `USAGE_CHECK=1` if the plan is close to its limit (a token the usage endpoint answers with
+     HTTP 403 cannot use the guard, and `sandcastle doctor --verify` shows that).
+   - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
+     When it shows another run live (its slots in use), say that the start prints a line on how
+     the machine is split - the other run's slots and demand, this run's share and a rough wait
+     for its first slot (an older kit's run is named as one that ignores shares). The split
+     applies by itself and asks nothing; quote that line once the run has printed it.
+   - **Turns.** If the config sets `autonomy` (or the user asks for `AUTONOMY_LEVEL`), say how
+     many further turns the run may take by itself. Tickets shown `[waits for ...]` form a chain,
+     and a chain whose links are all queued drains in one run: each ticket starts once its last
+     blocker lands and closes. With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
+     `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
+     in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
+     before left conflicted or released; a red ticket is not run again, and a ticket queued after
+     the run started waits for the next `sandcastle run`. A drain stops when no ticket is left to
+     run again or a stop holds: no progress, the same ticket conflicting in two turns running, a
+     red merged base, a usage limit or a stopped run, 20 turns at most.
+   - **How long.** Once the project has run before, the run prints a rough estimate at its start
+     (detached: in `.sandcastle/logs/run-output.log`); quote that once it is going, as the only
+     estimate you give.
+2. **Start it detached.** It takes hours, and a command run as your own background task has a time
+   cap, dies with your session and has no terminal - so from the project root run
+   `<env vars> sandcastle run --detach` (the same arguments as `sandcastle run`), never in a pane
+   or tab of your own. It checks what a run checks (clean tree, no other run, autonomy level),
+   starts the run as a process of its own that outlives this session, and returns once the run is
+   going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
+   `drain`, or run it attached (below). Inside Herdr the run opens a tab of its own holding only
+   the status view, which is the one status view; expect no pane per sandbox unless the config
+   sets `herdr.panes: "all"` (the sidebar carries the run). It prints:
+
+   ```
+   Run started detached (pid <pid>). Status view: pane <id> (tab <id>). Output: .sandcastle/logs/run-output.log. ...
+   ```
+
+   **Confirm that line.** Outside Herdr it says ``Status view: run `sandcastle status` ``. If the
+   command refuses, prints `The run ended at once`, or names no status view where Herdr is in use,
+   tell the user plainly that there is no run to watch. Otherwise tell them the pid, and the tab
+   and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output; the status
+   view's bottom shows its last lines while the run is live.
+
+   For a user who wants the run in their own terminal, give them the attached command to run
+   there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
+   person's terminal alone in a Herdr tab it adopts that tab.
+3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - this text then
+   ends with a note saying so - skip this step: the mod submits a prompt when the run's process
+   is gone, and that prompt is your cue for step 4. It follows the run this session started
+   wherever its project lives (a second clone, a package of a monorepo), by the session id the
+   run records; a run that `--detach` refused gets no prompt, so step 2's check still matters.
+
+   With no such note, the detached run is not your own process, so your harness never tells you
+   it finished. Right after starting it, run `sandcastle wait` as a background command your
+   harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
+   run is live, then prints the closing summary and exits with the run's exit code. A harness caps
+   a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
+   `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
+   timeout it exits 124 with the run untouched, which is no result - start the same
+   `sandcastle wait` again. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
+   user asks, and `sandcastle wait` then shows how it ended.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
-   the job; a hand-back the user can act on is. The run ends with a closing summary (`## 🏁 Run
-   finished` down to `## 👉 Next step`); `sandcastle report` prints it again at any time, from the
-   project root, with the blockers re-read and the local git state as it is now. Run it from the
-   project root and take the summary from its own stdout, not from a pane scrape. With `autonomy` set, one
-   `sandcastle run` can hold several turns, each printing its own closing summary; `sandcastle
-   report` shows only the last turn, so read the earlier turns' `Autonomy level` lines and
-   summaries from the run's output (`.sandcastle/logs/run-output.log` for a detached run;
-   `sandcastle wait` prints only the last turn's summary) before writing the hand-back. At level
-   `drain`, near its end is `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line
-   for each ticket queued after the run started: quote the cause and name those tickets in the hand-back. Then write your
-   closing message with **all seven sections, in this order, with these headings**, each one
-   present and saying "none" when empty. Copy each `## ` heading **verbatim from what `sandcastle
-   report` printed, emoji included** - retyping a heading is how the emoji get lost; the
-   headings below are the ones it prints (without the emoji when NO_COLOR is set):
+   the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
+   summary" below before writing it.
+
+   The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
+   `sandcastle report` prints it again at any time, with the blockers re-read and the local git
+   state as it is now. Run it from the project root and take the summary from its own stdout, not
+   from a pane scrape. With `autonomy` set, one `sandcastle run` can hold several turns, each
+   printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows only
+   the last: read the earlier turns' `Autonomy level` lines and summaries from the run's output
+   (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
+   `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
+   queued after the run started: quote the cause and name those tickets in the hand-back.
+
+   Then write your closing message with **all seven sections, in this order, with these
+   headings**, each one present and saying "none" when empty. Copy each `## ` heading **verbatim
+   from what `sandcastle report` printed, emoji included** - retyping a heading is how the emoji
+   get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
@@ -25,8 +107,8 @@ This continues the run steps 1-3 in SKILL.md.
       under Runnable now for the next `sandcastle run` to pick up.
       Under it, the `Settings:` line names the run's settings, and a line after it may name the switch
       that would have helped (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run
-      again; a usage guard that had no reading, so the run was not guarded): relay both unchanged and
-      add no other switch - a report with no hint has none to give.
+      again; a usage guard that had no reading, so the run was not guarded): relay both unchanged,
+      and name only the switch the report names.
    2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the tickets are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread. When it lists `Changelog lines the agents suggested`
@@ -34,12 +116,12 @@ This continues the run steps 1-3 in SKILL.md.
       Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from them.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
-      names one (`sandcastle land` leaves that ticket open), and anything that needs a decision - and each
-      ticket listed `merged - check by hand`: what the reviewer said to check, and offer to check it
-      if you can (open the page, rebuild the file) - the gates did not - and each ticket listed
+      names one (`sandcastle land` leaves that ticket open), and anything that needs a decision.
+      Each ticket listed `merged - check by hand`: what the reviewer said to check, and offer to
+      check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
-      next run picks up the remainder) - and each `needs-triage` issue
-      opened during the run (an agent or a person may have opened it): one line on what it asks, and offer the `queue` action for it.
+      next run picks up the remainder). Each `needs-triage` issue opened during the run (an agent
+      or a person may have opened it): one line on what it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
@@ -60,40 +142,63 @@ This continues the run steps 1-3 in SKILL.md.
       **one** question where a human decision is needed (for example: "Three of the unmerged
       branches failed on the same test baseline. Raise it once (recommended), or trim the rules?").
 
-   End by offering the natural follow-ups as things you can do next - fix a cause several branches share,
-   requeue a failed ticket with a note (`sandcastle requeue <n> --note "..."`), start a run for the unblocked tickets, `sandcastle clean`
-   once branches are resolved, push under the repo's rules. Offer them; do none without a yes.
+   End by offering the natural follow-ups as things you can do next - fix a cause several branches
+   share, requeue a failed ticket with a note (`sandcastle requeue <n> --note "..."`), start a run
+   for the unblocked tickets, `sandcastle clean` once branches are resolved, push under the repo's
+   rules - and do each only on a yes.
 
-   How landing reads: tickets land **while others still run**, one at a time on the landing worker,
-   as each goes green - not in a batch after the last one. So the summary's merged count
-   includes tickets that landed mid-run, `Merged <base> re-gated` is still the one check at the
-   end (it runs when two or more tickets merged), and a ticket's gates passing on its own branch
-   says nothing about the base it lands on. Two cases follow from that. **`red together with
-   #N`** (under Needs fixing) is a branch green alone but red once merged with ticket(s) that had
-   already landed: nothing was merged for it, and the fix is in how the two meet (usually a
-   shared test or file), not in the red ticket's own tests - read both diffs and the gate log
-   before blaming either. **`requeued`** (under Runnable now) is a ticket the run put back in the
-   queue itself: it needs no action from the user and runs again on the next `sandcastle run`.
-   In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
-   `ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
+## How landing reads
 
-   Reading the summary: `held` branches were green but not landed automatically - the line says
-   why: they change hooks, CI, install scripts or a `protectedPaths` path, add a file over 50 MB,
-   carry repair commits no review passed or a conflict resolution that dropped merged lines - or a
-   person marked the ticket `ready-for-human` during the run; `held` with "no commits" is a ticket an
-   agent handed back - it needs an answer, not a merge. A held branch a person has since merged by
-   hand reads "merged by hand; closes on push" under Done: nothing is left for them but the push.
-   `withdrawn` tickets were closed or
-   unqueued during the run: someone's decision, nothing to fix. `not landed` means the branch moved
-   after its gates or the merge failed for a reason other than a conflict. A run headed **Run
-   STOPPED** landed nothing after the stop (the heading says how many merged before it): it names
-   what moved - for a moved base branch, show the user the
-   commits it lists and ask whether they are theirs before offering a re-run; for a changed
-   `.git/config` or `.git/info/`, stop and have them inspect it. A red gate whose repair made
-   no commit usually means the repair agent judged the failure outside the branch - read the repair
-   log and its ticket comment, then check that gate with `sandcastle gates` before blaming the
-   branch. A run that stops with "red on <base> before any agent ran" spent no allowance: the cause
-   is the image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`). A dry
-   run ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote to the
-   tracker; show the user what changed. Unmerged branches are cleared with `sandcastle clean
-   --all` only after asking - their work is lost.
+Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
+not in a batch after the last one. So the summary's merged count includes tickets that landed
+mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
+tickets merged), and a ticket's gates passing on its own branch says nothing about the base it
+lands on. Two cases follow from that:
+
+- **`red together with #N`** (under Needs fixing) is a branch green alone but red once merged with
+  ticket(s) that had already landed: nothing was merged for it, and the fix is in how the two meet
+  (usually a shared test or file), not in the red ticket's own tests - read both diffs and the
+  gate log before blaming either.
+- **`requeued`** (under Runnable now) is a ticket the run put back in the queue itself: it needs
+  no action from the user and runs again on the next `sandcastle run`.
+
+In the status view, a landing ticket holds no sandbox slot, and the run cell's estimate reads
+`ends ~HH:MM` (when the last pipeline should finish) rather than `lands ~HH:MM`.
+
+## Reading the summary
+
+- **`held`** branches were green but not landed automatically - the line says why: they change
+  hooks, CI, install scripts or a `protectedPaths` path, add a file over 50 MB, carry repair
+  commits no review passed or a conflict resolution that dropped merged lines - or a person marked
+  the ticket `ready-for-human` during the run. `held` with "no commits" is a ticket an agent
+  handed back: it needs an answer, not a merge. A held branch a person has since merged by hand
+  reads "merged by hand; closes on push" under Done: nothing is left for them but the push.
+- **`withdrawn`** tickets were closed or unqueued during the run: someone's decision, nothing to
+  fix.
+- **`not landed`** means the branch moved after its gates or the merge failed for a reason other
+  than a conflict.
+- **Run STOPPED** in the heading: the run landed nothing after the stop (the heading says how many
+  merged before it), and it names what moved. For a moved base branch, show the user the commits
+  it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
+  or `.git/info/`, stop and have them inspect it.
+- **A red gate whose repair made no commit** usually means the repair agent judged the failure
+  outside the branch: read the repair log and its ticket comment, then check that gate with
+  `sandcastle gates` before blaming the branch.
+- **"red on <base> before any agent ran"**: the run spent no allowance, and the cause is the
+  image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).
+- **A dry run** ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote
+  to the tracker; show the user what changed.
+- Unmerged branches are cleared with `sandcastle clean --all` only after asking - their work is
+  lost.
+
+## Models and effort
+
+The kit's defaults are in its README ("Environment variables"). To change them for a project, set
+`model` or `effort` under `implement` or `review` in the project's `.sandcastle/config.ts` and
+commit it - for example `review: { effort: "medium" }`. For one run only, prefix the command with
+`IMPL_MODEL`, `IMPL_EFFORT`, `REVIEW_MODEL` or `REVIEW_EFFORT`; these win over the config. For the
+implementer the order is: the ticket's own `model:` or `effort:` label, then `IMPL_MODEL` /
+`IMPL_EFFORT`, then the config, then the kit's default - so `IMPL_MODEL` leaves a ticket with a
+`model:` label as it is; to override a label for one run, remove the label. Repair uses the
+implementer's model and effort. A run that is already going keeps its models; the change applies
+from the next one, and it never needs a change to the kit.

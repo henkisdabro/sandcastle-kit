@@ -247,8 +247,9 @@ async function look($: EngineInterface, root: string, follow = false): Promise<R
   }
   // A session that was not waiting for a run meets an old record: nothing ended on its watch.
   if (first && !armed) return undefined;
-  // The run closed or left tickets: the count is read again at the next idle look.
-  if (!follow) trigger = "run-ended";
+  // The run closed or left tickets: the count is read again at the next idle look. A followed run
+  // too - it may be a second clone of this project, burning down the same tracker.
+  trigger = "run-ended";
   const how = run.finishedAt ? `ended (exit ${run.exitCode ?? "unknown"})` : "ended without a clean exit";
   if (mine) {
     // The store keeps the old `since` until the turn this starts has begun, which may be much
@@ -424,9 +425,10 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   const shown = live.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
   const now = shown ? needing(shown) : [];
   // The line is the needs-you text while a live run needs a person, and otherwise the idle mark -
-  // unless the session root's own run is alive, when the band has it. Last, so after the end
-  // notice: the mark returns once the run is over.
-  idling = !now.length && !own && adopted;
+  // unless a run is alive, here or followed elsewhere: its castle and counts take over, and a
+  // mark above them would read as a second, stale queue. Last, so after the end notice: the mark
+  // returns once the run is over.
+  idling = !now.length && !shown && adopted;
   pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : undefined);
   await place($, idling ? await mark($, root) : undefined);
   await draw($, shown);
