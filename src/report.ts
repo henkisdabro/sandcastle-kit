@@ -71,6 +71,10 @@ export type Facts = {
   changed: Record<string, number>;
   /** Held tickets whose branch a person has merged by hand: on the base, the ticket still open until the push. */
   mergedByHand?: string[];
+  /** The part of `mergedByHand` whose ticket is already closed (the hand merge was pushed): nothing is left to close on push. */
+  mergedByHandClosed?: string[];
+  /** Held tickets whose branch is gone (`sandcastle clean`) with no merge of it on the base: nothing to review, and no merge command that would work. */
+  branchGone?: string[];
   /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
   filed?: { id: string; title: string }[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
@@ -242,7 +246,19 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     const files = git(["diff", "--name-only", `${base}...agent/issue-${id}`], root);
     if (files !== undefined) changed[id] = files.split("\n").filter(Boolean).length;
   }
-  const byHand = Object.keys(changed).filter((id) => changed[id] === 0 && mergedByHand(root, base, id));
+  // A branch with no ref has no diff: `clean` deletes one once its patches are on the base, so the merge's subject says whether it was merged.
+  const gone = Object.entries(tickets).filter(([id, t]) => t.state === "held" && changed[id] === undefined).map(([id]) => id);
+  const byHand = [...Object.keys(changed).filter((id) => changed[id] === 0), ...gone].filter((id) => mergedByHand(root, base, id));
+  const branchGone = gone.filter((id) => !byHand.includes(id));
+  let byHandClosed: string[] = [];
+  if (byHand.length) {
+    try {
+      const tracker = makeTracker(project);
+      byHandClosed = byHand.filter((id) => tracker.isClosed(id) === true);
+    } catch {
+      byHandClosed = [];
+    }
+  }
 
   // Issues opened during the run: open, carrying the triage label, created between its start
   // and its end. Agents file with the person's own token, so the author cannot say who opened
@@ -300,6 +316,8 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     stoppedBy: run.stoppedBy,
     changed,
     mergedByHand: byHand,
+    mergedByHandClosed: byHandClosed,
+    branchGone,
     filed,
     stage: run.stage,
     exitCode: run.exitCode,
@@ -380,12 +398,14 @@ export const render = (f: Facts, plain = false): string => {
   // Held work a person has merged by hand: on the base already, so not theirs to merge or redo; the push closes it.
   const byHand = ids(["held"]).filter((id) => f.mergedByHand?.includes(id));
   const held = ids(["held"]).filter((id) => !byHand.includes(id));
+  // Held, its branch cleaned away and never merged: only the ticket is left to act on.
+  const gone = held.filter((id) => f.branchGone?.includes(id));
   // Held with nothing on its branch: an agent handed it back, or a person took
   // it before any commit. There is nothing to review or merge - only a question.
-  const handedBack = held.filter((id) => f.changed[id] === 0);
+  const handedBack = held.filter((id) => f.changed[id] === 0 && !gone.includes(id));
   // Marked for a human by a person mid-run: they took it; the branch is only there if it helps.
   const takenBack = held.filter((id) => !handedBack.includes(id) && f.outcomes?.[id] === "taken back");
-  const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id));
+  const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id) && !gone.includes(id));
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
   // it runs again next time, and nothing here asks a person to act on it.
@@ -466,7 +486,10 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
   for (const id of merged.filter((id) => overrunNoted(f.tickets[id].overrun))) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
-  if (byHand.length) done.push(`${byHand.length} held, merged by hand; closes on push: ${list(byHand)}`);
+  const byHandOpen = byHand.filter((id) => !f.mergedByHandClosed?.includes(id));
+  const byHandShut = byHand.filter((id) => f.mergedByHandClosed?.includes(id));
+  if (byHandOpen.length) done.push(`${byHandOpen.length} held, merged by hand; closes on push: ${list(byHandOpen)}`);
+  if (byHandShut.length) done.push(`${byHandShut.length} held, merged by hand, and closed: ${list(byHandShut)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {
@@ -513,6 +536,7 @@ export const render = (f: Facts, plain = false): string => {
         const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
         return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
       }),
+      ...gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
       ...takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
       ...handedBack.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"}, no commits - read the agent's comment: do it yourself and close the ticket, or answer its question and requeue it`),
       // The next run finds its own merge message and closes the ticket, so
@@ -643,6 +667,7 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
+  if (gone.length) next.push(`Decide ${list(gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
   if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
