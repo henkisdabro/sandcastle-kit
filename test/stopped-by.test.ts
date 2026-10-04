@@ -91,16 +91,18 @@ setInterval(() => {}, 1000);
     await new Promise<void>((resolve, reject) => {
       const child = startNode([fixture], { env, stdio: ["ignore", "pipe", "inherit"] });
       let sent = false;
+      // Started with the signal, not the spawn: under load tsx's start-up alone took most of 15 s.
+      let timer: NodeJS.Timeout | undefined;
       child.stdout!.on("data", (d) => {
         if (!sent && String(d).includes("ready")) {
           sent = true;
           child.kill(signal);
+          timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            reject(new Error(`fixture still running 15 s after ${signal}`));
+          }, 15_000);
         }
       });
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        reject(new Error(`fixture still running 15 s after ${signal}`));
-      }, 15_000);
       child.on("error", reject);
       child.on("exit", () => {
         clearTimeout(timer);

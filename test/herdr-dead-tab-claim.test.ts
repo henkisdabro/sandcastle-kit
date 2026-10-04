@@ -21,7 +21,8 @@ case "$1 $2" in
     printf '{"result":{"pane":{"pane_id":"%s","tab_id":"w1:t2"}}}\\n' "$3"
     if [ -n "$FAKE_BARRIER" ]; then
       echo "$$" >> "$FAKE_BARRIER"
-      for _ in $(seq 1 100); do [ "$(wc -l < "$FAKE_BARRIER")" -ge 2 ] && break; sleep 0.05; done
+      # 30 s, not 5: each caller is its own tsx start-up, and under load the second came too late.
+      for _ in $(seq 1 600); do [ "$(wc -l < "$FAKE_BARRIER")" -ge 2 ] && break; sleep 0.05; done
     fi ;;
   "pane process-info")
     out=""; IFS='|'; for c in $FAKE_FG; do out="$out\${out:+,}{\\"cmdline\\":\\"$c\\"}"; done
