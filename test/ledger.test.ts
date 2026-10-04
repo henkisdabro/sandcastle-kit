@@ -423,3 +423,14 @@ test("the closing counts come from the ledger's entries", () => {
   for (const [id, e] of ends) ledger.record(id, e);
   assert.deepEqual(accountLanding(ledger.entries.values()), { merged: ["1", "2"], regenerated: 1, notLanded: 4, needsHuman: 2, withdrawn: 1 });
 });
+
+// The landing worker printed nothing: a run that spent its last half hour landing went quiet between
+// the last agent pass and the closing summary.
+test("each landing says its result in the run's output; a pipeline's ending does not", () => {
+  const said: string[] = [];
+  const ledger = createLedger({ run: { ticket: () => {} }, outcomes: () => {}, view: { landed: () => {} }, context: () => BASE, bookkeep: (_id, fn) => fn(), ...NO_REQUEUE, say: (l) => void said.push(l) });
+  ledger.record("1", landing({ kind: "merged" }));
+  ledger.record("4", landing({ kind: "conflict", files: ["a"], with: [] }));
+  ledger.record("5", pipeline({ status: "gate-failed" }));
+  assert.deepEqual(said, ["#1: merged.", "#4: merge conflict."]);
+});
