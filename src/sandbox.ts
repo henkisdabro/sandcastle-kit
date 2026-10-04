@@ -11,6 +11,7 @@ import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { nearest, OperatorError } from "./errors.ts";
+import { hostIdentityParts, shq } from "./generated.ts";
 import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
 
@@ -416,6 +417,11 @@ export const sandboxMounts = (project: Project) => [
     : []),
 ];
 
+export const gitIdentityCommand = (root: string) => {
+  const { name, email } = hostIdentityParts(root);
+  return `git config --global user.name ${shq(name)} && git config --global user.email ${shq(email)}`;
+};
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
 // each fresh worktree before the agent sees it.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
@@ -430,6 +436,10 @@ export const sandboxConfig = (project: Project, image: string, leanPlan: string)
     },
     sandbox: {
       onSandboxReady: [
+        // Before the project's setup and any gate: a test that commits needs an identity in a
+        // sandbox no agent has worked in. Global config, not GIT_AUTHOR_* in the environment,
+        // which would make the agent the author (see AGENT_COMMITTER).
+        { command: gitIdentityCommand(project.root) },
         ...(CROSS_REVIEW
           ? [{ command: `mkdir -p ~/.codex && cp ${CODEX_AUTH} ~/.codex/auth.json` }]
           : []),
