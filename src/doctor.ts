@@ -387,12 +387,16 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     // The guard's own credential, which may not be a file's: it prefers the host's Claude Code login.
     const guardCredential = usageToken({ CLAUDE_CODE_OAUTH_TOKEN: source("CLAUDE_CODE_OAUTH_TOKEN")?.value });
     console.log("\ncredentials (live)");
+    // The OAuth token's answer, kept for the guard's line: the usage endpoint is rate-limited, and a
+    // second ask for the same token can draw a 429 that reads as a problem.
+    let oauthStatus: number | undefined;
     for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "GH_TOKEN"]) {
       const found = source(key);
       if (!found) continue;
       const print = fingerprint(key, found.value, found.file, statSync(found.file).mtimeMs);
       const gh = key === "GH_TOKEN" ? await probeGithubToken(found.value) : undefined;
       const status = key === "GH_TOKEN" ? gh?.status : key === "ANTHROPIC_API_KEY" ? await probeApiKey(found.value) : await probeOAuth(found.value);
+      if (key === "CLAUDE_CODE_OAUTH_TOKEN") oauthStatus = status;
       const seen = verdict(status);
       if (seen === "ok") console.log(`ok   ${print} - accepted${gh?.login ? ` (${gh.login})` : ""}`);
       // In a project: the sandboxes get this token, and a prompt-injected agent has it too.
@@ -412,7 +416,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     // Only the source and the HTTP status are printed, never a character of a token.
     const usage = guardCredential;
     if (usage && "token" in usage) {
-      const status = await probeOAuth(usage.token);
+      const status = usage.source === "login" || oauthStatus === undefined ? await probeOAuth(usage.token) : oauthStatus;
       console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`}`);
     } else if (usage) console.log("warn usage guard (USAGE_CHECK=1) would find the Claude Code login expired, so it would have no reading until Claude Code refreshes it (any use of Claude Code does)");
     else console.log("info usage guard (USAGE_CHECK=1) has no credential: no readable Claude Code login and no CLAUDE_CODE_OAUTH_TOKEN");
