@@ -6,7 +6,7 @@
 //
 // Two records: a `peakMib` on the timings line of the gate pass (the project's own, in
 // `.sandcastle/logs/timings.jsonl`), and one line per sandbox in the machine-wide `peaks.jsonl`
-// beside the live-runs directory (whose files go when a run ends). A peaks line carries a time, the
+// beside the live-runs directory (whose files go once a run has ended and its tab no longer needs a report). A peaks line carries a time, the
 // run, and a hash of the project root: no path, no name. Best effort throughout: a file that is
 // missing (cgroup v1, an older kernel), a sandbox that is gone or a cache directory that cannot be
 // written records nothing and never fails the pass.
