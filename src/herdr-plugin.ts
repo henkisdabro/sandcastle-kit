@@ -23,7 +23,7 @@ import { clickHintLine, resolveClickHint } from "./click-hint.ts";
 import { CONFIG_PATH } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { helpFor, wantsHelp } from "./help.ts";
-import { herdr, lineText, runCounts, tellDeadTab } from "./herdr.ts";
+import { herdr, lineText, restartStatusView, runCounts, tellDeadTab } from "./herdr.ts";
 import { commandOf, PLUGIN_MARKER, RUNS_DIR } from "./live-runs.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import { readTickets, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -289,8 +289,9 @@ type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: stri
  * after `ended` has been told the root of a run whose record says so: its file is the last
  * sign of it, and the tab bar does not tick again for a run that is not registered. So `ended`
  * returning true keeps the file, for a tab still waiting to be told (`tellDeadTab`), or held by another Herdr server.
+ * `live` is told the root of each live run (the tab bar restarts its status view, `restartStatusView`).
  */
-export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}): Run[] => {
+export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}, live: (root: string) => void = () => {}): Run[] => {
   const runs: Run[] = [];
   const readRecord = (root: string) => {
     try {
@@ -309,6 +310,7 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root:
       const record = JSON.parse(seen ?? "");
       const run = { root, ...record, tickets: readTickets(record) } as Run;
       if (liveness({ record: run }, probe).state === "live") {
+        live(root);
         runs.push(run);
         continue;
       }
@@ -326,16 +328,18 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root:
 
 // Whichever reader of the runs directory drops a dead run's file first tells the tab: the tab bar's
 // next tick would find no file. A tab whose status view still runs keeps the file until it can be told.
-// A tab on another Herdr server keeps it too: that server's tab bar has yet to tell it.
+// A tab on another Herdr server keeps it too: that server's tab bar has yet to tell it. A run's exit
+// leaves its file while its own tab is unreported (live-runs.ts), so a run that ends after a Herdr
+// restart is told here too, and the tab is looked at every tick until it is reported or closed.
 export const replaceDeadTab = (root: string, kit?: string) => {
   const told = tellDeadTab(root, kit);
   return told === "showing" || told === "elsewhere";
 };
 
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
-export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void) => {
+export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void, live?: (root: string) => void) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
-  const runs = liveRuns(dir, probe, ended).sort((a, b) => Number(here(b)) - Number(here(a)));
+  const runs = liveRuns(dir, probe, ended, live).sort((a, b) => Number(here(b)) - Number(here(a)));
   return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
 };
 
@@ -488,7 +492,8 @@ export const herdrCommand = async (args: string[]) => {
     case "configure":
       return configure(rest.includes("--remove"), rest.includes("--yes"));
     case "line": {
-      const line = runsLine(undefined, undefined, undefined, replaceDeadTab);
+      // A live run's own tab after a Herdr restart gets its status view back on the next tick.
+      const line = runsLine(undefined, undefined, undefined, replaceDeadTab, (root) => void restartStatusView(root));
       if (line) console.log(line);
       return;
     }

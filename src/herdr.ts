@@ -40,7 +40,10 @@ import { basename, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
+
+export { viewRecord };
 
 // stderr is captured, not inherited: herdr reports errors there as JSON
 // (a closed pane is `pane_not_found`), which must not leak into the run.
@@ -52,7 +55,8 @@ export const IN_HERDR = process.env.HERDR_ENV === "1";
 // This kit's own entry, not whichever `sandcastle` PATH finds first: a second
 // checkout (a branch under test, say) would otherwise run with the other
 // checkout's status view.
-export const STATUS_COMMAND = `"${KIT}/bin/sandcastle" status`;
+export const statusCommand = (kit = KIT) => `"${kit}/bin/sandcastle" status`;
+export const STATUS_COMMAND = statusCommand();
 
 // Where the status pane opened beside the caller is recorded (run.ts).
 export const statusPaneRecord = (project: Project) => join(project.root, ".sandcastle/logs/status-pane");
@@ -60,9 +64,6 @@ type Foreground = { cmdline: string }[];
 const foreground = (pane: string) => herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as Foreground;
 const showsStatus = (processes: Foreground) => processes.some((p) => p.cmdline.includes("status.sh"));
 export const runsStatus = (pane: string) => showsStatus(foreground(pane));
-
-// The tab and panes a run opened, written by `openSandboxView` for the next run (and the plugin) to find.
-export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-view.json");
 
 // A pane's foreground is a bare shell: one process, a known shell's name, and at most the flags
 // that make it a login or interactive shell. `bash status.sh`, `claude`, `vim` and a REPL are not,
@@ -75,6 +76,37 @@ const bareShell = (processes: Foreground) => {
   return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
+
+type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string };
+// Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
+// a bare shell of someone else's. A record without `socket`, or a caller without
+// HERDR_SOCKET_PATH, cannot tell.
+const onOtherServer = (view: View) => !!view.socket && !!process.env.HERDR_SOCKET_PATH && view.socket !== process.env.HERDR_SOCKET_PATH;
+// After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
+const inRecordedTab = (view: View) => (herdrJson(["pane", "get", view.status!]).result.pane as { tab_id?: string }).tab_id === view.tab;
+const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+
+/**
+ * A live run's own tab after a cold Herdr restart: the panes come back as idle shells, and the
+ * status view died with the server. The tab bar's tick starts it again in the recorded status
+ * pane, with the command the run used, whenever it finds that pane a bare shell: nothing marks it
+ * done, as a second restart in the same run needs it again. Left alone, as `tellDeadTab` leaves
+ * them: a tab adopted from a person's terminal, a record already reported (an earlier run's), a
+ * tab on another Herdr server or not the recorded one, a pane still running the status view or
+ * anything else, and any herdr error. True when the view was started.
+ */
+export const restartStatusView = (root: string, kit = KIT): boolean => {
+  try {
+    const view = JSON.parse(readFileSync(viewRecord(root), "utf8")) as View;
+    if (!view.tab || !view.status || view.adopted !== false || view.reported || onOtherServer(view)) return false;
+    if (!inRecordedTab(view) || !bareShell(foreground(view.status))) return false;
+    // `cd`: a restored shell does not always start in the project, and the view is the project's.
+    herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(kit)}`]);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * A run that is no longer live (its pid gone, or its record finished) leaves its tab as the
@@ -107,13 +139,11 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
   try {
     const read = readFileSync(file, "utf8");
-    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string };
+    const view = JSON.parse(read) as View;
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return "left";
-    // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
-    // a bare shell of someone else's. Before any herdr call, and the record stays as it is.
-    if (view.socket && process.env.HERDR_SOCKET_PATH && view.socket !== process.env.HERDR_SOCKET_PATH) return "elsewhere";
-    // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
-    if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return "left";
+    // Before any herdr call, and the record stays as it is.
+    if (onOtherServer(view)) return "elsewhere";
+    if (!inRecordedTab(view)) return "left";
     const processes = foreground(view.status);
     if (showsStatus(processes)) return "showing";
     if (!bareShell(processes)) return "left";
@@ -134,8 +164,7 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     }
     try {
       // `cd`: a restored shell does not always start in the project.
-      const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-      herdr(["pane", "run", view.status, `cd ${quote(root)} && ${quote(join(kit, "bin/sandcastle"))} report`]);
+      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(kit, "bin/sandcastle"))} report`]);
     } catch (error) {
       giveBack(read);
       throw error;
