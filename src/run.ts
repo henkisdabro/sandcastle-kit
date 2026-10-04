@@ -15,6 +15,10 @@ import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandb
 import { OperatorError } from "./errors.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
+// How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
+// run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
+let endedBy: string | undefined;
+
 // Node's default action on SIGHUP, SIGINT and SIGTERM ends the process without
 // running exit handlers, so a closed pane or a Ctrl-C lost the end line, run.json's
 // finishedAt and the lock releases. The library handles only SIGINT and SIGTERM, and
@@ -28,10 +32,6 @@ import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord,
 // A detached run (`--detach`) has no terminal to hang up, and a SIGHUP it still gets (the
 // shell that started it closing, on a system that sends one to the session) must not end it:
 // it stops on `sandcastle stop`, which is a SIGINT.
-// How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
-// run is `sandcastle stop`'s, one in a terminal is Ctrl-C; a SIGTERM or SIGHUP is named as it is.
-let endedBy: string | undefined;
-
 export const exitOnSignal = () => {
   const mapped = { SIGHUP: "SIGTERM", SIGINT: "SIGINT", SIGTERM: "SIGTERM" } as const;
   const detached = process.env.SANDCASTLE_DETACHED === "1";
@@ -42,7 +42,7 @@ export const exitOnSignal = () => {
     }
     const onSignal = () => {
       // Before the library's teardown can end the process: its exit still writes the record.
-      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C") : mapped[sig];
+      endedBy ??= sig === "SIGINT" ? (detached ? "sandcastle stop" : "Ctrl-C") : sig;
       if (process.listenerCount(mapped[sig]) > 1) {
         if (sig === "SIGHUP") process.emit("SIGTERM", "SIGTERM");
         return;

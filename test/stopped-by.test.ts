@@ -71,7 +71,7 @@ test("the notify line says stopped by `sandcastle stop`", () => {
   assert.match(endSummary({ exitCode: 1, tickets }), /^run ended with exit 1/);
 });
 
-test("a detached run that gets a SIGINT records stoppedBy: sandcastle stop; one in a terminal, Ctrl-C", async () => {
+test("a detached run that gets a SIGINT records stoppedBy: sandcastle stop; one in a terminal, Ctrl-C; a hangup, SIGHUP", async () => {
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-stopped-by-"));
   const href = (f: string) => JSON.stringify(pathToFileURL(join(import.meta.dirname, "..", f)).href);
   const fixture = join(dir, "fixture.mts");
@@ -84,8 +84,8 @@ console.log("ready");
 setInterval(() => {}, 1000);
 `,
   );
-  const stopped = async (detached: boolean) => {
-    const root = join(dir, detached ? "detached" : "terminal");
+  const stopped = async (detached: boolean, signal: NodeJS.Signals = "SIGINT") => {
+    const root = join(dir, `${detached ? "detached" : "terminal"}-${signal}`);
     mkdirSync(root, { recursive: true });
     const env = { ...process.env, XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache"), FIXTURE_ROOT: root, SANDCASTLE_DETACHED: detached ? "1" : "" };
     await new Promise<void>((resolve, reject) => {
@@ -94,12 +94,12 @@ setInterval(() => {}, 1000);
       child.stdout!.on("data", (d) => {
         if (!sent && String(d).includes("ready")) {
           sent = true;
-          child.kill("SIGINT");
+          child.kill(signal);
         }
       });
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        reject(new Error("fixture still running 15 s after SIGINT"));
+        reject(new Error(`fixture still running 15 s after ${signal}`));
       }, 15_000);
       child.on("error", reject);
       child.on("exit", () => {
@@ -113,4 +113,5 @@ setInterval(() => {}, 1000);
   assert.equal(detached.stoppedBy, "sandcastle stop");
   assert.equal(detached.exitCode, 130);
   assert.equal((await stopped(false)).stoppedBy, "Ctrl-C");
+  assert.equal((await stopped(false, "SIGHUP")).stoppedBy, "SIGHUP");
 });
