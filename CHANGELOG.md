@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-04
+
 ### Upgrading
 
 - **Run `/sandcastle update` in each project, then start a new agent session.** The skill is now a
@@ -1419,7 +1421,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.0...v0.4.1
