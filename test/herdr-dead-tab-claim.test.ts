@@ -125,3 +125,27 @@ test("two callers that both read the record unmarked type the report once", asyn
   assert.equal(typed().length, 1, calls().join("\n"));
   assert.equal(existsSync(viewRecord(root)) && record(root).reported, true);
 });
+
+test("a record a new run wrote between the read and the claim is neither typed for nor overwritten", () => {
+  reset("-zsh");
+  const root = project(OWN);
+  const fresh = JSON.stringify({ tab: "w1:t9", adopted: false, status: "w1:t9-1", panes: [] }) + "\n";
+  const newRun = mkdtempSync(join(tmpdir(), "sandcastle-claim-newrun-"));
+  writeFileSync(join(newRun, "record"), fresh);
+  // The new run writes its record while this caller asks Herdr about the pane, after the read.
+  writeFileSync(
+    join(newRun, "herdr"),
+    `#!/usr/bin/env bash\ncase "$1 $2" in\n  "pane process-info") cp '${join(newRun, "record")}' '${viewRecord(root)}' ;;\nesac\nexec ${join(bin, "herdr")} "$@"\n`,
+  );
+  chmodSync(join(newRun, "herdr"), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${newRun}${delimiter}${path}`;
+  try {
+    assert.equal(reportInDeadTab(root, KIT_DIR), false);
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.deepEqual(typed(), []);
+  assert.equal(readFileSync(viewRecord(root), "utf8"), fresh, "the new run's record is left as it wrote it");
+  assert.deepEqual(readdirSync(join(root, ".sandcastle/logs")), ["herdr-view.json"], "no claim file is left");
+});

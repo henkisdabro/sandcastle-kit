@@ -95,7 +95,8 @@ export const reportInDeadTab = (root: string, kit = KIT): boolean => {
   const file = viewRecord(root);
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
   try {
-    const view = JSON.parse(readFileSync(file, "utf8")) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
+    const read = readFileSync(file, "utf8");
+    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return false;
     // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
     if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return false;
@@ -103,11 +104,16 @@ export const reportInDeadTab = (root: string, kit = KIT): boolean => {
     // ENOENT here is the other caller having claimed it first.
     renameSync(file, claim);
     // A record a new run wrote meanwhile stays: `wx` never overwrites it.
-    const giveBack = (record: object) => writeFileSync(file, JSON.stringify(record) + "\n", { flag: "wx" });
-    // The other caller may have finished, and written the record back marked, between our read and our claim.
-    if ((JSON.parse(readFileSync(claim, "utf8")) as { reported?: boolean }).reported) {
-      giveBack({ ...view, reported: true });
-      rmSync(claim, { force: true });
+    const giveBack = (record: string) => writeFileSync(file, record, { flag: "wx" });
+    // Between our read and our claim the other caller may have finished and written the record back
+    // marked, or a new run may have written its own: either way it is not the record checked above.
+    const claimed = readFileSync(claim, "utf8");
+    if (claimed !== read) {
+      try {
+        giveBack(claimed);
+      } finally {
+        rmSync(claim, { force: true });
+      }
       return false;
     }
     try {
@@ -115,12 +121,12 @@ export const reportInDeadTab = (root: string, kit = KIT): boolean => {
       const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
       herdr(["pane", "run", view.status, `cd ${quote(root)} && ${quote(join(kit, "bin/sandcastle"))} report`]);
     } catch (error) {
-      giveBack(view);
+      giveBack(read);
       throw error;
     } finally {
       rmSync(claim, { force: true });
     }
-    giveBack({ ...view, reported: true });
+    giveBack(JSON.stringify({ ...view, reported: true }) + "\n");
     return true;
   } catch {
     return false;
