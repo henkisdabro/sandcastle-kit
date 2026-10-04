@@ -155,8 +155,8 @@ test("redSubject: the test files the output names, their relative imports, and t
   assert.deepEqual([...redSubject("FAIL ./test/x.test.ts\n", tree, read)].sort(), ["src/lib/index.ts", "src/x.ts", "src/y.js", "test/x.test.ts"]);
   assert.deepEqual([...redSubject("FAILED tests/test_mod.py::test_f - boom\n", tree, read)].sort(), ["pkg/mod.py", "tests/test_mod.py"]);
   // An absolute path from a sandbox is cut from the left; a file the tree lacks, or a source file, is no subject.
-  assert.deepEqual([...redSubject("at /home/sandbox/work/test/x.test.ts:1:1 and /nowhere/ghost.test.ts", tree, () => undefined)], ["test/x.test.ts"]);
-  assert.deepEqual([...redSubject("at /home/sandbox/work/src/x.ts:1:1", tree, () => undefined)], []);
+  assert.deepEqual([...redSubject("at /home/agent/work/test/x.test.ts:1:1 and /nowhere/ghost.test.ts", tree, () => undefined)], ["test/x.test.ts"]);
+  assert.deepEqual([...redSubject("at /home/agent/work/src/x.ts:1:1", tree, () => undefined)], []);
   assert.deepEqual([...redSubject("nothing to see", tree, read)], []);
 });
 
