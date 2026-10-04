@@ -18,6 +18,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   With `ANTHROPIC_API_KEY` it now says it does not apply, where 0.6.0 read the host login's plan,
   which has nothing to do with an API key's spend. The run's start line and `doctor --verify` say
   whose plan is read.
+- **A run that would spend `ANTHROPIC_API_KEY` now asks first, and a run with no terminal refuses
+  without `--api-key`.** If `sandcastle doctor` prints `warn API credits`, `sandcastle run`, `preflight`
+  and `lean --measure` ask before they start, and `--detach` or a script needs `--api-key` (or
+  `SANDCASTLE_API_KEY=1`). To spend your subscription instead, remove the key from the file doctor
+  names (`/sandcastle update` checks this).
 
 ### Added
 
@@ -25,6 +30,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   what an existing project must act on; the closing summary lists such lines in a block of their own,
   apart from the changes, where an instruction used to be folded into a `Changed:` line or left in an
   agent's prose.
+- **Spending an API key is never silent.** Whenever `ANTHROPIC_API_KEY` would reach the sandboxes
+  (from either `.env`, even beside an OAuth token), `sandcastle doctor` warns in red, the run's start
+  line, the status view's settings row and the closing summary say it bills API credits, and
+  `sandcastle run`, `preflight` and `lean --measure` ask before spending it; with no terminal they
+  need `--api-key` (or `SANDCASTLE_API_KEY=1`).
 - **Landing gates are timed and estimated.** Each landing gate writes a `landing gates` line to
   `timings.jsonl`; the estimate counts them in the gates-pool sum and takes the landings in a row,
   one after another on the one worker, as a floor on the run's end ("landing gates, one after
@@ -33,6 +43,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **Sandbox agents can no longer use Monitor, ScheduleWakeup, CronCreate, CronDelete, CronList or
+  RemoteTrigger.** The sandbox's managed settings deny them, so a pass cannot sit waiting on a
+  backgrounded suite, spending tokens and the machine's shared gate slots.
 - **`test/full-check.sh` runs the suite in CI's weighted shards** and starts the macOS,
   agent-committer, Linux and scan legs together instead of one after another; `FULL_CHECK_SHARDS`
   sets the shards per pass.
@@ -74,12 +87,25 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   an editor, `claude` or a REPL started there since, and only once when two readers see the dead run
   together.
 - **A reviewer's rewording of a changelog line replaces the implementer's** instead of showing as a
-  second change: the review prompt asks for the branch's whole set of lines, and the summary keeps
-  the latest pass's set.
+  second change: a full review restates the branch's whole set of lines, and the summary keeps that
+  set. A narrow pass - the review after a repair, a base merge or a conflict resolution - sees only
+  its own diff, so it adds lines for what it changed instead of replacing the set.
 - **The beyond-Touches note leaves out files only a repair or a conflict resolution changed**, and is
   not printed when the overrun is only test and docs files (the paths stay in the run record).
 - **A red requeue line also names an earlier landing that changed a file the failing test imports or
   names**, not only one that changed a file the branch changed.
+- **A red merge's requeue line no longer blames every landed ticket whose module has a passing
+  test**: it reads only the lines that say a test failed (FAIL lines, failing-test lines, pytest's F
+  and E, stack frames) for vitest, jest, pytest and the others, coloured output and tsc's error
+  lines included.
+- **With both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` set, the kit named the OAuth token**
+  while Claude Code spent the API key; it now names the API key.
+- **A held ticket merged by hand whose branch `sandcastle clean` deleted counts as merged by hand**
+  instead of asking for a review and merge of a branch that is gone, and reads "merged by hand, and
+  closed" once the ticket is closed. A held branch that is gone with no merge on the base is listed
+  with no merge command.
+- **After a run, the status view shows a ticket merged partly done as partly done** (with "needs a
+  person's decision" where the agent's note says so) instead of "queued for the next run".
 
 ## [0.6.0] - 2026-10-04
 
