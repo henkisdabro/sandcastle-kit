@@ -10,20 +10,39 @@ name: Check
 # maintainer ran them by hand. macOS also runs the status view under its own
 # bash 3.2, the bash the kit's users have there.
 
+# Push only on main: a branch's pushes are covered by its pull request, and
+# running both doubled every job and queued the macOS jobs behind each other.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer push to a pull request makes its running check stale; main keeps
+# every run, so each landed commit has its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Arm ran the suite 15-35% faster than x64 at every shard count tried,
+        # and 24.04 a little faster than 26.04.
+        os: [ubuntu-24.04-arm, macos-latest]
+        # The status view checks, then the test files in four shards packed by
+        # weight (test/shard.ts). Five jobs is also the free plan's macOS limit.
+        part: [status, 1, 2, 3, 4]
+    name: ${{ matrix.os }} ${{ matrix.part }}
     runs-on: ${{ matrix.os }}
+    # Each test has its own five-minute limit; this stops a hung process
+    # holding a runner for the default six hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -32,7 +51,13 @@ jobs:
           node-version: lts/*
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsc --noEmit
-      - run: pnpm test
-      - if: runner.os == 'macOS'
+      - if: matrix.part == 'status'
+        run: |
+          pnpm exec tsc --noEmit
+          bash test/status.test.sh
+      - if: matrix.part == 'status' && runner.os == 'macOS'
         run: STATUS_BASH=/bin/bash bash test/status.test.sh
+      - if: matrix.part != 'status'
+        run: pnpm test:shard
+        env:
+          TEST_SHARD: ${{ matrix.part }}/4
