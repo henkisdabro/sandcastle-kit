@@ -37,14 +37,21 @@ const commitFile = (root: string, file: string, text: string, message: string) =
 };
 
 // main holds src/x.ts. 1 changes it, 3 adds an unrelated file; 2 adds a test that uses x.ts and touches nothing else.
-const makeRepo = (testText: string) => {
+const makeRepo = (testText: string, bulk = 0) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
   git(root, "config", "user.name", "Operator Example");
   git(root, "config", "user.email", "operator@example.com");
   git(root, "config", "commit.gpgsign", "false");
+  if (bulk) {
+    // Paths of some 200 characters, one blob, written straight to the index: no 6,000 file writes.
+    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: root, input: "x\n", encoding: "utf8" }).trim();
+    const entries = Array.from({ length: bulk }, (_, i) => `100644 ${blob}\tbulk/${"a".repeat(190)}${i}.txt\n`).join("");
+    execFileSync("git", ["update-index", "--index-info"], { cwd: root, input: entries });
+  }
   commitFile(root, "src/x.ts", "export const x = 1;\n", "start");
+  if (bulk) git(root, "reset", "-q", "--hard");
   const branch = (id: string, files: Record<string, string>) => {
     git(root, "checkout", "-q", "-b", `agent/issue-${id}`, "main");
     for (const [file, text] of Object.entries(files)) commitFile(root, file, text, `work on ${id}`);
@@ -151,4 +158,14 @@ test("redSubject: the test files the output names, their relative imports, and t
   assert.deepEqual([...redSubject("at /home/sandbox/work/test/x.test.ts:1:1 and /nowhere/ghost.test.ts", tree, () => undefined)], ["test/x.test.ts"]);
   assert.deepEqual([...redSubject("at /home/sandbox/work/src/x.ts:1:1", tree, () => undefined)], []);
   assert.deepEqual([...redSubject("nothing to see", tree, read)], []);
+});
+
+test("red still names the landed ticket when the tree's listing passes Node's 1 MiB output limit", async () => {
+  // 6,000 paths: a listing of about 1.2 MiB.
+  const root = makeRepo('import { x } from "../src/x.ts";\nconsole.log(x);\n', 6000);
+  const h = harness(root, "FAIL test/x.test.ts\n");
+  await h.land("1");
+  await h.land("3");
+  const landed = await h.land("2");
+  assert.deepEqual(landed.kind === "red" && landed.with, ["1"]);
 });

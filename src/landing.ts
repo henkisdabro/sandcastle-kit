@@ -14,6 +14,7 @@
 // branch delete. The worker moves the run's expected base with each write, so the `.git` check
 // the pipelines make after their sandbox closes still catches any other movement of the base.
 
+import { execFileSync } from "node:child_process";
 import { posix } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
@@ -507,7 +508,11 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       let subject = new Set<string>();
       if (result.run.failure) {
         try {
-          const tree = [...new Set([o.head!, result.base].flatMap((rev) => sh("git", ["ls-tree", "-r", "--name-only", rev], root).split("\n").filter(Boolean)))];
+          // `sh` keeps Node's 1 MiB output limit, which a listing of some 20,000 paths passes: it would throw and name nobody.
+          // `-z` keeps a non-ASCII path as written, where git would quote it.
+          const ls = (rev: string) =>
+            execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", rev], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
+          const tree = [...new Set([o.head!, result.base].flatMap((rev) => ls(rev).split("\0").filter(Boolean)))];
           const read = (file: string) => {
             for (const rev of [o.head!, result.base]) {
               try {
