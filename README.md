@@ -654,10 +654,10 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   output. A detached run ignores SIGHUP.
 - **Not with autonomy level 1**, which asks whether to run again at the end of each turn and has
   no terminal to ask in: `Autonomy level 1 asks a question ... Use level 2 or 3, or run attached.`
+  Levels 2, 3 and `drain` work as usual.
 - **Not with an API key, unless told.** A run that would spend `ANTHROPIC_API_KEY` has no terminal
   to ask on, so `--detach` refuses it before a process starts unless it is given `--api-key` (or
   `SANDCASTLE_API_KEY=1`) as well ([Run](#-run)).
-  Levels 2, 3 and `drain` work as usual.
 - **`sandcastle wait [seconds]`** blocks while the run holds the project's run lock, then prints
   what `sandcastle report` prints and exits with the run's own exit code (recorded in
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
