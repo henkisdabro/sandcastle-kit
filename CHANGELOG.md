@@ -36,6 +36,13 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   priced at about half its real cost.
 - **Agent tags are read only on lines of their own.** `<changelog>`, `<ungated>` and `<unmet>` named
   in an agent's prose (or inside a code block) no longer count as the tag.
+- **The website shows more and says less.** The status window sits beside the headline; the night's
+  log is a sky you can wind back and forth, the moon crossing it as a castle is built from the
+  run's tickets; how it works, safety, long runs and the skill are each a picture, with the detail
+  folded away beneath it. It also shows one of the kit's own runs from its record (18 tickets, their
+  minutes and tokens, each a public issue), compares the kit with wiring Claude Code up by hand, and
+  answers four more questions: your own work in the repository, a green branch that is wrong, merge
+  conflicts, and a ticket that tries to steer an agent.
 - **Herdr's sidebar row and tab bar lead with the mod's castle tower (`♜`), in plain text**, not the
   🏰 emoji: the same mark the Claude Code mod draws, in the terminal's own font and colour.
 - **The `/sandcastle` skill loads only what the action needs.** `SKILL.md` is now a short router

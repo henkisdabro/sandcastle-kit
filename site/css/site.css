@@ -58,6 +58,9 @@ html {
   background:
     radial-gradient(1000px 640px at 82% -140px, rgb(232 214 180 / 0.075), transparent 72%) no-repeat,
     var(--night);
+  /* clip, not hidden: a hidden overflow can still be panned to on a phone, and the castle's
+     sand and the sky reach past the right edge. hidden stays on body for browsers without clip. */
+  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -74,6 +77,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  overflow-x: clip;
 }
 
 a {
@@ -238,11 +242,68 @@ p { margin: 0 0 1rem; }
 section p,
 section li { max-width: var(--measure); }
 
-main > section { padding-block: clamp(4.5rem, 11vw, 9rem); }
+main > section { padding-block: clamp(3.5rem, 7vw, 6rem); }
 
 /* -- hero */
 
-main > .hero { padding-block: clamp(2rem, 6vh, 5rem) 1rem; }
+/* The pitch beside the run it describes; one above the other on a narrow screen. */
+main > .hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(2.5rem, 6vw, 4rem);
+  align-items: center;
+  padding-block: clamp(2rem, 6vh, 5rem) clamp(3rem, 8vw, 6rem);
+}
+@media (min-width: 1040px) {
+  main > .hero { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr); }
+  .hero h1 { font-size: clamp(2rem, 3.1vw, 2.9rem); max-width: 20ch; margin-bottom: 1.8rem; }
+  .hero .lede { margin-bottom: 1.6rem; }
+  .hero .status { font-size: clamp(9.5px, 0.8vw, 11px); }
+}
+
+/* What happens to a ticket, in five pictures. */
+.pipe {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.2rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+  font-size: var(--s-1);
+  line-height: 1.3;
+  color: var(--dry);
+}
+.pipe li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 4.9rem;
+  text-align: center;
+}
+.pipe li + li::before {
+  content: '▸';
+  position: absolute;
+  left: -0.95rem;
+  top: 0.45rem;
+  color: var(--deep);
+}
+.pipe svg,
+.line svg,
+.zone svg {
+  width: 2.2rem;
+  height: 2.2rem;
+  fill: none;
+  stroke: var(--dry);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+svg.i-queued { stroke: var(--queued); }
+svg.i-working { stroke: var(--working); }
+svg.i-ready { stroke: var(--ready); }
+svg.i-merged { stroke: var(--merged); }
 
 .mark {
   display: flex;
@@ -358,27 +419,6 @@ h1 {
 }
 .req { font-size: var(--s-1); color: var(--shore); }
 
-/* -- the live window, wider than the text */
-
-main > .run {
-  position: relative;
-  width: min(100% - 2 * var(--gutter), 60rem);
-  padding-block: 0 clamp(3rem, 8vw, 6rem);
-  margin-top: clamp(10rem, 18vw, 14rem);
-}
-/* The dunes are a horizon across the whole width, above the window and clear
-   of it; their feet fade into the night. */
-.dunes {
-  position: absolute;
-  z-index: -1;
-  bottom: calc(100% + clamp(2.5rem, 5vw, 4rem));
-  left: 50%;
-  width: 100vw;
-  height: 0;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
 .run-caption {
   margin: 1rem 0 0;
   max-width: 72ch;
@@ -386,47 +426,345 @@ main > .run {
   color: var(--shore);
 }
 
-/* -- who */
+/* -- under the hero: the first objection, answered in a line */
 
-.who > p { font-size: 1.12rem; color: var(--dry); }
-.fit {
+.guard {
+  grid-column: 1 / -1;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 1.2rem 0 0;
+  border-top: 3px double var(--wet);
+  font-size: var(--s-1);
+  color: var(--dry);
+}
+.guard li + li a {
+  display: block;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--wet);
+  text-decoration: none;
+}
+.guard li + li a:hover { border-color: var(--accent); }
+.dry { margin: 0 0 0.8rem; font-size: 0.95rem; color: var(--dry); }
+.dry code { color: var(--moon); }
+
+/* -- proof: one real run, from its record */
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem 2.6rem;
+  margin: 2.2rem 0 0;
+  padding: 1.2rem 0;
+  border-top: 3px double var(--wet);
+  border-bottom: 1px solid var(--wet);
+}
+.facts dt { font-size: var(--s-1); color: var(--driftwood); }
+.facts dd { margin: 0; font-size: var(--s1); font-weight: 650; color: var(--moon); }
+.facts dd.c-grn { color: var(--merged); }
+.ran { list-style: none; margin: 0; padding: 0; font-size: var(--s-1); }
+.ran li {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 3rem;
+  grid-template-columns: 3.2rem minmax(0, 1.5fr) minmax(4rem, 1fr) 2.6rem 7rem;
+  gap: 0 1rem;
+  align-items: center;
+  max-width: none;
+  padding: 0.38rem 0;
+  border-bottom: 1px solid rgb(74 58 42 / 0.55);
+}
+.ran-t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--dry); }
+/* The longest ticket took 35 minutes. */
+.ran i { height: 0.6rem; width: calc(var(--m) / 35 * 100%); background: var(--merged); }
+.ran .again i,
+.ran-key .again { background: repeating-linear-gradient(135deg, var(--merged) 0 4px, #2f7a2f 4px 8px); }
+.ran-m { text-align: right; color: var(--moon); font-variant-numeric: tabular-nums; }
+.ran-k { color: var(--driftwood); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ran-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.8rem;
+  margin: 0.9rem 0 0;
+  max-width: none;
+  font-size: var(--s-1);
+  color: var(--shore);
+}
+.ran-key .again { display: inline-block; width: 1.4rem; height: 0.6rem; margin-right: 0.6rem; }
+.catch { margin: 2.6rem 0 0; padding-left: 1.4rem; border-left: 3px solid var(--working); max-width: var(--measure); }
+.catch blockquote { margin: 0; }
+.catch blockquote p { font-size: 1.12rem; color: var(--moon); }
+.catch figcaption { font-size: var(--s-1); color: var(--dry); }
+
+/* -- who: the same night twice, with you in every gap and with you at its ends */
+
+.nights { margin-top: 2.6rem; border-top: 3px double var(--wet); }
+.nights-row {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 1rem 1.8rem;
+  align-items: center;
+  padding: 1.8rem 0;
+  border-bottom: 1px solid var(--wet);
+}
+.nights-who { margin: 0; font-size: var(--s-1); color: var(--driftwood); }
+.nights-who b { display: block; font-size: var(--s0); font-weight: 500; color: var(--dry); }
+.lane-you,
+.lane-kit { display: flex; align-items: center; gap: 6px; }
+.you {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 50%;
+  background: var(--moon);
+  color: var(--night);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.lane-you i { height: 0.85rem; background: var(--working); }
+.lane-you .asleep { background: none; border: 1px dashed var(--damp); }
+.lanes { flex: 1; display: grid; gap: 4px; transform-origin: left; }
+.lanes div { display: flex; gap: 3px; height: 0.55rem; }
+.lanes .w, .key .w { background: var(--working); }
+.lanes .m, .key .m { background: var(--merged); }
+.lanes .n, .key .n { background: var(--needs); }
+.js .lanes { transform: scaleX(0); transition: transform 2.4s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.js .seen .lanes { transform: none; }
+.nights-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.3rem 1.5rem;
+  margin: 0.8rem 0 0;
+  max-width: none;
+  font-size: var(--s-1);
+  color: var(--shore);
+}
+.nights-notes time { color: var(--accent); }
+.key {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.8rem;
+  margin: 1.2rem 0 0;
+  padding: 0;
+  font-size: var(--s-1);
+  color: var(--dry);
+}
+.key li { display: flex; align-items: center; gap: 0.6rem; }
+.key i { width: 1.4rem; height: 0.6rem; }
+
+.fit { display: grid; gap: 0.9rem; margin-top: 3rem; }
+.fit p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  max-width: none;
+  font-size: var(--s-1);
+}
+.fit b { width: 6.2rem; }
+.fit span { border: 1px solid var(--wet); padding: 0.45rem 0.8rem; color: var(--dry); }
+.fit p + p span { border: 1px dashed var(--damp); color: var(--shore); }
+
+.versus-title { margin: 3.4rem 0 0.4rem; font-size: var(--s1); color: var(--moon); }
+.versus { width: 100%; margin-top: 1.4rem; border-collapse: collapse; border-top: 3px double var(--wet); font-size: var(--s-1); }
+.versus th,
+.versus td { padding: 0.8rem 1rem 0.8rem 0; border-bottom: 1px solid var(--wet); text-align: left; vertical-align: top; }
+.versus thead th { font-weight: 500; color: var(--driftwood); }
+.versus tbody th { width: 26%; font-weight: 500; color: var(--dry); }
+.versus td { width: 37%; color: var(--shore); }
+.versus td:last-child,
+.versus thead th:last-child { color: var(--moon); }
+
+/* -- the night: a sky the width of the window. The moon crosses it with the
+   run's clock, over the page's dunes, and the castle on them is the run's
+   tickets. night.js moves the moon and sets --dawn. */
+
+.sky {
+  position: relative;
+  width: 100vw;
+  height: clamp(340px, 44vw, 540px);
+  /* A finger moving sideways winds the night; up and down still scrolls the page. */
+  touch-action: pan-y;
+  margin: 1rem 0 0 calc(50% - 50vw);
+  /* Cut at the sides and the foot only: the moon's light spills up behind the heading. */
+  clip-path: inset(-100vh 0 0 0);
+  overflow-x: clip;
+  --dawn: 0;
+  --ground: 48px;
+  --block: clamp(40px, 4vw, 54px);
+}
+.sky > * { position: absolute; }
+.stars { inset: 0; opacity: calc(1 - var(--dawn) * 0.9); }
+.stars span {
+  position: absolute;
+  color: var(--driftwood);
+  font-size: 0.8rem;
+  line-height: 1;
+  animation: twinkle 5s ease-in-out infinite;
+}
+@keyframes twinkle { 50% { opacity: 0.2; } }
+.comet {
+  top: 14%;
+  left: 60%;
+  width: 110px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--moon), transparent);
+  rotate: -20deg;
+  opacity: 0;
+  animation: comet 13s 4s infinite;
+}
+@keyframes comet {
+  0% { opacity: 0; transform: translateX(0); }
+  1.5% { opacity: 0.9; }
+  5%, 100% { opacity: 0; transform: translateX(-300px); }
+}
+.arc { inset: 0; width: 100%; height: 100%; }
+.arc path { fill: none; stroke: var(--wet); stroke-width: 1.5; stroke-dasharray: 2 9; stroke-linecap: round; }
+/* The sun comes up where the moon rose. */
+.dawn {
+  inset: 0;
+  background: radial-gradient(90vw 110% at 5% 100%, rgb(232 214 180 / 0.5), rgb(192 164 120 / 0.2) 40%, transparent 75%);
+  opacity: var(--dawn);
+}
+.sun {
+  left: max(5%, 2.4rem);
+  bottom: calc(var(--ground) * 1.4);
+  width: clamp(44px, 6vw, 86px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--dry);
+  box-shadow: 0 0 80px 20px rgb(205 184 148 / 0.4);
+  opacity: var(--dawn);
+  transform: translate(-50%, calc(100% - var(--dawn) * 75%));
+}
+.moon {
+  left: 0;
+  top: 0;
+  width: clamp(34px, 4.6vw, 62px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 66% 62%, rgb(160 134 98 / 0.45) 0 10%, transparent 11%),
+    radial-gradient(circle at 36% 68%, rgb(160 134 98 / 0.35) 0 6%, transparent 7%),
+    radial-gradient(circle at 42% 30%, rgb(160 134 98 / 0.3) 0 8%, transparent 9%),
+    var(--moon);
+  box-shadow: 0 0 70px 16px rgb(232 214 180 / 0.16), 0 0 12px 1px rgb(232 214 180 / 0.5);
+  will-change: transform;
+}
+/* Its light on the night around it, gone by dawn. */
+.moon::before {
+  content: "";
+  position: absolute;
+  inset: -24vw;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(232 214 180 / 0.1), transparent);
+  opacity: calc(1 - var(--dawn));
+  pointer-events: none;
+}
+.moon-clock {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: var(--s-1);
+  font-variant-numeric: tabular-nums;
+}
+/* Its height is the sand script's; their feet fade into the night. */
+.dunes { left: 0; bottom: 0; width: 100%; height: 0; pointer-events: none; }
+.keep {
+  left: 50%;
+  bottom: calc(var(--ground) * 0.5);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(5, var(--block));
+  gap: 3px;
+  font-size: clamp(0.6rem, 0.9vw, 0.68rem);
+  font-weight: 650;
+}
+.keep span {
+  display: grid;
+  place-items: center;
+  height: calc(var(--block) * 0.66);
+  border: 1px dashed var(--wet);
+  background: rgb(14 17 22 / 0.7);
+  color: var(--damp);
+}
+.keep .w { border: 1px solid var(--working); color: var(--working); animation: work 1.6s ease-in-out infinite; }
+.keep .b { border-color: var(--queued); color: var(--queued); }
+.keep .r { border: 2px solid var(--needs); color: var(--needs); }
+.keep .m { border: 0; background: var(--dry); color: var(--night); animation: land 0.5s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.keep .m:nth-child(-n + 3) { background: var(--moon); }
+.keep .m:nth-child(n + 9) { background: var(--deep); color: #f6ead0; }
+@keyframes work { 50% { border-color: rgb(255 215 95 / 0.3); } }
+@keyframes land { from { transform: translateY(-1.6rem); opacity: 0.2; } }
+.sky-tally {
+  top: 1rem;
+  right: max(var(--gutter), calc(50% - var(--page) / 2));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1.2rem;
+  margin: 0;
+  font-size: var(--s-1);
+}
+.sky-tally b { font-weight: 400; font-variant-numeric: tabular-nums; }
+
+.moments {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
   border-top: 3px double var(--wet);
 }
-.fit-col { padding: 1.6rem 2rem 0 0; }
-.fit-col + .fit-col { padding: 1.6rem 0 0 2rem; border-left: 1px solid var(--wet); }
-.fit ul { list-style: none; margin: 0; padding: 0; }
-.fit li {
-  position: relative;
-  padding-left: 1.6em;
-  margin-bottom: 0.8rem;
+.moments li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: -3px;
+  padding: 1.2rem 1.2rem 1.2rem 0;
+  border-top: 3px solid transparent;
+  font-size: var(--s-1);
+  color: var(--dry);
+  transition: opacity 0.5s, border-color 0.5s;
 }
-.fit li > span:first-child { position: absolute; left: 0; font-weight: 700; }
-
-/* -- the night: a time column and a rule, as in the status table */
-
-.log {
-  list-style: none;
-  margin: 2.4rem 0 2rem;
-  padding: 0;
-  border-top: 1px solid var(--wet);
-}
-.log li {
-  display: grid;
-  grid-template-columns: 7ch 1fr;
-  border-bottom: 1px solid var(--wet);
+.js .moments li { opacity: 0.6; }
+.js .moments .done { opacity: 0.85; }
+.js .moments .on { opacity: 1; border-top-color: var(--moon); }
+.moments time { color: var(--accent); font-variant-numeric: tabular-nums; }
+.moments b { font-size: var(--s0); font-weight: 650; color: var(--moon); }
+.moments b.c-ylw { color: var(--working); }
+.moments b.c-grn { color: var(--merged); }
+.moments code { font-size: 1em; color: inherit; }
+.sky-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.6rem;
+  margin: 0.9rem 0 0;
   max-width: none;
+  font-size: var(--s-1);
+  color: var(--shore);
 }
-.log time {
-  padding: 1.1rem 0;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  border-right: 1px solid var(--wet);
+.sky-key .k-w { color: var(--working); }
+.sky-key .k-m { color: var(--dry); }
+.sky-key .k-r { color: var(--needs); }
+.sky-key .k-b { color: var(--queued); }
+.sky-hint { display: none; margin-left: auto; color: var(--driftwood); }
+@media (prefers-reduced-motion: no-preference) {
+  .js .sky-hint { display: inline; }
 }
-.log li > div { padding: 1.1rem 0 1.1rem 1.6rem; max-width: calc(var(--measure) + 1.6rem); }
-.after { color: var(--dry); }
+.after { margin-top: 2rem; color: var(--dry); }
+
+@media (prefers-reduced-motion: reduce) {
+  .stars span, .comet, .keep span { animation: none; }
+  .js .lanes { transform: none; transition: none; }
+}
 
 /* -- how: a real sequence, counted the way a run counts its landing */
 
@@ -456,7 +794,256 @@ main > .run {
 .steps li::before { content: counter(step) '/5'; }
 .install-steps li::before { content: counter(step) '/3'; }
 
-/* -- safety: a table by boundary, ruled like the status view's table */
+/* -- how: the five steps as a factory line */
+
+.line {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 2.3fr 1fr;
+  gap: 1.7rem;
+  margin: 2.4rem 0 0;
+  padding: 0;
+}
+.line > li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.1rem 1rem;
+  border: 1px solid var(--wet);
+}
+.line > li + li::before,
+.stages li + li::before,
+.wall > * + *::before {
+  content: '▸';
+  position: absolute;
+  left: -1.25rem;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--deep);
+}
+.line h3 { margin: 0; color: var(--moon); }
+.line code { font-size: var(--s-1); }
+.line-n { font-size: var(--s-1); color: var(--accent); }
+.line-run { border-color: var(--accent); background: color-mix(in srgb, var(--night-up) 88%, transparent); }
+.line-run p { margin: 0; font-size: var(--s-1); color: var(--shore); }
+.stages {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.1rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  font-size: var(--s-1);
+}
+.stages li {
+  position: relative;
+  flex: 1;
+  padding: 0.5rem 0.3rem;
+  border: 1px solid var(--working);
+  color: var(--working);
+  text-align: center;
+  white-space: nowrap;
+}
+.stages li + li::before { left: -0.9rem; }
+.stages .st-g { border-color: var(--ready); color: var(--ready); }
+.stages .st-m { border-color: var(--merged); background: var(--merged); color: var(--night); font-weight: 650; }
+/* -- the detail behind a picture, folded away */
+
+.more { margin-top: 2.4rem; border-top: 1px solid var(--wet); border-bottom: 1px solid var(--wet); }
+.more > summary {
+  position: relative;
+  padding: 0.9rem 0 0.9rem 3ch;
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--s-1);
+  color: var(--shore);
+}
+.more > summary::-webkit-details-marker { display: none; }
+.more > summary::before { content: '+'; position: absolute; left: 0; }
+.more[open] > summary::before { content: '-'; }
+.more .bounds { margin-top: 0; border-top: 1px solid var(--wet); }
+.more .bound:last-child { border-bottom: 0; }
+.more .steps { margin-top: 1.4rem; }
+
+/* -- a terminal, drawn */
+
+.show {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: center;
+  margin-top: 2.4rem;
+}
+.term {
+  border: 1px solid var(--wet);
+  background: #0b0d11;
+  padding: 1.2rem 1.4rem;
+  font-size: 0.9rem;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.45);
+}
+.term p { margin: 0; max-width: none; }
+
+/* -- the skill: one question asked, six actions as keys */
+
+.skill .show { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: stretch; }
+.ask { display: flex; flex-direction: column; gap: 0.9rem; }
+.ask-reply { display: grid; gap: 0.3rem; padding-left: 1rem; border-left: 2px solid var(--deep); color: var(--dry); }
+.ask-keys { display: flex; gap: 0.6rem; }
+.ask-keys span { padding: 0.45rem 1rem; border: 1px solid var(--wet); color: var(--driftwood); }
+.ask-keys .on { border-color: var(--accent); color: var(--moon); }
+.ask .term-note { margin-top: auto; padding-top: 1rem; font-size: var(--s-1); color: var(--shore); }
+.keys h3 {
+  margin: 0 0 0.6rem;
+  font-size: var(--s-1);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--driftwood);
+}
+.keys ul {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+  gap: 0.6rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+}
+.keys li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.8rem;
+  border: 1px solid var(--wet);
+  border-bottom-width: 4px;
+  font-size: var(--s-1);
+  color: var(--dry);
+}
+.keys .on { border-color: var(--accent); }
+.keys b { font-size: var(--s0); font-weight: 650; color: var(--moon); }
+.keys-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  margin: 0;
+  max-width: none;
+  padding-top: 1rem;
+  border-top: 3px double var(--wet);
+  font-size: var(--s-1);
+  color: var(--dry);
+}
+
+/* -- long runs: three pictures */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  gap: 2rem;
+  margin-top: 2.4rem;
+}
+.tile { display: flex; flex-direction: column; padding-top: 1.2rem; border-top: 3px double var(--wet); }
+.tile h3 { margin: 0; font-size: var(--s1); color: var(--moon); }
+.tile > p { margin: 0.2rem 0 1.2rem; font-size: var(--s-1); color: var(--dry); }
+.checks { list-style: none; margin: 0; padding: 0; font-size: var(--s-1); }
+.checks li { position: relative; margin-top: -1px; padding: 0.8rem 0.9rem 0.8rem 2.4rem; border: 1px solid var(--wet); }
+.checks li::before { content: '+'; position: absolute; left: 0.9rem; font-weight: 700; color: var(--merged); }
+.tile > .go {
+  position: relative;
+  margin: 2rem 0 0;
+  padding: 0.8rem;
+  background: var(--working);
+  color: var(--night);
+  font-weight: 650;
+  text-align: center;
+}
+.go::before { content: '▾'; position: absolute; top: -1.7rem; left: 50%; translate: -50%; color: var(--deep); }
+.lean { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: var(--s-1); }
+.lean ul { list-style: none; display: grid; gap: 0.35rem; margin: 0; padding: 0; }
+.lean li { min-height: 1.9rem; padding: 0.25rem 0.7rem; background: var(--deep); color: #f6ead0; }
+.lean .kept li { background: var(--dry); color: var(--night); }
+.lean .kept .cut { background: none; border: 1px dashed var(--wet); }
+.lean .lean-h { padding-left: 0; background: none; color: var(--driftwood); }
+.lean .kept .lean-h { background: none; color: var(--working); }
+.slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; font-size: var(--s-1); }
+.slots i {
+  display: grid;
+  place-items: center;
+  height: 3.6rem;
+  background: var(--dry);
+  color: var(--night);
+  font-style: normal;
+  font-weight: 650;
+}
+.slots .b { background: var(--queued); }
+.tile > .slots-cap { margin: 0.8rem 0 0; color: var(--shore); }
+.tile > .slots-note { margin: 1.2rem 0 0; }
+
+/* -- where you watch it: Claude Code and Herdr, a line each */
+
+.seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: 2rem 3rem;
+  margin-top: 2.4rem;
+}
+.seat { padding-top: 1.2rem; border-top: 3px double var(--wet); }
+.seat h3 { font-size: var(--s1); color: var(--moon); }
+.seat img { display: block; width: 100%; height: auto; margin: 0.8rem 0 1rem; border: 1px solid #1c222c; }
+.seat p { color: var(--dry); }
+.seat .seat-line {
+  margin: 0.8rem 0 1rem;
+  padding: 1.6rem 1.2rem;
+  border: 1px solid #1c222c;
+  background: #0b0d11;
+  color: var(--needs);
+}
+.seat .more { margin-top: 1.2rem; }
+.seat .bound { grid-template-columns: 1fr; }
+.seat .bound h3 { padding-bottom: 0; border-right: 0; font-size: var(--s0); color: var(--dry); }
+.seat .bound ul { padding-left: 0; }
+
+/* -- safety: the sandbox, the wall a branch has to get through, your machine */
+
+.wall {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.75fr);
+  gap: 2.2rem;
+  margin-top: 2.6rem;
+}
+.wall > * { position: relative; }
+.wall > * + *::before { left: -1.5rem; }
+.wall > .zone-host::before { color: var(--merged); }
+.wall > .zone-out::before { content: '✕'; color: var(--needs); }
+.zone { display: flex; flex-direction: column; gap: 0.8rem; padding: 1.2rem; border: 1px dashed var(--working); }
+.zone-h { margin: 0; font-size: var(--s-1); letter-spacing: 0.06em; text-transform: uppercase; color: var(--working); }
+.zone svg { width: 2.6rem; height: 2.6rem; stroke: var(--working); }
+.zone h3 { margin: 0; color: var(--moon); }
+.zone ul { list-style: none; display: grid; gap: 0.5rem; margin: auto 0 0; padding: 1rem 0 0; font-size: var(--s-1); color: var(--dry); }
+.zone-host { border: 1px solid var(--merged); }
+.zone-host .zone-h { color: var(--merged); }
+.zone-host svg { stroke: var(--merged); }
+.zone-out { border-color: var(--damp); }
+.zone-out .zone-h { color: var(--driftwood); }
+.zone-out h3 { color: var(--dry); }
+.rampart { display: flex; flex-direction: column; }
+.merlons { display: flex; gap: 1.1rem; height: 1.1rem; }
+.merlons i { flex: 1; background: var(--moon); }
+.rampart ol {
+  flex: 1;
+  list-style: none;
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 1.1rem;
+  background: var(--dry);
+  border-bottom: 1.2rem solid var(--deep);
+  counter-reset: check;
+}
+.rampart li { padding: 0.7rem 0.9rem; background: var(--night); font-size: var(--s-1); color: var(--dry); counter-increment: check; }
+.rampart b { display: block; font-size: var(--s0); }
+.rampart b::before { content: counter(check) ' '; }
+
+/* -- the detail tables, ruled like the status view's table */
 
 .section-lede { color: var(--dry); }
 .bounds {
@@ -526,13 +1113,40 @@ main > .run {
 .foot p { margin: 0; }
 .foot-links { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
+/* The rows of pictures become columns, and their arrows point down. */
+@media (max-width: 900px) {
+  .line,
+  .wall,
+  .show,
+  .skill .show { grid-template-columns: minmax(0, 1fr); }
+  .line > li + li::before,
+  .wall > * + *::before { content: '▾'; left: 1.2rem; top: -1.5rem; translate: none; }
+  .wall > .zone-out::before { content: '✕'; }
+  .moments { grid-template-columns: minmax(0, 1fr); border-top: 0; }
+  .moments li { margin-top: 0; padding: 0.9rem 0 0.9rem 1rem; border-top: 0; border-left: 3px solid var(--wet); }
+  .js .moments .on { border-left-color: var(--moon); }
+  .sky-tally { left: var(--gutter); right: auto; }
+  .sky-hint { margin-left: 0; }
+  .ran li { grid-template-columns: 3.2rem minmax(0, 1fr) 2.6rem; }
+  .ran i, .ran-k { display: none; }
+  .versus thead { display: none; }
+  .versus tr { display: grid; padding: 0.8rem 0; border-bottom: 1px solid var(--wet); }
+  .versus tbody th, .versus td { width: auto; padding: 0.15rem 0; border: 0; }
+  .versus td:first-of-type::before { content: "by hand: "; color: var(--driftwood); }
+}
+
+@media (max-width: 480px) {
+  /* All five on one row. */
+  .pipe { gap: 0.7rem; font-size: 0.68rem; }
+  .pipe li { width: 3.6rem; }
+  .pipe li + li::before { left: -0.65rem; }
+  .pipe svg { width: 1.9rem; height: 1.9rem; }
+}
+
 @media (max-width: 760px) {
-  .fit { grid-template-columns: 1fr; }
-  .fit-col + .fit-col { padding: 1.6rem 0 0; border-left: 0; border-top: 1px solid var(--wet); }
   .bound { grid-template-columns: 1fr; }
   .bound h3 { border-right: 0; padding-bottom: 0; }
   .bound ul { padding-left: 0; }
   .foot { grid-template-columns: 1fr; }
-  .log li { grid-template-columns: 6.5ch 1fr; }
-  .log li > div { padding-left: 1rem; }
+  .nights-row { grid-template-columns: minmax(0, 1fr); }
 }

@@ -19,10 +19,10 @@
 
   const GLINT = css(MOON, 1.08);
   const LAYERS = [
-    { depth: 0.08, size: 1, rgb: [94, 78, 60], alpha: 0.8, wind: 7, share: 0.38 },
-    { depth: 0.22, size: 1.4, rgb: [146, 124, 94], alpha: 0.7, wind: 13, share: 0.32 },
-    { depth: 0.45, size: 1.9, rgb: DRY, alpha: 0.62, wind: 22, share: 0.21 },
-    { depth: 0.8, size: 2.6, rgb: MOON, alpha: 0.55, wind: 36, share: 0.09 },
+    { depth: 0.08, size: 1.1, rgb: [128, 106, 80], alpha: 0.9, wind: 7, share: 0.38 },
+    { depth: 0.22, size: 1.5, rgb: [176, 152, 116], alpha: 0.85, wind: 13, share: 0.32 },
+    { depth: 0.45, size: 2, rgb: DRY, alpha: 0.8, wind: 22, share: 0.21 },
+    { depth: 0.8, size: 2.7, rgb: MOON, alpha: 0.75, wind: 36, share: 0.09 },
   ];
   // Far to near: the far ones drift slowest.
   // Far dunes are paler and fade into the night; near ones are warmer.
@@ -86,7 +86,7 @@
         for (let i = 0; i < n; i++) {
           // A few specks of shell, and a few grains that catch the moon now and then.
           const speck = r() < 0.03;
-          const glint = !speck && L.depth > 0.2 && r() < 0.06;
+          const glint = !speck && L.depth > 0.2 && r() < 0.16;
           grains.push({
             L,
             x: r() * W,
@@ -151,14 +151,19 @@
 
         const speed = L.wind * w + p.vx;
         // Sand hangs low: grains thin out towards the top of the screen.
-        let a = L.alpha * fieldAlpha * (0.4 + 0.6 * Math.min(1, Math.max(0, y / H)));
+        let a = L.alpha * fieldAlpha * (0.6 + 0.4 * Math.min(1, Math.max(0, y / H)));
         if (p.speck) a *= 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(clock * 1.7 + p.phase * 3));
         // A glint: a short, sharp flash, then dark for a few seconds.
-        const flash = p.glint ? Math.max(0, Math.sin(clock * p.rate + p.phase)) ** 24 : 0;
+        const flash = p.glint ? Math.max(0, Math.sin(clock * p.rate + p.phase)) ** 12 : 0;
         if (flash > 0.02) {
-          ctx.globalAlpha = Math.min(1, 0.35 + flash) * fieldAlpha;
           ctx.fillStyle = GLINT;
-          const g = p.size * (1 + flash * 1.6);
+          // A soft halo under the cross, so a glint reads against the night from across the page.
+          ctx.globalAlpha = 0.16 * flash * fieldAlpha;
+          ctx.beginPath();
+          ctx.arc(p.x, y, p.size * (2 + flash * 3), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = Math.min(1, 0.45 + flash) * fieldAlpha;
+          const g = p.size * (1.6 + flash * 2.6);
           ctx.fillRect(p.x - g, y - 0.5, g * 2, 1);
           ctx.fillRect(p.x - 0.5, y - g, 1, g * 2);
         }
