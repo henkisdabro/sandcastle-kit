@@ -137,6 +137,14 @@
 
   document.fonts.ready.then(() => {
     startSand();
+    window.SandcastleNight({ root: document.querySelector('.night'), puff: (x, y) => sand.puff(x, y, 14, 0.5), reduced });
+    // The six lanes of the second night are drawn across once, when they come into view.
+    const nights = document.querySelector('.nights');
+    new IntersectionObserver(([e], io) => {
+      if (!e.isIntersecting) return;
+      nights.classList.add('seen');
+      io.disconnect();
+    }, { threshold: 0.5 }).observe(nights);
     if (!pre) return;
     if (reduced.matches) t = STILL;
     layout();

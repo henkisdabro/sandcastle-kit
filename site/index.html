@@ -70,9 +70,13 @@
       {
         "@type": "FAQPage",
         "mainEntity": [
-          { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and USAGE_CHECK=1 stops it starting tickets before then." } },
+          { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. On the kit's own repository, 18 tickets took 1 h 40 min and 28.4M input and 343k output tokens, with Sonnet implementing and Opus reviewing; one ticket ran from 0.4M to 3.3M input tokens. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and USAGE_CHECK=1 stops it starting tickets before then." } },
           { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label sets the implementer's model or effort for one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
           { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed." } },
+          { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. Leave the checkout alone until the run ends, and do your own work in another clone." } },
+          { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
+          { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged." } },
+          { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
           { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake until it ends (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A ticket whose blocker lands starts in the same run, and with autonomy: \"drain\" one run keeps going until the queue is drained or something stops it, and says what." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
           { "@type": "Question", "name": "Linear, Jira, Windows?", "acceptedAnswer": { "@type": "Answer", "text": "Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux." } }
@@ -89,8 +93,7 @@
     <a class="top-logo" href="./" aria-label="sandcastle-kit home"><svg class="top-castle" viewBox="0 1 5 5" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e8d6b4" d="M0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4z"/><path fill="#cdb894" d="M0 2h5v2H0z"/><path fill="#705c42" d="M0 4h5v1H0zM0 5h2v1H0zM3 5h2v1H3z"/></svg>sandcastle-kit</a>
     <nav aria-label="Sections">
       <a href="#how">How it works</a>
-      <a href="#herdr">Herdr</a>
-      <a href="#claude-code">Claude Code</a>
+      <a href="#proof">A real run</a>
       <a href="#safety">Safety</a>
       <a href="#install">Install</a>
       <a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a>
@@ -99,259 +102,520 @@
 
   <main>
     <section class="hero" aria-labelledby="hero-title">
-      <div class="mark">
-        <button type="button" class="castle-btn" aria-label="Knock the sandcastle down and watch it build again">
-        <svg class="castle" viewBox="0 1 5 5" shape-rendering="crispEdges" aria-hidden="true">
-          <g class="castle-px">
-            <rect data-r="1" x="0" y="1" width="1" height="1" fill="#e8d6b4"/>
-            <rect data-r="1" x="2" y="1" width="1" height="1" fill="#e8d6b4"/>
-            <rect data-r="1" x="4" y="1" width="1" height="1" fill="#e8d6b4"/>
-            <rect data-r="2" x="0" y="2" width="5" height="2" fill="#cdb894"/>
-            <rect data-r="4" x="0" y="4" width="5" height="1" fill="#705c42"/>
-            <rect data-r="5" x="0" y="5" width="2" height="1" fill="#705c42"/>
-            <rect data-r="5" x="3" y="5" width="2" height="1" fill="#705c42"/>
-          </g>
-        </svg>
-        </button>
-        <p class="wordmark" aria-hidden="true"><span class="wm-sand">sandcastle</span><span class="wm-kit">-kit</span></p>
-        <canvas class="castle-sand" aria-hidden="true"></canvas>
-      </div>
-
-      <h1 id="hero-title">Turn your ticket backlog into a software factory.</h1>
-      <p class="lede">sandcastle-kit runs Claude Code agents unattended, one Docker sandbox per ticket. A second agent reviews each branch against its ticket, and only a branch that passes your own lint, tests and build is merged, into your local branch. Nothing is pushed until you push it.</p>
-
-      <div class="cta">
-        <div class="cmd" data-copy>
-          <code><span class="c-mute">$</span> git clone https://github.com/henkisdabro/sandcastle-kit.git ~/sandcastle-kit &amp;&amp; cd ~/sandcastle-kit &amp;&amp; pnpm install &amp;&amp; ./bin/sandcastle setup</code>
-          <button type="button" class="copy">Copy</button>
+      <div class="hero-copy">
+        <div class="mark">
+          <button type="button" class="castle-btn" aria-label="Knock the sandcastle down and watch it build again">
+          <svg class="castle" viewBox="0 1 5 5" shape-rendering="crispEdges" aria-hidden="true">
+            <g class="castle-px">
+              <rect data-r="1" x="0" y="1" width="1" height="1" fill="#e8d6b4"/>
+              <rect data-r="1" x="2" y="1" width="1" height="1" fill="#e8d6b4"/>
+              <rect data-r="1" x="4" y="1" width="1" height="1" fill="#e8d6b4"/>
+              <rect data-r="2" x="0" y="2" width="5" height="2" fill="#cdb894"/>
+              <rect data-r="4" x="0" y="4" width="5" height="1" fill="#705c42"/>
+              <rect data-r="5" x="0" y="5" width="2" height="1" fill="#705c42"/>
+              <rect data-r="5" x="3" y="5" width="2" height="1" fill="#705c42"/>
+            </g>
+          </svg>
+          </button>
+          <p class="wordmark" aria-hidden="true"><span class="wm-sand">sandcastle</span><span class="wm-kit">-kit</span></p>
+          <canvas class="castle-sand" aria-hidden="true"></canvas>
         </div>
-        <p class="cta-links">
-          <a href="#install">Start with a dry run</a>
-          <a href="https://github.com/henkisdabro/sandcastle-kit">Read the source on GitHub</a>
-        </p>
+
+        <h1 id="hero-title">Unattended Claude Code agents for your ticket backlog.</h1>
+
+        <ol class="pipe" aria-label="What happens to each ticket">
+          <li><svg viewBox="0 0 24 24" class="i-queued" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>a ticket</li>
+          <li><svg viewBox="0 0 24 24" class="i-working" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>its own sandbox</li>
+          <li><svg viewBox="0 0 24 24" class="i-working" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>a second agent reviews</li>
+          <li><svg viewBox="0 0 24 24" class="i-ready" aria-hidden="true"><path d="M4 21V9l8-6 8 6v12"/><path d="M9 13l2.2 2.2L15.5 11"/></svg>your lint, tests, build</li>
+          <li><svg viewBox="0 0 24 24" class="i-merged" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-6 6"/></svg>your local branch</li>
+        </ol>
+        <p class="lede">Queue tickets, start a run and read the report in the morning. Nothing is pushed until you push it.</p>
+
+        <div class="cta">
+          <div class="cmd" data-copy>
+            <code><span class="c-mute">$</span> git clone https://github.com/henkisdabro/sandcastle-kit.git ~/sandcastle-kit &amp;&amp; cd ~/sandcastle-kit &amp;&amp; pnpm install &amp;&amp; ./bin/sandcastle setup</code>
+            <button type="button" class="copy">Copy</button>
+          </div>
+          <p class="cta-links">
+            <a href="#install">Start with a dry run</a>
+            <a href="https://github.com/henkisdabro/sandcastle-kit">Read the source on GitHub</a>
+          </p>
+        </div>
+        <p class="dry"><code>DRY_RUN=1 sandcastle run</code> the first time: it implements, reviews and gates your tickets, and merges nothing.</p>
+        <p class="req">macOS or Linux, Docker (or OrbStack, or Podman), Node 22+, and a Claude subscription or API key.</p>
       </div>
-      <p class="req">macOS or Linux, Docker (or OrbStack, or Podman), Node 22+, and a Claude subscription or API key.</p>
+
+      <div class="hero-run">
+        <h2 id="run-title" class="sr-only">A run, as the status view shows it</h2>
+        <pre class="status" aria-hidden="true"></pre>
+        <p class="run-caption">An example night, played back as <code>sandcastle status</code> shows it: thirteen tickets, nine merged, two left for you, two waiting on those.</p>
+        <ul class="sr-only">
+          <li>Ticket 41, rate limiting: implemented and reviewed, failed its tests, repaired, reviewed again, merged.</li>
+          <li>Tickets 42, 43, 45, 48, 49, 52 and 53: implemented, reviewed, gates green, each merged as it went green while the others worked.</li>
+          <li>Ticket 44, a date library upgrade: still failing three tests after two repairs; left for you.</li>
+          <li>Ticket 46: gates green, but it changes CI config, so it is held for you to merge by hand.</li>
+          <li>Ticket 47: waited for ticket 41; once that landed, it started in a free sandbox in the same run, and was implemented, reviewed and merged.</li>
+          <li>Tickets 50 and 51 wait for 44 and 46 to close.</li>
+          <li>By morning: nine branches merged into the local main branch, none of it pushed.</li>
+        </ul>
+      </div>
+
+      <ul class="guard" aria-label="What keeps an unattended agent in bounds">
+        <li>Agents run with permission prompts off, so:</li>
+        <li><a href="#safety">their token cannot push</a></li>
+        <li><a href="#safety">the kit runs your tests itself</a></li>
+        <li><a href="#safety">changes to CI and hooks wait for you</a></li>
+        <li><a href="#safety">nothing is pushed</a></li>
+      </ul>
     </section>
 
-    <section class="run" aria-labelledby="run-title">
-      <h2 id="run-title" class="sr-only">A run, as the status view shows it</h2>
-      <canvas class="dunes" aria-hidden="true"></canvas>
-      <pre class="status" aria-hidden="true"></pre>
-      <p class="run-caption">An example night, played back as <code>sandcastle status</code> shows it: thirteen tickets, each landing in your local branch as it goes green - nine merged, two left for you, two waiting on those.</p>
-      <ul class="sr-only">
-        <li>Ticket 41, rate limiting: implemented and reviewed, failed its tests, repaired, reviewed again, merged.</li>
-        <li>Tickets 42, 43, 45, 48, 49, 52 and 53: implemented, reviewed, gates green, each merged as it went green while the others worked.</li>
-        <li>Ticket 44, a date library upgrade: still failing three tests after two repairs; left for you.</li>
-        <li>Ticket 46: gates green, but it changes CI config, so it is held for you to merge by hand.</li>
-        <li>Ticket 47: waited for ticket 41; once that landed, it started in a free sandbox in the same run, and was implemented, reviewed and merged.</li>
-        <li>Tickets 50 and 51 wait for 44 and 46 to close.</li>
-        <li>By morning: nine branches merged into the local main branch, none of it pushed.</li>
-      </ul>
+    <section class="proof" id="proof" aria-labelledby="proof-title">
+      <h2 id="proof-title">A real run: the kit, on its own backlog</h2>
+      <p class="section-lede">The kit is built by its own runs. This is one of them, on 4 October 2026, from the run record. Every ticket is a public issue you can open.</p>
+      <dl class="facts">
+        <div><dt>tickets</dt><dd>18</dd></div>
+        <div><dt>merged</dt><dd class="c-grn">18</dd></div>
+        <div><dt>left open for a person</dt><dd>2, a criterion unmet</dd></div>
+        <div><dt>wall clock</dt><dd>1 h 40 min</dd></div>
+        <div><dt>tokens</dt><dd>28.4M in / 343k out</dd></div>
+        <div><dt>models</dt><dd>Sonnet 5.5 implements, Opus 5.5 reviews</dd></div>
+        <div><dt>sandboxes</dt><dd>5 at once</dd></div>
+      </dl>
+      <ol class="ran">
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/252">#252</a><span class="ran-t">Size: a read-only sandcastle size command that recommends the pool's limits</span><i style="--m: 25"></i><span class="ran-m">25m</span><span class="ran-k">1.9M / 25k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/249">#249</a><span class="ran-t">The gates phase time includes the wait for a machine-wide gates slot</span><i style="--m: 16"></i><span class="ran-m">16m</span><span class="ran-k">1.4M / 14k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/244">#244</a><span class="ran-t">A green resolution held by the stray-path check reports 0 commits and no gates</span><i style="--m: 22"></i><span class="ran-m">22m</span><span class="ran-k">1.9M / 14k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/258">#258</a><span class="ran-t">backup-size test fails intermittently: 2 packs after a drop, not 1</span><i style="--m: 31"></i><span class="ran-m">31m</span><span class="ran-k">1.0M / 20k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/251">#251</a><span class="ran-t">An ended run's status view shows the next run's settings beside the report's recorded ones</span><i style="--m: 18"></i><span class="ran-m">18m</span><span class="ran-k">1.1M / 12k</span></li>
+        <li class="again"><a href="https://github.com/henkisdabro/sandcastle-kit/issues/250">#250</a><span class="ran-t">One ticket can spend an hour and 19M tokens with no ceiling short of idle</span><i style="--m: 15"></i><span class="ran-m">15m</span><span class="ran-k">878k / 10k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/248">#248</a><span class="ran-t">The pool tests take 10-66 seconds each and slow the test gate 2-8x under load</span><i style="--m: 19"></i><span class="ran-m">19m</span><span class="ran-k">2.2M / 38k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/243">#243</a><span class="ran-t">The &lt;ungated&gt;, &lt;unmet&gt; and &lt;changelog&gt; readers match a tag named in prose</span><i style="--m: 10"></i><span class="ran-m">10m</span><span class="ran-k">623k / 12k</span></li>
+        <li class="again"><a href="https://github.com/henkisdabro/sandcastle-kit/issues/242">#242</a><span class="ran-t">Tickets that edit protected paths always end held; say so before queueing and requeueing</span><i style="--m: 35"></i><span class="ran-m">35m</span><span class="ran-k">2.5M / 24k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/241">#241</a><span class="ran-t">Report and status treat a hand-merged held branch as one the agent handed back</span><i style="--m: 22"></i><span class="ran-m">22m</span><span class="ran-k">3.3M / 30k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/240">#240</a><span class="ran-t">Idle mark: the skill trigger reads the count before the skill's own labelling</span><i style="--m: 27"></i><span class="ran-m">27m</span><span class="ran-k">1.7M / 17k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/239">#239</a><span class="ran-t">Doctor: the kit's own checkout is never a project, so its project checks are skipped</span><i style="--m: 27"></i><span class="ran-m">27m</span><span class="ran-k">660k / 7k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/237">#237</a><span class="ran-t">pnpmStore mounts the versioned store dir, so sandboxes nest a second store inside the host's</span><i style="--m: 9"></i><span class="ran-m">9m</span><span class="ran-k">396k / 7k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/254">#254</a><span class="ran-t">Size: recommend the pool's limits from measured sandbox and gate peaks</span><i style="--m: 19"></i><span class="ran-m">19m</span><span class="ran-k">2.5M / 41k</span></li>
+        <li class="again"><a href="https://github.com/henkisdabro/sandcastle-kit/issues/253">#253</a><span class="ran-t">Size: setup and doctor point to sandcastle size while the pool limits are untouched defaults</span><i style="--m: 22"></i><span class="ran-m">22m</span><span class="ran-k">1.3M / 14k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/247">#247</a><span class="ran-t">The run estimate is about half the real cost for a run of carried or conflicting branches</span><i style="--m: 29"></i><span class="ran-m">29m</span><span class="ran-k">2.6M / 30k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/246">#246</a><span class="ran-t">A requeued or resolver-held green branch is re-implemented and re-reviewed in full</span><i style="--m: 7"></i><span class="ran-m">7m</span><span class="ran-k">1.3M / 19k</span></li>
+        <li><a href="https://github.com/henkisdabro/sandcastle-kit/issues/245">#245</a><span class="ran-t">Needs you says a stray-held branch changes test files, hiding the real reason</span><i style="--m: 10"></i><span class="ran-m">10m</span><span class="ran-k">994k / 9k</span></li>
+      </ol>
+      <p class="ran-key"><span>bar = minutes in work</span><span>tokens in / out</span><span><i class="again"></i>went back once, after a red gate or a conflict, and merged on its second try</span></p>
+      <figure class="catch">
+        <blockquote>
+          <p>A test that did not test: "a run below its share does hold back a younger wait" filled the pool. The younger run waited only because no slot was free, so the test also passed with the wait-order check removed.</p>
+        </blockquote>
+        <figcaption>The review agent on <a href="https://github.com/henkisdabro/sandcastle-kit/issues/248">#248</a>, in that run. It rewrote the test so that removing the check fails it. The gates were green either way.</figcaption>
+      </figure>
+      <p class="after">Over the 26 runs on this repository so far, a ticket ended merged 110 times, in a conflict 8 times and held for a person 6 times. It is a TypeScript project whose tests take a few minutes; a slower suite or a bigger model costs more.</p>
     </section>
 
     <section class="who" aria-labelledby="who-title">
       <h2 id="who-title">You already run Claude Code all day. It still needs you in the loop.</h2>
-      <p>Someone has to pick the next ticket, start the next session, carry context across and check what came back. For the hard problems that someone should be you. For the well-specified tickets, sandcastle-kit does that part: write them down, mark them ready, start a run, and read what happened in the morning.</p>
 
-      <div class="fit">
-        <div class="fit-col">
-          <h3>It fits if</h3>
-          <ul>
-            <li><span class="c-head" aria-hidden="true">+</span> your work lives in GitHub Issues or Markdown ticket files in the repo;</li>
-            <li><span class="c-head" aria-hidden="true">+</span> most tickets are small and closed - a bug, a small feature, a refactor, tests, a dependency bump;</li>
-            <li><span class="c-head" aria-hidden="true">+</span> the repo has gates a machine can run: lint, typecheck, tests, a build;</li>
-            <li><span class="c-head" aria-hidden="true">+</span> you would rather review a report than watch a terminal.</li>
-          </ul>
+      <div class="nights" role="img" aria-label="Two nights compared. Today you pick each ticket, start each session, carry the context across and check each result, and the work stops when you sleep. With sandcastle-kit you start a run in the evening, six sandboxes work through the tickets, and you read the report in the morning.">
+        <div class="nights-row">
+          <p class="nights-who">Today <b>you drive</b></p>
+          <div class="nights-track">
+            <div class="lane-you">
+              <span class="you">you</span><i style="flex: 5"></i>
+              <span class="you">you</span><i style="flex: 4"></i>
+              <span class="you">you</span><i style="flex: 6"></i>
+              <span class="you">you</span><i style="flex: 3"></i>
+              <span class="you">you</span><i class="asleep" style="flex: 22"></i>
+            </div>
+            <p class="nights-notes"><span>pick the ticket · start the session · carry the context · check the result · again</span><span>you sleep, it stops</span></p>
+          </div>
         </div>
-        <div class="fit-col">
-          <h3>Not yet if</h3>
-          <ul>
-            <li><span class="c-gry" aria-hidden="true">-</span> your tickets say "make it faster" - an agent with no chat context needs a closed spec;</li>
-            <li><span class="c-gry" aria-hidden="true">-</span> nothing in the repo tests anything, so nothing stands between a guess and your main branch;</li>
-            <li><span class="c-gry" aria-hidden="true">-</span> you want to pair with an agent live - use Claude Code directly for that;</li>
-            <li><span class="c-gry" aria-hidden="true">-</span> your tickets live only in Linear or Jira. GitHub Issues and ticket files are the queues today.</li>
-          </ul>
+        <div class="nights-row">
+          <p class="nights-who">With sandcastle-kit <b>you start it, then read the report</b></p>
+          <div class="nights-track">
+            <div class="lane-kit">
+              <span class="you">you</span>
+              <div class="lanes">
+                <div><i class="w" style="flex: 3"></i><i class="m" style="flex: 4"></i><i class="w" style="flex: 3"></i><i class="m" style="flex: 5"></i></div>
+                <div><i class="w" style="flex: 4"></i><i class="m" style="flex: 2"></i><i class="w" style="flex: 5"></i><i class="m" style="flex: 4"></i></div>
+                <div><i class="w" style="flex: 5"></i><i class="n" style="flex: 10"></i></div>
+                <div><i class="w" style="flex: 2"></i><i class="m" style="flex: 5"></i><i class="w" style="flex: 4"></i><i class="m" style="flex: 4"></i></div>
+                <div><i class="w" style="flex: 6"></i><i class="m" style="flex: 3"></i><i class="w" style="flex: 3"></i><i class="m" style="flex: 3"></i></div>
+                <div><i class="w" style="flex: 3"></i><i class="m" style="flex: 3"></i><i class="w" style="flex: 6"></i><i class="m" style="flex: 3"></i></div>
+              </div>
+              <span class="you">you</span>
+            </div>
+            <p class="nights-notes"><span><time>22:41</time> sandcastle run</span><span>six sandboxes, one ticket each</span><span><time>07:30</time> read the report</span></p>
+          </div>
         </div>
       </div>
+      <ul class="key" aria-hidden="true">
+        <li><i class="w"></i>an agent working</li>
+        <li><i class="m"></i>merged into your local branch</li>
+        <li><i class="n"></i>left for you</li>
+      </ul>
+
+      <div class="fit">
+        <p><b class="c-grn">+ it fits</b><span>GitHub Issues or ticket files</span><span>small, closed tickets</span><span>lint · types · tests · build</span><span>you would rather read a report</span></p>
+        <p><b class="c-mute">- not yet</b><span>tickets that say "make it faster"</span><span>nothing tests anything</span><span>you want to pair live</span><span>tickets only in Linear or Jira</span></p>
+      </div>
+
+      <h3 class="versus-title">Why not a loop of <code>claude -p</code>, subagents or worktrees?</h3>
+      <p class="section-lede">You can, and then you build the rest yourself.</p>
+      <table class="versus">
+        <thead><tr><th scope="col"></th><th scope="col">Wired up by hand</th><th scope="col">sandcastle-kit</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Where the agent runs</th><td>your machine, with your credentials</td><td>a Docker sandbox per ticket, holding a token that cannot push</td></tr>
+          <tr><th scope="row">Who checks the work</th><td>the agent that wrote it</td><td>a second, stronger agent, against the ticket</td></tr>
+          <tr><th scope="row">Who runs the tests</th><td>the agent, when it remembers</td><td>the kit, on every branch and again on the merge</td></tr>
+          <tr><th scope="row">Merging</th><td>you, one branch at a time</td><td>each branch as it goes green; a conflict gets a second try</td></tr>
+          <tr><th scope="row">Changes to CI, hooks, install scripts</th><td>merged like the rest</td><td>held for you</td></tr>
+          <tr><th scope="row">The morning after</th><td>scrollback in six terminals</td><td>one report: what merged, what is red and why, what needs you</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section class="night" aria-labelledby="night-title">
       <h2 id="night-title">One night, one run</h2>
-      <ol class="log">
-        <li><time>22:41</time><div><code>sandcastle run</code>. It checks tokens, images and hooks, then runs every gate on <code>main</code> before an agent starts. Red there, and the run stops before it spends anything.</div></li>
-        <li><time>22:43</time><div>Six sandboxes start, one per ticket, each on its own branch in its own container. The rest wait their turn; <span class="c-blu">#47</span> waits for <span class="c-blu">#41</span>.</div></li>
-        <li><time>22:53</time><div><span class="c-grn">#43</span> goes green, and the landing worker merges it into your local <code>main</code> straight away, gating the merge, while the other sandboxes keep working.</div></li>
-        <li><time>22:55</time><div><span class="c-hot">#46</span> is green too, but it changes CI config, so it is held for you to merge by hand.</div></li>
-        <li><time>22:56</time><div><span class="c-ylw">#41</span> fails its tests. A repair pass gets the gate's own output on the same warm sandbox. Green again means a second review before it lands.</div></li>
-        <li><time>23:03</time><div><span class="c-ylw">#41</span> lands, and <span class="c-blu">#47</span>, which waited for it, starts at once in a free sandbox. A branch that conflicts as it lands goes back for one more try in the same run.</div></li>
-        <li><time>23:11</time><div>The last branch lands: nine merged into your local <code>main</code>, two left for you. Nothing is pushed.</div></li>
-        <li><time>07:30</time><div>You read the report: what merged, what is red and why, what needs you. Push what you like; <code>sandcastle requeue 44 --note "..."</code> sends one back with a note.</div></li>
+      <div class="sky" aria-hidden="true">
+        <div class="stars"></div>
+        <div class="comet"></div>
+        <svg class="arc"><path/></svg>
+        <div class="dawn"></div>
+        <div class="sun"></div>
+        <div class="moon"><span class="moon-clock">22:41</span></div>
+        <canvas class="dunes"></canvas>
+        <div class="keep">
+          <span data-t="44" style="grid-column: 1">#44</span>
+          <span data-t="50" style="grid-column: 3">#50</span>
+          <span data-t="51" style="grid-column: 5">#51</span>
+          <span data-t="49">#49</span><span data-t="52">#52</span><span data-t="46">#46</span><span data-t="53">#53</span><span data-t="47">#47</span>
+          <span data-t="43">#43</span><span data-t="42">#42</span><span data-t="45">#45</span><span data-t="41">#41</span><span data-t="48">#48</span>
+        </div>
+        <p class="sky-tally"><span class="c-ylw">● working <b data-n="w">0</b></span><span class="c-hot">! needs you <b data-n="r">0</b></span><span class="c-grn">+ merged <b data-n="m">0</b></span></p>
+      </div>
+      <ol class="moments">
+        <li><time>22:41</time><b><code>sandcastle run</code></b><span>Your gates run on <code>main</code> first. Red there, and nothing is spent.</span></li>
+        <li><time>22:43</time><b class="c-ylw">six sandboxes</b><span>One ticket each, on its own branch. A green one lands while the rest work.</span></li>
+        <li><time>22:56</time><b class="c-ylw">a red gate, repaired</b><span><span class="c-ylw">#41</span> fails its tests, is repaired, reviewed again and lands. <span class="c-blu">#47</span> waited for it, and starts.</span></li>
+        <li><time>23:11</time><b class="c-grn">nine merged</b><span><span class="c-hot">#44</span> and <span class="c-hot">#46</span> are left for you. Nothing is pushed.</span></li>
+        <li><time>07:30</time><b>you read the report</b><span>Push once you have read it. <code>sandcastle requeue 44</code> sends a ticket back.</span></li>
       </ol>
-      <p class="after">With <code>autonomy: "drain"</code>, the run keeps taking turns by itself until the queue is drained, and says why it stopped. <span class="c-hot">#44</span> waits for you; requeued with a note, it builds on its branch instead of starting over.</p>
+      <p class="sky-key" aria-hidden="true"><span class="k-w">outlined: in a sandbox</span><span class="k-m">filled: merged</span><span class="k-r">red: needs you</span><span class="k-b">dashed: waiting on another ticket</span><span class="sky-hint">Move across the sky to wind the night.</span></p>
+      <p class="after">With <code>autonomy: "drain"</code>, the run keeps taking turns by itself until the queue is drained, and says why it stopped.</p>
     </section>
 
     <section class="how" id="how" aria-labelledby="how-title">
       <h2 id="how-title">How it works</h2>
-      <ol class="steps">
+      <ol class="line">
         <li>
-          <h3>Install once</h3>
-          <p><code>./bin/sandcastle setup</code> puts <code>sandcastle</code> on your PATH, installs the agent skill for Claude Code, Codex and OpenCode, walks you through your tokens and ends with a health check.</p>
+          <span class="line-n">1/5</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg>
+          <h3>Install</h3>
+          <code>sandcastle setup</code>
         </li>
         <li>
-          <h3>Point it at a project</h3>
-          <p><code>sandcastle init</code> reads your stack and fills in the gate commands for you to check against CI. <code>sandcastle build</code> makes the project's image.</p>
+          <span class="line-n">2/5</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/><circle cx="12" cy="14" r="2"/></svg>
+          <h3>Point at a project</h3>
+          <code>sandcastle init</code>
         </li>
         <li>
+          <span class="line-n">3/5</span>
+          <svg viewBox="0 0 24 24" class="i-queued" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/></svg>
           <h3>Queue tickets</h3>
-          <p>Label a GitHub issue <code>ready-for-agent</code>, or give a ticket file that status. Ask your agent for <code>/sandcastle queue</code> to tighten the vague ones first, or <code>/sandcastle audit</code> to find work in a repo with no tickets yet.</p>
+          <code class="c-cyn">ready-for-agent</code>
+        </li>
+        <li class="line-run">
+          <span class="line-n">4/5</span>
+          <h3>Run, and walk away</h3>
+          <code>sandcastle run</code>
+          <ol class="stages" aria-label="What a run does with each ticket">
+            <li class="st-w">implement</li>
+            <li class="st-w">review</li>
+            <li class="st-g">your gates</li>
+            <li class="st-m">land</li>
+          </ol>
+          <p>one sandbox per ticket, in parallel</p>
         </li>
         <li>
-          <h3>Run</h3>
-          <p><code>sandcastle run</code>, or <code>DRY_RUN=1 sandcastle run</code> the first time: implement, review and gate, but never merge or close. Watch it with <code>sandcastle status</code>, or from Herdr's sidebar.</p>
-        </li>
-        <li>
-          <h3>Land and push</h3>
-          <p><code>sandcastle report</code> prints the summary again. <code>land</code> merges a branch you fixed, <code>requeue</code> sends a ticket back. Then you push.</p>
+          <span class="line-n">5/5</span>
+          <svg viewBox="0 0 24 24" class="i-merged" aria-hidden="true"><path d="M12 21V7M6 12l6-6 6 6M4 3h16"/></svg>
+          <h3>You push</h3>
+          <code>sandcastle report</code>
         </li>
       </ol>
+      <p class="after">First time? <code>DRY_RUN=1 sandcastle run</code> implements, reviews and gates, and merges nothing.</p>
+      <details class="more">
+        <summary>Each step in full</summary>
+        <ol class="steps">
+          <li>
+            <h3>Install once</h3>
+            <p><code>./bin/sandcastle setup</code> puts <code>sandcastle</code> on your PATH, installs the agent skill for Claude Code, Codex and OpenCode, walks you through your tokens and ends with a health check.</p>
+          </li>
+          <li>
+            <h3>Point it at a project</h3>
+            <p><code>sandcastle init</code> reads your stack and fills in the gate commands for you to check against CI. <code>sandcastle build</code> makes the project's image.</p>
+          </li>
+          <li>
+            <h3>Queue tickets</h3>
+            <p>Label a GitHub issue <code>ready-for-agent</code>, or give a ticket file that status. Ask your agent for <code>/sandcastle queue</code> to tighten the vague ones first, or <code>/sandcastle audit</code> to find work in a repo with no tickets yet.</p>
+          </li>
+          <li>
+            <h3>Run</h3>
+            <p><code>sandcastle run</code>, or <code>DRY_RUN=1 sandcastle run</code> the first time: implement, review and gate, but never merge or close. Watch it with <code>sandcastle status</code>, or from Herdr's sidebar.</p>
+          </li>
+          <li>
+            <h3>Land and push</h3>
+            <p><code>sandcastle report</code> prints the summary again. <code>land</code> merges a branch you fixed, <code>requeue</code> sends a ticket back. Then you push.</p>
+          </li>
+        </ol>
+      </details>
     </section>
 
-    <section class="safety skill" id="skill" aria-labelledby="skill-title">
+    <section class="skill" id="skill" aria-labelledby="skill-title">
       <h2 id="skill-title">Or ask your agent</h2>
-      <p class="section-lede">Setup installs an agent skill: <code>/sandcastle</code> in Claude Code, <code>$sandcastle</code> in Codex, and OpenCode reads it too. It asks before anything that spends allowance, starts a run, or files, closes or splits a ticket.</p>
-      <div class="bounds">
-        <div class="bound">
+      <div class="show">
+        <div class="term ask" aria-hidden="true">
+          <p><span class="c-mute">❯</span> /sandcastle run</p>
+          <div class="ask-reply">
+            <p><span class="c-blu">○ 9 ready</span> · <span class="c-blu">~ 2 blocked</span></p>
+            <p>implement sonnet · review opus</p>
+            <p class="c-wht c-b">Start the run?</p>
+          </div>
+          <p class="ask-keys"><span class="on">Yes, start</span><span>Not yet</span></p>
+          <p class="term-note">It asks before anything that spends allowance, starts a run, or files or closes a ticket.</p>
+        </div>
+        <div class="keys">
           <h3>Before the first run</h3>
           <ul>
-            <li><b><code>init</code></b> reads your CI, sets up the gate commands and rules for agents, agrees with you which skills and MCP servers agents see, and checks that every hook runs in the sandbox. It ends with your gates green on <code>main</code>.</li>
-            <li><b><code>audit</code></b> has read-only agents check the repo for bugs, security issues, missing tests and stale docs, and files what they can prove as tickets once you have approved the list.</li>
-            <li><b><code>queue</code></b> walks every open ticket with you. A ticket is queued only when an agent with no chat context could finish it; for the rest you get one question each, with a recommended answer.</li>
+            <li><b>init</b>sets up your gates and a lean sandbox</li>
+            <li><b>audit</b>finds work and files it as tickets</li>
+            <li><b>queue</b>asks one question per vague ticket</li>
           </ul>
-        </div>
-        <div class="bound">
           <h3>Every run after</h3>
           <ul>
-            <li><b><code>run</code></b> shows the queue and models, asks before starting, and leaves the run working in the background. When it ends, you get the summary: what merged, what needs you, what to push.</li>
-            <li><b><code>status</code></b> reads a live run, or the last one, and the log behind any red row.</li>
-            <li><b><code>update</code></b> pulls the latest kit, rebuilds the project's image and walks you through what the new version changes for it.</li>
+            <li class="on"><b>run</b>asks, then starts the run and writes its summary</li>
+            <li><b>status</b>reads a live run, or the last one</li>
+            <li><b>update</b>pulls the latest kit and says what it changes</li>
           </ul>
+          <p class="keys-where"><span><code>/sandcastle</code> Claude Code</span><span><code>$sandcastle</code> Codex</span><span>OpenCode too</span></p>
         </div>
       </div>
+      <details class="more">
+        <summary>What each action does</summary>
+        <div class="bounds">
+          <div class="bound">
+            <h3>Before the first run</h3>
+            <ul>
+              <li><b><code>init</code></b> reads your CI, sets up the gate commands and rules for agents, agrees with you which skills and MCP servers agents see, and checks that every hook runs in the sandbox. It ends with your gates green on <code>main</code>.</li>
+              <li><b><code>audit</code></b> has read-only agents check the repo for bugs, security issues, missing tests and stale docs, and files what they can prove as tickets once you have approved the list.</li>
+              <li><b><code>queue</code></b> walks every open ticket with you. A ticket is queued only when an agent with no chat context could finish it; for the rest you get one question each, with a recommended answer.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Every run after</h3>
+            <ul>
+              <li><b><code>run</code></b> shows the queue and models, asks before starting, and leaves the run working in the background. When it ends, you get the summary: what merged, what needs you, what to push.</li>
+              <li><b><code>status</code></b> reads a live run, or the last one, and the log behind any red row.</li>
+              <li><b><code>update</code></b> pulls the latest kit, rebuilds the project's image and walks you through what the new version changes for it.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
     </section>
 
-    <section class="safety long" id="long-runs" aria-labelledby="long-title">
+    <section class="long" id="long-runs" aria-labelledby="long-title">
       <h2 id="long-title">Built for long runs</h2>
-      <p class="section-lede">A run checks what could stop it before it spends anything, and keeps what each sandbox loads small.</p>
-      <div class="bounds">
-        <div class="bound">
+      <div class="tiles">
+        <div class="tile">
           <h3>Fails early</h3>
-          <ul>
-            <li><b>Your gates on <code>main</code> first.</b> If one fails there, the run stops before any agent starts.</li>
-            <li><b>Preflight.</b> One short reply from every model, so an exhausted plan or an old CLI stops the run at the start, not halfway through.</li>
-            <li><b>Hooks proven.</b> The kit checks that your Claude Code hooks run inside the sandbox, and a test can prove a blocking hook still blocks.</li>
+          <p>Checked before a token is spent.</p>
+          <ul class="checks">
+            <li>your gates, green on <code>main</code></li>
+            <li>every model answers a one-line preflight</li>
+            <li>your hooks run in the sandbox</li>
           </ul>
+          <p class="go">agents start</p>
         </div>
-        <div class="bound">
+        <div class="tile">
           <h3>Spends less</h3>
-          <ul>
-            <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins: each one costs context on every turn.</li>
-            <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
-          </ul>
+          <p>A sandbox loads only what you keep.</p>
+          <div class="lean" aria-hidden="true">
+            <ul><li class="lean-h">your session</li><li>skill</li><li>skill</li><li>skill</li><li>plugin</li><li>plugin</li><li>MCP server</li><li>MCP server</li><li>subagent</li></ul>
+            <ul class="kept"><li class="lean-h">a sandbox</li><li>skill</li><li class="cut"></li><li class="cut"></li><li class="cut"></li><li class="cut"></li><li>MCP server</li><li class="cut"></li><li class="cut"></li></ul>
+          </div>
         </div>
-        <div class="bound">
+        <div class="tile">
           <h3>Shares the machine</h3>
-          <ul>
-            <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other.</li>
-            <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
-          </ul>
+          <p>Live runs split the sandbox slots.</p>
+          <div class="slots" aria-hidden="true"><i>my-app</i><i>my-app</i><i>my-app</i><i class="b">api</i><i class="b">api</i><i class="b">api</i></div>
+          <p class="slots-cap">six sandbox slots, two projects running</p>
+          <p class="slots-note">A run outlives the session that started it: <code>sandcastle wait</code> · <code>stop</code></p>
         </div>
       </div>
+      <details class="more">
+        <summary>The detail</summary>
+        <div class="bounds">
+          <div class="bound">
+            <h3>Fails early</h3>
+            <ul>
+              <li><b>Your gates on <code>main</code> first.</b> If one fails there, the run stops before any agent starts.</li>
+              <li><b>Preflight.</b> One short reply from every model, so an exhausted plan or an old CLI stops the run at the start, not halfway through.</li>
+              <li><b>Hooks proven.</b> The kit checks that your Claude Code hooks run inside the sandbox, and a test can prove a blocking hook still blocks.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Spends less</h3>
+            <ul>
+              <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins: each one costs context on every turn.</li>
+              <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Shares the machine</h3>
+            <ul>
+              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other.</li>
+              <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
     </section>
 
-    <section class="safety herdr" id="herdr" aria-labelledby="herdr-title">
-      <h2 id="herdr-title">First-class Herdr support</h2>
-      <p class="section-lede"><a href="https://herdr.dev">Herdr</a> is a terminal multiplexer built for coding agents. Inside it, a run's status view opens over any tab and its progress shows in Herdr's sidebar. Outside Herdr, nothing changes.</p>
-      <div class="bounds">
-        <div class="bound">
-          <h3>Over any tab</h3>
-          <ul>
-            <li><b>The status view on a key.</b> Herdr's prefix key, then <code>Shift+S</code>, opens it over whatever you are doing; <code>q</code> puts you back. Prefix, then <code>Shift+E</code>, shows the last run's report.</li>
-            <li><b>Logs a click away.</b> Ctrl-click a ticket in the status view to open its latest agent log.</li>
-          </ul>
+    <section class="watch" id="watch" aria-labelledby="watch-title">
+      <h2 id="watch-title">Watch it where you already work</h2>
+      <p class="section-lede"><code>sandcastle status</code> works in any terminal. Two optional extras put the run in front of you.</p>
+      <div class="seats">
+        <div class="seat" id="claude-code">
+          <h3>In Claude Code</h3>
+          <img src="img/mod.gif" width="1440" height="472" loading="lazy" alt="A Claude Code session with a band above the prompt: the castle, then sandcastle, my-app, implementing, and counts of tickets working, ready and merged.">
+          <p>An optional <a href="https://code.claude.com/docs/en/plugins/mods/overview">mod</a> (a Claude Code plugin, in early access) shows the run above the prompt of the session that started it, and names the tickets that need you.</p>
+          <details class="more">
+            <summary>The detail</summary>
+            <div class="bounds">
+          <div class="bound">
+            <h3>Above the prompt</h3>
+            <ul>
+              <li><b>A band while it runs.</b> The run's stage and tokens, and how many tickets are working, need you, are ready to land, are blocked or have merged.</li>
+              <li><b>A line when you are needed.</b> A conflict, a red gate, a held branch or a crash pins a line naming the tickets, until they are dealt with or the run ends.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>When it ends</h3>
+            <ul>
+              <li><b>A closing prompt.</b> When the run's process is gone, the session where you used <code>/sandcastle</code> gets a prompt and writes the closing summary, even if you quit Claude Code and resumed that session in between.</li>
+              <li><b>Ticket status on demand.</b> <code>/sandcastle-status</code> lists every ticket and where it is, without a model turn.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Between runs</h3>
+            <ul>
+              <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows how many tickets a run would start now: <code>♜ sandcastle · 4 ready - /sandcastle run</code>. The count is read in the background, at most once every ten minutes per project.</li>
+              <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready; <code>hide</code> turns the mark off for the project.</li>
+            </ul>
+          </div>
         </div>
-        <div class="bound">
-          <h3>In the sidebar</h3>
-          <ul>
-            <li><b>The run at a glance.</b> The run is one entry in the sidebar, and its workspace reads <code>🏰 4/9 · 1 needs you</code>, red when something needs you. The tab bar lists every live run on the machine.</li>
-            <li><b>Each sandbox, if you want them.</b> With sandbox panes on (<code>herdr: { panes: "all" }</code> in the project config, or <code>SANDBOX_PANES=all</code> for one run), each one is named after its ticket with its step and time in it: <code>review · 12m</code>.</li>
-          </ul>
+      </details>
         </div>
-        <div class="bound">
-          <h3>Out of your way</h3>
-          <ul>
-            <li><b>One tab per run.</b> A run started by your agent runs detached, in a tab that holds only its status view, and outlives the session that started it.</li>
-            <li><b>Set up when you say.</b> <code>sandcastle herdr configure</code> shows what it adds to Herdr's config and asks first; <code>--remove</code> takes it out again.</li>
-          </ul>
+        <div class="seat" id="herdr">
+          <h3>In Herdr</h3>
+          <p class="seat-line c-hot">♜ 4/9 · 1 needs you</p>
+          <p><a href="https://herdr.dev">Herdr</a> is a terminal multiplexer for coding agents. There the run is one line in the sidebar, red when it needs you, and a key opens the status view over any tab.</p>
+          <details class="more">
+            <summary>The detail</summary>
+            <div class="bounds">
+          <div class="bound">
+            <h3>Over any tab</h3>
+            <ul>
+              <li><b>The status view on a key.</b> Herdr's prefix key, then <code>Shift+S</code>, opens it over whatever you are doing; <code>q</code> puts you back. Prefix, then <code>Shift+E</code>, shows the last run's report.</li>
+              <li><b>Logs a click away.</b> Ctrl-click a ticket in the status view to open its latest agent log.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>In the sidebar</h3>
+            <ul>
+              <li><b>The run at a glance.</b> The run is one entry in the sidebar, and its workspace reads <code>♜ 4/9 · 1 needs you</code>, red when something needs you. The tab bar lists every live run on the machine.</li>
+              <li><b>Each sandbox, if you want them.</b> With sandbox panes on (<code>herdr: { panes: "all" }</code> in the project config, or <code>SANDBOX_PANES=all</code> for one run), each one is named after its ticket with its step and time in it: <code>review · 12m</code>.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Out of your way</h3>
+            <ul>
+              <li><b>One tab per run.</b> A run started by your agent runs detached, in a tab that holds only its status view, and outlives the session that started it.</li>
+              <li><b>Set up when you say.</b> <code>sandcastle herdr configure</code> shows what it adds to Herdr's config and asks first; <code>--remove</code> takes it out again.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
         </div>
       </div>
-    </section>
-
-    <section class="safety mod" id="claude-code" aria-labelledby="mod-title">
-      <h2 id="mod-title">The run in your Claude Code session</h2>
-      <p class="section-lede">Most runs start from Claude Code, with <code>/sandcastle run</code>. With the kit's optional <a href="https://code.claude.com/docs/en/plugins/mods/overview">Claude Code mod</a> linked, that session shows the run in the status view's castle, glyphs and colours.</p>
-      <div class="bounds">
-        <div class="bound">
-          <h3>Above the prompt</h3>
-          <ul>
-            <li><b>A band while it runs.</b> The run's stage and tokens, and how many tickets are working, need you, are ready to land, are blocked or have merged.</li>
-            <li><b>A line when you are needed.</b> A conflict, a red gate, a held branch or a crash pins a line naming the tickets, until they are dealt with or the run ends.</li>
-          </ul>
-        </div>
-        <div class="bound">
-          <h3>When it ends</h3>
-          <ul>
-            <li><b>A closing prompt.</b> When the run's process is gone, the session where you used <code>/sandcastle</code> gets a prompt and writes the closing summary, even if you quit Claude Code and resumed that session in between.</li>
-            <li><b>Ticket status on demand.</b> <code>/sandcastle-status</code> lists every ticket and where it is, without a model turn.</li>
-          </ul>
-        </div>
-        <div class="bound">
-          <h3>Between runs</h3>
-          <ul>
-            <li><b>Ready tickets.</b> Between runs, a quiet row of sand above the prompt shows how many tickets a run would start now: <code>♜ sandcastle · 4 ready - /sandcastle run</code>. The count is read in the background, at most once every ten minutes per project.</li>
-            <li><b>Hide the reminder.</b> <code>/sandcastle-mark dismiss</code> hides the count until another ticket becomes ready; <code>hide</code> turns the mark off for the project.</li>
-          </ul>
-        </div>
-      </div>
-      <p class="after">Claude Code mods are in early access. Without this one, <code>/sandcastle</code> still waits for a run and writes the summary when it ends.</p>
     </section>
 
     <section class="safety" id="safety" aria-labelledby="safety-title">
       <h2 id="safety-title">Safe to leave alone</h2>
-      <p class="section-lede">Agents run with permission prompts off, inside Docker. The container is the boundary, and the kit narrows what can cross it.</p>
-      <div class="bounds">
-        <div class="bound">
-          <h3>Into the sandbox</h3>
+      <p class="section-lede">Agents run with permission prompts off, inside Docker. The container is the boundary, and only a green, reviewed branch gets through the wall.</p>
+      <div class="wall">
+        <div class="zone zone-box">
+          <p class="zone-h">Docker sandbox</p>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+          <h3>An agent, prompts off</h3>
           <ul>
-            <li><b>A token that cannot push.</b> Only a fine-grained GitHub token for issues goes in, and <code>sandcastle doctor --verify</code> checks it cannot push. An empty value is refused, so a host API key cannot leak in.</li>
-            <li><b>Tickets grant no permissions.</b> A ticket that asks an agent to touch <code>.git/</code>, credentials or a push is not the work, and the guards below hold if an agent tries anyway.</li>
+            <li>a token that cannot push</li>
+            <li>a ticket, which grants no permissions</li>
           </ul>
         </div>
-        <div class="bound">
-          <h3>Before a merge</h3>
+        <div class="rampart">
+          <div class="merlons" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <ol>
+            <li><b class="c-ylw">Review</b>a second agent, against the ticket</li>
+            <li><b class="c-cyn">Your gates</b>lint, tests and build, run by the kit itself</li>
+            <li><b class="c-hot">Risky? It waits for you</b>CI, hooks, install scripts, protected paths</li>
+          </ol>
+        </div>
+        <div class="zone zone-host">
+          <p class="zone-h">Your machine</p>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-6 6"/></svg>
+          <h3>Merged into your local branch</h3>
           <ul>
-            <li><b>Review, then your gates.</b> A second agent reviews every branch against its ticket and fixes what it finds. Then the orchestrator, never the agent, runs your lint, tests and build. Only a green branch merges, and the merged branch is gated again.</li>
-            <li><b>Risky changes wait.</b> A green branch that changes hooks, CI, agent settings, package-manager config, install scripts or a path you protect is labelled <code>ready-for-human</code> and left for you. So is one that adds a file over 50 MB, a repair whose review failed, and a conflict resolution that drops lines git had merged.</li>
+            <li><code>.git</code> is fingerprinted</li>
+            <li>host hooks stay off</li>
           </ul>
         </div>
-        <div class="bound">
-          <h3>On your machine</h3>
+        <div class="zone zone-out">
+          <p class="zone-h">GitHub</p>
+          <h3>Nothing pushed</h3>
           <ul>
-            <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it only labels, comments on and closes issues.</li>
-            <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there.</li>
-            <li><b>Host hooks stay off.</b> During a run the kit's own git calls on your machine ignore hooks, so a branch that adds one cannot run it as it lands.</li>
+            <li>only labels, comments and closed issues</li>
           </ul>
         </div>
       </div>
+      <details class="more">
+        <summary>The detail</summary>
+        <div class="bounds">
+          <div class="bound">
+            <h3>Into the sandbox</h3>
+            <ul>
+              <li><b>A token that cannot push.</b> Only a fine-grained GitHub token for issues goes in, and <code>sandcastle doctor --verify</code> checks it cannot push. An empty value is refused, so a host API key cannot leak in.</li>
+              <li><b>Tickets grant no permissions.</b> A ticket that asks an agent to touch <code>.git/</code>, credentials or a push is not the work, and the guards below hold if an agent tries anyway.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>Before a merge</h3>
+            <ul>
+              <li><b>Review, then your gates.</b> A second agent reviews every branch against its ticket and fixes what it finds. Then the orchestrator, never the agent, runs your lint, tests and build. Only a green branch merges, and the merged branch is gated again.</li>
+              <li><b>Risky changes wait.</b> A green branch that changes hooks, CI, agent settings, package-manager config, install scripts or a path you protect is labelled <code>ready-for-human</code> and left for you. So is one that adds a file over 50 MB, a repair whose review failed, and a conflict resolution that drops lines git had merged.</li>
+            </ul>
+          </div>
+          <div class="bound">
+            <h3>On your machine</h3>
+            <ul>
+              <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it only labels, comments on and closes issues.</li>
+              <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there.</li>
+              <li><b>Host hooks stay off.</b> During a run the kit's own git calls on your machine ignore hooks, so a branch that adds one cannot run it as it lands.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
     </section>
 
     <section class="install" id="install" aria-labelledby="install-title">
@@ -377,7 +641,7 @@
       <h2 id="faq-title">Questions</h2>
       <details>
         <summary>What does it cost to run?</summary>
-        <p>The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and <code>USAGE_CHECK=1</code> stops it starting tickets before then.</p>
+        <p>The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. On the kit's own repository, 18 tickets took 1 h 40 min and 28.4M input and 343k output tokens, with Sonnet implementing and Opus reviewing; one ticket ran from 0.4M to 3.3M input tokens. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and <code>USAGE_CHECK=1</code> stops it starting tickets before then.</p>
       </details>
       <details>
         <summary>Which models does it use?</summary>
@@ -386,6 +650,22 @@
       <details>
         <summary>Does it push to GitHub?</summary>
         <p>No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed.</p>
+      </details>
+      <details>
+        <summary>What about my own work in that repository?</summary>
+        <p>A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. Leave the checkout alone until the run ends, and do your own work in another clone.</p>
+      </details>
+      <details>
+        <summary>What if a branch is green but wrong?</summary>
+        <p>Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch.</p>
+      </details>
+      <details>
+        <summary>What happens on a merge conflict?</summary>
+        <p>A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged.</p>
+      </details>
+      <details>
+        <summary>Can the text of a ticket make an agent do something else?</summary>
+        <p>It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said.</p>
       </details>
       <details>
         <summary>Can a run go all night?</summary>
@@ -415,6 +695,7 @@
 
   <script src="js/status.js" defer></script>
   <script src="js/sand.js" defer></script>
+  <script src="js/night.js" defer></script>
   <script src="js/main.js" defer></script>
 </body>
 </html>
