@@ -846,9 +846,23 @@ nothing asks. What you get:
 | `prefix+shift+s` | The status view over whatever tab you are in, full size. `q` or Esc closes it and puts you back where you were. |
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
-| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says `ctrl-click a ticket for its log`. The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
+| Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's latest log opens in a popup that follows the log live (new lines appear at the bottom as the agent writes them); `Ctrl-C` closes it. A log shorter than the popup opens from its top line and does not follow. |
 | Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
+
+**Which click.** The key depends on the terminal Herdr runs in, not on Herdr: Ctrl-click works in
+Terminal.app and Ghostty, but in iTerm2 it is macOS's right-click and never reaches Herdr, and
+Cmd-click opens the log there instead. A pane cannot see that terminal, so when `sandcastle status`
+starts a view it looks once (never per redraw) at the Herdr clients attached to the view's own
+server - one `ps` listing of your own processes, and `herdr session list` - and reads the
+terminal from their environment (`TERM_PROGRAM`, `LC_TERMINAL`, `VTE_VERSION`, `KITTY_WINDOW_ID`,
+`WEZTERM_EXECUTABLE`). iTerm2 gets `cmd-click a ticket for its log`, Terminal.app and Ghostty
+`ctrl-click a ticket for its log`; anything else - WezTerm, Kitty, a Linux terminal, no client
+found, or clients in terminals that disagree - gets `ctrl-click a ticket for its log (iTerm2:
+cmd-click)`. If the guess is wrong, set it: `"herdr": {"clickHint": "ctrl"}` (or `"cmd"`; `"auto"`
+senses, the default) in your [personal settings](#personal-settings), or `SANDCASTLE_CLICK_HINT`
+for one view, which wins. `sandcastle doctor` and `sandcastle herdr configure` say which terminal
+was sensed and which hint the view will show.
 
 The prefix is Herdr's, `ctrl+b` unless you changed it. The keys work on the project of the focused
 pane; from a pane in no project, on the run going (with several, the one whose tab is in this
@@ -1094,7 +1108,8 @@ Examples: [`examples/`](examples/).
 | `SANDCASTLE_DETACH=1` | off | The same as `sandcastle run --detach` |
 | `SANDCASTLE_API_KEY=1` | off | The same as `--api-key`: the yes to billing API credits, for a run (or `preflight`, `lean --measure`) whose sandboxes would spend `ANTHROPIC_API_KEY`. Without it, such a run asks on a terminal and refuses without one ([Run](#-run)) |
 | `SANDCASTLE_HERDR_VIEW=0` | on inside Herdr | Skip the run's Herdr view - its tab, panes and sidebar reports (the status pane still opens; inside Herdr a run that cannot open any status view does not start) |
-| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log, and its `ctrl-click a ticket for its log` hint (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
+| `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log, and its click hint, `ctrl-click a ticket for its log` or as `SANDCASTLE_CLICK_HINT` says (what the [Herdr plugin](#the-herdr-plugin)'s Ctrl-click opens); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
+| `SANDCASTLE_CLICK_HINT=auto`, `ctrl` or `cmd` | `herdr.clickHint`, else `auto` | Which key the status view's hint names for a click on a ticket: `auto` senses the terminal the Herdr client runs in ([The Herdr plugin](#the-herdr-plugin)); over the personal setting. A value it does not know gives the hint that names both |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
 | `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY`, alone or beside the token (Claude Code spends it first), they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
@@ -1126,10 +1141,11 @@ naming the file, and every run asks before it bills API credits ([Run](#-run)). 
 |---|---|---|
 | `maxSandboxes`, `maxGates` | `6`, `2` | Machine-wide limits across all projects ([Concurrency](#-concurrency)); `SANDCASTLE_MAX_*` overrides them |
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
+| `herdr.clickHint` | `"auto"` | `"ctrl"` or `"cmd"`: the key the status view's hint names for a click on a ticket, in place of the one sensed from your terminal (`"auto"`); `SANDCASTLE_CLICK_HINT` overrides it ([The Herdr plugin](#the-herdr-plugin)). `herdr` holds no other key |
 | `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod draws between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit or has an `idleMark` that is not `true` or `false`.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
 
 ### 🐳 The image's agent versions
 

@@ -88,6 +88,13 @@ relink() {
   elif [ -n "$LINKS_MARKER" ] || [ -z "$LINKS" ]; then LINKS=0; fi
 }
 relink
+# The hint's modifier, sensed once by `sandcastle status` from the outer terminal (src/click-hint.ts):
+# Ctrl-click is macOS's right-click in iTerm2, where Cmd-click works. Unset or unknown: both named.
+case "${SANDCASTLE_CLICK_MOD:-}" in
+  ctrl) CLICK_HINT="ctrl-click a ticket for its log" ;;
+  cmd) CLICK_HINT="cmd-click a ticket for its log" ;;
+  *) CLICK_HINT="ctrl-click a ticket for its log (iTerm2: cmd-click)" ;;
+esac
 
 # Visible width, and a cut to a width, of a string holding colour codes. The
 # terminal's own clipping (line wrap is off) cut the header mid-word in a
@@ -1160,7 +1167,7 @@ render() {
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
   # Below 80 columns there is no CPU column to explain.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
-  [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}ctrl-click a ticket for its log${off}"
+  [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}${CLICK_HINT}${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
   # columns: eight on one row from 130 columns, else rows of four, or of two
