@@ -253,10 +253,13 @@ export const sameChangelogLine = (a: string, b: string): boolean => {
 };
 
 // Adds one pass's lines to the ticket's, in order, and returns how many tags were no line. The first
-// pass's lines stand; a later one adds only what no line already there says.
+// pass's lines stand; a later one adds only what no line already there says. A pass is checked against
+// the earlier passes' lines alone: two of its own lines are two changes, however alike their words
+// ("`size --json` prints ..." and "`status --json` prints ..."), and the implementer's must all stand.
 export const addChangelog = (have: string[], text: string): number => {
   const read = changelogRead(text);
-  for (const line of read.lines) if (!have.some((kept) => sameChangelogLine(kept, line))) have.push(line);
+  const earlier = [...have];
+  for (const line of read.lines) if (!earlier.some((kept) => sameChangelogLine(kept, line))) have.push(line);
   return read.dropped;
 };
 

@@ -202,3 +202,13 @@ test("the pipeline counts what it dropped and records the count", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(src, /changelogDropped \+= addChangelog\(changelog, text\);/);
 });
+
+test("one pass's own lines all stand, however alike their words", () => {
+  const lines: string[] = [];
+  const implement = "<changelog>Added: `sandcastle size --json` prints the report as JSON</changelog>\n<changelog>Added: `sandcastle status --json` prints the report as JSON</changelog>";
+  assert.equal(addChangelog(lines, implement), 0);
+  assert.equal(lines.length, 2, lines.join("\n"));
+  // A later pass's rewording of either is still left out.
+  addChangelog(lines, "<changelog>Added: `sandcastle size --json` prints its report as JSON</changelog>");
+  assert.equal(lines.length, 2, lines.join("\n"));
+});
