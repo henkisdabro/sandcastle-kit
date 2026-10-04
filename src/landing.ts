@@ -40,7 +40,7 @@ export const conflictLine = (c: { files: string[]; with: string[] }) =>
  * file the branch deleted): either side declares a path. `--no-renames` lists both ends of a rename.
  * A file the branch adds under a conventional test path is never an overrun (`isTestPath`): its name
  * cannot be known when the ticket is written. A modified test file, or an added file elsewhere, is
- * returned here; `overrunLine` folds the test paths into a count when the overrun is reported.
+ * returned here; `overrunPaths` folds the test and docs paths into counts when the overrun is reported.
  * Nor is a change to an agent-instructions file (`isAgentDoc`) when the branch adds any file: the
  * new module's row in the layout table is expected. On a branch that adds nothing it still counts.
  */
