@@ -79,6 +79,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`sandcastle doctor` no longer waits on a slow Docker** for its build-cache line: `docker system
+  df` sizes every container's files and took over a minute beside a busy container; the line now
+  gets five seconds and is left out after that.
 - **The ticket card's `t` key runs nothing from the clicked repo's git config.** A sandbox agent can
   print a link to a log in a repository it made under its worktree; listing that repository's files
   ran its `core.fsmonitor` command on the host. git now runs with fsmonitor and hooks off.
