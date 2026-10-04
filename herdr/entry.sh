@@ -22,8 +22,11 @@ unset LESS_TERMCAP_so LESS_TERMCAP_se
 # names the file and the position and not the keys. -Pw replaces the "Waiting for data" that
 # less draws while following (less 376 on); less still appends its own "... (interrupt to
 # abort)", which no option changes, so the words before it name Ctrl-C.
-paged="-Psq closes this popup - F follows new lines (Ctrl-C then closes it)"
-following="-PwFollowing new lines - Ctrl-C closes this popup"
+# A log paged from the ticket card goes back to the card, so it closes the log, not the popup.
+closes="this popup"
+[ -n "${SANDCASTLE_FROM_CARD:-}" ] && closes="this log"
+paged="-Psq closes $closes - F follows new lines (Ctrl-C then closes it)"
+following="-PwFollowing new lines - Ctrl-C closes $closes"
 report_prompt="-Psq closes this popup - space pages down"
 case "${1:-}" in
   # Refreshed every 5 seconds; q or Esc closes the overlay.

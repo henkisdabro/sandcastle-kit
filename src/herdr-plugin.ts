@@ -593,10 +593,11 @@ const cardPane = async (logPath: string | undefined) => {
   const root = dirname(dirname(logsDir));
   const id = logOwner(basename(log));
   // The pager the log popup has always used, with its options and words (entry.sh's `log`).
-  const page = (file: string) => spawnSync("sh", [join(PLUGIN_DIR, "entry.sh"), "log"], { stdio: "inherit", env: { ...process.env, SANDCASTLE_LOG: file } });
+  const page = (file: string, fromCard = true) =>
+    spawnSync("sh", [join(PLUGIN_DIR, "entry.sh"), "log"], { stdio: "inherit", env: { ...process.env, SANDCASTLE_LOG: file, ...(fromCard ? { SANDCASTLE_FROM_CARD: "1" } : {}) } });
   // A log named by hand, or no terminal to read keys from: the log itself, as before.
   if (!id || !process.stdin.isTTY) {
-    page(log);
+    page(log, false);
     return;
   }
   const read = (file: string) => {

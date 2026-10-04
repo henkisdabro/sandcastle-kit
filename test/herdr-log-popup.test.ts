@@ -27,12 +27,12 @@ const makeBin = () => {
 };
 
 // No terminal on stdin, so `stty size` fails and the popup is taken to be 40 rows.
-const openLog = (lines: number) => {
+const openLog = (lines: number, extra: Record<string, string> = {}) => {
   const log = join(dir, `log-${lines}.log`);
   writeFileSync(log, Array.from({ length: lines }, (_, i) => `line ${i + 1}\n`).join(""));
   const out = join(dir, `less-${lines}.out`);
   const r = spawnSync("sh", [ENTRY, "log"], {
-    env: { ...process.env, PATH: `${makeBin()}${delimiter}${process.env.PATH}`, SANDCASTLE_LOG: log, FAKE_LESS_OUT: out, LESSSECURE: "", LESS_TERMCAP_so: "\x1b[01;44;33m", LESS_TERMCAP_se: "\x1b[0m" },
+    env: { ...process.env, PATH: `${makeBin()}${delimiter}${process.env.PATH}`, SANDCASTLE_LOG: log, FAKE_LESS_OUT: out, LESSSECURE: "", LESS_TERMCAP_so: "\x1b[01;44;33m", LESS_TERMCAP_se: "\x1b[0m", ...extra },
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
   });
@@ -48,6 +48,11 @@ test("a log longer than the popup follows live, with Ctrl-C closing it", () => {
 test("a log shorter than the popup opens from its top line, not followed", () => {
   const { args, log } = openLog(5);
   assert.deepEqual(args, ["-R", "-X", "-K", PAGED, FOLLOWING, log, "LESSSECURE=1", "so=unset"]);
+});
+
+test("a log paged from the ticket card says the keys close the log, which goes back to the card", () => {
+  const { args, log } = openLog(100, { SANDCASTLE_FROM_CARD: "1" });
+  assert.deepEqual(args, ["-R", "-X", "-K", "-Psq closes this log - F follows new lines (Ctrl-C then closes it)", "-PwFollowing new lines - Ctrl-C closes this log", "+F", log, "LESSSECURE=1", "so=unset"]);
 });
 
 test("a log exactly as long as the popup is still the short route", () => {
