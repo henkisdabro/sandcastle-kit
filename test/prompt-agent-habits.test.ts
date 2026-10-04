@@ -20,13 +20,22 @@ test("the implementer runs the gates in the foreground, output in a file, with a
   assert.match(p, /how the test runner reports a pass and a failure/);
 });
 
+// An implementer timed the full check four times under load, then woke itself 17 times with Monitor
+// to wait for it: half an hour on the run's critical path, and every other sandbox's gates slowed.
+test("the implementer never times the gates, and leaves a requested timing to a person", () => {
+  const p = read("prompts", "implement.md");
+  assert.match(p, /never several in one command, and never to time or compare it/);
+  assert.match(p, /leave it as an `<unmet>` line for a person/);
+  assert.match(p, /do not wait on it with Monitor either/);
+});
+
 // A 2-minute default timeout moved the suite to the background in six of 29 passes, and a
 // reviewer then waited ten minutes on a `pgrep -f` loop that matched itself.
 test("every agent that runs the gates runs them in the foreground with the longest timeout", () => {
   for (const name of ["review.md", "repair.md", "resolve.md"]) {
     const p = read("prompts", name);
     assert.match(p, /Run each gate in the foreground with the tool's longest timeout/, name);
-    assert.match(p, /never wait on a backgrounded run with `sleep` or `pgrep`/, name);
+    assert.match(p, /never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite to time it/, name);
   }
 });
 
