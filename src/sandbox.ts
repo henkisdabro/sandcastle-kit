@@ -417,9 +417,15 @@ export const sandboxMounts = (project: Project) => [
     : []),
 ];
 
+// Sandcastle runs the ready hooks all at once, so this one races the project's setup: written to
+// git's XDG global file rather than `~/.gitconfig`, it never meets a setup step's `git config
+// --global` at `~/.gitconfig.lock` (which would fail that step), and an identity the setup sets
+// there still wins, being read after this file.
 export const gitIdentityCommand = (root: string) => {
   const { name, email } = hostIdentityParts(root);
-  return `git config --global user.name ${shq(name)} && git config --global user.email ${shq(email)}`;
+  const dir = "${XDG_CONFIG_HOME:-$HOME/.config}/git";
+  const set = (key: string, value: string) => `git config --file "${dir}/config" ${key} ${shq(value)}`;
+  return `mkdir -p "${dir}" && ${set("user.name", name)} && ${set("user.email", email)}`;
 };
 
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
@@ -436,9 +442,9 @@ export const sandboxConfig = (project: Project, image: string, leanPlan: string)
     },
     sandbox: {
       onSandboxReady: [
-        // Before the project's setup and any gate: a test that commits needs an identity in a
-        // sandbox no agent has worked in. Global config, not GIT_AUTHOR_* in the environment,
-        // which would make the agent the author (see AGENT_COMMITTER).
+        // `createSandbox` returns once every ready hook has ended, so before any gate: a test that
+        // commits needs an identity in a sandbox no agent has worked in. Global config, not
+        // GIT_AUTHOR_* in the environment, which would make the agent the author (see AGENT_COMMITTER).
         { command: gitIdentityCommand(project.root) },
         ...(CROSS_REVIEW
           ? [{ command: `mkdir -p ~/.codex && cp ${CODEX_AUTH} ~/.codex/auth.json` }]

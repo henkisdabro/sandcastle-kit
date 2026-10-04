@@ -36,17 +36,23 @@ writeFileSync(join(repo, ".sandcastle/.env"), "ANTHROPIC_API_KEY=made-up\n");
 const project = { root: repo, setup: ["echo setup"], mounts: [], generated: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
 const hooks = () => sandboxConfig(project, "image", "plan.json").hooks.sandbox.onSandboxReady;
 
-test("the first ready hook sets the host identity, before the project's setup", () => {
+test("a ready hook sets the host identity, beside the project's setup", () => {
   const [first, second] = hooks();
-  assert.match(first.command, /^git config --global user\.name /);
+  assert.match(first.command, /git config --file .* user\.name /);
   assert.equal(second.command, "echo setup");
 });
 
-test("a sandbox with no agent pass answers git config user.email, and a commit works", () => {
-  const home = join(tmp, "home");
+// A clean HOME, as a fresh sandbox has: no ~/.gitconfig and no XDG git config.
+const sandboxHome = (name: string) => {
+  const home = join(tmp, name);
   mkdirSync(home);
-  const env = { ...clean, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(home, ".gitconfig") };
-  const sh = (cmd: string, cwd = home) => execFileSync("sh", ["-c", cmd], { encoding: "utf8", cwd, env }).trim();
+  const env = { ...clean, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_CONFIG_NOSYSTEM: "1" };
+  const sh = (cmd: string, cwd = home) => execFileSync("sh", ["-c", cmd], { encoding: "utf8", cwd, env, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return { home, sh };
+};
+
+test("a sandbox with no agent pass answers git config user.email, and a commit works", () => {
+  const { home, sh } = sandboxHome("home");
   assert.throws(() => sh("git config user.email"), "no identity before the hook");
   sh(hooks()[0].command);
   assert.equal(sh("git config user.email"), "me@example.com");
@@ -55,6 +61,18 @@ test("a sandbox with no agent pass answers git config user.email, and a commit w
   sh(`git init -q -b main ${work}`);
   sh("git commit -q --allow-empty -m test", work);
   assert.equal(sh("git log -1 --format=%an", work), "It's Me");
+});
+
+// Sandcastle runs the ready hooks all at once: a setup step writing `git config --global` holds
+// ~/.gitconfig.lock while this hook runs, and the hook must neither fail on it nor make it fail.
+test("the identity hook needs no lock on ~/.gitconfig, and a setup step's identity still wins", () => {
+  const { home, sh } = sandboxHome("home-race");
+  writeFileSync(join(home, ".gitconfig.lock"), "");
+  sh(hooks()[0].command);
+  assert.equal(sh("git config user.email"), "me@example.com");
+  rmSync(join(home, ".gitconfig.lock"));
+  sh("git config --global user.email setup@example.com");
+  assert.equal(sh("git config user.email"), "setup@example.com");
 });
 
 test("the committer stays the agent: the identity is global config, not GIT_AUTHOR_* in the environment", () => {
