@@ -54,7 +54,13 @@ const frame = (cols: number, next?: string): string[] => {
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return lines;
 };
-const settingsLines = (lines: string[]) => lines.filter((l) => /^│ settings /.test(l));
+// The settings row and the lines it wrapped onto, which carry no label: up to the cell's border.
+const settingsLines = (lines: string[]) => {
+  const at = lines.findIndex((l) => /^│ settings /.test(l));
+  if (at < 0) return [];
+  const end = lines.findIndex((l, i) => i > at && !/^│ {11}\S/.test(l));
+  return lines.slice(at, end < 0 ? undefined : end);
+};
 
 test("an ended run's row for the next run is prefixed, with no mark at its end", () => {
   const next = JSON.stringify({ autonomy: 0, turn: 1, cap: 1 });
@@ -68,7 +74,9 @@ test("an ended run's row for the next run is prefixed, with no mark at its end",
 
 test("a row wrapped over several lines carries the prefix once, on the first", () => {
   const rows = settingsLines(frame(80, JSON.stringify({ autonomy: 0, turn: 1, cap: 1, repair: 2, concurrency: 4, crossReview: true, crossReviewModel: "gpt-6-astra", crossReviewEffort: "high", usageGuard: true, usageStop: 90 })));
-  assert.match(rows[0], /next run:/);
+  assert.ok(rows.length > 1, `the row did not wrap:\n${rows.join("\n")}`);
+  assert.match(rows[0], /^│ settings {2}next run: /);
+  assert.match(rows.at(-1) ?? "", /usage-guard 90%/);
   const text = rows.join("\n");
   assert.equal(text.match(/next run:/g)?.length, 1);
 });
