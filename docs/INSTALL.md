@@ -119,7 +119,9 @@ setting lives (OrbStack `orb config set memory_mib` and `cpu`, Docker Desktop Se
 `podman machine set --cpus --memory` with the machine stopped, `colima start --cpu --memory`;
 native Linux Docker has no VM). It is read-only and writes nothing, not even `config.json`: copy the
 numbers into `~/.config/sandcastle-kit/config.json` yourself. Applying a runtime change restarts it
-and stops a live run's containers. The reasoning is in the README's
+and stops a live run's containers. While neither limit is set (no `maxSandboxes` or `maxGates` in
+`config.json`, no `SANDCASTLE_MAX_*` in the environment), `setup` and `doctor` (as an `info` line) point
+here; `init` does not, as the pool is machine-wide. The reasoning is in the README's
 [Concurrency](../README.md#-concurrency) section.
 
 ## 🔄 Updating

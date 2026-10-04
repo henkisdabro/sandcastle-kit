@@ -14,6 +14,7 @@ import { claudeCode, doctor, probeGithubToken, run } from "./doctor.ts";
 import { OperatorError } from "./errors.ts";
 import { configure, pluginState } from "./herdr-plugin.ts";
 import { KIT, USER_CONFIG } from "./sandbox.ts";
+import { sizePointerNow } from "./size.ts";
 
 // Ctrl-C at a question rejects it with an AbortError, which reached the operator as a stack
 // trace; it ends setup, as it does at a token prompt.
@@ -253,5 +254,8 @@ export const setup = async (repoRoot?: string) => {
 
   // 4. Everything else - Docker, gh, git - is doctor's to check and explain.
   console.log("\nChecking the whole setup:\n");
-  await doctor(repoRoot);
+  await doctor(repoRoot, false, false);
+  // The pool is machine-wide, so this is setup's to say (and `init`'s not to).
+  const pointer = sizePointerNow();
+  if (pointer) console.log(`\n${pointer}`);
 };

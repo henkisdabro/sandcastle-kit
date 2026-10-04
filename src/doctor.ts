@@ -11,6 +11,7 @@ import { CONFIG_PATH, loadProject } from "./config.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
+import { sizePointerNow } from "./size.ts";
 import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { probeOAuth } from "./usage.ts";
@@ -214,7 +215,11 @@ export const kitCheckoutOnPath = (onPath: string | undefined) => {
 export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot is string =>
   !!repoRoot && (existsSync(join(repoRoot, CONFIG_PATH)) || realpathSync(repoRoot) !== realpathSync(kit));
 
-export const doctor = async (repoRoot?: string, verify = false) => {
+/**
+ * `pointToSize` is false for `sandcastle setup`, which runs doctor and prints the pointer itself
+ * after it, so the line is not said twice.
+ */
+export const doctor = async (repoRoot?: string, verify = false, pointToSize = true) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
     if (!ok && !optional) bad++;
@@ -416,6 +421,9 @@ export const doctor = async (repoRoot?: string, verify = false) => {
       console.log(`warn Could not reach the release channel; using ${versions.source === "cache" ? "the cached" : "the Dockerfile's default"} versions.\n       -> Fine while runs work. If preflight says a model needs a newer Claude Code, check the network and run \`sandcastle build\`, or pin one with \`claudeCode: "x.y.z"\` in ${CONFIG_PATH}.`);
     }
   }
+  // Info, never a warn or a FIX: the defaults work, and `size` is only the better number.
+  const pointer = pointToSize ? sizePointerNow() : undefined;
+  if (pointer) console.log(`info ${pointer}`);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
   if (process.env.HERDR_ENV === "1") {
     const plugin = pluginState();
