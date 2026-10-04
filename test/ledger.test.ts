@@ -425,12 +425,24 @@ test("the closing counts come from the ledger's entries", () => {
 });
 
 // The landing worker printed nothing: a run that spent its last half hour landing went quiet between
-// the last agent pass and the closing summary.
-test("each landing says its result in the run's output; a pipeline's ending does not", () => {
+// the last agent pass and the closing summary. A hand-back went quiet the same way.
+test("each landing and each hand-back says its result in the run's output; a gate-failed pipeline does not", () => {
   const said: string[] = [];
   const ledger = createLedger({ run: { ticket: () => {} }, outcomes: () => {}, view: { landed: () => {} }, context: () => BASE, bookkeep: (_id, fn) => fn(), ...NO_REQUEUE, say: (l) => void said.push(l) });
   ledger.record("1", landing({ kind: "merged" }));
   ledger.record("4", landing({ kind: "conflict", files: ["a"], with: [] }));
   ledger.record("5", pipeline({ status: "gate-failed" }));
-  assert.deepEqual(said, ["#1: merged.", "#4: merge conflict."]);
+  ledger.record("6", pipeline({ handedBack: true }));
+  assert.deepEqual(said, ["#1: merged.", "#4: merge conflict.", "#6: handed back - for a human."]);
+});
+
+test("a hold note prints the hand-back line; a conflict-resolution hold prints none (burndown does)", () => {
+  const said: string[] = [];
+  let context = BASE;
+  const ledger = createLedger({ run: { ticket: () => {} }, outcomes: () => {}, view: { landed: () => {} }, context: () => context, bookkeep: (_id, fn) => fn(), ...NO_REQUEUE, say: (l) => void said.push(l) });
+  context = { ...BASE, hold: "note" };
+  ledger.record("2", pipeline({}));
+  context = BASE;
+  ledger.record("3", pipeline({ status: "held", heldNote: "held for a human" }));
+  assert.deepEqual(said, ["#2: handed back - for a human."]);
 });

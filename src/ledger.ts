@@ -431,6 +431,9 @@ export const createLedger = (d: {
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     if (view && ending.kind === "landing") d.say(`${d.ref(id)}: ${view.word}.`);
+    // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
+    // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
+    if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);
     // Sent back, and its second attempt never began: withdrawn since, its first pipeline's line goes too.
     if (ending.kind === "landing" && ending.attempts === 1 && requeuedAs.delete(id) && ending.landed.kind === "withdrawn") d.dropFirst(id);
   };
