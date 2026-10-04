@@ -11,7 +11,7 @@ import type { Project } from "./config.ts";
 import { type Gate, LANDING_GATES } from "./gates.ts";
 import type { Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { credentials, credentialSource, KIT, machineSettings, sh } from "./sandbox.ts";
+import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
@@ -138,7 +138,7 @@ export const keepAwake = (): string => {
 // Porcelain lines (`XY path`) of everything staged, unstaged or untracked. Not sh(): its trim
 // would eat the first line's leading status column.
 export const dirtyFiles = (root: string): string[] =>
-  execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" })
+  execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8", maxBuffer: MAX_OUTPUT })
     .split("\n")
     .filter(Boolean);
 
