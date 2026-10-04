@@ -77,10 +77,11 @@ action's categories and its closed-spec test, so keep queue.md to hand.
    called real or order-only - and get the user's yes before filing anything: filing writes to the
    tracker. The user can split a cluster back into its findings.
 10. **File in dependency order**, so a blocker exists (and has its number) before what waits on
-    it. Write each body by queue.md's "Writing a ticket body" - its blocker line, `Touches:` line
-    and evidence rules.
+    it. Write each body by queue.md's "Writing a ticket body" - its blocker line, `Touches:` line,
+    evidence and seams rules.
     - GitHub: `gh issue create --title ... --body-file <temp file>`. The body has `## Problem`,
-      `## Evidence`, `## Fix` and `## Done when`, a `Touches:` line, and a blocker line.
+      `## Evidence`, `## Fix` and `## Done when` (and `## Seams` where the seams rule asks for
+      it), a `Touches:` line, and a blocker line.
     - Apply only labels that already exist in the repo's vocabulary (area, severity). Create none
       except the queue label (`gh label create`, as the queue action does).
     - A ready or decided finding gets the queue label. Human-only, parked and declined findings

@@ -23,6 +23,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   and `lean --measure` ask before they start, and `--detach` or a script needs `--api-key` (or
   `SANDCASTLE_API_KEY=1`). To spend your subscription instead, remove the key from the file doctor
   names (`/sandcastle update` checks this).
+- **Tickets may carry a `## Seams` section.** `/sandcastle queue` and `audit` add one where a
+  behaviour change's test boundary is not obvious, naming the interface a test should drive.
+  Existing tickets need nothing: without it, the implementer tests at the highest existing public
+  interface.
 
 ### Added
 
@@ -43,6 +47,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **Implementers work test-first.** For a change in behaviour, one test at a time at the ticket's
+  seams, each seen failing for the right reason before the code that passes it, with expected
+  values taken from outside the code and mocks only at real boundaries; single test files while
+  working, the full gates once at the end.
+- **The review checks that each test would fail if the behaviour broke** and survive a refactor
+  that kept it, and tidies duplication or misleading names the branch introduced.
 - **Sandbox agents can no longer use Monitor, ScheduleWakeup, CronCreate, CronDelete, CronList or
   RemoteTrigger.** The sandbox's managed settings deny them, so a pass cannot sit waiting on a
   backgrounded suite, spending tokens and the machine's shared gate slots.

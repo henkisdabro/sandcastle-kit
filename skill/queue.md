@@ -100,3 +100,7 @@ from it, and only in plain text: a line inside a code block or backticks is not 
   limit on what the agent may change.
 - **Evidence.** A run opens no pull request: ask for evidence (a failing test's output, say) in
   the agent's final message or a ticket comment, never "in the PR description".
+- **Seams.** For a behaviour change whose test boundary is not obvious, add a `## Seams` section
+  naming the caller-visible interface a test should drive; prefer an existing one. Ask the user
+  only when two interfaces would give materially different tests. The run does not read it; its
+  agents do.
