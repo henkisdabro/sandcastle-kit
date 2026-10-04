@@ -34,8 +34,9 @@
 // or on any herdr error, it does nothing and the run carries on.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -63,27 +64,63 @@ export const runsStatus = (pane: string) =>
 // The tab and panes a run opened, written by `openSandboxView` for the next run (and the plugin) to find.
 export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-view.json");
 
+// A pane's foreground is a bare shell: one process, a known shell's name, and at most the flags
+// that make it a login or interactive shell. `bash status.sh`, `claude`, `vim` and a REPL are not,
+// and neither is a pane with no foreground process Herdr can name.
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu"]);
+const SHELL_FLAGS = new Set(["-l", "-i", "--login", "--interactive"]);
+export const runsBareShell = (pane: string) => {
+  const processes = herdrJson(["pane", "process-info", "--pane", pane]).result.process_info.foreground_processes as { cmdline: string }[];
+  if (processes.length !== 1) return false;
+  const [command, ...flags] = processes[0].cmdline.trim().split(/\s+/);
+  return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
+};
+
 /**
  * A run that is no longer live (its pid gone, or its record finished) leaves its tab as the
  * server last had it, and after a cold Herdr restart that is idle shells with nothing saying the
  * run ended. The tab the kit opened for it gets the closing report in its status pane, once: the
  * record is marked, so a later tick finds nothing to do. Left alone: a tab a person's terminal
  * was adopted into (that terminal is theirs), a tab that is not the recorded one any more, and a
- * status pane still running the status view (it already shows how the run ended). Any herdr error
- * leaves the tab as it is. Returns whether the report was started.
+ * status pane that is not a bare shell - the status view still running (it already shows how the
+ * run ended), or anything a person started there since (Herdr may reuse a pane id across a
+ * restart, and the command would be typed into an editor or a REPL). Any herdr error leaves the
+ * tab as it is. Returns whether the report was started.
+ *
+ * The record is claimed by renaming it to a name of this caller's own, which only one of two
+ * callers can do, before anything is typed; it goes back marked `reported` once the command is
+ * sent, and unmarked if herdr failed.
  */
 export const reportInDeadTab = (root: string, kit = KIT): boolean => {
+  const file = viewRecord(root);
+  const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
   try {
-    const file = viewRecord(root);
     const view = JSON.parse(readFileSync(file, "utf8")) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return false;
     // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
     if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return false;
-    if (runsStatus(view.status)) return false;
-    // `cd`: a restored shell does not always start in the project.
-    const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-    herdr(["pane", "run", view.status, `cd ${quote(root)} && ${quote(join(kit, "bin/sandcastle"))} report`]);
-    writeFileSync(file, JSON.stringify({ ...view, reported: true }) + "\n");
+    if (!runsBareShell(view.status)) return false;
+    // ENOENT here is the other caller having claimed it first.
+    renameSync(file, claim);
+    // A record a new run wrote meanwhile stays: `wx` never overwrites it.
+    const giveBack = (record: object) => writeFileSync(file, JSON.stringify(record) + "\n", { flag: "wx" });
+    // The other caller may have finished, and written the record back marked, between our read and our claim.
+    if ((JSON.parse(readFileSync(claim, "utf8")) as { reported?: boolean }).reported) {
+      giveBack({ ...view, reported: true });
+      rmSync(claim, { force: true });
+      return false;
+    }
+    try {
+      // `cd`: a restored shell does not always start in the project.
+      const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+      herdr(["pane", "run", view.status, `cd ${quote(root)} && ${quote(join(kit, "bin/sandcastle"))} report`]);
+    } catch (error) {
+      giveBack(view);
+      throw error;
+    } finally {
+      rmSync(claim, { force: true });
+    }
+    giveBack({ ...view, reported: true });
     return true;
   } catch {
     return false;
