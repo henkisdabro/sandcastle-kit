@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -232,6 +232,26 @@ test("configConflicts: comments set nothing, single quotes count, a half block i
   // The kit's entries with their markers gone (a tool rewrote the file): named, not duplicated.
   const unmarked = block.replace(/^# >>> .*$/m, "").replace(/^# <<< .*$/m, "");
   assert.ok(configConflicts(unmarked).some((c) => c.includes("outside its marker lines")));
+});
+
+test("configure leaves the marker status.sh reads for its links, and --remove takes it out", async () => {
+  const marker = join(process.env.XDG_CACHE_HOME as string, "sandcastle-kit", "herdr-plugin-linked");
+  rmSync(marker, { force: true });
+  const fake = fakeHerdr("");
+  writeFileSync(fake.config, "[ui]\nx = 1\n");
+  await quietly(() => configure(false, true));
+  assert.equal(existsSync(marker), true);
+  // A link from another checkout is not this one's to unlink, so the links stay on with it.
+  const other = fakeHerdr("/some/other/checkout/herdr");
+  await quietly(() => configure(true, true));
+  assert.equal(existsSync(marker), true, other.calls().join("\n"));
+  fakeHerdr(PLUGIN_DIR);
+  await quietly(() => configure(true, true));
+  assert.equal(existsSync(marker), false);
+  // A Herdr that did not take the config leaves the plugin as it was found: no marker.
+  fakeHerdr("", '{"error":{"code":"internal","message":"boom"}}');
+  await assert.rejects(quietly(() => configure(false, true)));
+  assert.equal(existsSync(marker), false);
 });
 
 test("configure keeps the block when Herdr is not running: it reads it at start", async () => {

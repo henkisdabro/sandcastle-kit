@@ -401,8 +401,29 @@ sed $'s/\e]8;[^\e]*\e\\\\//g; s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
 while IFS= read -r l; do
   [ "${#l}" -le "$COLS" ] || { echo "FAIL [$SCENARIO] wider than $COLS columns: $l"; fails=$((fails+1)); }
 done <"$TMP/frame"
-[ "$(wc -l <"$TMP/frame")" = "$plain_rows" ] || { echo "FAIL [$SCENARIO] $(wc -l <"$TMP/frame") rows with links, $plain_rows without"; fails=$((fails+1)); }
+# The hint may take one more note row: nothing else changes the frame's height.
+rows=$(wc -l <"$TMP/frame")
+{ [ "$rows" = "$plain_rows" ] || [ "$rows" = $((plain_rows+1)) ]; } || { echo "FAIL [$SCENARIO] $rows rows with links, $plain_rows without"; fails=$((fails+1)); }
 row '#103' ready
+# The hint that the numbers are clickable is shown with the links, and only then.
+has 'ctrl-click a ticket for its log'
+
+# ---------------------------------------------------------------------------
+SCENARIO="links off, or no plugin marker"
+# SANDCASTLE_LINKS=0 turns links and hint off. With HERDR_ENV=1 and no marker under the cache,
+# neither shows either (the pipe already rules them out here; test/status-links.test.ts holds
+# the same on a terminal, where only the marker does).
+linkless() { # extra env assignments
+  env "$@" PATH="$FAKE:$PATH" FAKE_QUEUE="" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+    SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture TERM_COLS="$COLS" TERM_ROWS=200 XDG_CACHE_HOME="$TMP/cache" \
+    "${STATUS_BASH:-bash}" "$KIT/status.sh" 0 all >"$TMP/linked" 2>&1
+  ! grep -q $'\e]8;' "$TMP/linked" || { echo "FAIL [$SCENARIO] a link with: $*"; fails=$((fails+1)); }
+  sed $'s/\e\\[[0-9;]*m//g' "$TMP/linked" >"$TMP/frame"
+  hasnt 'ctrl-click'
+}
+linkless SANDCASTLE_LINKS=0
+linkless HERDR_ENV=1
+linkless HERDR_ENV=1 SANDCASTLE_LINKS=
 
 # ---------------------------------------------------------------------------
 SCENARIO="every log archived"
