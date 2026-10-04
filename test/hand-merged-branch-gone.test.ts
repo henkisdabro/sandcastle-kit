@@ -27,7 +27,7 @@ const git = (root: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
 /** shop-01 is held; its branch carried work and was deleted, after a merge with `subject` (none: never merged). */
-const repo = (subject: string | undefined, status = "ready-for-human") => {
+const repo = (subject: string | undefined, status = "ready-for-human", outcome = "needs a human merge") => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-branch-gone-"));
   git(root, "init", "-q", "-b", "main");
   mkdirSync(join(root, ".scratch/shop/issues"), { recursive: true });
@@ -42,7 +42,7 @@ const repo = (subject: string | undefined, status = "ready-for-human") => {
   if (subject) git(root, "merge", "--no-ff", "-qm", subject, "agent/issue-shop-01");
   git(root, "branch", "-D", "agent/issue-shop-01");
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  writeFileSync(join(root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ "shop-01": { run: started, kind: "held", text: "needs a human merge" } }));
+  writeFileSync(join(root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ "shop-01": { run: started, kind: "held", text: outcome } }));
   writeFileSync(
     join(root, ".sandcastle/logs/run.json"),
     JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: started, finishedAt: "2026-10-01T09:00:00.000Z", exitCode: 0, stage: "report", tickets: { "shop-01": { state: "held", title: "A", note: "human merge: x.sh" } } }),
@@ -84,4 +84,12 @@ test("report: a hand merge whose ticket is already closed drops \"closes on push
   const out = render(await gather(project, () => undefined), true);
   assert.match(out, /merged by hand, and closed: .*shop-01/);
   assert.doesNotMatch(out, /closes on push/);
+});
+
+test("report: a handed-back ticket whose empty branch was cleaned still asks for the agent's comment to be read", async () => {
+  const { project } = repo(undefined, "ready-for-human", "needs a human: handed back");
+  const out = render(await gather(project, () => undefined), true);
+  assert.match(out, /shop-01 .*no commits - read the agent's comment/);
+  assert.doesNotMatch(out, /is gone and no merge of it/);
+  assert.doesNotMatch(out, /git merge --no-ff/);
 });

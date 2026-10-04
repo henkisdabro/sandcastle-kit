@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
@@ -249,7 +249,13 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   // A branch with no ref has no diff: `clean` deletes one once its patches are on the base, so the merge's subject says whether it was merged.
   const gone = Object.entries(tickets).filter(([id, t]) => t.state === "held" && changed[id] === undefined).map(([id]) => id);
   const byHand = [...Object.keys(changed).filter((id) => changed[id] === 0), ...gone].filter((id) => mergedByHand(root, base, id));
-  const branchGone = gone.filter((id) => !byHand.includes(id));
+  // An agent that handed a ticket back left no commits, so `clean` deletes its branch too: the question is still the person's to answer.
+  const recorded = readOutcomes(root);
+  for (const id of gone) {
+    const o = recorded[id];
+    if (o?.run === run.startedAt && (o.text === HANDED_BACK || o.kind === "no change")) changed[id] = 0;
+  }
+  const branchGone = gone.filter((id) => !byHand.includes(id) && changed[id] === undefined);
   let byHandClosed: string[] = [];
   if (byHand.length) {
     try {
