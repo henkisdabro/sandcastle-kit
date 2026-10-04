@@ -294,6 +294,8 @@ const FAILING_TEST_LINE = [
   /^\s*--- FAIL: (\S+)/,
   /^test (\S+) \.\.\. FAILED$/,
 ];
+/** True when a single output line is a failing-test match (the patterns `failingTests` reads). */
+export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) => re.test(line));
 export const failingTests = (output: string) =>
   [
     ...new Set(

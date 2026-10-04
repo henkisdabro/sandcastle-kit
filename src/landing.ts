@@ -16,9 +16,10 @@
 
 import { execFileSync } from "node:child_process";
 import { posix } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { type GateRun, failingTests } from "./gates.ts";
+import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, protectedChanges, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
@@ -634,9 +635,20 @@ export const redDetail = (red?: { gates?: string[]; failing?: string[] }) => {
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".py", ".json"];
 const PATH_TOKEN = /[\w@.\-/]+\.\w+/g;
 
+const PASSING_LINE = /^\s*(?:✓|✔|√|PASS\b|ok\b)/;
+// A failure's own lines: a FAIL / FAILED / ERROR / ✖ / ✗ / × line, vitest's "❯ file (3 tests | 1 failed)", a
+// pytest progress line with an F or E in it ("test_b.py F."), and a stack frame or error location (an "at" line, "file:line:col",
+// pytest's "file:line: Error", tsc's "file(line,col): error", Python's `File "file", line N`).
+const FAIL_WORD_LINE = /^\s*(?:FAIL|FAILED|ERROR|✖|✗|×)(?=\s|$)/;
+const FAILED_COUNT_LINE = /^\s*❯.*\b[1-9]\d* failed\b/;
+const PYTEST_PROGRESS_RED = /^\s*\S+\.py\s+[.sxX]*[FE][.sxXFE]*\s*(?:\[\s*\d+%\])?\s*$/;
+const STACK_FRAME = /^\s*at\s|[\w.\-/]+:\d+(?::\d+)?(?::|\s|\)|$)|[\w.\-/]+\(\d+,\d+\)|^\s*File "[^"]+", line \d+/;
+const namesFailure = (line: string) =>
+  !PASSING_LINE.test(line) && (namesFailingTest(line) || FAIL_WORD_LINE.test(line) || FAILED_COUNT_LINE.test(line) || PYTEST_PROGRESS_RED.test(line) || STACK_FRAME.test(line));
+
 /**
  * The files a red gate's failing tests are about, as far as the gate output and the test files show it:
- * the test files the output names (a "FAIL path" line, a stack frame), what each imports (relative
+ * the test files the output names as failing (a "FAIL path" line, a stack frame; never a passing line), what each imports (relative
  * specifiers, Python's dotted imports) and any path it names in a string. `tree` is every path the
  * merged tree can hold and `read` the text of one: a landed ticket that changed one of these is a
  * suspect for the red, though the branch never touched the file. Imports are read one level deep, and
@@ -646,8 +658,12 @@ export const redSubject = (output: string, tree: string[], read: (file: string) 
   const files = new Set(tree);
   const subject = new Set<string>();
   const tests = new Set<string>();
+  // Only a line that says something failed names a path: vitest's "✓ a.test.ts" and pytest's "test_a.py ...."
+  // list every passing file, and blaming those named each landed ticket that touched any tested module.
+  // Colour codes go first: a forced-colour runner's "FAIL" starts with one, and the line would read as no failure.
+  const failingLines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, "")).filter(namesFailure);
   // An absolute path from a sandbox is cut from the left until it is a path in the tree.
-  for (const token of output.match(PATH_TOKEN) ?? []) {
+  for (const token of failingLines.flatMap((line) => line.match(PATH_TOKEN) ?? [])) {
     const parts = token.replace(/^(?:\.\/)+/, "").split("/").filter(Boolean);
     for (let i = 0; i < parts.length; i++) {
       const file = parts.slice(i).join("/");
