@@ -387,3 +387,19 @@ test("a later green head with every criterion met drops the earlier one from the
   assert.equal(o.unmet, undefined);
   assert.equal(readHeads(h.root)[ID]?.unmet, undefined);
 });
+
+// A reviewer whose only commit merged the base in read as `commits=1 (review=14)`: the pass's commit
+// list counts the base commits its merge brought in, where `commits` counts the branch's own.
+test("a reviewer that only merges the base in adds no review commits", async () => {
+  const h = harness();
+  h.agents.impl = (wt) => {
+    commit(wt, "a.txt", "a\n");
+    for (const f of ["b.txt", "c.txt", "d.txt"]) h.land(f, `${f}\n`);
+  };
+  h.agents.review = (wt) => void git(wt, "merge", "-q", "--no-edit", "main");
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.equal(o.status, "green");
+  assert.equal(o.commits, 1);
+  assert.equal(o.reviewCommits, 0);
+});

@@ -691,6 +691,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       };
       // A land-only re-run keeps the first attempt's review commits on its branch: `commits` counts them, so `reviewCommits` does.
       let reviewCommits = landOnly && requeued ? firstAttemptReviewCommits(results, issue.id) : 0;
+      // A pass's own commits, counted as `commits` is (no merges): a pass's commit list includes the
+      // base commits its merge brought in, which read as `commits=1 (review=14)`.
+      const ownNow = () => ownCommits(base, branch, project.root);
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
       // The lines of every agent's final message, only when the project asked for them. A land-only
@@ -714,9 +717,10 @@ export const createPipeline = (ctx: PipelineContext) => {
         // carries a merge from an earlier run that no review has read: nobody has seen its
         // resolution. A clean land-only merge of the base needs no review.
         console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
+        const beforeResolved = ownNow();
         const resolved = await narrowReview(greenHead, "after conflict resolution");
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
-        reviewCommits += resolved.commits.length;
+        reviewCommits += ownNow() - beforeResolved;
         noteChangelog(resolved.stdout);
         const said = tracker.agentsWrite ? undefined : tags(resolved.stdout).report;
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
@@ -770,9 +774,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           console.log(`${ref(issue.id)}: nothing new since its review at ${since.slice(0, 7)} - no review; the gates decide.`);
         } else if (since !== undefined) {
           console.log(`${ref(issue.id)}: only a base merge since its review at ${since.slice(0, 7)} - reviewing the merge only.`);
+          const beforeMerged = ownNow();
           const merged = await narrowReview(since, "after base merge");
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
-          reviewCommits = merged.commits.length;
+          reviewCommits = ownNow() - beforeMerged;
           noteChangelog(merged.stdout);
           const said = tracker.agentsWrite ? undefined : tags(merged.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
@@ -780,6 +785,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (u) unmet.push(u);
         } else {
           let reviewModel: string | undefined;
+          const beforeReview = ownNow();
           const review = await timed(
             issue.id,
             "review",
@@ -804,7 +810,7 @@ export const createPipeline = (ctx: PipelineContext) => {
               )
             : undefined;
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
-          reviewCommits = review.commits.length + (cross?.commits.length ?? 0);
+          reviewCommits = ownNow() - beforeReview;
           reviewed = true;
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
@@ -933,6 +939,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         // A review that dies leaves the branch held, not the ticket crashed:
         // like a failed repair, only a spent allowance stops the queue.
         let afterModel: string | undefined;
+        const beforeAfter = ownNow();
         const after = await timed(
           issue.id,
           "review",
@@ -952,7 +959,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         });
         if (after) {
           noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
-          reviewCommits += after.commits.length;
+          reviewCommits += ownNow() - beforeAfter;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
           noteChangelog(after.stdout);
