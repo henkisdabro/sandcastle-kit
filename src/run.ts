@@ -941,6 +941,10 @@ export const ARCHIVE_KEEP_DAYS = 14;
 /** The raw `.jsonl` streams are the bulk of the archive, so they go sooner; the readable `.log` stays. */
 export const ARCHIVE_KEEP_RAW_DAYS = 2;
 
+/** The cleanup's one line; both limits carry their unit, so the raw streams' "2" is read as days. */
+export const prunedLine = (pruned: number): string =>
+  `Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS} days).`;
+
 /** Delete archived files past their age limit, by mtime (an append refreshes it). Returns how many went. */
 export const pruneArchive = (project: Project, now = Date.now()): number => {
   const archive = join(project.root, ".sandcastle/logs/archive");
@@ -990,7 +994,7 @@ export const archiveFinishedLogs = (project: Project) => {
   }
   if (moved) console.log(`Archived ${moved} log(s) of finished branches to .sandcastle/logs/archive/.`);
   const pruned = pruneArchive(project);
-  if (pruned) console.log(`Deleted ${pruned} archived log(s) past their age limit (${ARCHIVE_KEEP_DAYS} days; raw .jsonl streams ${ARCHIVE_KEEP_RAW_DAYS}).`);
+  if (pruned) console.log(prunedLine(pruned));
 };
 
 // ---------------------------------------------------------------------------
