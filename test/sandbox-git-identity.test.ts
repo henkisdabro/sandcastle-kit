@@ -39,7 +39,14 @@ const hooks = () => sandboxConfig(project, "image", "plan.json").hooks.sandbox.o
 test("a ready hook sets the host identity, beside the project's setup", () => {
   const [first, second] = hooks();
   assert.match(first.command, /git config --file .* user\.name /);
-  assert.equal(second.command, "echo setup");
+  assert.equal(second.command, "(echo setup\n)");
+});
+
+test("setup's steps run in order, in one hook: Sandcastle runs its ready hooks at once", () => {
+  const steps = ["echo one # first", "echo two"];
+  const all = sandboxConfig({ ...project, setup: steps } as Project, "image", "plan.json").hooks.sandbox.onSandboxReady;
+  assert.equal(all.length, 2);
+  assert.equal(execFileSync("sh", ["-c", all[1].command], { encoding: "utf8" }), "one\ntwo\n");
 });
 
 // A clean HOME, as a fresh sandbox has: no ~/.gitconfig and no XDG git config.
@@ -67,6 +74,9 @@ test("a sandbox with no agent pass answers git config user.email, and a commit w
 // ~/.gitconfig.lock while this hook runs, and the hook must neither fail on it nor make it fail.
 test("the identity hook needs no lock on ~/.gitconfig, and a setup step's identity still wins", () => {
   const { home, sh } = sandboxHome("home-race");
+  // Sandcastle writes safe.directory to ~/.gitconfig before any hook runs. Without the file, the
+  // setup step's `--global` would write to the XDG file and pass without ~/.gitconfig winning.
+  writeFileSync(join(home, ".gitconfig"), "");
   writeFileSync(join(home, ".gitconfig.lock"), "");
   sh(hooks()[0].command);
   assert.equal(sh("git config user.email"), "me@example.com");

@@ -449,7 +449,10 @@ export const sandboxConfig = (project: Project, image: string, leanPlan: string)
         ...(CROSS_REVIEW
           ? [{ command: `mkdir -p ~/.codex && cp ${CODEX_AUTH} ~/.codex/auth.json` }]
           : []),
-        ...project.setup.map((command) => ({ command })),
+        // Sandcastle runs the ready hooks all at once, so setup's steps share one hook to keep their
+        // order: pnpmStore's store-dir step raced the install, which then filled a store of its own.
+        // A subshell each, ended on a line of its own so a step's trailing comment cannot eat it.
+        ...(project.setup.length ? [{ command: project.setup.map((c) => `(${c}\n)`).join(" && ") }] : []),
       ],
     },
   },
