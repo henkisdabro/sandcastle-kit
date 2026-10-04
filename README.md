@@ -581,7 +581,7 @@ and draws no row.
 The row also shows the usage guard: `● usage-guard 90%` with `USAGE_CHECK=1` (its stop
 threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drops below 80 columns.
 When the guard cannot get a reading (a 403 turns it off for the run, a rate limit, an expired
-Claude Code login or no token at all leaves it without one for now) the row says so in the warning colour:
+Claude Code login or no token at all leaves it without one for now, and with an API key it does not apply) the row says so in the warning colour:
 `● usage-guard 90% (no reading - not guarding)`. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
