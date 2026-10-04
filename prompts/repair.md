@@ -50,6 +50,10 @@ Run all of these in the repo root and make them pass - the orchestrator re-runs 
 {{KIT_GATES}}
 ```
 
+Run each gate in the foreground with the tool's longest timeout (`timeout: 600000` in Claude Code,
+whose 2-minute default moves a longer suite to the background) and its output in a file outside the
+worktree; never wait on a backgrounded run with `sleep` or `pgrep`.
+
 # Finishing
 
 Run `{{GATE_COMMAND}}` exactly as written, then the other gates, and quote the last lines of each

@@ -57,9 +57,10 @@ ticket names. The project rules below say what else to read.
   the lockfile.
 - **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
   outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
-  long suite is run once and not again to find the line you wanted. Give the command a timeout long enough for the whole suite
-  (other sandboxes run at the same moment and slow it); never start it in the background and poll it
-  with `sleep`, which the sandbox blocks. Look in the project rules for how the test runner reports a
+  long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
+  (`timeout: 600000` in Claude Code, whose 2-minute default moves a longer suite to the background;
+  other sandboxes run at the same moment and slow it). Never start it in the background and wait on
+  it with `sleep`, which the sandbox blocks, or `pgrep -f`, which matches its own loop. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
 - **Prefer the Edit tool to scripted replacements.** A `sed -i` or a `python3` heredoc that does a
   string replace does nothing when the text does not match, and says nothing. If you do script an

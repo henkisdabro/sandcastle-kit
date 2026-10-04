@@ -36,6 +36,10 @@ Run all of these in the repo root and make them pass - the orchestrator re-runs 
 {{KIT_GATES}}
 ```
 
+Run each gate in the foreground with the tool's longest timeout (`timeout: 600000` in Claude Code,
+whose 2-minute default moves a longer suite to the background) and its output in a file outside the
+worktree; never wait on a backgrounded run with `sleep` or `pgrep`.
+
 # Finishing
 
 If the merge is resolved, the gates pass and the merge is committed, output
