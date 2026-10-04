@@ -721,17 +721,18 @@ export const readOutcomes = (root: string): Outcomes => {
   );
 };
 
-/** The outcome text of a finished branch the kit held for a person: what tells it from a hand-back, which has no commits either. */
-export const HELD_WORK = "needs a human merge";
+/** The outcome text of a ticket an agent handed back: held, like work the kit held, but with nothing to merge. */
+export const HANDED_BACK = "needs a human: handed back";
 
 /**
- * A branch the kit held for a human merge, which a person has since merged by hand: its tip is on the
- * base, so its diff is empty, as a hand-back's is. Only the held-work outcome tells the two apart, and
- * only an ancestor check says the merge happened. The ticket stays open until the push closes it.
+ * A branch the kit held for a person - at landing, or a conflict resolution it would not trust - which a
+ * person has since merged by hand: its tip is on the base, so its diff is empty, as a hand-back's is.
+ * Only the outcome tells the two apart, and only an ancestor check says the merge happened. The ticket
+ * stays open until the push closes it.
  */
 export const mergedByHand = (root: string, base: string, id: string): boolean => {
   const o = readOutcomes(root)[id];
-  if (o?.kind !== "held" || o.text !== HELD_WORK) return false;
+  if (o?.kind !== "held" || o.text === HANDED_BACK) return false;
   try {
     execFileSync("git", ["merge-base", "--is-ancestor", `refs/heads/agent/issue-${id}`, `refs/heads/${base}`], { cwd: root, stdio: "ignore" });
     return true;

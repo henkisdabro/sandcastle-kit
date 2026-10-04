@@ -532,14 +532,14 @@ blocked_on() {
 
 # "run|kind|text" for a branch slug, from OUTCOMES.
 outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3 "|" $4; exit}'; }
-# A branch the kit held for a human merge that a person has since merged by
-# hand: its tip is on the base, so it has no commits over it, as a hand-back
-# has none. Only the held-work outcome tells the two apart; the ticket stays
-# open until the push closes it.
+# A branch the kit held for a person (at landing, or a conflict resolution it
+# would not trust) that a person has since merged by hand: its tip is on the
+# base, so it has no commits over it, as a hand-back has none. Only the
+# outcome tells the two apart; the ticket stays open until the push closes it.
 hand_merged() {
   local oc
   oc=$(outcome_of "$1")
-  case "$oc" in *'|held|needs a human merge') ;; *) return 1;; esac
+  case "$oc" in *'|held|needs a human: handed back') return 1;; *'|held|'*) ;; *) return 1;; esac
   git merge-base --is-ancestor "refs/heads/agent/issue-$1" "refs/heads/$BASE" 2>/dev/null
 }
 

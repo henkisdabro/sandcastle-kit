@@ -36,7 +36,7 @@ const ticketFile = (title: string, status: string, head = "") => `# ${title}\n\n
  * shop-01 is held (its outcome says why), shop-02 waits for it. `how` is what became of shop-01's
  * branch: merged by hand, left unmerged, or handed back with no commits.
  */
-const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01") => {
+const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01", heldText = HELD) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-hand-merged-"));
   git(root, "init", "-q", "-b", "main");
   mkdirSync(join(root, ".scratch/shop/issues"), { recursive: true });
@@ -55,7 +55,7 @@ const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01") => {
     if (how === "merged") git(root, "merge", "--no-ff", "-qm", `Merge agent/issue-${id}`, `agent/issue-${id}`);
   }
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  const outcome = how === "handed back" ? { kind: "held", text: "needs a human: handed back" } : { kind: "held", text: HELD };
+  const outcome = how === "handed back" ? { kind: "held", text: "needs a human: handed back" } : { kind: "held", text: heldText };
   writeFileSync(join(root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ [id]: { run: started, ...outcome } }));
   const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", gates: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
   return { root, project, tracker: makeTracker(project) };
@@ -67,6 +67,10 @@ test("mergedByHand: only held work whose branch tip is on the base", () => {
   // Its branch is on the base too (cut from it, nothing added), but nothing was held for a merge.
   assert.equal(mergedByHand(repo("handed back").root, "main", "shop-01"), false);
   assert.equal(mergedByHand(repo("merged").root, "main", "shop-99"), false);
+  // A conflict resolution the kit would not trust is held work too, with its own words.
+  const resolution = "needs a human: the conflict resolution changed lines outside the conflict (a.ts)";
+  assert.equal(mergedByHand(repo("merged", "shop-01", resolution).root, "main", "shop-01"), true);
+  assert.equal(mergedByHand(repo("unmerged", "shop-01", resolution).root, "main", "shop-01"), false);
 });
 
 test("queue: a dependant waits for a blocker merged locally, which closes on push", async () => {
@@ -143,9 +147,17 @@ const statusOf = (root: string, ticket: string) => {
 };
 
 test("status: a held branch merged by hand reads merged, and a hand-back or unmerged one stays held", () => {
-  for (const [how, want] of [["merged", /merged .*merged by hand; closes on push/], ["unmerged", /held .*needs a human merge/], ["handed back", /held .*handed back/]] as const) {
+  const resolution = "needs a human: resolution held";
+  const cases = [
+    ["merged", HELD, /merged .*merged by hand; closes on push/],
+    ["merged", resolution, /merged .*merged by hand; closes on push/],
+    ["unmerged", HELD, /held .*needs a human merge/],
+    ["unmerged", resolution, /held .*resolution held/],
+    ["handed back", HELD, /held .*handed back/],
+  ] as const;
+  for (const [how, text, want] of cases) {
     // A number for the id keeps the row's cell simple.
-    const { root } = repo(how, "7");
+    const { root } = repo(how, "7", text);
     // A branch is a row once an agent log names it.
     writeFileSync(join(root, ".sandcastle/logs/agent-issue-7-impl-7.log"), "done\n");
     writeFileSync(join(root, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: started, finishedAt: started, exitCode: 0, tickets: {} }));
