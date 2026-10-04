@@ -8,8 +8,12 @@
 #      worktree's .git is a pointer the container cannot follow, so git history is not copied).
 #   3. the outbound scan of the commits not yet on the base: gitleaks, the personal denylist (the
 #      pre-commit hook's rules), and home-directory paths.
+# The legs run side by side, not one after another, and the tests in each are CI's weighted shards
+# (test/shard.ts, run by test/run-shards.sh): every file still runs once per pass.
 # Prints one summary line per step and RESULT: PASS or FAIL; a failure's output is shown, the rest
 # kept in a temp directory.
+#
+# FULL_CHECK_SHARDS sets the shards per pass (default: half the cores, 1 to 6).
 #
 #   bash test/full-check.sh [base]     # base defaults to origin/main
 #   NO_DOCKER=1 bash test/full-check.sh  # skip the Linux step
@@ -20,31 +24,41 @@ logs=$(mktemp -d)
 fail=0
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
 
-# The pass/fail counts from node's test runner, or the failing tests when there are any.
-summary() {
-  grep -E "^ℹ (pass|fail) " "$1" | tr '\n' ' '
-  echo
-  grep -E "^✖ " "$1" | sort -u | head -20
+# Each leg is a function that prints its summary lines and returns its status. They all start at
+# once, in the background, each into its own file, and the output is printed in a fixed order once
+# they are done: the longest leg (the suite, or the Linux container's) sets the wall time, not the
+# sum of them. The tests are the files test/shard.ts packs by weight, in shards side by side.
+
+leg_types() {
+  pnpm exec tsc --noEmit >"$logs/tsc.log" 2>&1 && echo "tsc: ok" || { echo "tsc: FAIL"; cat "$logs/tsc.log"; return 1; }
 }
 
-echo "== $(uname -s)"
-pnpm exec tsc --noEmit >"$logs/tsc.log" 2>&1 && echo "tsc: ok" || { fail=1; echo "tsc: FAIL"; cat "$logs/tsc.log"; }
-pnpm test >"$logs/test.log" 2>&1 || fail=1
-printf 'pnpm test: '; summary "$logs/test.log"
-GIT_COMMITTER_NAME="Sandcastle agent" GIT_COMMITTER_EMAIL=agent@sandcastle.invalid \
-  pnpm exec tsx --test test/*.test.ts >"$logs/agent-env.log" 2>&1 || fail=1
-printf 'under the agent committer: '; summary "$logs/agent-env.log"
-if [ "$(uname -s)" = Darwin ]; then
-  STATUS_BASH=/bin/bash bash test/status.test.sh >"$logs/status.log" 2>&1 && echo "status view on bash 3.2: ok" \
-    || { fail=1; echo "status view on bash 3.2: FAIL"; tail -20 "$logs/status.log"; }
-fi
+# The suite as `pnpm test` runs it: the status view's checks, then every test file once.
+leg_tests() {
+  local rc=0
+  bash test/status.test.sh >"$logs/status-view.log" 2>&1 || { rc=1; echo "status view: FAIL"; tail -20 "$logs/status-view.log"; }
+  printf 'pnpm test: '
+  bash test/run-shards.sh "$logs/test" >"$logs/test.out" 2>&1 || rc=1
+  cat "$logs/test.out"
+  return "$rc"
+}
 
-echo "== Linux"
-if [ -n "${NO_DOCKER:-}" ]; then
-  echo "skipped (NO_DOCKER)"
-elif ! docker info >/dev/null 2>&1; then
-  echo "skipped: Docker is not running"
-else
+# The test files again under an agent's committer identity.
+leg_agent() {
+  printf 'under the agent committer: '
+  GIT_COMMITTER_NAME="Sandcastle agent" GIT_COMMITTER_EMAIL=agent@sandcastle.invalid \
+    bash test/run-shards.sh "$logs/agent-env" >"$logs/agent-env.out" 2>&1
+  local rc=$?
+  cat "$logs/agent-env.out"
+  return "$rc"
+}
+
+leg_bash32() {
+  STATUS_BASH=/bin/bash bash test/status.test.sh >"$logs/status.log" 2>&1 && echo "status view on bash 3.2: ok" \
+    || { echo "status view on bash 3.2: FAIL"; tail -20 "$logs/status.log"; return 1; }
+}
+
+leg_linux() {
   # COPYFILE_DISABLE: macOS tar would add an AppleDouble `._` file beside each one.
   git ls-files -z -co --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - 2>/dev/null \
     | docker run --rm -i node:24-trixie bash -c '
@@ -55,41 +69,84 @@ else
       git config --global user.email t@example.com && git config --global user.name t
       corepack enable >/dev/null 2>&1 && CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
       pnpm exec tsc --noEmit
-      pnpm test >/tmp/t.log 2>&1 || { grep -E "^✖ " /tmp/t.log | sort -u | head -20; tail -40 /tmp/t.log; exit 1; }
-      grep -E "^ℹ (pass|fail) " /tmp/t.log | tr "\n" " "; echo' >"$logs/linux.log" 2>&1 \
+      # The container has the whole VM to itself, so its shards are not halved by a second pass.
+      bash test/status.test.sh >/tmp/status.log 2>&1 || { tail -20 /tmp/status.log; exit 1; }
+      FULL_CHECK_SHARDS=$(nproc) bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
+      cat /tmp/t.log' >"$logs/linux.log" 2>&1 \
     && { printf 'pnpm test: '; tail -1 "$logs/linux.log"; } \
-    || { fail=1; echo "FAIL"; tail -60 "$logs/linux.log"; }
-fi
+    || { echo "FAIL"; tail -60 "$logs/linux.log"; return 1; }
+}
 
-echo "== scan of $base..HEAD"
-if ! git rev-parse -q --verify "$base" >/dev/null; then
-  fail=1
-  echo "no $base to compare with: git fetch first"
-else
+# The outbound scan needs no tests, only git: it is quick, and runs beside everything else.
+leg_scan() {
+  local rc=0
+  if ! git rev-parse -q --verify "$base" >/dev/null; then
+    echo "no $base to compare with: git fetch first"
+    return 1
+  fi
   if command -v gitleaks >/dev/null 2>&1; then
     gitleaks git --log-opts="$base..HEAD" --redact --no-banner >"$logs/gitleaks.log" 2>&1 && echo "gitleaks: ok" \
-      || { fail=1; echo "gitleaks: FAIL"; tail -20 "$logs/gitleaks.log"; }
+      || { rc=1; echo "gitleaks: FAIL"; tail -20 "$logs/gitleaks.log"; }
   else
-    fail=1
+    rc=1
     echo "gitleaks: not installed"
   fi
   git diff "$base"...HEAD -U0 --no-color | grep '^+' | grep -v '^+++' >"$logs/added.txt" || true
-  deny="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/denylist"
-  allow="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/allowlist"
+  local deny="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/denylist"
+  local allow="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/allowlist"
   if [ -f "$deny" ]; then
     grep -vE '^[[:space:]]*(#|$)' "$deny" >"$logs/deny" || true
     : >"$logs/allow"
     [ -f "$allow" ] && { grep -vE '^[[:space:]]*(#|$)' "$allow" >"$logs/allow" || true; }
-    hits=""
+    local hits=""
     [ -s "$logs/deny" ] && hits=$({ if [ -s "$logs/allow" ]; then grep -vEf "$logs/allow"; else cat; fi; } <"$logs/added.txt" | grep -inEf "$logs/deny" || true)
-    if [ -n "$hits" ]; then fail=1; echo "denylist: FAIL"; echo "$hits" | head -20; else echo "denylist: ok"; fi
+    if [ -n "$hits" ]; then rc=1; echo "denylist: FAIL"; echo "$hits" | head -20; else echo "denylist: ok"; fi
   else
     echo "denylist: none at $deny"
   fi
   # The placeholder homes the docs and tests use are fine; a real one is not.
+  local homes
   homes=$(grep -nE '/(Users|home)/[a-z]' "$logs/added.txt" | grep -vE '/home/(user|node|agent)\b' || true)
-  if [ -n "$homes" ]; then fail=1; echo "home paths: FAIL"; echo "$homes" | head -20; else echo "home paths: ok"; fi
+  if [ -n "$homes" ]; then rc=1; echo "home paths: FAIL"; echo "$homes" | head -20; else echo "home paths: ok"; fi
+  return "$rc"
+}
+
+start() { # name function: the function's output and status go to $logs/leg-name.{out,status}
+  ( "$2" >"$logs/leg-$1.out" 2>&1; echo $? >"$logs/leg-$1.status" ) &
+}
+# The legs' summary lines in order, and each one's failure in the overall status.
+show() {
+  cat "$logs/leg-$1.out"
+  [ "$(cat "$logs/leg-$1.status")" = 0 ] || fail=1
+}
+
+docker_note=""
+if [ -n "${NO_DOCKER:-}" ]; then
+  docker_note="skipped (NO_DOCKER)"
+elif ! docker info >/dev/null 2>&1; then
+  docker_note="skipped: Docker is not running"
 fi
+
+# The Linux leg is the slowest (an image, an install), so it starts first.
+[ -n "$docker_note" ] || start linux leg_linux
+start scan leg_scan
+start types leg_types
+start tests leg_tests
+start agent leg_agent
+[ "$(uname -s)" != Darwin ] || start bash32 leg_bash32
+wait
+
+echo "== $(uname -s)"
+show types
+show tests
+show agent
+[ "$(uname -s)" != Darwin ] || show bash32
+
+echo "== Linux"
+if [ -n "$docker_note" ]; then echo "$docker_note"; else show linux; fi
+
+echo "== scan of $base..HEAD"
+show scan
 
 echo "logs: $logs"
 echo "RESULT: $([ "$fail" = 0 ] && echo PASS || echo FAIL)"
