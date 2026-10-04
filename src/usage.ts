@@ -8,7 +8,17 @@
 // bogus token got 401), so a reading is cached for ten minutes and fails
 // open - an unknown reading never blocks a run. A failed reading is asked for again before the next
 // ticket, except a 403 (this token cannot read usage): that turns the guard off for the run.
+//
+// The token comes from the host's Claude Code login when there is a readable one (`usageToken`): a
+// `claude setup-token` token is inference-only and the endpoint answers it 403, while the login's
+// access token carries the `user:profile` scope. It is read on the host, at each reading, and only
+// ever sent to the usage endpoint: never refreshed (a refresh rotates the token and could sign
+// Claude Code out), never written anywhere, never in a sandbox's environment or mounts, never printed.
 
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
@@ -27,6 +37,60 @@ const usageStopPercent = () => parseUsageStop(process.env.USAGE_STOP);
 /** Refuses a bad USAGE_STOP when the run starts - before the image, preflight or any spend - not at the first reading. */
 export const checkUsageSettings = () => {
   if (USAGE_CHECK) usageStopPercent();
+};
+
+/** What the guard reads the plan's usage with: the Claude Code login's access token, the setup token, or a login that has run out. */
+export type UsageToken = { source: "login" | "CLAUDE_CODE_OAUTH_TOKEN"; token: string } | { source: "login expired" } | undefined;
+
+/** The host's Claude Code login as JSON text, or undefined when there is none to read. Injected, so a test needs no real keychain or file. */
+export type LoginReaders = { keychain(): string | undefined; file(): string | undefined };
+
+const KEYCHAIN_SERVICE = "Claude Code-credentials";
+
+/** The real readers: the macOS keychain's generic password, and `.credentials.json` under `CLAUDE_CONFIG_DIR` (else `~/.claude`). A failure is no login. */
+export const hostLoginReaders: LoginReaders = {
+  keychain: () => {
+    try {
+      return execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
+    } catch {
+      return undefined;
+    }
+  },
+  file: () => {
+    try {
+      return readFileSync(join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), ".credentials.json"), "utf8");
+    } catch {
+      return undefined;
+    }
+  },
+};
+
+/**
+ * The token a usage reading is made with: the host's Claude Code login (macOS keychain, else the
+ * credentials file) while it has not expired, else `CLAUDE_CODE_OAUTH_TOKEN`, else nothing. An
+ * expired login is its own answer, not a reason to fall back: the setup token would only get a 403,
+ * which turns the guard off for the whole run, while the login comes back when Claude Code next
+ * refreshes it. A missing or unreadable login (no entry, malformed JSON, no access token) falls
+ * back. The login's `expiresAt` is in milliseconds; nothing here refreshes or writes anything.
+ */
+export const usageToken = (
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform = process.platform,
+  readers: LoginReaders = hostLoginReaders,
+  now = Date.now(),
+): UsageToken => {
+  const login = (() => {
+    try {
+      const raw = platform === "darwin" ? readers.keychain() : readers.file();
+      const oauth = (JSON.parse(raw ?? "") as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } } | null)?.claudeAiOauth;
+      return typeof oauth?.accessToken === "string" && oauth.accessToken ? { token: oauth.accessToken, expiresAt: Number(oauth.expiresAt) } : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  // No usable expiry is read as expired: a token of unknown age is not sent.
+  if (login) return login.expiresAt > now ? { source: "login", token: login.token } : { source: "login expired" };
+  return env.CLAUDE_CODE_OAUTH_TOKEN ? { source: "CLAUDE_CODE_OAUTH_TOKEN", token: env.CLAUDE_CODE_OAUTH_TOKEN } : undefined;
 };
 
 type Window = { kind: string; percent: number };
@@ -102,20 +166,25 @@ const read = (token: string): Promise<Reading> => {
 // guarding only while it has a reading. Undefined until the guard has asked.
 let lastReading: "got" | "none" | undefined;
 
-/** True when the guard's last attempt got no reading (a 403, a rate limit, no OAuth token): it is not guarding right now. */
+/** True when the guard's last attempt got no reading (a 403, a rate limit, no token or an expired login): it is not guarding right now. */
 export const usageReadingLost = () => lastReading === "none";
 
 const describe = (windows: Window[]) => windows.map((w) => `${w.kind} ${Math.round(w.percent)}%`).join(" · ");
 
 /** One line for the run's start, or undefined when the check is off. */
-export const usageLine = async (env: Record<string, string>) => {
+export const usageLine = async (env: Record<string, string>, readers: LoginReaders = hostLoginReaders) => {
   if (!USAGE_CHECK) return undefined;
   const stop = usageStopPercent();
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+  const credential = usageToken(env, process.platform, readers);
+  if (!credential) {
     lastReading = "none";
-    return "Plan usage: not checked - it needs CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
+    return "Plan usage: not checked - it needs a Claude Code login on this machine (`claude`, then /login) or CLAUDE_CODE_OAUTH_TOKEN, not an API key.";
   }
-  const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
+  if (!("token" in credential)) {
+    lastReading = "none";
+    return "Plan usage: unknown right now (the Claude Code login has expired; any use of Claude Code on this machine refreshes it); the run goes ahead, and checks again before each ticket starts.";
+  }
+  const windows = await read(credential.token);
   lastReading = Array.isArray(windows) ? "got" : "none";
   if (Array.isArray(windows)) return `Plan usage: ${describe(windows)} (no new ticket starts at ${stop}%).`;
   if (windows.off) return `Plan usage: the usage guard is off for this run (${windows.why}; USAGE_CHECK=1 cannot work with it, and the endpoint is not asked again).`;
@@ -123,14 +192,15 @@ export const usageLine = async (env: Record<string, string>) => {
 };
 
 /** Why no further issue should start, or undefined to carry on. */
-export const usageStop = async (env: Record<string, string>) => {
+export const usageStop = async (env: Record<string, string>, readers: LoginReaders = hostLoginReaders) => {
   if (!USAGE_CHECK) return undefined;
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+  const credential = usageToken(env, process.platform, readers);
+  if (!credential || !("token" in credential)) {
     lastReading = "none";
     return undefined;
   }
   const stop = usageStopPercent();
-  const windows = await read(env.CLAUDE_CODE_OAUTH_TOKEN);
+  const windows = await read(credential.token);
   lastReading = Array.isArray(windows) ? "got" : "none";
   const over = Array.isArray(windows) ? windows.filter((w) => w.percent >= stop) : undefined;
   return over?.length ? `plan usage ${describe(over)} reached USAGE_STOP=${stop}%` : undefined;

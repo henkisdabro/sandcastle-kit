@@ -14,7 +14,7 @@ import { limit } from "./pool.ts";
 import { sizePointerNow } from "./size.ts";
 import { baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
-import { probeOAuth } from "./usage.ts";
+import { probeOAuth, usageToken } from "./usage.ts";
 import { resolveVersions } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string) => {
@@ -384,6 +384,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       }
       return found;
     };
+    // The guard's own credential, which may not be a file's: it prefers the host's Claude Code login.
+    const guardCredential = usageToken({ CLAUDE_CODE_OAUTH_TOKEN: source("CLAUDE_CODE_OAUTH_TOKEN")?.value });
     console.log("\ncredentials (live)");
     for (const key of ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "GH_TOKEN"]) {
       const found = source(key);
@@ -403,9 +405,17 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       }
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
       else console.log(`opt  ${print} - not checked (${status === undefined ? "no connection" : `HTTP ${status}`})`);
-      // Apart from whether the token is accepted: any 403 from the usage endpoint means the guard cannot read this token's plan usage.
-      if (key === "CLAUDE_CODE_OAUTH_TOKEN" && status === 403) console.log("warn USAGE_CHECK=1 cannot work with this token: the usage endpoint answered HTTP 403, so the guard would be off for a run.");
+      // Apart from whether the token is accepted: any 403 from the usage endpoint means the guard cannot read this token's plan usage
+      // - unless the guard reads with the Claude Code login instead, which the line after the loop reports.
+      if (key === "CLAUDE_CODE_OAUTH_TOKEN" && status === 403 && guardCredential?.source !== "login" && guardCredential?.source !== "login expired") console.log("warn USAGE_CHECK=1 cannot work with this token: the usage endpoint answered HTTP 403, so the guard would be off for a run.");
     }
+    // Only the source and the HTTP status are printed, never a character of a token.
+    const usage = guardCredential;
+    if (usage && "token" in usage) {
+      const status = await probeOAuth(usage.token);
+      console.log(`${status !== undefined && status >= 200 && status < 300 ? "ok  " : "warn"} usage guard (USAGE_CHECK=1) would read plan usage with ${usage.source === "login" ? "the Claude Code login" : "CLAUDE_CODE_OAUTH_TOKEN"} - the usage endpoint answered ${status === undefined ? "nothing (no connection)" : `HTTP ${status}`}`);
+    } else if (usage) console.log("warn usage guard (USAGE_CHECK=1) would find the Claude Code login expired, so it would have no reading until Claude Code refreshes it (any use of Claude Code does)");
+    else console.log("info usage guard (USAGE_CHECK=1) has no credential: no readable Claude Code login and no CLAUDE_CODE_OAUTH_TOKEN");
     console.log();
   }
   check(!!run("sh", ["-c", "command -v codex"]), "Codex CLI (only for CROSS_REVIEW=1)", "`npm install -g @openai/codex && codex login`", true);
