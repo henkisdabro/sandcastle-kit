@@ -12,7 +12,9 @@ min_herdr_version = "0.9.3"
 description = "Watch sandcastle-kit runs: the status view and report over any tab, Ctrl-click a ticket for its card, sandboxes first in Agents"
 platforms = ["linux", "macos"]
 
-# Herdr forgets the Agents view on a restart: put "sandboxes first" back if it was on.
+# Herdr forgets the Agents view on a restart: put "sandboxes first" back if it was on. A restart
+# also leaves a finished run's status pane a bare shell: its file goes back to the live-runs
+# directory, and the tab bar's next tick gives that tab the run's report.
 [[startup]]
 command = ["./entry.sh", "startup"]
 

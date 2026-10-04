@@ -29,7 +29,8 @@ writeFileSync(join(bin, "herdr"), FAKE);
 chmodSync(join(bin, "herdr"), 0o755);
 const log = join(mkdtempSync(join(tmpdir(), "sandcastle-deadtab-log-")), "calls.log");
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, FAKE_LOG: log, XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), "sandcastle-deadtab-cache-")) });
-const { replaceDeadTab, runsLine } = await import("../src/herdr-plugin.ts");
+const { replaceDeadTab, requeueAwaiting, runsLine } = await import("../src/herdr-plugin.ts");
+const { awaitingDir } = await import("../src/live-runs.ts");
 const { reportInDeadTab, viewRecord } = await import("../src/herdr.ts");
 
 const KIT_DIR = "/the/kit";
@@ -53,7 +54,8 @@ const OWN = { tab: "w1:t2", adopted: false, status: "w1:t2-1", panes: [] };
 const DEAD = { pid: 2 ** 22 + 12345 };
 const probe = (pid: number) => (pid === process.pid ? everyPidIsTheKit() : undefined);
 const tick = (dir: string, ended = (root: string) => replaceDeadTab(root, KIT_DIR)) => runsLine(dir, undefined, probe, ended);
-const runs = () => mkdtempSync(join(tmpdir(), "sandcastle-deadtab-runs-"));
+// Inside a directory of its own: the awaiting directory is the runs directory's sibling.
+const runs = () => join(mkdtempSync(join(tmpdir(), "sandcastle-deadtab-cache-")), "runs");
 
 test("a dead run's own tab: the status pane runs the report, once", () => {
   reset();
@@ -145,20 +147,21 @@ test("a pane Herdr no longer has leaves the tab and the record as they were, and
   assert.equal(readdirSync(dir).length, 0);
 });
 
-test("a killed run whose status view still runs keeps its file until a later restart leaves the pane a shell", () => {
+test("a killed run whose status view still runs keeps its file awaiting until a later restart leaves the pane a shell", () => {
   reset("w1:t2", "bash /kit/status.sh 5");
   const dir = runs();
   const root = project(dir, DEAD, OWN);
-  for (const _ of [1, 2]) {
-    assert.equal(tick(dir), "");
-    assert.equal(readdirSync(dir).length, 1, "the file stays while the view shows how the run ended");
-  }
+  assert.equal(tick(dir), "");
+  assert.equal(readdirSync(dir).length, 0, "the tab bar's gate is not held open");
+  assert.equal(readdirSync(awaitingDir(dir)).length, 1, "the file awaits while the view shows how the run ended");
   assert.equal(calls().some((c) => c.startsWith("pane run ")), false, calls().join("\n"));
-  // Herdr stopped and started: the view is gone and the pane is a bare shell.
+  // Herdr stopped and started: the view is gone and the pane is a bare shell. The startup hook puts the file back.
   reset("w1:t2", "-zsh");
+  requeueAwaiting(dir, probe);
   assert.equal(tick(dir), "");
   assert.deepEqual(calls().filter((c) => c.startsWith("pane run ")), [`pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' report`]);
   assert.equal(readdirSync(dir).length, 0);
+  assert.equal(readdirSync(awaitingDir(dir)).length, 0);
   reset("w1:t2", "-zsh");
   tick(dir);
   assert.deepEqual(calls(), []);
