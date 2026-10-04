@@ -24,7 +24,8 @@ export type LandResult =
   | { kind: "merged"; commit: string; files: string[]; regen: string[] }
   | { kind: "conflict"; files: string[]; note?: string }
   | { kind: "regen-failed"; files: string[]; reason: string }
-  | { kind: "red"; run: GateRun };
+  /** `base`: the base tip the merge was made on and gated, which a requeue compares with its own (`repairFromRed`, landing.ts). */
+  | { kind: "red"; run: GateRun; base: string };
 
 /**
  * What the host checks on the sandbox's landing commit `c` before fast-forwarding to it: `b`
@@ -158,7 +159,10 @@ export const landInSandbox = async (
           }
         }
         red ??= await gate(box);
-        if (red.failures.length || red.gates.some((g) => !g.pass)) result = { kind: "red", run: red };
+        if (red.failures.length || red.gates.some((g) => !g.pass)) {
+          // The merge's own first parent, not the host's read before the sandbox opened: it is the tip this tree was gated on.
+          result = { kind: "red", run: red, base: (await box.exec("git rev-parse HEAD^1")).stdout.trim() };
+        }
       }
     } finally {
       // Sandcastle's close keeps a worktree that holds untracked files, and a build leaves them.

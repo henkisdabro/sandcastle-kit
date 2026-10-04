@@ -44,7 +44,9 @@ state.
 - **Ports.** `attempt` (with `last()`, true once nothing more will start), `land`, `host` and `tell`.
 - **Requeue once.** A first conflict or red at landing gets a second attempt carrying what it
   collided with, unless the run starts nothing. The ticket is told before it is pushed back; a
-  second collision is final.
+  second collision is final. A red one is repaired from the landing gate's own output, with no gate
+  run, when the requeue's merge joins the base tip and branch head that gate ran on
+  (`repairFromRed`, `src/landing.ts`); on a moved base the gates run first.
 - **Release of dependants.** The tickets held for a blocker that starts in this run: when one lands
   and closes, the blockers of the ones that waited for it are read again through the plan's
   `blockers.open` port, and each with none open starts through the file hold. Any other ending, a
