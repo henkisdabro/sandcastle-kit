@@ -1,7 +1,8 @@
 // A run that is no longer live leaves its Herdr tab behind (after a cold server restart, as idle
 // shells): on the tab bar's next tick the tab the kit opened for it gets the closing report, once.
 // A live run's tab, a tab adopted from a person's terminal and a tab that is not the recorded one
-// are left alone. The fake `herdr` logs every call; no Herdr, no network.
+// are left alone. A dead run whose status view still runs keeps its live-runs file, so a restart
+// some ticks after the kill is still reported. The fake `herdr` logs every call; no Herdr, no network.
 //
 //   pnpm exec tsx --test test/herdr-dead-tab.test.ts
 
@@ -28,7 +29,7 @@ writeFileSync(join(bin, "herdr"), FAKE);
 chmodSync(join(bin, "herdr"), 0o755);
 const log = join(mkdtempSync(join(tmpdir(), "sandcastle-deadtab-log-")), "calls.log");
 Object.assign(process.env, { PATH: `${bin}${delimiter}${process.env.PATH}`, FAKE_LOG: log, XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), "sandcastle-deadtab-cache-")) });
-const { runsLine } = await import("../src/herdr-plugin.ts");
+const { replaceDeadTab, runsLine } = await import("../src/herdr-plugin.ts");
 const { reportInDeadTab, viewRecord } = await import("../src/herdr.ts");
 
 const KIT_DIR = "/the/kit";
@@ -50,7 +51,8 @@ const project = (dir: string, record: object, view?: object) => {
 };
 const OWN = { tab: "w1:t2", adopted: false, status: "w1:t2-1", panes: [] };
 const DEAD = { pid: 2 ** 22 + 12345 };
-const tick = (dir: string) => runsLine(dir, undefined, (pid) => (pid === process.pid ? everyPidIsTheKit() : undefined), (root) => void reportInDeadTab(root, KIT_DIR));
+const probe = (pid: number) => (pid === process.pid ? everyPidIsTheKit() : undefined);
+const tick = (dir: string, ended = (root: string) => replaceDeadTab(root, KIT_DIR)) => runsLine(dir, undefined, probe, ended);
 const runs = () => mkdtempSync(join(tmpdir(), "sandcastle-deadtab-runs-"));
 
 test("a dead run's own tab: the status pane runs the report, once", () => {
@@ -122,7 +124,8 @@ test("a status pane still running the status view already shows how the run ende
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, undefined);
 });
 
-test("a pane Herdr no longer has leaves the tab and the record as they were", () => {
+test("a pane Herdr no longer has leaves the tab and the record as they were, and the run's file goes", () => {
+  reset("w1:t2", "bash /kit/status.sh 5");
   const dir = runs();
   const root = project(dir, DEAD, OWN);
   // A herdr that fails every call, as when the server is not running.
@@ -133,11 +136,56 @@ test("a pane Herdr no longer has leaves the tab and the record as they were", ()
   process.env.PATH = `${broken}${delimiter}${path}`;
   try {
     assert.equal(reportInDeadTab(root, KIT_DIR), false);
+    assert.equal(tick(dir), "");
   } finally {
     process.env.PATH = path;
   }
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, undefined);
+  // A Herdr that cannot answer cannot say the status view still runs: the file is not kept for it.
+  assert.equal(readdirSync(dir).length, 0);
+});
+
+test("a killed run whose status view still runs keeps its file until a later restart leaves the pane a shell", () => {
+  reset("w1:t2", "bash /kit/status.sh 5");
+  const dir = runs();
+  const root = project(dir, DEAD, OWN);
+  for (const _ of [1, 2]) {
+    assert.equal(tick(dir), "");
+    assert.equal(readdirSync(dir).length, 1, "the file stays while the view shows how the run ended");
+  }
+  assert.equal(calls().some((c) => c.startsWith("pane run ")), false, calls().join("\n"));
+  // Herdr stopped and started: the view is gone and the pane is a bare shell.
+  reset("w1:t2", "-zsh");
   assert.equal(tick(dir), "");
+  assert.deepEqual(calls().filter((c) => c.startsWith("pane run ")), [`pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' report`]);
+  assert.equal(readdirSync(dir).length, 0);
+  reset("w1:t2", "-zsh");
+  tick(dir);
+  assert.deepEqual(calls(), []);
+});
+
+test("a dead run whose status pane runs something else loses its file with no report", () => {
+  reset("w1:t2", "vim notes.md");
+  const dir = runs();
+  project(dir, DEAD, OWN);
+  tick(dir);
+  assert.equal(calls().some((c) => c.startsWith("pane run ")), false, calls().join("\n"));
+  assert.equal(readdirSync(dir).length, 0);
+});
+
+test("a dead run's file is kept when a new run of the project registers before it is removed", () => {
+  reset("w1:t7");
+  const dir = runs();
+  const root = project(dir, DEAD, OWN);
+  // The new run writes its record (and its file, under the same name) after the reader judged the old one dead.
+  const ended = (r: string) => {
+    writeFileSync(join(r, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "shop", startedAt: "2026-10-02T05:00:00Z", pid: process.pid }));
+    return replaceDeadTab(r, KIT_DIR);
+  };
+  assert.equal(tick(dir, ended), "");
+  assert.equal(readdirSync(dir).length, 1);
+  assert.match(tick(dir), /^♜ shop /, "the next tick finds the new run");
+  assert.equal(readFileSync(join(dir, readdirSync(dir)[0]), "utf8"), root);
 });
 
 test("`sandcastle herdr line`, the tab bar's own command, replaces the dead run's tab", () => {
