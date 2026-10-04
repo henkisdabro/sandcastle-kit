@@ -220,6 +220,8 @@ comments, and the gates can prove it.
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
    `Touches:`, wide tickets, hot and unmergeable files, and a rough turn count. It is advice, so
    quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags; do not edit unasked.
+   A ticket it lists under protected paths will always be held for a human merge: say so, and offer
+   to unqueue it (or to leave the protected file to the user) rather than spend a pipeline on it.
 
 ## run - start a burndown
 
@@ -300,7 +302,7 @@ working, ready to land, need you, queued, blocked, merged. The states:
 
 - **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running, `2/7 pytest`,
   or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m` mean the step
-  has taken twice its usual time; `quiet Nm` means an agent's log has been silent that long. Read
+  has taken twice its usual time, and `3x over, usually 5m` (the note in red too) three times; `quiet Nm` means an agent's log has been silent that long. Read
   the log before calling either hung.
 - **`ready`** - gates green, waiting for the landing worker, which lands each ticket as it goes
   green while the others still run. Once every sandbox has finished, the `run` line counts what is

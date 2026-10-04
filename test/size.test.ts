@@ -148,7 +148,7 @@ const size = (bin: string, args: string[] = ["size"]) =>
     cwd: mkdtempSync(join(tmpdir(), "sandcastle-size-cwd-")),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: config, XDG_CONFIG_HOME: config, PATH: `${bin}${delimiter}${process.env.PATH}`, GIT_CEILING_DIRECTORIES: tmpdir() },
+    env: { ...process.env, HOME: config, XDG_CONFIG_HOME: config, XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), "sandcastle-size-cache-")), PATH: `${bin}${delimiter}${process.env.PATH}`, GIT_CEILING_DIRECTORIES: tmpdir() },
   });
 
 test("sandcastle size from outside a repository prints the recommendation and writes no file", () => {

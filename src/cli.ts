@@ -23,9 +23,9 @@
 //                    cap. The run keeps the slots it holds. The cap ends with the run;
 //                    --project acts on another project's run from any directory
 //   size             recommend the machine pool's limits (maxSandboxes, maxGates) from the
-//                    container runtime's VM, with the figure that set each, the current
-//                    limits and advice on the runtime's CPU and memory; read-only, writes
-//                    nothing; no model calls
+//                    container runtime's VM and the sandboxes' measured peak memory, with
+//                    the figure that set each, the current limits and advice on the
+//                    runtime's CPU and memory; read-only, writes nothing; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -81,7 +81,7 @@ import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -441,6 +441,12 @@ try {
       // A requeue asks for new work: without this, a kept green branch would land on the next run unread.
       const { id } = parseRequeueArgs(args);
       if (forgetHead(project.root, id)) console.log(`${tracker.ref(id)}: its recorded green head was dropped, so the next run re-implements it.`);
+      // Warn only: a re-run of such a ticket costs a pipeline and ends held for the same paths.
+      // Last, and never fatal: a failed re-read of the ticket must not undo a requeue that happened.
+      try {
+        const protectedPaths = protectedForTicket(project, id, tracker.get(id).body ?? "");
+        if (protectedPaths.length) console.log(`${tracker.ref(id)} ${protectedWarning(protectedPaths)}`);
+      } catch {}
       break;
     }
     case "blockers": {

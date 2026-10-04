@@ -8,15 +8,22 @@ import { existsSync, statfsSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
+import { type PeakLine, projectId, readPeaks } from "./peaks.ts";
 import { poolLimit } from "./pool.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
 
 const GIB = 2 ** 30;
 
-// Assumed, not measured: no run has been sampled yet. One place, so a later ticket replaces them
-// with measured peaks, and printed, so the person sees what the numbers rest on.
+// Assumed, not measured, and printed so the person sees what the numbers rest on. The per-sandbox
+// figure is only the fallback: once runs have recorded sandbox peaks (src/peaks.ts) those are used.
 export const HEADROOM_GIB = 2;
 export const PER_SANDBOX_GIB = 1.5;
+// A measured peak is a project's highest over its last RECENT_RUNS measured runs, so one runaway
+// run drops out after a few more; only a project measured within FRESH_DAYS counts, so a project
+// no longer worked on does not set the limit; and MARGIN covers a run a little heavier than any seen.
+export const RECENT_RUNS = 5;
+export const FRESH_DAYS = 30;
+export const MARGIN = 1.1;
 export const CPUS_PER_GATE = 6;
 export const MAX_SANDBOXES = 12;
 
@@ -33,6 +40,12 @@ export type Readers = {
   exists: (path: string) => boolean;
   home: () => string;
   platform: NodeJS.Platform;
+  /** The machine-wide sandbox peaks; none when omitted. */
+  peaks?: () => PeakLine[];
+  /** The id of the project the command runs in, which marks it among the peaks; none when omitted or outside a project. */
+  projectId?: () => string | undefined;
+  /** The clock in ms; `Date.now` when omitted. */
+  now?: () => number;
 };
 
 export const realReaders = (): Readers => ({
@@ -53,6 +66,12 @@ export const realReaders = (): Readers => ({
   exists: existsSync,
   home: homedir,
   platform: process.platform,
+  peaks: () => readPeaks(),
+  projectId: () => {
+    const r = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return r.status === 0 && r.stdout.trim() ? projectId(r.stdout.trim()) : undefined;
+  },
+  now: Date.now,
 });
 
 type Info = { NCPU?: unknown; MemTotal?: unknown; Name?: unknown; OperatingSystem?: unknown; DockerRootDir?: unknown; Platform?: { Name?: unknown }; Components?: { Name?: unknown }[] };
@@ -92,14 +111,61 @@ const WHERE: Record<Exclude<Runtime, "native">, string> = {
 const gib = (bytes: number) => `${(Math.round((bytes / GIB) * 10) / 10).toString()} GiB`;
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
 
-export type Recommendation = { sandboxes: number; gates: number; sandboxesBy: string; gatesBy: string };
+/** What the peaks say a sandbox needs: the heaviest project's peak, the project, the runs it rests on and the figure with the margin. */
+export type Measured = { peakMib: number; project: string; runs: number; perSandboxMib: number };
 
-/** The recommended limits from the VM's memory (bytes) and CPUs, each with the figure that set it. */
-export const recommend = (memory: number, cpus: number): Recommendation => {
-  const byMemory = Math.floor((memory / GIB - HEADROOM_GIB) / PER_SANDBOX_GIB);
+/**
+ * A sandbox's measured need: each project's highest peak over its last `RECENT_RUNS` measured runs
+ * (a run is the peaks sharing a `run`, as old as its newest line), then the highest of the
+ * projects whose newest measured run is within `FRESH_DAYS` of `now`, plus `MARGIN`. Undefined with
+ * nothing measured, in which case the caller keeps the assumed figure.
+ */
+export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
+  const byProject = new Map<string, Map<string, { at: number; peakMib: number }>>();
+  for (const l of peaks) {
+    const runs = byProject.get(l.project) ?? new Map<string, { at: number; peakMib: number }>();
+    const run = runs.get(l.run) ?? { at: 0, peakMib: 0 };
+    runs.set(l.run, { at: Math.max(run.at, Date.parse(l.ts)), peakMib: Math.max(run.peakMib, l.peakMib) });
+    byProject.set(l.project, runs);
+  }
+  let best: (Measured & { at: number }) | undefined;
+  for (const [project, runs] of byProject) {
+    const recent = [...runs.values()].sort((a, b) => b.at - a.at).slice(0, RECENT_RUNS);
+    if (!recent.length || recent[0].at < now - FRESH_DAYS * 86_400_000) continue;
+    const peakMib = Math.max(...recent.map((r) => r.peakMib));
+    if (!best || peakMib > best.peakMib || (peakMib === best.peakMib && recent[0].at > best.at)) {
+      best = { peakMib, project, runs: recent.length, perSandboxMib: Math.ceil(peakMib * MARGIN - 1e-9), at: recent[0].at };
+    }
+  }
+  return best && { peakMib: best.peakMib, project: best.project, runs: best.runs, perSandboxMib: best.perSandboxMib };
+};
+
+export type Recommendation = {
+  sandboxes: number;
+  gates: number;
+  sandboxesBy: string;
+  gatesBy: string;
+  /** Memory alone allows this many sandboxes (the CPUs and the ceiling may lower the limit). */
+  byMemory: number;
+  /** The figure each sandbox is assumed to need, in GiB: the measured one with its margin, else `PER_SANDBOX_GIB`. */
+  perSandboxGib: number;
+  /** Set when `perSandboxGib` is measured. */
+  measured?: Measured;
+};
+
+const gib2 = (g: number) => String(Math.round(g * 100) / 100);
+
+/**
+ * The recommended limits from the VM's memory (bytes) and CPUs, each with the figure that set it.
+ * `peaks` and `now` bring measured sandbox peaks in place of the assumed per-sandbox figure.
+ */
+export const recommend = (memory: number, cpus: number, peaks: PeakLine[] = [], now = Date.now()): Recommendation => {
+  const measured = measuredPeak(peaks, now);
+  const perSandboxGib = measured ? measured.perSandboxMib / 1024 : PER_SANDBOX_GIB;
+  const byMemory = Math.floor((memory / GIB - HEADROOM_GIB) / perSandboxGib);
   const raw = Math.min(byMemory, cpus);
   const sandboxes = Math.max(1, Math.min(MAX_SANDBOXES, raw));
-  const memoryNote = `floor((${gib(memory)} - ${HEADROOM_GIB} GiB) / ${PER_SANDBOX_GIB} GiB) = ${byMemory}`;
+  const memoryNote = `floor((${gib(memory)} - ${HEADROOM_GIB} GiB) / ${gib2(perSandboxGib)} GiB) = ${byMemory}`;
   let sandboxesBy: string;
   if (raw < 1) sandboxesBy = `at least 1 (memory allows ${byMemory}: ${memoryNote})`;
   else if (raw > MAX_SANDBOXES) sandboxesBy = `the ceiling of ${MAX_SANDBOXES} (memory allows ${byMemory}, CPUs ${cpus})`;
@@ -109,7 +175,7 @@ export const recommend = (memory: number, cpus: number): Recommendation => {
   const byCpus = Math.floor(cpus / CPUS_PER_GATE);
   const gates = Math.max(1, byCpus);
   const gatesBy = byCpus < 1 ? `at least 1 (floor(${cpus} CPUs / ${CPUS_PER_GATE}) = ${byCpus})` : `CPUs: floor(${cpus} / ${CPUS_PER_GATE}) = ${byCpus}`;
-  return { sandboxes, gates, sandboxesBy, gatesBy };
+  return { sandboxes, gates, sandboxesBy, gatesBy, byMemory, perSandboxGib, ...(measured ? { measured } : {}) };
 };
 
 const current = (pool: "sandboxes" | "gates", env: Record<string, string | undefined>, machine: Record<string, unknown>) => {
@@ -148,11 +214,21 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
     `Host: ${hostCpus} CPUs, ${gib(hostMemory)} RAM`,
     free === undefined ? `Free disk for images and worktrees: unknown (${diskPath})` : `Free disk for images and worktrees: ${gib(free)} (${diskPath})`,
     "",
-    `Assumed, not measured (no run has been sampled yet): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
-    "",
   ];
 
-  const rec = recommend(memory, cpus);
+  const peaks = readers.peaks?.() ?? [];
+  const rec = recommend(memory, cpus, peaks, readers.now?.() ?? Date.now());
+  const m = rec.measured;
+  if (m) {
+    const where = m.project === readers.projectId?.() ? "this project" : `project ${m.project}`;
+    lines.push(
+      `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where} peaked at ${gib2(m.peakMib / 1024)} GiB in one sandbox, the highest of any project in the last ${FRESH_DAYS} days; plus ${Math.round((MARGIN - 1) * 100)}% is ${gib2(rec.perSandboxGib)} GiB. This VM's memory fits ${rec.byMemory} sandboxes, so maxSandboxes is ${rec.sandboxes}.`,
+      `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
+    );
+  } else {
+    lines.push(`Assumed, not measured (no run has been sampled yet): ${HEADROOM_GIB} GiB headroom, ${PER_SANDBOX_GIB} GiB per sandbox, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`);
+  }
+  lines.push("");
   const now = { sandboxes: current("sandboxes", env, machine), gates: current("gates", env, machine) };
   const row = (name: string, key: "sandboxes" | "gates", by: string) => {
     const c = now[key];
@@ -178,7 +254,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
     return lines;
   }
   lines.push("Runtime settings:");
-  if (memoryHigh) lines.push(`  - The VM has ${gib(memory)}, more than half of the host's ${gib(hostMemory)}. Leave the host enough RAM for your other apps. Memory the containers do not use only grows the VM's file cache, which the host then swaps. About ${gib((HEADROOM_GIB + rec.sandboxes * PER_SANDBOX_GIB) * GIB)} covers ${rec.sandboxes} sandboxes.`);
+  if (memoryHigh) lines.push(`  - The VM has ${gib(memory)}, more than half of the host's ${gib(hostMemory)}. Leave the host enough RAM for your other apps. Memory the containers do not use only grows the VM's file cache, which the host then swaps. About ${gib((HEADROOM_GIB + rec.sandboxes * rec.perSandboxGib) * GIB)} covers ${rec.sandboxes} sandboxes.`);
   if (cpusAll) lines.push(`  - The VM has all ${cpus} of the host's CPUs. Leave the host some cores for your other apps; too few CPUs slow gates and can flake timing-sensitive tests, and 2 gates want about 8 CPUs.`);
   lines.push(runtime ? `  Where: ${WHERE[runtime]}.` : "  Where: in your runtime's own settings (OrbStack: `orb config set`; Docker Desktop: Settings -> Resources; Podman: `podman machine set`; Colima: `colima start --cpu --memory`).");
   lines.push("  Warning: applying a runtime change restarts it and stops a live run's containers. Wait for runs to finish (`sandcastle wait`).");

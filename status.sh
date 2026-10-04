@@ -532,6 +532,17 @@ blocked_on() {
 
 # "run|kind|text" for a branch slug, from OUTCOMES.
 outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3 "|" $4; exit}'; }
+# A branch the kit held for a person (at landing, or a conflict resolution it
+# would not trust) that a person has since merged by hand: its tip is on the
+# base, so it has no commits over it, as a hand-back has none. Only the
+# outcome tells the two apart; the ticket stays open until the push closes it.
+hand_merged() {
+  local oc
+  oc=$(outcome_of "$1")
+  case "$oc" in *'|held|needs a human: handed back') return 1;; *'|held|'*) ;; *) return 1;; esac
+  git merge-base --is-ancestor "refs/heads/agent/issue-$1" "refs/heads/$BASE" 2>/dev/null
+}
+
 # The row state for a recorded outcome's kind (mod/hooks/run-record.ts), in
 # the words the live view uses. Never the line's words: a line the case did
 # not foresee once read as ready. No kind, or one this view does not know,
@@ -858,6 +869,7 @@ render() {
         # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
+      held) if hand_merged "$n"; then state=merged; activity="merged by hand; closes on push"; fi;;
       implement|resolve|review|cross-review|repair|gates)
         log="logs/agent-issue-$n-$(log_phase "$tstate")-$n.log"
         if [ -f "$log" ]; then
@@ -877,10 +889,16 @@ render() {
             fi
           fi
         fi
-        # Busy but healthy, or stuck: a step at twice its usual length says which to suspect.
+        # Busy but healthy, or stuck: a step at twice its usual length says which to suspect,
+        # and at three times it says so in words and in the activity's colour too, since
+        # nothing else bounds an agent pass that keeps producing output.
         typ=$(typical_of "$tstate")
-        if [[ "$typ" =~ ^[0-9]+$ ]] && [ "$typ" -gt 0 ] && [ $(( now_s - since )) -gt $(( typ * 2 )) ]; then
-          age_col="$hot"; activity="usually $(ago "$typ") - $activity"
+        if [[ "$typ" =~ ^[0-9]+$ ]] && [ "$typ" -gt 0 ]; then
+          if [ $(( now_s - since )) -gt $(( typ * 3 )) ]; then
+            age_col="$hot"; act_col="$hot"; activity="3x over, usually $(ago "$typ") - $activity"
+          elif [ $(( now_s - since )) -gt $(( typ * 2 )) ]; then
+            age_col="$hot"; activity="usually $(ago "$typ") - $activity"
+          fi
         fi;;
     esac
     # A ticket landing sent back keeps saying so through its second attempt.
@@ -1000,6 +1018,7 @@ render() {
       # nothing to change. A branch with no commits is "merged" by git's
       # reckoning, and a question for a human read as done.
       state="$oc_state"; activity_note="${oc_text#*|}"
+      if [ "$oc_state" = held ] && hand_merged "$n"; then state="merged"; activity_note="merged by hand; closes on push"; fi
     elif grep -q "agent/issue-${n}$" <<<"$merged_list"; then
       state="merged"
     else

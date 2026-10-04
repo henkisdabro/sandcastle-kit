@@ -1,5 +1,5 @@
 // The estimate a run prints before its slow steps (src/run.ts `estimate`):
-// medians of this project's earlier tickets in timings.jsonl, noise ignored,
+// the median-to-80th-percentile range of this project's earlier tickets in timings.jsonl, noise ignored,
 // and nothing at all without history.
 //
 //   pnpm exec tsx --test test/estimate.test.ts
@@ -47,9 +47,9 @@ test("medians of earlier tickets, times the tickets, time across the slots", () 
   const p = project(history);
   assert.equal(
     estimate(p, 5, 2),
-    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 10.0M tokens in / 100k out and 1h 00m for 5 ticket(s), 2 at a time.",
+    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 10.0M to 15.0M tokens in / 100k to 150k out and 1h 00m to 1h 30m for 5 ticket(s), 2 at a time.",
   );
-  assert.match(estimate(p, 1, 4)!, /about 2\.0M tokens in \/ 20k out and 20m for 1 ticket\(s\), 4 at a time\.$/);
+  assert.match(estimate(p, 1, 4)!, /about 2\.0M to 3\.0M tokens in \/ 20k to 30k out and 20m to 30m for 1 ticket\(s\), 4 at a time\.$/);
 });
 
 test("no timings file: nothing to print", () => {

@@ -6,6 +6,7 @@
 
 import type { Project } from "./config.ts";
 import { blockerProblems, refsOf, stripCode } from "./blockers.ts";
+import { protectedAmong, protectedWarning } from "./guard.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
@@ -92,6 +93,12 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
     if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) problems.push(`${refOf(t.id)} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
   }
 
+  // A ticket whose work lies in a protected path ends held whatever the agent does: said before it costs a pipeline.
+  const heldFor = queued.flatMap((t) => {
+    const paths = protectedAmong(project, files.get(t.id) ?? []);
+    return paths.length ? [`${refOf(t.id)} ${protectedWarning(paths)}`] : [];
+  });
+
   const out = [`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}": ${queued.length} ticket(s)`];
   out.push(`  blocker depth: ${chain.length} - ${chain.length > 1 ? chain.map(refOf).join(" -> ") : `no queued ticket waits for another (${refOf(chain[0])} is first)`}`);
   out.push(`  blocked-by edges: ${edges.length}, ${overlapping.length} between tickets whose Touches overlap (they only order shared files), ${real.length} that do not (real dependencies)`);
@@ -101,6 +108,8 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   for (const [f, by] of hot) out.push(`    ${f}: ${names(by)}`);
   out.push(shared.length ? "  unmergeable files declared by 2+ tickets (git cannot merge them line by line):" : "  unmergeable files declared by 2+ tickets: none");
   for (const [f, by] of shared) out.push(`    ${f}: ${names(by)}`);
+  out.push(heldFor.length ? "  protected paths (a run cannot land these):" : "  protected paths: none");
+  for (const h of heldFor) out.push(`    ${h}`);
   out.push(problems.length ? "  problems:" : "  problems: none");
   for (const p of problems) out.push(`    ${p}`);
   // Dependants start in the same run once their last blocker lands, so depth costs time inside one run, not turns.

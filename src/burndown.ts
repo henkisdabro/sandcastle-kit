@@ -34,11 +34,12 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
+import { peakOf, recordPeak } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -466,11 +467,15 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const name = m.project || found?.record.orchestrator;
     return { project: name, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
   }))) console.log(line);
+  // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
+  const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
   const slots = estimateSlots(workers, split);
+  const chainIds = blockerChain(project, tracker, candidates);
   const rough = estimate(
-    project, candidates.length, slots, blockerChain(project, tracker, candidates).length,
+    project, candidates.length, slots, chainIds.length,
     candidates.map((i) => overrides.get(i.id)?.model ?? IMPL_MODEL),
+    { carried: candidates.map((i) => carriedAtStart.has(i.id)), chainAt: chainIds.flatMap((id) => { const at = candidates.findIndex((c) => c.id === id); return at < 0 ? [] : [at]; }) },
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
@@ -575,6 +580,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     let ok = false;
     let tokens: Tokens | undefined;
     let gateTimes: Record<string, number> | undefined;
+    let peakMib: number | undefined;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
     try {
@@ -583,6 +589,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
+      peakMib = peakOf(result);
       red = gateRed(result);
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
@@ -596,9 +603,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const m = model?.();
       const line = {
         ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? { ms: Date.now() - since }), ok,
+        ...(carriedAtStart.has(issue) ? { carried: true } : {}),
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
+        ...(peakMib ? { peakMib } : {}),
         ...(red?.length ? { red } : {}),
       };
       appendFileSync(timings, JSON.stringify(line) + "\n");
@@ -650,7 +659,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(project, image, planFile));
+      await timed("", "base gates", () => requireGreenBase(project, image, planFile, true, runId));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -926,8 +935,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch]), generated: project.generated });
         if (stray?.length) {
           const why = strayNote(stray);
+          // No `files` on the record: the report reads them as a protected-path hold ("changes X") and would hide this note.
           console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
-          run.ticket(issue.id, { files: stray });
           notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
           // `held` from the first write: the kit held a finished, green resolution, the agent handed nothing back.
           return heldResolution(issue.id, branch, why, {
@@ -1250,6 +1259,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
       took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
       unlockWorktree(sandbox.worktreePath);
+      // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
+      await recordPeak(sandbox, project.root, runId);
       // Sandcastle keeps a worktree with uncommitted files rather than lose
       // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
       const closed = await sandbox.close();
@@ -1488,7 +1499,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify")).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);

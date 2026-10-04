@@ -133,7 +133,7 @@ hasnt 'ISSUE'
 has '^│ settings +autonomy (0 1 \[2\] 3 drain|2) · turn 2/2 +│'
 hasnt '\((next|last) run\)'
 row '#101' impl 'Bash|\$ pnpm test'
-row '#102' gates 'usually 1m - 2/3 pytest'
+row '#102' gates '3x over, usually 1m - 2/3'
 row '#103' ready 'gates green'
 row '#104' 'gate red' 'pytest red'
 row '#105' queued 'next to start'
@@ -344,9 +344,11 @@ has '^│ +#101 .*│ +1\.5c +│'
 # ---------------------------------------------------------------------------
 SCENARIO="a state written after the frame's clock"
 # The frame reads the clock before run.json, so a state the run wrote in between is "in the future".
+# The clock is read afresh: the script's own $now is minutes old on a loaded machine, and 30s ahead of
+# it is then already in the past.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
-  "issues": ["103"], "tickets": { "103": { "state": "ready", "since": $((now + 30)), "note": "gates green" } } }
+  "issues": ["103"], "tickets": { "103": { "state": "ready", "since": $(($(date +%s) + 30)), "note": "gates green" } } }
 EOF
 render "103"
 row '#103' ready

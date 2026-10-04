@@ -4,7 +4,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
@@ -60,8 +60,8 @@ export type ProjectConfig = {
   /** Commands run in each sandbox once it is up, e.g. dependency install. */
   setup?: string[];
   /**
-   * `true`: mount the host's pnpm store (`pnpm store path`, asked of the host's pnpm before each
-   * command) at `/home/agent/.pnpm-store` and point the sandbox's pnpm at it before `setup`, so
+   * `true`: mount the host's pnpm store-dir (the parent of `pnpm store path`, asked of the host's
+   * pnpm before each command) at `/home/agent/.pnpm-store` and point the sandbox's pnpm at it before `setup`, so
    * each sandbox's install hardlinks instead of downloading. The config holds no host path. Without
    * pnpm on the host the mount is skipped, with a note.
    */
@@ -139,13 +139,24 @@ export const CONFIG_PATH = ".sandcastle/config.ts";
 export const PNPM_STORE_SANDBOX = "/home/agent/.pnpm-store";
 export const PNPM_STORE_SETUP = `pnpm config set store-dir ${PNPM_STORE_SANDBOX}`;
 
-/** The host's pnpm store, or undefined when pnpm is not on the host (or cannot say). */
+/**
+ * The host's pnpm store-dir, or undefined when pnpm is not on the host (or cannot say).
+ * `pnpm store path` prints the versioned directory (`<store-dir>/v11`), and pnpm adds its own
+ * version segment to any `store-dir` it is given: mounting the versioned path would make the
+ * sandbox's store `<store-dir>/v11/v11`, a second store nested in the host's that no install of
+ * the host ever fills. The parent is what the sandbox's `store-dir` must be, so its `<mount>/vN`
+ * is the host's own store when the pnpm majors match (another major gets its own `vN` beside it).
+ */
 export const hostPnpmStore = (root: string): string | undefined => {
+  let versioned: string;
   try {
-    return execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 }).trim() || undefined;
+    versioned = execFileSync("pnpm", ["store", "path"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000 }).trim();
   } catch {
     return undefined;
   }
+  if (!versioned) return undefined;
+  // A path with no `vN` last segment is not one pnpm would add a segment to: mount it as it is.
+  return /^v\d+$/.test(basename(versioned)) ? dirname(versioned) : versioned;
 };
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as

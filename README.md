@@ -537,7 +537,7 @@ moments earlier (the search index lags), so a run started straight after `--add-
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time from the medians of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). When a `Blocked by` chain in the run is longer than the tickets over the slots, the chain sets the time: `(N tickets in sequence)`. Tickets that others wait for start first; a ticket
+time, as a range from the median to the 80th percentile of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low). A carried branch (one ahead of the base, which a base merge may conflict with) is priced from earlier carried tickets - those that had a conflict resolved or ran as carried - and a fresh ticket from the rest; the line gives the split `(N carried, M fresh)`, and says the estimate is low for a carried ticket with no carried history. When a `Blocked by` chain in the run takes longer than the tickets over the slots, the chain sets the time, as the sum of its own tickets' times: `(N tickets in sequence)`. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -585,10 +585,10 @@ lines rather than cut anything off.
 
 | State | Means |
 |---|---|
-| `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project |
+| `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project, and the note starts `3x over, usually 5m` (in red) at three times it |
 | `ready` | Implemented, reviewed, gates green: waits for the landing worker, which lands each ticket as it goes green. `human merge: .github/` means it will be held for a person instead |
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
-| `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person; `uncommitted`: the agent's work is in its kept worktree, not committed |
+| `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push"); `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
 | `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
@@ -725,7 +725,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 |---|---|
 | `logs/run.json` | The live run's record: stage, versions, each ticket's state. The status view and `sandcastle report` read it |
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
-| `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`. The estimate and the status view's "usual time" come from it |
+| `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time and a `carried` flag on a ticket whose branch was carried into the run (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`. The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
@@ -952,7 +952,8 @@ all of it. The mod:
   a 20 second timeout, one at a time per session, and keeps the ids in its store (one entry per
   project, shared by every session). That read is the one place the mod reaches the tracker, and
   it does it through the kit, never itself. It makes none while an entry under 10 minutes old
-  stands;
+  stands, except when you use `/sandcastle` and again when that turn ends (triage labels tickets
+  in between);
 - runs `ps -p <pid> -o command=` to ask whether the run's process is still there and still the
   run. It sends that process nothing;
 - once you have used `/sandcastle`, runs one short `sh` script (`cat`, `cd` and `pwd -P`, no
@@ -973,7 +974,7 @@ numeric exit code. Ticket titles are shown as written, as `sandcastle status` sh
 running it:
 
 ```
-❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
+❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, turn.complete, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
 ❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 
@@ -1003,7 +1004,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle preview` | Dry-merges every unlanded `agent/issue-*` branch onto the base, oldest first, in the project image (`git merge-tree`; the host keeps git 2.31), and lists each as clean or conflicting with the files. Changes no checkout and no ticket | ➖ no |
 | `sandcastle report` | The last run's closing summary (see [After a run](#-after-a-run)), with the local git state and the blockers read again now. Every run also ends with it | ➖ no |
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
-| `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them) and a rough estimate. Advice only | ➖ no |
+| `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets that touch a protected path (always held for a human merge), blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them) and a rough estimate. Advice only | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. On GitHub it also reminds you to give the label search a few seconds before `sandcastle run`. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight` | One "Reply OK" from every model, in the project image | 💸 yes, briefly |
@@ -1011,7 +1012,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
-| `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
+| `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
 
@@ -1033,7 +1034,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
-| `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store into every sandbox and points the sandbox's pnpm at it before `setup`, so installs hardlink instead of downloading. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note |
+| `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store's parent (the store-dir, without the `vN` segment pnpm adds) into every sandbox and points the sandbox's pnpm at it before `setup`. With the same pnpm major the sandbox's `<mount>/vN` is the host's own store, so installs hardlink instead of downloading; a different major keeps its own `vN` beside it. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note |
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
 | `changelog` | `false` | For a project whose rules keep agents out of its changelog: the implement and review prompts ask for each changelog line in a `<changelog>...</changelog>` tag (starting `Added:`, `Changed:` or `Fixed:`), and the closing summary lists the lines of the tickets that merged under Done, grouped by those words, for you to write the entries from |
@@ -1219,7 +1220,9 @@ and the kit narrows what can cross it:
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
   `ready-for-human` and left for you to merge; `sandcastle land` refuses it too. A branch that adds
   a file over 50 MB is held the same way: GitHub refuses a push with one over 100 MB, and a file
-  that size stays in the history for good.
+  that size stays in the history for good. A ticket whose work lies in a protected path therefore
+  always ends held, so `sandcastle queue --lint` and `sandcastle requeue` warn about one (its `Touches:`
+  line, or a kept branch, names the path): merge it by hand rather than queue it.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.
@@ -1276,9 +1279,26 @@ share (`wants 4 · share 2 · cap 2`).
 **Sizing the pool.** `sandcastle size` is read-only: it reads the container runtime's VM
 (`docker info`: its CPUs and memory), the host's RAM and the free disk where images and worktrees
 live, and recommends the limits above, naming the figure that set each. Sandboxes are the smaller
-of `floor((VM memory - 2 GiB) / 1.5 GiB)` and the VM's CPUs, at least 1 and at most 12; gates are
-`floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and 1.5 GiB per sandbox are assumptions, not
-measurements, and are printed with the answer. It shows the current limits beside the
+of `floor((VM memory - 2 GiB) / the sandbox's memory)` and the VM's CPUs, at least 1 and at most
+12; gates are `floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and the 6 CPUs a gate wants are
+assumptions, and are printed with the answer.
+
+The sandbox's memory is **measured** once runs have been recorded, and assumed (1.5 GiB, and the
+answer says so) until then. Every sandbox's peak memory is read from inside it, from the kernel's
+own high-water mark (cgroup v2 `memory.peak`), after each gate pass and again before it closes.
+Gates run in the agent's own sandbox, and the base and verify gates in a throwaway one, so a
+sandbox's peak covers its gates, and a heavy gate (a browser test suite, say) shows in it. The
+largest reading goes into the gate pass's line in the project's `.sandcastle/logs/timings.jsonl`
+(`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
+(`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
+a time, the run's start time, the peak and a hash of the project root: no path and no project name.
+`size` takes each project's highest peak over its last 5 measured runs, then the highest of the
+projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
+project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
+Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
+keeps the assumed one. The peak counts file cache the kernel has not yet reclaimed, so it is on the
+high side, which suits a limit. The pool's shares divide whatever limit you set; nothing about them
+changes. `size` shows the current limits beside the
 recommendation (environment, then `config.json`, then the defaults) and says when they already
 match; it changes nothing, so you copy the numbers into your [personal settings](#personal-settings)
 yourself. It also says where the runtime's own CPU and memory setting lives (OrbStack `orb config
@@ -1317,6 +1337,7 @@ is refused with a reminder to start the runtime.
 | A branch conflicts at landing | The run sends it back once, in the same run: its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued: its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |
 | `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
+| `3x over, usually 5m`, note and AGE in red | The step has run over three times its usual time. Nothing stops an agent pass that keeps producing output short of its idle timeout, so read its log (a test command that hangs and restarts burns tokens the whole while). |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
 ## 🤖 If you are an AI coding agent reading this
