@@ -10,12 +10,20 @@ INPUT=$(cat)
 CMD=$(jq -r '.tool_input.command // empty' <<<"$INPUT")
 FILE=$(jq -r '.tool_input.file_path // empty' <<<"$INPUT")
 CWD=$(jq -r '.cwd // empty' <<<"$INPUT")
-deny() { echo "BLOCKED: $1. It would damage the .git that other agents share. Continue the ticket without it; do not retry." >&2; exit 2; }
+# The match is on the command string, so a heredoc, commit message or comment body that only quotes
+# a refused command is refused too. The second sentence tells the agent how to carry such text
+# (a file), so it does not have to go against "do not retry" to find out. A refused file write has
+# no text to move, so it passes a second argument to leave the sentence out.
+deny() {
+  echo "BLOCKED: $1. It would damage the .git that other agents share. Continue the ticket without it; do not retry." >&2
+  [ -n "$2" ] || echo "If this command only quotes that text (a heredoc, a commit message, a comment body) and does not run it, write the text to a file and pass the file instead: --body-file <file>, -F <file>, git commit -F <file>." >&2
+  exit 2
+}
 
 # The shared dir of the hook's own cwd, so a package's own .git/ (node_modules) is never matched.
 COMMON=$(git -C "${CWD:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 if [ -n "$FILE" ] && [ -n "$COMMON" ]; then
-  case "$FILE" in "$COMMON"/*) deny "writing inside the shared .git";; esac
+  case "$FILE" in "$COMMON"/*) deny "writing inside the shared .git" file;; esac
 fi
 [ -z "$CMD" ] && exit 0
 
