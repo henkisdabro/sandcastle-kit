@@ -439,10 +439,10 @@ run_alive() {
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
-WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
 load_run() {
-  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
   TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
@@ -450,6 +450,8 @@ load_run() {
   # older kit's entry has no kind, and its line under "outcome".
   [ -f logs/outcomes.json ] && OUTCOMES=$(jq -r 'to_entries[] | "\(.key)|\(.value.run // "")|\(.value.kind // "")|\(.value.text // .value.outcome // "")"' logs/outcomes.json 2>/dev/null)
   [ -f "$f" ] || return 0
+  # The criterion each partly-done ticket left unmet ("id US text" lines): kept for a run that has ended too.
+  UNMETS=$(jq -r '(.tickets // {}) | to_entries[] | select(.value.unmet) | [.key, (.value.unmet | tostring | gsub("[\\n\\r]+"; " "))] | join("\u001f")' "$f" 2>/dev/null)
   RUN_STARTED=$(jq -r '.startedAt // empty' "$f" 2>/dev/null)
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && run_alive "$pid" || return 0
@@ -524,9 +526,13 @@ dur() {
 # live run holds: before landing no ticket has that merge commit, so every
 # finished branch of the run read as re-queued.
 requeued() {
-  local updated merged
-  merged=$(git log "$BASE" -1 --format=%ct --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" 2>/dev/null)
+  local updated merged landing
+  landing=$(git log "$BASE" -1 --format='%ct %s' --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
+  merged="${landing%% *}"
   [ -z "$merged" ] && return 0
+  # A partly-done landing leaves its ticket open and in the queue by design, and its own comment moves
+  # the issue after the merge: neither is a person putting it back, so it reads as partly done.
+  case "$landing" in *"(part of "*) return 1;; esac
   updated=$(printf '%s\n' "$QUEUE_UPDATED" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
   [ -n "$updated" ] && [ "$updated" -gt "$merged" ]
 }
@@ -1004,7 +1010,14 @@ render() {
       if [ -n "$landed_subj" ]; then
         state="merged"; activity_note="landed on $BASE"
         # A criterion left undone: the ticket stays open, which the row must not hide.
-        case "$landed_subj" in *"(part of "*) activity_note="partly done, ticket open";; esac
+        case "$landed_subj" in *"(part of "*)
+          activity_note="partly done, ticket open"
+          # The agent's own line, as the closing summary reads it (needsDecision in src/autonomy.ts).
+          unmet=$(printf '%s\n' "$UNMETS" | awk -F"$US" -v k="$n" '$1==k{print $2; exit}')
+          if printf '%s' "$unmet" | grep -Eiq '(^|[^[:alnum:]_])(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)([^[:alnum:]_]|$)'; then
+            activity_note="partly done - needs a person's decision"
+          fi;;
+        esac
       else
         state="no branch"
       fi

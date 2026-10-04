@@ -9,7 +9,7 @@ import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { type Gate, LANDING_GATES } from "./gates.ts";
-import type { Tracker } from "./tracker.ts";
+import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
@@ -838,8 +838,21 @@ export const HANDED_BACK = "needs a human: handed back";
 export const mergedByHand = (root: string, base: string, id: string): boolean => {
   const o = readOutcomes(root)[id];
   if (o?.kind !== "held" || o.text === HANDED_BACK) return false;
+  const git = (args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   try {
-    execFileSync("git", ["merge-base", "--is-ancestor", `refs/heads/agent/issue-${id}`, `refs/heads/${base}`], { cwd: root, stdio: "ignore" });
+    git(["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`]);
+  } catch {
+    // `sandcastle clean` deletes a branch once its patches are on the base, so a merged branch has no ref
+    // to check: the merge's subject on the base is the proof, as the status view takes it. A branch gone
+    // with no such subject was never merged by hand, and its merge command would fail.
+    try {
+      return git(["log", base, "-1", "--format=%H", "--fixed-strings", `--grep=Merge agent/issue-${id} (closes ${refOf(id)})`, `--grep=Merge agent/issue-${id} (part of ${refOf(id)})`]).trim() !== "";
+    } catch {
+      return false;
+    }
+  }
+  try {
+    git(["merge-base", "--is-ancestor", `refs/heads/agent/issue-${id}`, `refs/heads/${base}`]);
     return true;
   } catch {
     return false;
