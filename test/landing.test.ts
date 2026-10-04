@@ -13,6 +13,10 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { quietly } from "./quiet.ts";
 
+// landOne takes a sandbox slot from the machine-wide pool (src/pool.ts), whose directory pool.ts and
+// live-runs.ts derive from this at import. Under the real cache, a live run holding every slot made
+// this file wait with no bound (and show up to that run as another run asking for a share).
+process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // sandbox.ts derives USER_CONFIG from this at import: nothing here may read the user's real config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merge passes process.env through to git, so an exported identity would win over config.
