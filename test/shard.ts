@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 // one on macos-latest. Every file not listed averaged under 2.5. To refresh, run the suite with --test-concurrency=1 and a reporter
 // that sums each file's top-level test:pass and test:fail durations.
 const WEIGHTS: Record<string, number> = {
-  "test/quiet-output.test.ts": 30,
+  // 30 alone, but its eight child test runs compete with the rest of its shard for the runner's
+  // cores, and in a shard it took more than twice that.
+  "test/quiet-output.test.ts": 50,
   "test/detach.test.ts": 16,
   "test/cap-command.test.ts": 11,
   "test/doctor-prereqs.test.ts": 10,
