@@ -95,15 +95,23 @@ export const runsBareShell = (pane: string) => bareShell(foreground(pane));
  * the report, once a later restart (or the view quit) leaves the pane a bare shell. The live-runs
  * reader keeps the run's file for it, as the tab bar runs the kit only while a file is there, and a
  * kill with no restart until some ticks later would otherwise never be reported.
+ *
+ * `elsewhere`: the record names the Herdr server that holds the tab (`socket`) and this caller is
+ * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader keeps the
+ * run's file for the right server. A record without `socket`, or a caller without
+ * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
  */
-export type DeadTab = "reported" | "showing" | "left";
+export type DeadTab = "reported" | "showing" | "elsewhere" | "left";
 export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
   const file = viewRecord(root);
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
   try {
     const read = readFileSync(file, "utf8");
-    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean };
+    const view = JSON.parse(read) as { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string };
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return "left";
+    // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
+    // a bare shell of someone else's. Before any herdr call, and the record stays as it is.
+    if (view.socket && process.env.HERDR_SOCKET_PATH && view.socket !== process.env.HERDR_SOCKET_PATH) return "elsewhere";
     // After a restart Herdr may number its tabs afresh: the pane must still be in the recorded tab.
     if ((herdrJson(["pane", "get", view.status]).result.pane as { tab_id?: string }).tab_id !== view.tab) return "left";
     const processes = foreground(view.status);
@@ -369,7 +377,7 @@ export const openSandboxView = (
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
   const adopted = tab === myTab;
   const slots: Slot[] = [];
-  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+  const save = () => writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), status: statusPane, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);

@@ -285,7 +285,7 @@ type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: stri
  * Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed,
  * after `ended` has been told the root of a run whose record says so: its file is the last
  * sign of it, and the tab bar does not tick again for a run that is not registered. So `ended`
- * returning true keeps the file, for a tab still waiting to be told (`tellDeadTab`).
+ * returning true keeps the file, for a tab still waiting to be told (`tellDeadTab`), or held by another Herdr server.
  */
 export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}): Run[] => {
   const runs: Run[] = [];
@@ -323,7 +323,11 @@ export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root:
 
 // Whichever reader of the runs directory drops a dead run's file first tells the tab: the tab bar's
 // next tick would find no file. A tab whose status view still runs keeps the file until it can be told.
-export const replaceDeadTab = (root: string, kit?: string) => tellDeadTab(root, kit) === "showing";
+// A tab on another Herdr server keeps it too: that server's tab bar has yet to tell it.
+export const replaceDeadTab = (root: string, kit?: string) => {
+  const told = tellDeadTab(root, kit);
+  return told === "showing" || told === "elsewhere";
+};
 
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */
 export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void) => {
