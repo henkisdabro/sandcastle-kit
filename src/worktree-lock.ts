@@ -19,9 +19,9 @@ const git = (args: string[], cwd?: string) =>
 
 // Idempotent: the worktree hook locks each worktree the moment it exists, and
 // the pipeline locks again in case Sandcastle reused one.
-export const lockWorktree = (path: string) => {
+export const lockWorktree = (path: string, cwd?: string) => {
   try {
-    git(["worktree", "lock", "--reason", REASON, path]);
+    git(["worktree", "lock", "--reason", REASON, path], cwd);
   } catch (error) {
     if (!/already locked/.test(String((error as { stderr?: string }).stderr ?? error))) throw error;
   }
@@ -39,12 +39,12 @@ export const unlockWorktree = (path: string, cwd?: string) => {
 // A run that crashed before its `finally` leaves its branch's worktree locked,
 // and Sandcastle's create would then fail to clear it. Only this run ever
 // works on `branch`, so releasing the lock here cannot touch a live sandbox.
-export const releaseBranchWorktree = (branch: string) => {
-  for (const entry of git(["worktree", "list", "--porcelain"]).split("\n\n")) {
+export const releaseBranchWorktree = (branch: string, cwd?: string) => {
+  for (const entry of git(["worktree", "list", "--porcelain"], cwd).split("\n\n")) {
     const lines = entry.split("\n");
     const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
     if (path && lines.includes(`branch refs/heads/${branch}`) && lines.some((l) => l.startsWith("locked"))) {
-      unlockWorktree(path);
+      unlockWorktree(path, cwd);
     }
   }
 };

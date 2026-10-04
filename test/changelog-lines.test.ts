@@ -198,11 +198,6 @@ test("a ticket with an implement pass and a repair pass shows each change once",
   assert.deepEqual(lines, ["Fixed: the closing summary repeats a suggested changelog line", "Added: a note when a suggested line is dropped"]);
 });
 
-test("the pipeline counts what it dropped and records the count", () => {
-  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /changelogDropped \+= addChangelog\(changelog, text\);/);
-});
-
 test("one pass's own lines all stand, however alike their words", () => {
   const lines: string[] = [];
   const implement = "<changelog>Added: `sandcastle size --json` prints the report as JSON</changelog>\n<changelog>Added: `sandcastle status --json` prints the report as JSON</changelog>";

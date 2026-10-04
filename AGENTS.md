@@ -37,7 +37,7 @@ read a module's section there before changing it.
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
 | `src/land.ts` | Landing one branch in a sandbox: merge, regenerate generated files, gate, fast-forward the base; `sandcastle land` |
 | `src/preview.ts` | Landing preview: `git merge-tree` of each unlanded branch in the project image, nothing written to the repo |
-| `src/burndown.ts` | The orchestrator: base gates, then every attempt and landing through `createSchedule`, then verify and report; the file hold's inputs, re-runs of carried branches, timings |
+| `src/burndown.ts` | The orchestrator: base gates, then every attempt and landing through `createSchedule`, then verify and report; one ticket's pipeline (`createPipeline`, over ports a test fakes), the file hold's inputs, re-runs of carried branches, timings |
 | `src/landing.ts` | Landing one green branch (`landOne`, which returns facts and writes no verdict), the scheduler's land and host ports, and `createHostGit`, the mutex every host git write goes through |
 | `src/ledger.ts` | The ticket ledger: `describe(ending)`, pure and exhaustive - the ticket state, outcome, view word and tracker text of every ending - and the writer that records it, and each requeue, as the scheduler tells them |
 | `src/resolution.ts` | `strayChanges`: a conflict resolution checked against git's own automatic merge, so a resolution that dropped another ticket's lines is held |

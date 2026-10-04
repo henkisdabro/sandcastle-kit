@@ -1,10 +1,11 @@
 // A requeued ticket that lands on its second attempt keeps its first attempt's review commits in
-// `reviewCommits`, as `commits` keeps them in the branch total. No Docker, model or network.
+// `reviewCommits`, as `commits` keeps them in the branch total. No Docker, model or network. The land-only
+// re-run itself is driven in test/pipeline.test.ts.
 //
 //   pnpm exec tsx --test test/review-commits-requeued.test.ts
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -28,10 +29,4 @@ test("no first attempt in this run (a branch from an earlier run) counts 0", () 
   assert.equal(firstAttemptReviewCommits([done("1", 2)], "193"), 0);
   assert.equal(firstAttemptReviewCommits([{ status: "rejected", reason: new Error("x") }], "193"), 0);
   assert.equal(firstAttemptReviewCommits([], "193"), 0);
-});
-
-test("the land-only re-run starts from the first attempt's count and adds the resolution review's", () => {
-  const src = readFileSync(join(import.meta.dirname, "..", "src", "burndown.ts"), "utf8");
-  assert.match(src, /let reviewCommits = landOnly && requeued \? firstAttemptReviewCommits\(results, issue\.id\) : 0;/);
-  assert.match(src, /reviewCommits \+= resolved\.commits\.length;/);
 });

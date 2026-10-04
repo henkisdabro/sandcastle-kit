@@ -1,13 +1,13 @@
 // A green branch's conflict resolution that the kit holds (the stray-path check) still reports what
 // the branch carries: its real commit count and the gate results recorded at its green head, in the
 // outcome the run record and the per-ticket line are written from. Temp git repo; no Docker, model
-// or network.
+// or network. The pipeline's own hold is driven in test/pipeline.test.ts.
 //
 //   pnpm exec tsx --test test/held-resolution-facts.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -57,14 +57,4 @@ test("a held resolution reports the branch's real commits and its recorded gates
   const said = describe({ kind: "pipeline", outcome: held, attempts: 1 }, { base: "main", gateNames: "typecheck, test" });
   assert.deepEqual(said.record, { state: "held", note: "resolution changed a.txt" });
   assert.deepEqual(said.outcome, { kind: "held", text: "needs a human: resolution changed a.txt" });
-});
-
-test("burndown's stray hold reads the branch's commits and recorded gates, and a green end records its gates", () => {
-  const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  const hold = src.slice(src.indexOf("if (stray?.length) {"), src.indexOf("// Review passes run on the same warm sandbox"));
-  assert.match(hold, /return heldResolution\(/);
-  assert.match(hold, /ownCommits\(base, branch\)/);
-  assert.match(hold, /readHeads\(project\.root\)\[issue\.id\]\?\.gates/);
-  assert.doesNotMatch(hold, /commits: 0/);
-  assert.match(src, /noteHead\(issue\.id, branch, \{ green: head, unmet: unmetNote, gates: gated\.gates,/);
 });

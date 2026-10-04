@@ -1,11 +1,12 @@
 // The conflict resolver of a re-run (the land-only path in src/burndown.ts) is its own phase:
 // a `resolve` ticket state, a `resolve-<id>` sandbox and log, and its own timings line, so its
-// short pass neither shares the implementer's log nor pulls the typical implement time down.
+// short pass neither shares the implementer's log nor pulls the typical implement time down. The
+// pipeline running it is driven in test/pipeline.test.ts.
 //
 //   pnpm exec tsx --test test/resolve-phase.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -16,7 +17,6 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { agentLog, logOwner, typicalTimes } = await import("../src/run.ts");
 type Project = Parameters<typeof typicalTimes>[0];
 
-const KIT = join(import.meta.dirname, "..");
 const MIN = 60_000;
 
 test("resolve is a working ticket state of its own", () => {
@@ -46,12 +46,4 @@ test("a resolve step stays out of the implement median and still counts in the i
   assert.equal(times.resolve, 60);
   // Tickets 1, 2 and 3 total 10m, 11m and 1m: the resolve minutes are in ticket 2's.
   assert.equal(times.issue, 600);
-});
-
-test("the land-only resolver runs as resolve, with its own sandbox name and log", () => {
-  const src = readFileSync(join(KIT, "src/burndown.ts"), "utf8");
-  const block = src.slice(src.indexOf("if (landOnly && mergeConflicted) {"), src.indexOf("the resolver failed"));
-  assert.match(block, /timed\(issue\.id, "resolve"/);
-  assert.match(block, /name: `resolve-\$\{issue\.id\}`/);
-  assert.doesNotMatch(block, /impl-|"implement"/);
 });
