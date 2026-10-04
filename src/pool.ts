@@ -105,13 +105,25 @@ const exists = (pid: number) => {
   }
 };
 
+// What the pool asks the machine: which process a pid is, and what time it is. The kit's own
+// answers unless a test says otherwise (`inject`), so a test can drive several runs' files in one
+// process, with no child process to start or `ps` to wait for.
+let processOf: Probe = commandOf;
+let clock = () => Date.now();
+
+/** Replaces the process check and the clock the pool reads (a test's seam); with no argument, restores both. */
+export const inject = (hooks: { probe?: Probe; now?: () => number } = {}) => {
+  processOf = hooks.probe ?? commandOf;
+  clock = hooks.now ?? (() => Date.now());
+};
+
 /**
  * The lock's owner is still running: a process of the kit holds the pid. When `ps` cannot say
  * what the pid is (no `-p`, as in BusyBox, or `ps` failing) but the process exists, the lock is
  * kept: a live run misread as gone would let a second one take the same project, while a
  * recycled pid kept for want of an answer only waits for a later look.
  */
-export const holderRunning = (pid: number, probe: Probe = commandOf): boolean => {
+export const holderRunning = (pid: number, probe: Probe = (p) => processOf(p)): boolean => {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   const command = probe(pid);
   return command === undefined ? exists(pid) : isKit(command);
@@ -318,7 +330,7 @@ const writeRegistration = (j: Joined) => {
  */
 export const joinPool = (project: string, concurrency: number, demand = 0) => {
   mkdirSync(RUNS, { recursive: true });
-  joined ??= { file: join(RUNS, `${RUN_ID}.run`), registration: { pid: process.pid, run: RUN_ID, project, demand, concurrency, since: Date.now() } };
+  joined ??= { file: join(RUNS, `${RUN_ID}.run`), registration: { pid: process.pid, run: RUN_ID, project, demand, concurrency, since: clock() } };
   joined.registration = { ...joined.registration, project, concurrency, demand };
   writeRegistration(joined);
 };
@@ -419,7 +431,7 @@ export const otherRuns = (): Member[] => members().filter((m) => m.run !== RUN_I
  * are free this moment, which it can take without waiting for any run to finish a ticket.
  */
 export const splitAtStart = (demand: number, others: Member[], total = limit("sandboxes")): { share: number; free: number } => {
-  const shares = splitShares(total, [...others, { run: RUN_ID, demand, since: Date.now() }]);
+  const shares = splitShares(total, [...others, { run: RUN_ID, demand, since: clock() }]);
   return { share: shares.get(RUN_ID) ?? 0, free: Math.max(0, total - others.reduce((n, m) => n + m.held, 0)) };
 };
 
@@ -491,7 +503,7 @@ let sequence = 0;
 // Written whole, then renamed in: a reader never sees an entry half-written.
 const beginWait = (pool: PoolName, label: string): Wait => {
   mkdirSync(WAITS, { recursive: true });
-  const since = Date.now();
+  const since = clock();
   const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}.wait`);
   writeFileSync(`${file}.tmp`, `${process.pid} ${RUN_ID} ${since} ${label}\n`);
   renameSync(`${file}.tmp`, file);
