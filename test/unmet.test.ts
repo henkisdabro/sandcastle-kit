@@ -120,7 +120,7 @@ const harness = (root: string, mode: "merge" | "squash" = "merge") => {
 
 test("unmetOf reads one tag, the last of two, and one line out of many", () => {
   assert.equal(unmetOf("done.\n<unmet>skipped the export module</unmet>\n"), "skipped the export module");
-  assert.equal(unmetOf("<unmet>first</unmet> then <unmet>second</unmet>"), "second");
+  assert.equal(unmetOf("<unmet>first</unmet>\nthen\n<unmet>second</unmet>"), "second");
   assert.equal(unmetOf("<unmet>skipped\n   the export\tmodule</unmet>"), "skipped the export module");
 });
 

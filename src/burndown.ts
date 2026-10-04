@@ -181,9 +181,19 @@ export const cutAtWord = (text: string, max: number): string => {
   const space = head.lastIndexOf(" ");
   return `${(space > 0 ? head.slice(0, space) : head).trimEnd()}…`;
 };
+// The texts of every `<tag>...</tag>` an agent put on lines of its own, in order. A tag named in
+// prose - inside inline code, a fenced block or mid-sentence - is the agent explaining, not
+// reporting, and the lazy match would otherwise run from that mention to the next real closing
+// tag and record the prose between. So fenced blocks are blanked first, then the opening tag must
+// start its line and the closing tag end one (the prompts ask for "a line of its own"); the
+// content may still wrap over several lines but never holds another opening tag. A fence never closed blanks nothing: dropping a real
+// tag after a stray one costs more than reading a mention.
+const ownLineTags = (text: string, tag: string): string[] => {
+  const unfenced = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
+  return [...unfenced.matchAll(new RegExp(`^[ \\t]*<${tag}>((?:(?!<${tag}>)[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => m[1]);
+};
 const lineOf = (tag: string) => (text: string): string | undefined => {
-  const last = [...text.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))].at(-1);
-  const said = last?.[1].replace(/\s+/g, " ").trim();
+  const said = ownLineTags(text, tag).at(-1)?.replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 export const ungatedOf = lineOf("ungated");
@@ -191,12 +201,12 @@ export const ungatedOf = lineOf("ungated");
 export const unmetOf = lineOf("unmet");
 
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
-// Unlike `<ungated>` every tag counts, not the last alone: a ticket may need several lines. An
+// Unlike `<ungated>` every own-line tag counts, not the last alone: a ticket may need several lines. An
 // empty tag or the echoed placeholder "..." does not count; a line is cut at CHANGELOG_MAX.
 export const CHANGELOG_MAX = 500;
 export const changelogOf = (text: string): string[] =>
-  [...text.matchAll(/<changelog>([\s\S]*?)<\/changelog>/g)]
-    .map((m) => m[1].replace(/\s+/g, " ").trim())
+  ownLineTags(text, "changelog")
+    .map((said) => said.replace(/\s+/g, " ").trim())
     .filter((said) => said && said !== "...")
     .map((said) => cutAtWord(said, CHANGELOG_MAX));
 
