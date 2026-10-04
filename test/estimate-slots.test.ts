@@ -21,11 +21,11 @@ const OPUS = "claude-opus-fixture";
 const tokens = { input: 0, cacheWrite: 0, cacheRead: 1_000_000, output: 10_000 };
 const line = (issue: string, ms: number, model: string) => JSON.stringify({ project: "fixture", run: "r1", issue, phase: "implement", ms, model, tokens });
 
-/** Four 10m tickets on the default model and one 27m Opus ticket. */
+/** Five 10m tickets on the default model and five 27m Opus tickets: each model's own history is solid. */
 const project = () => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-estimate-slots-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  const lines = ["1", "2", "3", "4"].map((i) => line(i, 10 * MIN, IMPL_MODEL)).concat(line("5", 27 * MIN, OPUS));
+  const lines = ["1", "2", "3", "4", "5"].map((i) => line(i, 10 * MIN, IMPL_MODEL)).concat(["6", "7", "8", "9", "10"].map((i) => line(i, 27 * MIN, OPUS)));
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), lines.join("\n") + "\n");
   return { root, name: "fixture" } as Project;
 };

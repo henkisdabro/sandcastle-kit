@@ -37,27 +37,34 @@ const history = [
   line({ issue: "3", phase: "implement", ms: 600_000, tokens: tok(1_000_000, 10_000) }),
 ];
 
+// The same, with more tickets of the same figures until each model has five (SOLID_HISTORY in src/run.ts):
+// three more on the default model, four more on Opus.
+const more = (issues: string[], model: string, ms: number, cacheRead: number) =>
+  issues.map((issue) => line({ issue, phase: "implement", ms, model, tokens: tok(cacheRead, cacheRead / 100) }));
+const solid = [...history, ...more(["4", "5", "6"], IMPL_MODEL, 600_000, 1_000_000), ...more(["7", "8", "9", "10"], OPUS, 2_000_000, 8_000_000)];
+
 test("each ticket is estimated from the history of its own implement model", () => {
-  const p = project(history);
-  // The summed 50m over 2 slots is 25m, but the Opus ticket alone takes 40m: no run is shorter than its slowest ticket.
+  const p = project(solid);
+  // The summed 43m over 2 slots is 22m, but the Opus tickets' median is 33m (the 40m one carries a review line):
+  // no run is shorter than its slowest ticket.
   assert.equal(
     estimate(p, 2, 2, 0, [IMPL_MODEL, OPUS]),
-    "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 40m for 2 ticket(s), 2 at a time.",
+    "Estimate (rough, from 10 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 33m for 2 ticket(s), 2 at a time.",
   );
-  // Without models the one median applies to both: the Opus ticket is missed at the median, and only the high end shows it.
-  assert.match(estimate(p, 2, 2)!, /about 2\.0M to 16\.0M tokens in \/ 20k to 160k out and 10m to 40m for 2 ticket\(s\)/);
+  // Without models the one median of all ten applies to both: the Opus tickets' figures, priced for the default-model ticket too.
+  assert.match(estimate(p, 2, 2)!, /about 16\.0M tokens in \/ 160k out and 33m for 2 ticket\(s\)/);
 });
 
 test("a model with no history is estimated from all tickets, and the line says it is low", () => {
-  const p = project(history);
+  const p = project(solid);
   const line = estimate(p, 3, 3, 0, [IMPL_MODEL, "claude-unseen", "claude-unseen"])!;
-  assert.match(line, /about 3\.0M to 17\.0M tokens in/);
+  assert.match(line, /about 17\.0M tokens in/);
   assert.match(line, /2 ticket\(s\) use a model with no history here; the estimate is low\.$/);
   assert.ok(!/no history/.test(estimate(p, 2, 2, 0, [IMPL_MODEL, OPUS])!));
 });
 
 test("a chain reads as tickets in sequence", () => {
-  const p = project(history);
+  const p = project(solid);
   const text = estimate(p, 4, 4, 3, [IMPL_MODEL, IMPL_MODEL, IMPL_MODEL, IMPL_MODEL])!;
   assert.match(text, /4 at a time \(3 tickets in sequence\)\.$/);
   assert.ok(!/runs in order/.test(text));
