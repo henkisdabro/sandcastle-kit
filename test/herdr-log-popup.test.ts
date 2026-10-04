@@ -14,6 +14,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ENTRY = join(fileURLToPath(new URL("..", import.meta.url)), "herdr/entry.sh");
+const PAGED = "-Psq closes this popup - F follows new lines (Ctrl-C then closes it)";
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-log-popup-"));
 const fake = `#!/bin/sh\n{ printf '%s\\n' "$@"; printf 'LESSSECURE=%s\\n' "$LESSSECURE"; printf 'so=%s\\n' "\${LESS_TERMCAP_so-unset}"; } > "$FAKE_LESS_OUT"\n`;
 // A bin dir of its own keeps the fake out of every other test's PATH.
@@ -40,12 +41,12 @@ const openLog = (lines: number) => {
 
 test("a log longer than the popup follows live, with Ctrl-C closing it", () => {
   const { args, log } = openLog(100);
-  assert.deepEqual(args, ["-R", "-X", "-K", "+F", log, "LESSSECURE=1", "so=unset"]);
+  assert.deepEqual(args, ["-R", "-X", "-K", PAGED, "+F", log, "LESSSECURE=1", "so=unset"]);
 });
 
 test("a log shorter than the popup opens from its top line, not followed", () => {
   const { args, log } = openLog(5);
-  assert.deepEqual(args, ["-R", "-X", log, "LESSSECURE=1", "so=unset"]);
+  assert.deepEqual(args, ["-R", "-X", PAGED, log, "LESSSECURE=1", "so=unset"]);
 });
 
 test("a log exactly as long as the popup is still the short route", () => {

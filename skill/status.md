@@ -42,3 +42,5 @@ result - is the `.jsonl` beside its `.log`: read that to check a reviewer's clai
 marks a failed tool result as `! error: ...` or `! exit N: ...`, and the last lines of a failed
 run's log hold the real cause (a usage limit usually reads as a "trust dialog" error). How long
 each step took, and each agent pass's tokens, is in `.sandcastle/logs/timings.jsonl`.
+
+In Herdr, Ctrl-clicking a ticket in the status view opens its log in a popup: while the popup follows a live log, `Ctrl-C` closes it (less takes no other key then); on a finished or short log, `q` closes it and the bottom line says so.
