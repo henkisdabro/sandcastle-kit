@@ -615,32 +615,58 @@ export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.
 const k = (n: number) => (n < 1000 ? String(n) : n < 1_000_000 ? `${Math.round(n / 1000)}k` : `${(n / 1_000_000).toFixed(1)}M`);
 
 /**
- * A rough estimate for a run about to start: the median tokens and time of
- * this project's tickets in its last three runs (from timings.jsonl, see
- * `recentWindow`) times `tickets`, with
- * the time divided across `slots`, or one ticket's time per ticket
- * of the longest in-run `Blocked by` chain (`chain`) when that is longer. Undefined until an earlier ticket has
+ * Whether ticket `id` is carried work: its branch `agent/issue-<id>` exists and is ahead of the base
+ * (the branch a `heads.json` entry names, or one an earlier run left). A carried branch gets a base
+ * merge, often a conflict to resolve, and a review of work it already has, so it costs more than a
+ * fresh ticket; the estimate prices the two apart, and the timings lines of a carried ticket say so.
+ */
+export const isCarried = (root: string, base: string, id: string): boolean => {
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`], root);
+    return Number(sh("git", ["rev-list", "--count", `refs/heads/${base}..refs/heads/agent/issue-${id}`], root)) > 0;
+  } catch {
+    return false; // no such branch, or git failed
+  }
+};
+
+/** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
+const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
+const HIGH = 0.8;
+
+/**
+ * A rough estimate for a run about to start, as a range: the median to the 80th percentile of the
+ * tokens and time of this project's tickets in its last three runs (from timings.jsonl, see
+ * `recentWindow`), summed over `tickets`, with
+ * the time divided across `slots`, or the chain's own tickets' times one after another when that is
+ * longer (`chain` is the longest in-run `Blocked by` chain's length; `detail.chainAt` says which
+ * tickets, by their place in `models`, and without it each takes the average). Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
  * covers the tickets' own pipelines only - not the image check, preflight,
  * base gates, landing or verify. A line that does not parse is skipped.
  *
- * `models` is the implement model of each ticket in the run (its `model:`
- * label, else the default): each is estimated from the history of tickets
- * that model implemented, as an Opus ticket takes several times a Sonnet one.
- * A history ticket's model is the one on its implement or repair lines; lines
- * with none (older ones) count as the default model. A model with no history
- * falls back to the median of all of them, and the line says it is low.
- * Without `models` every ticket is estimated from the one median.
+ * `models` is the implement model of each ticket in the run (its `model:` label, else the default):
+ * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
+ * several times a Sonnet one. A history ticket's model is the one on its implement or repair
+ * lines; lines with none (older ones) count as the default model. A model with no history falls
+ * back to all of them, and the line says it is low. Without `models` every ticket is estimated
+ * from all of them.
+ *
+ * `detail.carried` says which tickets of the run are carried branches (`isCarried`). A carried
+ * ticket is estimated from the history tickets that were carried (a `resolve` pass, or a `carried`
+ * field on their lines), a fresh one from the rest, each falling back to the other when it has no
+ * history of its own; a carried ticket with none says the estimate is low.
  */
-export const estimate = (project: Project, tickets: number, slots: number, chain = 0, models?: string[]): string | undefined => {
+export const estimate = (
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; chainAt?: number[] } = {},
+): string | undefined => {
   let text: string;
   try {
     text = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8");
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  type Group = { ms: number; tokened: boolean; inTokens: number; out: number; model?: string };
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Group = { ms: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
   const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
@@ -656,8 +682,9 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
   }
   for (const l of recentWindow(ticketLines)) {
     const key = `${l.run}|${l.issue}`;
-    const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0 };
+    const g = groups.get(key) ?? { ms: 0, tokened: false, inTokens: 0, out: 0, carried: false };
     g.ms += l.ms as number;
+    if (l.phase === "resolve" || l.carried === true) g.carried = true;
     // The review lines name the reviewer's model: only the steps the implementer ran say who implemented.
     if ((l.phase === "implement" || l.phase === "repair") && typeof l.model === "string" && l.model) g.model ??= l.model;
     if (l.tokens && typeof l.tokens === "object") {
@@ -669,29 +696,49 @@ export const estimate = (project: Project, tickets: number, slots: number, chain
   }
   const counted = [...groups.values()].filter((g) => g.tokened);
   if (!counted.length) return undefined;
-  const medians = (gs: Group[]) => ({ inTokens: median(gs.map((g) => g.inTokens))!, out: median(gs.map((g) => g.out))!, ms: median(gs.map((g) => g.ms))! });
-  const overall = medians(counted);
-  let inAll = overall.inTokens * tickets;
-  let outAll = overall.out * tickets;
-  let msAll = overall.ms * tickets;
+  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)) });
+  // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
-  if (models) {
-    inAll = outAll = msAll = 0;
-    for (const model of models) {
-      const same = counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
-      if (!same.length) unknown++;
-      const m = same.length ? medians(same) : overall;
-      inAll += m.inTokens;
-      outAll += m.out;
-      msAll += m.ms;
-    }
-  }
-  // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots.
-  const rounds = Math.max(chain, Math.ceil(tickets / slots));
-  const m = Math.round(((msAll / Math.max(tickets, 1)) * rounds) / 60_000);
-  const time = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  const low = unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "";
-  return `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): about ${k(inAll)} tokens in / ${k(outAll)} out and ${time} for ${tickets} ticket(s), ${slots} at a time${chain > Math.ceil(tickets / slots) ? ` (${chain} tickets in sequence)` : ""}.${low}`;
+  let lowCarried = 0;
+  const per = Array.from({ length: tickets }, (_, at) => {
+    const carried = detail.carried?.[at] ?? false;
+    const model = models?.[at];
+    const ofModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
+    if (!ofModel.length) unknown++;
+    const pool = ofModel.length ? ofModel : counted;
+    const same = pool.filter((g) => g.carried === carried);
+    if (carried && !same.length) lowCarried++;
+    const use = same.length ? same : pool;
+    return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
+  });
+  const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
+  // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
+  const minutes = (pick: (p: (typeof per)[number]) => number) => {
+    const rounds = Math.ceil(tickets / slots);
+    const serial = rounds * (sum(pick) / Math.max(tickets, 1));
+    const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? pick(per[at]) : 0), 0) : chain * (sum(pick) / Math.max(tickets, 1));
+    return { serial, chained };
+  };
+  const midMs = minutes((p) => p.mid.ms);
+  const highMs = minutes((p) => p.high.ms);
+  const clock = (ms: number) => {
+    const m = Math.round(ms / 60_000);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  };
+  const span = (lo: number, hi: number, show: (n: number) => string) => (show(lo) === show(hi) ? show(lo) : `${show(lo)} to ${show(hi)}`);
+  const total = (t: { serial: number; chained: number }) => Math.max(t.serial, t.chained);
+  const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
+  const split = carriedCount ? ` (${carriedCount} carried, ${tickets - carriedCount} fresh)` : "";
+  const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
+  const low = [
+    unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
+    lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
+  ].join("");
+  return (
+    `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): ` +
+    `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
+    `and ${span(total(midMs), total(highMs), clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}.${low}`
+  );
 };
 
 // ---------------------------------------------------------------------------
