@@ -43,14 +43,14 @@ test("each ticket is estimated from the history of its own implement model", () 
     estimate(p, 2, 2, 0, [IMPL_MODEL, OPUS]),
     "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 25m for 2 ticket(s), 2 at a time.",
   );
-  // Without models the one median applies to both: the Opus ticket is missed.
-  assert.match(estimate(p, 2, 2)!, /about 2\.0M tokens in \/ 20k out and 10m for 2 ticket\(s\)/);
+  // Without models the one median applies to both: the Opus ticket is missed at the median, and only the high end shows it.
+  assert.match(estimate(p, 2, 2)!, /about 2\.0M to 16\.0M tokens in \/ 20k to 160k out and 10m to 40m for 2 ticket\(s\)/);
 });
 
 test("a model with no history is estimated from all tickets, and the line says it is low", () => {
   const p = project(history);
   const line = estimate(p, 3, 3, 0, [IMPL_MODEL, "claude-unseen", "claude-unseen"])!;
-  assert.match(line, /about 3\.0M tokens in/);
+  assert.match(line, /about 3\.0M to 17\.0M tokens in/);
   assert.match(line, /2 ticket\(s\) use a model with no history here; the estimate is low\.$/);
   assert.ok(!/no history/.test(estimate(p, 2, 2, 0, [IMPL_MODEL, OPUS])!));
 });
