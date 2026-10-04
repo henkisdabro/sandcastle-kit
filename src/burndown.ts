@@ -54,7 +54,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type LandContext, landingWork, pipelineWorkers, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -101,7 +101,7 @@ type Outcome = {
  * so it reports what it carries - its commits and the gates it passed at its green head - not the
  * nothing of a ticket that did no work.
  */
-export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates">): Outcome => ({
+export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates"> & Partial<Pick<Outcome, "repairs">>): Outcome => ({
   issue,
   branch,
   status: "held",
@@ -832,6 +832,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       const carried = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`])) > 0;
       // The requeue-once state holds the first attempt's line only on a second attempt in this run.
       const requeued = requeuedAs.has(issue.id);
+      // The repair passes of the first attempt, so the outcome line counts the ticket's whole run: `repairs` below bounds one attempt's loop only.
+      const earlierRepairs = requeued ? firstAttemptRepairs(results, issue.id) : 0;
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`]));
       // Read before the base merge, which moves the tip. A branch at the head it
       // was reviewed and gated green on, or past it by merge commits only, needs no
@@ -951,6 +953,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           return heldResolution(issue.id, branch, why, {
             commits: ownCommits(base, branch),
             reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
+            repairs: earlierRepairs,
             gates: readHeads(project.root)[issue.id]?.gates ?? [],
           });
         }
@@ -1037,7 +1040,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           const { blocked, report } = tags(impl.stdout);
           if (blocked) {
             notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
-            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
@@ -1054,7 +1057,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`]));
         if (impl.commits.length === 0 && branchCommits === 0) {
           // Nothing lands for a nochange, so nothing else would carry the report.
-          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: 0, gates: [] };
+          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
         }
 
         // Only a base merge since the last completed review: review the merge, not the branch.
@@ -1255,7 +1258,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // report 0 commits while shipping its work. Without the kit's base merge-ins.
         commits: ownCommits(base, branch),
         reviewCommits,
-        repairs,
+        repairs: earlierRepairs + repairs,
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         head,
