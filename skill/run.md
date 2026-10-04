@@ -37,10 +37,10 @@ This continues SKILL.md: run its "Before every action" first.
      blocker lands and closes. With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
-     before left conflicted or released; a red ticket is not run again, and a ticket queued after
+     before left conflicted, released or partly done (still queued); a red ticket is not run again, and a ticket queued after
      the run started waits for the next `sandcastle run`. A drain stops when no ticket is left to
-     run again or a stop holds: no progress, the same ticket conflicting in two turns running, a
-     red merged base, a usage limit or a stopped run, 20 turns at most.
+     run again or a stop holds: no progress, the same ticket conflicting or left partly done in two
+     turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
      (detached: in `.sandcastle/logs/run-output.log`); quote that once it is going, as the only
      estimate you give.

@@ -112,8 +112,8 @@ export type DrainTurn = {
 
 /**
  * The cause to stop `drain` on after a turn, or undefined to go on: the same ticket conflicting
- * in two turns running (a third try would conflict the same way), or a turn that landed and
- * released nothing (the next would start from the same queue).
+ * in two turns running (a third try would conflict the same way), the same ticket left partly done
+ * in two turns running, or a turn that landed and released nothing (the next would start from the same queue).
  */
 export const drainStop = (turn: DrainTurn, earlier: DrainTurn | undefined, ref: (id: string) => string = (id) => id): string | undefined => {
   const again = earlier ? turn.conflicted.filter((id) => earlier.conflicted.includes(id)) : [];

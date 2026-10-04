@@ -676,16 +676,17 @@ are now. Then:
 - **Leftovers:** `sandcastle clean` removes leftover worktrees, finished branches, exited sandbox containers and the kit's dangling images. Docker's build cache is not the kit's to prune: `sandcastle doctor` shows its size, and `docker builder prune` frees it.
 
 `autonomy` (or `AUTONOMY_LEVEL` for one run) lets one `sandcastle run` take further turns by itself:
-after a turn it re-runs only the tickets that ended in a merge conflict or whose blockers have now
-landed - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
+after a turn it re-runs only the tickets that ended in a merge conflict, whose blockers have now
+landed, or that merged partly done and are still queued - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
 A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
 
 `autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until no ticket is left to run
 again, for a queue that needs more turns than `3` gives - a ticket that conflicts across turns, and
 the tickets waiting on it. A `Blocked by` chain whose links are all queued needs no extra turn: each
-ticket starts in the same run once its last blocker lands. A red ticket is not run again. After every turn it checks four stops and prints the one that holds as a line
+ticket starts in the same run once its last blocker lands. A red ticket is not run again. After every turn it checks five stops and prints the one that holds as a line
 naming the cause: **no progress** (the turn landed nothing and released nothing), **the same ticket
-conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.json`), **a red
+conflicting in two turns running** (named, read from `.sandcastle/logs/outcomes.json`), **the same
+ticket left partly done in two turns running** (named), **a red
 merged base**, and **a usage limit or a stopped run**. A hard cap of 20 turns is the backstop. After
 the last turn it prints `Drain: <N> turns, <landed> landed, stopped because <cause>`.
 
@@ -1036,7 +1037,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
-| `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
+| `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }` |
