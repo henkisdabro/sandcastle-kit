@@ -123,7 +123,13 @@ export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean;
 // even when the run is killed. A closed laptop lid still sleeps.
 // ---------------------------------------------------------------------------
 
-export const keepAwake = (): string => {
+// How long the inhibitor must survive to count as on. `-h` alone passes where the real call fails
+// at once (systemd with no system bus, as in WSL without systemd or a container; BusyBox's tail
+// with no --pid), so the start line said on for an inhibitor already gone. Short, as it holds up
+// the run's start.
+const KEEP_AWAKE_SETTLE_MS = 250;
+
+export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
     return "off - the machine's energy settings apply";
   }
@@ -133,8 +139,17 @@ export const keepAwake = (): string => {
       ? ["caffeinate", ["-i", "-w", pid]]
       : ["systemd-inhibit", ["--what=idle:sleep", "--who=sandcastle", "--why=sandcastle run", "tail", `--pid=${pid}`, "-f", "/dev/null"]];
   if (spawnSync(cmd, ["-h"], { stdio: "ignore" }).error) return `off - ${cmd} not found`;
-  spawn(cmd, args, { stdio: "ignore" }).on("error", () => {}).unref();
-  return `on (${cmd})`;
+  const child = spawn(cmd, args, { stdio: "ignore" });
+  const ended = new Promise<boolean>((resolve) => {
+    child.on("error", () => resolve(true));
+    child.on("exit", () => resolve(true));
+  });
+  child.unref();
+  let timer: NodeJS.Timeout | undefined;
+  const settled = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), KEEP_AWAKE_SETTLE_MS); });
+  const failed = await Promise.race([ended, settled]);
+  clearTimeout(timer);
+  return failed ? `off - ${cmd} failed` : `on (${cmd})`;
 };
 
 // Porcelain lines (`XY path`) of everything staged, unstaged or untracked. Not sh(): its trim
