@@ -16,7 +16,7 @@
 # workarounds there. Switching to `-slim` to save space breaks projects' gates.
 FROM node:24-trixie
 
-RUN apt-get update && apt-get install -y git curl jq less \
+RUN apt-get update && apt-get install -y git curl jq less tini \
   && rm -rf /var/lib/apt/lists/*
 
 # `sandcastle preview` needs git 2.47 (`git merge-tree --write-tree`). Fail the
@@ -70,8 +70,15 @@ ENV COREPACK_HOME=/home/agent/.cache/node/corepack
 
 WORKDIR /home/agent
 # Sandcastle bind-mounts the worktree at /home/agent/workspace and works there.
-# sleep as PID 1 has no SIGTERM handler, so every `docker stop` of a sandbox waited out Docker's 10 s
+# tini as PID 1: when an exec'd shell exits, its children are reparented to PID 1, and `sleep` never
+# reaps them, so a killed process stays a zombie that `kill -0` still finds - a test that checks a
+# process is gone behaves differently in the sandbox than on a Mac. Sandcastle's `docker run` has no
+# `--init`, so the image carries its own. The split form keeps the library's command-less run at
+# `tini -- sleep infinity` and gives a hand-run `docker run -it <image> bash` a shell under tini. A
+# project layer that sets its own ENTRYPOINT loses tini.
+# The sleep has no SIGTERM handler, so every `docker stop` of a sandbox waited out Docker's 10 s
 # before its SIGKILL, inside a slot or on the landing worker. Nothing in the container keeps state of its
 # own (the work is in the bind-mounted worktree), so the kill comes first.
 STOPSIGNAL SIGKILL
-ENTRYPOINT ["sleep", "infinity"]
+ENTRYPOINT ["tini", "--"]
+CMD ["sleep", "infinity"]
