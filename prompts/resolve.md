@@ -23,18 +23,24 @@ their records mid-run. If git ever tells you this worktree is not a git reposito
 - **Change nothing beyond resolving the merge.** No refactor, no new behaviour, nothing the ticket
   did not already do.
 - **Make every change inside the merge commit and commit nothing else.** Resolve the files, run the
-  gates, `git add` the files, then `git commit --no-edit`.
+  typecheck gate and the tests that cover them (see "Gates"), `git add` the files, then
+  `git commit --no-edit`.
 - Never delete, skip or weaken a test, an assertion or a guard to get green.
 
 {{KIT_PROJECT_RULES}}
 
 # Gates
 
-Run all of these in the repo root and make them pass - the orchestrator re-runs them after you exit:
+These are the project's gates. The orchestrator gates the merge commit after you exit, all of them,
+the full suite included, so do not run the full suite yourself:
 
 ```
 {{KIT_GATES}}
 ```
+
+Run only the typecheck gate (the gate above that type-checks or builds, if there is one) and the test
+files that cover the conflicted files, and make them pass. A conflict in a README or another document
+that no test file covers needs the typecheck gate alone.
 
 Run each gate in the foreground with the tool's longest timeout (`timeout: 600000` in Claude Code,
 whose 2-minute default moves a longer suite to the background) and its output in a file outside the
@@ -43,7 +49,7 @@ to time it.
 
 # Finishing
 
-If the merge is resolved, the gates pass and the merge is committed, output
+If the merge is resolved, the typecheck gate and the covering tests pass and the merge is committed, output
 `<promise>COMPLETE</promise>`.
 
 If it cannot be resolved without changing what the ticket does, leave the merge in progress (do not

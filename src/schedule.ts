@@ -534,12 +534,17 @@ export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kin
  * not come. A cycle (A waits on B's fix while B waits on A's) is refused at `fixing`, so no two
  * tickets wait on each other. A waiter holds its sandbox slot, and the landing it waits for may need
  * one: while `starved` says a landing waits for a slot, every waiter stops waiting (asked every
- * `pause` ms), so the two never wait on each other. In memory, one per run.
+ * `pause` ms), so the two never wait on each other. A ticket whose landing put a commit on the base
+ * (`landedAt`, read as it ends) has it remembered, and `fixing` hands it on: a ticket whose branch
+ * holds that commit already got the fix when it started, so a merge brings it nothing. In memory, one
+ * per run.
  */
-export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
+export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?: (id: string) => string | undefined) => {
   const claims = new Map<string, string>();
   // A ticket that ended: whether it landed.
   const ended = new Map<string, boolean>();
+  // The commit that put a landed ticket on the base, where the landing record has one.
+  const commits = new Map<string, string>();
   // The keys a ticket sent back at landing had claimed: its second attempt is often land-only and
   // repairs nothing, so without these its fix would land unclaimed and a later red repairs again.
   const sentBack = new Map<string, Set<string>>();
@@ -557,12 +562,14 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
     claim,
     /**
      * The other ticket repairing `key`, when `id` may wait for it: `landed` when its fix is on the base
-     * already, so `id` merges the base without waiting (its gate may have finished just after that landing).
+     * already, so `id` merges the base without waiting (its gate may have finished just after that landing),
+     * and `commit` is the one that put it there, when the landing record had it: a branch that holds it
+     * was cut after the fix, and its red is its own.
      */
-    fixing(key: string, id: string): { by: string; landed: boolean } | undefined {
+    fixing(key: string, id: string): { by: string; landed: boolean; commit?: string } | undefined {
       const by = claims.get(key);
       if (by === undefined || by === id) return undefined;
-      if (ended.has(by)) return ended.get(by) ? { by, landed: true } : undefined;
+      if (ended.has(by)) return ended.get(by) ? { by, landed: true, commit: commits.get(by) } : undefined;
       for (let at = waitingOn.get(by); at !== undefined; at = waitingOn.get(at)) if (at === id) return undefined;
       return { by, landed: false };
     },
@@ -602,6 +609,8 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
       } else if (change.kind === "ended") {
         const landed = change.ending.kind === "landing" && onBase(change.ending.landed);
         ended.set(change.id, landed);
+        const commit = landed ? landedAt?.(change.id) : undefined;
+        if (commit) commits.set(change.id, commit);
         if (landed) for (const key of sentBack.get(change.id) ?? []) claim(key, change.id);
         sentBack.delete(change.id);
         release(change.id, landed);

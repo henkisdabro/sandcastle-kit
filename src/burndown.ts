@@ -40,7 +40,7 @@ import { isTicketState, type RunRecord, type TicketRecord, type TicketState } fr
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -356,6 +356,62 @@ export const fileFollowUps = async (
   return out;
 };
 
+/**
+ * What the pipelines' `<followup>` lines go into, and the run record behind it. Each line is written to
+ * the record as its pass ends, as an unfiled entry (no `id`): a run that stops before its end (a crash,
+ * a safety stop) never reaches the filing after the landings, and its lines were then in memory only -
+ * not in the closing summary, and unknown to the next run. A title is listed once, and not at all when
+ * an earlier turn of the run filed it (`seen`).
+ *
+ * `file` files the entries still unfiled (`fileFollowUps`) and writes what each became to the record, and
+ * returns those it settled now: calling it again files nothing twice, and a title whose filing failed is
+ * not tried again by it. `unsafe` is the reason when writing to the tracker is not safe - the shared
+ * `.git` changed - and then nothing is written: each stays in the record as failed with that reason, which
+ * the summary lists under Needs you as one to file by hand. A dry run writes nothing either way, so
+ * `unsafe` changes nothing for it.
+ */
+export type FollowUpBook = {
+  push(f: FollowUp): void;
+  file(unsafe?: string): Promise<FiledFollowUp[]>;
+};
+export const createFollowUpBook = (
+  run: { update(fields: { followUps: FiledFollowUp[] }): void },
+  o: { tracker: Pick<Tracker, "create" | "ref">; dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string> },
+): FollowUpBook => {
+  const seen = o.seen ?? new Set<string>();
+  const heard: FollowUp[] = [];
+  // By title, in the order the lines arrived: what the run record's `followUps` holds.
+  const listed = new Map<string, FiledFollowUp>();
+  const keep = () => run.update({ followUps: [...listed.values()] });
+  return {
+    push(f) {
+      const key = titleKey(f.title);
+      if (seen.has(key)) return;
+      heard.push(f);
+      if (listed.has(key)) return;
+      listed.set(key, { title: f.title, from: f.from, phase: f.phase });
+      keep();
+    },
+    async file(unsafe) {
+      const unfiled = heard.filter((f) => {
+        const at = listed.get(titleKey(f.title));
+        return at && !at.id && !at.failed;
+      });
+      const refuse = unsafe !== undefined && !o.dryRun;
+      const settled = await fileFollowUps(o.tracker, unfiled, {
+        dryRun: o.dryRun,
+        // Not the tracker's own refusal, but recorded as one: it is the same entry, and the same line to file by hand.
+        write: refuse ? async () => { throw new Error(unsafe); } : o.write,
+        seen,
+      });
+      if (!settled.length) return [];
+      for (const s of settled) listed.set(titleKey(s.title), s);
+      keep();
+      return [...new Set(settled.map((s) => titleKey(s.title)))].map((key) => listed.get(key)!);
+    },
+  };
+};
+
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
   list.split(",").map((n) => {
@@ -534,8 +590,8 @@ export type PipelineContext = {
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
   reports: Map<string, string>;
   notes: Note[];
-  /** The `<followup>` lines of every agent pass, filed once the run has landed (`fileFollowUps`). A pipeline given none keeps none. */
-  followUps?: FollowUp[];
+  /** Where the `<followup>` lines of every agent pass go as the pass ends: the run's book (`createFollowUpBook`), which records and later files them. A pipeline given none keeps none. */
+  followUps?: { push(f: FollowUp): unknown };
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -636,8 +692,9 @@ export const createPipeline = (ctx: PipelineContext) => {
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
     const implModel = own.model ?? IMPL_MODEL;
-    // `IMPL_UNMET` is empty here: only a full review is shown the implementer's line (see `implUnmetView`).
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", ...tracker.promptArgs(issue.id) };
+    // `IMPL_UNMET` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's unmet
+    // line and changelog lines (see `implUnmetView`, `implChangelogView`).
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_CHANGELOG: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
@@ -955,7 +1012,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             () => {
               return reviewWithFallback(ref(issue.id), (agent, model) => {
                 reviewModel = model;
-                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) })(agent);
+                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
               });
             },
             undefined,
@@ -966,7 +1023,7 @@ export const createPipeline = (ctx: PipelineContext) => {
                 issue.id,
                 "cross-review",
                 () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) }));
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) }));
                 },
                 undefined,
                 () => CROSS_REVIEW_MODEL,
@@ -1059,7 +1116,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
-        const fixing = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        const asked = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        // A fix whose landing this branch already holds (it started after) is no news: merging the moved base
+        // would gate the same failure again, one gate run for nothing. The red is this ticket's own. A landing
+        // with no commit on record, or one git cannot place, is not known to be in the branch: it merges as before.
+        const fixing = asked?.landed && asked.commit && isAncestor(project.root, asked.commit, branch) ? undefined : asked;
         if (fixing) {
           const fixer = fixing.by;
           waitedFor.add(key);
@@ -1610,13 +1671,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string) => {
+  // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId);
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
       gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
       log: gatesLog(project, id),
-    });
+    }, priority);
   };
 
   const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
@@ -1657,8 +1719,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const reports = new Map<string, string>();
   // The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment.
   const notes: Note[] = [];
-  // Out-of-scope problems the agents named in `<followup>` lines, filed after the notes below.
-  const followUps: FollowUp[] = [];
+  // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
+  // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
+  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
@@ -1680,7 +1743,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
     gate: (box, id) =>
-      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate")),
+      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
     landed: new Map(),
     slotWanted,
     reds,
@@ -1725,7 +1788,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
   // A landing left waiting for a sandbox slot may be waiting for the very slots the waiters hold (the run's
   // share shrank, a cap): they stop waiting and repair, so no wait outlasts the landing it waits for.
-  const fixes = createFixBoard(() => slotWanted.n > 0);
+  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit);
   const pipeline = createPipeline({
     project,
     tracker,
@@ -1864,11 +1927,32 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   };
 
+  // Files the follow-ups still unfiled and says what each became. Where the shared .git changed, `unsafe` says
+  // why nothing is written to the tracker (a ticket file is a commit on that base): they stay in the record to file by hand.
+  const fileTheFollowUps = async (unsafe?: string) => {
+    for (const f of await followUps.file(unsafe)) {
+      console.log(
+        f.id
+          ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
+          : f.failed
+            ? `${ref(f.from)}: could not file a follow-up (${f.failed}): ${f.title}`
+            : `[dry run] would file for triage, from ${ref(f.from)}: ${f.title}`,
+      );
+    }
+  };
+
   // The run stops: the summary still prints, headed by why - a stack trace was all a
-  // stopped run left, and its report then said "Run finished".
-  const stopLanding = async (error: unknown): Promise<never> => {
+  // stopped run left, and its report then said "Run finished". The agents' follow-ups are filed first, or
+  // (`safety`: the shared .git changed) left in the record to file by hand, so the summary lists them either way.
+  const stopLanding = async (error: unknown, safety: boolean): Promise<never> => {
     const why = String((error as Error).message ?? error);
     run.update({ stopped: why });
+    try {
+      await fileTheFollowUps(safety ? "the shared .git changed, so nothing more was written to the tracker" : undefined);
+    } catch (e) {
+      // Whatever went wrong here must not replace the reason the run stopped.
+      console.log(`Could not file the agents' follow-ups: ${errorLine(e)}`);
+    }
     console.log(`\n${await closingReport(project)}\n`);
     throw error;
   };
@@ -1877,7 +1961,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
-      return stopLanding(error);
+      // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
+      // would have named is lost with its rejection, and the writer's check refuses such a write by itself.
+      return stopLanding(error, host.failed !== undefined);
     });
   clearInterval(heartbeat);
   // The cause the closing summary names: the most severe, a `.git` change before a limit.
@@ -1890,7 +1976,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   ledger.close(endings, stopLine);
   // A safety stop (a `.git` change, after a pipeline or under the landing worker, or a refused
   // write) landed nothing more: the run stops, headed by the most severe of them.
-  if (stop.landsNothing && headline) await stopLanding(stopError(headline));
+  if (stop.landsNothing && headline) await stopLanding(stopError(headline), true);
 
   // What landing decided, for the closing notification and the verify, from the ledger's entries.
   const { merged, regenerated, notLanded, needsHuman, withdrawn } = accountLanding(ledger.entries.values());
@@ -1911,19 +1997,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   }
   // Through the same writer, after the run's own tickets: a ticket file is a commit on the base branch.
-  const filedFollowUps = await fileFollowUps(tracker, followUps, { dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
-  for (const f of filedFollowUps) {
-    console.log(
-      f.id
-        ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
-        : f.failed
-          ? `${ref(f.from)}: could not file a follow-up (${f.failed}): ${f.title}`
-          : `[dry run] would file for triage, from ${ref(f.from)}: ${f.title}`,
-    );
-  }
-  if (filedFollowUps.length) run.update({ followUps: filedFollowUps });
+  await fileTheFollowUps();
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
-  if (stop.landsNothing) await stopLanding(stopError(stop.headline!));
+  if (stop.landsNothing) await stopLanding(stopError(stop.headline!), true);
 
   // -------------------------------------------------------------------------
   // Phase 4: the gates on the merged base branch. Each branch was gated on its

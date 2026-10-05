@@ -297,7 +297,7 @@ export type LandContext = {
   withdrawal: (id: string) => { held: boolean; reason: string } | undefined;
   /** Where every write to the host's git goes. */
   host: HostGit;
-  /** Gates a merged tree in the sandbox `opener` opened: the gates of the run, on a tree no pipeline gated. */
+  /** Gates a merged tree in the sandbox `opener` opened: the gates of the run, on a tree no pipeline gated. Its wait for a machine-wide gates slot goes before the run's ticket gates (`runGates`'s `priority`). */
   gate: (box: Box, id: string) => Promise<GateRun>;
   /**
    * The tickets landed so far in this run, with the files each one changed on the base and the
@@ -357,7 +357,7 @@ export type Landed =
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
 export class LandingStop extends OperatorError {}
 
-const isAncestor = (root: string, ancestor: string, of: string) => {
+export const isAncestor = (root: string, ancestor: string, of: string) => {
   try {
     sh("git", ["merge-base", "--is-ancestor", ancestor, of], root);
     return true;
