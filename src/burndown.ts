@@ -1085,7 +1085,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const wholeOpen = await openOnQueue(project, tracker, whole);
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));
-  for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   // A comment is not read as a blocker; say so where the run would start the issue.
   for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
   // A blocker that can never close (missing, a cycle) holds its ticket for good; an unnamed Linear key lets it start.
@@ -1130,7 +1129,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
   // `order` in run.json: a released ticket queues behind the ones already waiting for a sandbox.
   const order = new Map(candidates.map((t, at) => [t.id, at] as const));
+  const sayWaits = () => {
+    for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
+  };
   if (issues.length === 0) {
+    sayWaits();
     holds.start(schedule.start);
     console.log("Every queued ticket is waiting on another. Nothing to start.");
     return false;
@@ -1152,7 +1155,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const later = parked.find((p) => p.ticket.id === i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
-  // After the ticket list, not before its header: the shared-file lines are indented under it.
+  // After the header, with the ticket list and the shared-file lines: they are indented under it.
+  sayWaits();
   holds.start(schedule.start);
   // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
   const spend = projectApiKeySpend(project);

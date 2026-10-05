@@ -626,9 +626,13 @@ export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
   },
 });
 
+const TITLE_MAX = 40;
+/** A failing test as the line names it: a path (or any id with no space in it) as it is; a title, which node:test and others report in prose, quoted and cut, so it does not run into the sentence. */
+const failingName = (id: string) => (/\s/.test(id) ? `"${id.length > TITLE_MAX ? `${id.slice(0, TITLE_MAX - 1).trimEnd()}…` : id}"` : id);
+
 /** The red gate and the failing tests it named: " (gate test; failing a.test.ts, b.test.ts)", or "" when no gate is known. */
 export const redDetail = (red?: { gates?: string[]; failing?: string[] }) => {
-  const parts = [red?.gates?.length ? `${red.gates.length > 1 ? "gates" : "gate"} ${red.gates.join(", ")}` : "", red?.failing?.length ? `failing ${red.failing.join(", ")}` : ""].filter(Boolean);
+  const parts = [red?.gates?.length ? `${red.gates.length > 1 ? "gates" : "gate"} ${red.gates.join(", ")}` : "", red?.failing?.length ? `failing ${red.failing.map(failingName).join(", ")}` : ""].filter(Boolean);
   return parts.length ? ` (${parts.join("; ")})` : "";
 };
 
