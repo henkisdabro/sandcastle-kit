@@ -75,7 +75,9 @@ const RULES: [name: string, pattern: RegExp, fine?: RegExp][] = [
   ["find -printf", /\bfind\b.*\s-f?printf\b/],
   ["du -b", new RegExp(String.raw`\bdu${opts}(?:-[A-Za-z]*b|--bytes\b)`)],
   ["base64 -w", new RegExp(String.raw`\bbase64${opts}(?:-[A-Za-z]*w|--wrap\b)`)],
-  ["bare timeout", /(?:^|[;&|(`]|\$\(|\b(?:then|do|else|exec|time)\s)\s*timeout(?:\s|$)/],
+  // Command position: after a separator, a keyword that runs a command (`if timeout 5 x; then`)
+  // or a command that runs one, and any `NAME=value` prefixes.
+  ["bare timeout", /(?:^|[;&|(`{!]|\b(?:if|elif|while|until|then|do|else|exec|time|command|env|nohup)\s)\s*(?:[A-Za-z_][A-Za-z_0-9]*=\S*\s+)*timeout(?:\s|$)/],
 ];
 
 /** A line with its comment cut off: a `#` that starts a word outside quotes (not `$#` or `${#x}`). */
@@ -152,6 +154,12 @@ const CASES: [rule: string, line: string][] = [
   ["bare timeout", "timeout 5 make"],
   ["bare timeout", "out=$(timeout 5 make)"],
   ["bare timeout", "make && timeout 5 make check"],
+  ["bare timeout", "if timeout 5 make; then echo ok; fi"],
+  ["bare timeout", "while timeout 1 read -r line; do :; done"],
+  ["bare timeout", "! timeout 5 make"],
+  ["bare timeout", "{ timeout 5 make; }"],
+  ["bare timeout", "LC_ALL=C timeout 5 make"],
+  ["bare timeout", "env LC_ALL=C timeout 5 make"],
 ];
 
 test("each bash 4 construct and GNU-only flag is caught, one rule per case", () => {
@@ -176,6 +184,8 @@ test("the 3.2-safe and portable forms pass", () => {
     "base64 < f | tr -d '\\n'",
     "timeout=5",
     "local timeout=5",
+    "x=1 timeout=5",
+    'echo "${timeout}" "$!"',
     'echo "$timeout"',
     'case $x in a) echo a ;; esac',
     "echo hi 2>&1 | cat",
