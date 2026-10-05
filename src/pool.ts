@@ -600,6 +600,39 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
   }
 };
 
+let extras = 0;
+
+/**
+ * Runs `fn` with an extra slot of `pool`: a lock outside the numbered ones
+ * (`<pool>-extra-<run>-<n>.lock`, the content a slot has), taken at once and never waited for. It is
+ * for a sandbox started inside a slot the caller already holds - the mid-run base check - which
+ * would deadlock a pool of one if it waited, and was otherwise counted nowhere: other runs saw one
+ * sandbox fewer than were alive. `usage()`, `liveSlots` and status.sh's `<pool>-*.lock` glob count
+ * it; `tryAcquire` takes only numbered slots, so it blocks none. Accepted while it lives: `usage()`
+ * can read 7/6, and as `members()` counts it in this run's `held`, this run's other tickets may wait
+ * for their share. The share arithmetic stays as it is - hiding the slot from it would hide it from
+ * the other runs too. Released when `fn` ends and at exit; one whose holder was killed counts for
+ * nothing (`holderRunning`) and is removed by the next extra slot taken.
+ */
+export const withExtraSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T> | T): Promise<T> => {
+  mkdirSync(DIR, { recursive: true });
+  // The name is unique to this process, so a killed holder's lock is never taken over: it would stay for good.
+  for (const f of readdirSync(DIR).filter((f) => f.includes("-extra-") && f.endsWith(".lock"))) {
+    const content = read(join(DIR, f));
+    if (content && !holderRunning(parseLock(content).pid)) rmSync(join(DIR, f), { force: true });
+  }
+  const file = join(DIR, `${pool}-extra-${RUN_ID}-${extras++}.lock`);
+  const mine = `${process.pid} ${randomUUID()} run=${RUN_ID} ${label}\n`;
+  writeFileSync(file, mine, { flag: "wx" });
+  held.set(file, mine);
+  try {
+    return await fn();
+  } finally {
+    held.delete(file);
+    releaseLock(file, mine);
+  }
+};
+
 /** "sandboxes 3/6 · gates 1/2" - live slots only; read by status.sh too. */
 export const usage = () => (["sandboxes", "gates"] as const).map((pool) => `${pool} ${liveSlots(pool).length}/${limit(pool)}`).join(" · ");
 
