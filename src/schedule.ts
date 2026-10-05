@@ -538,17 +538,21 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
   const claims = new Map<string, string>();
   // A ticket that ended: whether it landed.
   const ended = new Map<string, boolean>();
+  // The keys a ticket sent back at landing had claimed: its second attempt is often land-only and
+  // repairs nothing, so without these its fix would land unclaimed and a later red repairs again.
+  const sentBack = new Map<string, Set<string>>();
   const resumes = new Map<string, ((landed: boolean) => void)[]>();
   const waitingOn = new Map<string, string>();
   const release = (id: string, landed: boolean) => {
     for (const resume of resumes.get(id)?.splice(0) ?? []) resume(landed);
   };
+  const claim = (key: string, id: string) => {
+    const by = claims.get(key);
+    if (by === undefined || by === id || ended.has(by)) claims.set(key, id);
+  };
   return {
     /** `id` is repairing `key`. The first ticket to claim it that has not ended keeps it. */
-    claim(key: string, id: string) {
-      const by = claims.get(key);
-      if (by === undefined || by === id || ended.has(by)) claims.set(key, id);
-    },
+    claim,
     /**
      * The other ticket repairing `key`, when `id` may wait for it: `landed` when its fix is on the base
      * already, so `id` merges the base without waiting (its gate may have finished just after that landing).
@@ -580,14 +584,24 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
      * The scheduler's changes: a ticket's ending is what its waiters wait for. A ticket sent back at
      * landing has landed nothing yet, and its second attempt may wait behind the very pipelines that
      * wait for it (every worker a waiter): they stop waiting, and its claims go until it repairs again.
+     * Its second attempt may land a carried branch with no repair: that landing is still the fix to
+     * the keys it had claimed, unless another ticket claimed one since and is still repairing it.
      */
     told<G, O, B>(change: Change<G, O, B>) {
       if (change.kind === "requeued") {
-        for (const [key, by] of claims) if (by === change.id) claims.delete(key);
+        const keys = sentBack.get(change.id) ?? new Set<string>();
+        for (const [key, by] of claims) {
+          if (by !== change.id) continue;
+          claims.delete(key);
+          keys.add(key);
+        }
+        sentBack.set(change.id, keys);
         release(change.id, false);
       } else if (change.kind === "ended") {
         const landed = change.ending.kind === "landing" && onBase(change.ending.landed);
         ended.set(change.id, landed);
+        if (landed) for (const key of sentBack.get(change.id) ?? []) claim(key, change.id);
+        sentBack.delete(change.id);
         release(change.id, landed);
       }
     },

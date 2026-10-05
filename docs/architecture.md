@@ -73,8 +73,12 @@ state.
   already landed (its gate finished just after that landing) merges the base and gates again the
   same way, without a wait or its line. A ticket that did not land (red, gave up, crashed, held,
   stopped) or was sent back at landing (`requeued`: its second attempt may sit behind the very
-  pipelines that wait for it) frees its waiters, which repair as before; so do a merge that
-  conflicts and a re-gate that is still red (it waits once per failure). A wait that would close a
+  pipelines that wait for it) frees its waiters, which repair as before. A ticket sent back keeps
+  the failures it had claimed until it ends: its second attempt is often a land-only one with no
+  repair pass, so when it lands, its landing is the fix to them (unless another ticket claimed one
+  since and is still repairing it), and a later red on one merges the base instead of repairing;
+  one that ends without landing leaves nothing. A merge that conflicts and a re-gate that is
+  still red also send a waiter to repair (it waits once per failure). A wait that would close a
   cycle is refused, a forced red (`SANDCASTLE_TEST_RED_GATE`) never waits, and the waiting ticket
   keeps its sandbox slot - so while a landing of the run waits for a slot (`slotWanted`), every
   waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
