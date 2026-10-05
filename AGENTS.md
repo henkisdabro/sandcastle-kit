@@ -120,8 +120,12 @@ A change to `mod/` has checks of its own, which `pnpm test` skips without a rece
 read the `mod/` section of `docs/architecture.md`.
 
 Before a branch's work is pushed, `bash test/full-check.sh` repeats the checks on this machine and
-in Linux (agents' sandboxes are Linux, so BSD tools and macOS's bash 3.2 break only here), and
-scans the new commits for secrets, the denylist and home-directory paths.
+in Linux (agents' sandboxes are Linux, so BSD tools break only here), and scans the new commits
+for secrets, the denylist and home-directory paths.
+
+In this repository's sandbox image (`.sandcastle/Dockerfile`), `bash32` is macOS's bash 3.2 built
+from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Before
+committing a change to a shell script, run `shellcheck -S error` on it; `shellcheck` is installed there too.
 
 `sandcastle run`, `preflight` and `lean --measure` spend the user's model allowance; ask first.
 Test a guard (git hooks, protected paths, fingerprint) in a throwaway clone under a temp
