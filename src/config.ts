@@ -40,6 +40,11 @@ export type ProjectConfig = {
   /** Parallel sandboxes. Default 4. */
   concurrency?: number;
   /**
+   * CPUs each sandbox container may use (`docker run --cpus`), its own test runs and a gate in it
+   * alike. Unset: the VM's CPUs divided by the run's concurrency, at least 2. `false`: no limit.
+   */
+  cpus?: number | false;
+  /**
    * Inside Herdr, whether a run opens a pane per sandbox: `"none"` (default) leaves the run's tab
    * with the status view alone and reports the run as one agent on it, `"all"` adds a pane per
    * concurrent sandbox. `SANDBOX_PANES` overrides it for one run.
@@ -131,8 +136,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
@@ -161,7 +166,7 @@ export const hostPnpmStore = (root: string): string | undefined => {
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -200,6 +205,9 @@ const checkShape = (config: ProjectConfig) => {
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
   if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
+  if (config.cpus !== undefined && config.cpus !== false && !(typeof config.cpus === "number" && Number.isFinite(config.cpus) && config.cpus > 0)) {
+    refuse(`\`cpus\` must be a number above 0 (CPUs per sandbox) or false (no limit), not ${JSON.stringify(config.cpus)}.`);
+  }
   if (config.changelog !== undefined && typeof config.changelog !== "boolean") refuse(`\`changelog\` must be true or false, not ${JSON.stringify(config.changelog)}.`);
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.herdr?.panes !== undefined && config.herdr.panes !== "none" && config.herdr.panes !== "all") {

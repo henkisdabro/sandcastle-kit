@@ -1073,6 +1073,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
+| `cpus` | the VM's CPUs ÷ concurrency | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset: the container runtime's CPUs (`docker info`'s NCPU) divided by the run's effective concurrency, at least 2 and never more than the VM has; a gate run in a sandbox gets the same limit. A number sets the limit (cut to the VM's CPUs, which `docker run` would otherwise refuse), `false` sets none. The run's start lines say which applies (`Sandbox CPUs: 3 each`) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
@@ -1289,7 +1290,9 @@ Several projects can run at once; one project runs once at a time (`run.lock`). 
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
-[personal settings](#personal-settings). When every slot is taken, a freed slot goes to the run
+[personal settings](#personal-settings). The gate cap does not reach the tests an agent runs in its
+own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
+divided by the run's concurrency). When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
