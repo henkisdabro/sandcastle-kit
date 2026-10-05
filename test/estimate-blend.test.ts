@@ -1,6 +1,7 @@
 // A model with fewer than five tickets in the window is not priced from them alone: two dear Opus tickets
-// priced a four-Opus run at about twice what it took. Its figures are blended with all tickets', and the
-// estimate line says so. Made-up timings; no tracker, Docker or network.
+// priced a four-Opus run at about twice what it took. Nor from all tickets alone, which priced it as the
+// cheap model. Its figures are mixed with all tickets', weighted by its share of five, and the estimate
+// line says so. Made-up timings; no tracker, Docker or network.
 //
 //   pnpm exec tsx --test test/estimate-blend.test.ts
 
@@ -35,8 +36,9 @@ const dear = [...tickets(1, 20, IMPL_MODEL, 10 * MIN, 1_000_000), ...tickets(21,
 
 test("two dear Opus tickets in the history are blended with all tickets, and the line says so", () => {
   const text = estimate(project(dear), 4, 4, 0, [OPUS, OPUS, OPUS, OPUS])!;
-  // The median of all 22 is a cheap ticket's 1M and 10m; priced from the two Opus tickets it would be 48M and 60m.
-  assert.match(text, /^Estimate \(rough, from 22 ticket\(s\) in the last 3 runs\): about 4\.0M tokens in \/ 40k out and 10m for 4 ticket\(s\), 4 at a time\./);
+  // Opus's own: 12M and 60m a ticket; all 22 tickets' median: 1M and 10m. Two of five parts its own,
+  // three all tickets': 5.4M and 30m a ticket, so 21.6M for four - between 4M (all) and 48M (own).
+  assert.match(text, /^Estimate \(rough, from 22 ticket\(s\) in the last 3 runs\): about 21\.6M tokens in \/ 216k out and 30m for 4 ticket\(s\), 4 at a time\./);
   assert.match(text, / claude-opus-5-5 from 2 tickets, blended\.$/);
 });
 

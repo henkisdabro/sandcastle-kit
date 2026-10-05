@@ -762,13 +762,23 @@ export const estimate = (
     const model = models?.[at];
     const ofModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
     if (!ofModel.length) unknown++;
-    // A model with a few tickets only is blended with all of them: two dear tickets in the window are not a median to price a run by.
     else if (ofModel.length < SOLID_HISTORY && model !== undefined) thin.set(model, ofModel.length);
-    const pool = ofModel.length >= SOLID_HISTORY ? ofModel : counted;
-    const same = pool.filter((g) => g.carried === carried);
-    if (carried && !same.length) lowCarried++;
-    const use = same.length ? same : pool;
-    return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
+    const priced = (pool: Group[]) => {
+      const same = pool.filter((g) => g.carried === carried);
+      const use = same.length ? same : pool;
+      return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
+    };
+    if (carried && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).some((g) => g.carried)) lowCarried++;
+    if (!ofModel.length || ofModel.length >= SOLID_HISTORY || model === undefined) return priced(ofModel.length ? ofModel : counted);
+    // A model with a few tickets only is blended with all of them, weighted by how many it has: two dear tickets in
+    // the window are not a median to price a run by, and the other models' median alone prices it as one of them.
+    const own = priced(ofModel);
+    const all = priced(counted);
+    const w = ofModel.length / SOLID_HISTORY;
+    type Figures = ReturnType<typeof figures>;
+    const mix = (a: Figures, b: Figures) =>
+      Object.fromEntries((Object.keys(a) as (keyof Figures)[]).map((k) => [k, w * a[k] + (1 - w) * b[k]])) as Figures;
+    return { mid: mix(own.mid, all.mid), high: mix(own.high, all.high) };
   });
   const sum = (pick: (p: (typeof per)[number]) => number) => per.reduce((n, p) => n + pick(p), 0);
   // A chain of in-run `Blocked by` runs one ticket after another, whatever the slots: its tickets' own times.
