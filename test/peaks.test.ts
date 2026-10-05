@@ -103,7 +103,7 @@ const line = (project: string, daysAgo: number, peakMib: number, run = `run-${pr
 test("recommend: no data keeps the assumed figure", () => {
   const rec = recommend(8 * GIB, 8, [], NOW);
   assert.equal(rec.measured, undefined);
-  assert.equal(rec.perSandboxGib, 1.5);
+  assert.deepEqual([rec.gateGib, rec.baselineGib], [1.5, 1.5]);
   assert.equal(rec.sandboxes, 4);
   assert.equal(measuredPeak([], NOW), undefined);
 });
@@ -111,7 +111,7 @@ test("recommend: no data keeps the assumed figure", () => {
 test("recommend: one project's highest peak plus 10%", () => {
   const peaks = [line("a", 1, 1000), line("a", 2, 1400), line("a", 3, 900)];
   const m = measuredPeak(peaks, NOW)!;
-  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3, perSandboxMib: 1540 });
+  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3 });
   const rec = recommend(10 * GIB, 16, peaks, NOW);
   // floor((10 - 2) / (1540 / 1024)) = floor(5.32) = 5
   assert.equal(rec.byMemory, 5);
@@ -153,7 +153,7 @@ test("recommend: a run is its sandboxes' lines together, and counts once", () =>
 test("recommend: of several projects the highest wins, and names itself", () => {
   const peaks = [line("a", 1, 1000), line("b", 2, 2200), line("c", 3, 1500), line("old", 45, 8000)];
   const m = measuredPeak(peaks, NOW)!;
-  assert.deepEqual([m.project, m.peakMib, m.runs, m.perSandboxMib], ["b", 2200, 1, 2420]);
+  assert.deepEqual([m.project, m.peakMib, m.runs, recommend(16 * GIB, 8, peaks, NOW).gateGib * 1024], ["b", 2200, 1, 2420]);
 });
 
 // ---- the command's output ----
@@ -173,13 +173,14 @@ const reading = (over: Record<string, unknown> = {}) => ({
 test("size with measured peaks prints the measured line and sizes by it", () => {
   const peaks = [line("a", 1, 1400), line("a", 2, 1000), line("b", 3, 300)];
   const out = sizeLines(reading({ peaks: () => peaks, now: () => NOW, projectId: () => "b" }), {}, {}).join("\n");
-  assert.match(out, /Measured: the last 2 measured runs of project a peaked at 1\.37 GiB in one sandbox, the highest of any project in the last 30 days; plus 10% is 1\.5 GiB\./);
-  assert.match(out, /memory fits 6 sandboxes, so maxSandboxes is 6\./);
+  assert.match(out, /Measured: the last 2 measured runs of project a, the heaviest of any project in the last 30 days\./);
+  assert.match(out, /Gate figure: 1\.37 GiB, cgroup `memory\.peak`[^\n]*plus 10% is 1\.5 GiB\./);
+  assert.match(out, /memory fits 6 sandboxes, so maxSandboxes is 6 and maxGates 1\./);
   assert.match(out, /Assumed, not measured: 2 GiB headroom, 6 CPUs per gate/);
   assert.ok(!out.includes("no run has been sampled yet"));
   assert.match(out, /maxSandboxes: 6 {2}\(memory: floor\(\(12 GiB - 2 GiB\) \/ 1\.5 GiB\) = 6; CPUs allow 8\)/);
   const mine = sizeLines(reading({ peaks: () => peaks, now: () => NOW, projectId: () => "a" }), {}, {}).join("\n");
-  assert.match(mine, /of this project peaked/);
+  assert.match(mine, /runs of this project, the heaviest/);
 });
 
 test("size with no peaks prints the assumed-figure line as before", () => {

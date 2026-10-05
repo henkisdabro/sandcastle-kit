@@ -459,9 +459,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       console.log(`warn Could not reach the release channel; using ${versions.source === "cache" ? "the cached" : "the Dockerfile's default"} versions.\n       -> Fine while runs work. If preflight says a model needs a newer Claude Code, check the network and run \`sandcastle build\`, or pin one with \`claudeCode: "x.y.z"\` in ${CONFIG_PATH}.`);
     }
   }
-  // A warn when measured sandbox peaks say the pool's limits are above what the VM fits (the
-  // owner's choice: never a FIX, a run still starts), and then in place of the pointer. From the
-  // assumed figures it stays info: the defaults work, and `size` is only the better number.
+  // A warn when the measured anonymous memory says the pool's limits need more than the VM has (the
+  // owner's choice: never a FIX, a run still starts), and then in place of the pointer. From
+  // `memory.peak` or the assumed figures it stays info: page cache inflates the one, the other is a
+  // guess, and `size` is only the better number.
   const poolWarns = poolWarningsNow();
   for (const line of poolWarns) console.log(`warn ${line}`);
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;

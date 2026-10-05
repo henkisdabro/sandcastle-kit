@@ -16,7 +16,7 @@ const config = mkdtempSync(join(tmpdir(), "sandcastle-size-cfg-"));
 process.env.XDG_CONFIG_HOME = config;
 process.env.HOME = config;
 const { OperatorError } = await import("../src/errors.ts");
-const { detectRuntime, recommend, sizeLines } = await import("../src/size.ts");
+const { detectRuntime, poolWarnings, recommend, sizeLines, sizePointer } = await import("../src/size.ts");
 type Readers = Parameters<typeof sizeLines>[0];
 
 const GIB = 2 ** 30;
@@ -134,6 +134,104 @@ test("a docker info that fails is an OperatorError telling the person to start t
   assert.throws(() => sizeLines(reading(undefined), {}, {}), (e: Error) => e instanceof OperatorError && /Start your runtime/.test(e.message) && /docker info/.test(e.message));
   assert.throws(() => sizeLines({ ...reading({}), dockerInfo: () => "not json" }, {}, {}), /did not print JSON/);
   assert.throws(() => sizeLines(reading({ Name: "x" }), {}, {}), /NCPU, MemTotal/);
+});
+
+// ---- pricing: maxGates sandboxes at the gate figure, the rest at the agent baseline ----
+// Every expected number below is worked by hand from the figures in the test, with the 10% margin
+// and the 2 GiB headroom: a MiB figure x 1.1, rounded up, over 1024.
+
+const NOW = Date.parse("2026-05-10T00:00:00Z");
+type Figures = { peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };
+const ran = (f: Figures) => [{ ts: "2026-05-09T00:00:00.000Z", project: "abc123", run: "r1", ...f }];
+const measuredOn = (cpus: number, gib: number, f: Figures | undefined, over: Partial<Readers> = {}) =>
+  reading(orbstack(cpus, gib), { peaks: () => (f ? ran(f) : []), now: () => NOW, projectId: () => "abc123", ...over });
+
+test("with no run measured, size prices every sandbox at the assumed figure, as before", () => {
+  const rec = recommend(8 * GIB, 8, [], NOW);
+  assert.deepEqual([rec.sandboxes, rec.gates, rec.gateGib, rec.baselineGib, rec.gateFrom, rec.baselineFrom], [4, 1, 1.5, 1.5, "assumed", "assumed"]);
+  const out = text(sizeLines(measuredOn(8, 8, undefined), {}, {}));
+  assert.match(out, /no run has been sampled yet\): 2 GiB headroom, 1\.5 GiB per sandbox/);
+  assert.match(out, /maxSandboxes: 4 {2}\(memory: floor\(\(8 GiB - 2 GiB\) \/ 1\.5 GiB\) = 4; CPUs allow 8\)/);
+  assert.deepEqual(poolWarnings(measuredOn(8, 8, undefined), {}, {}), []);
+});
+
+test("memory.peak alone prices the agent baseline at the gate figure, says so, and warns nothing", () => {
+  // Gate 2000 MiB -> 2200 MiB = 2.15 GiB; floor(10 GiB / 2.15 GiB) = 4.
+  const readers = measuredOn(8, 12, { peakMib: 2000 });
+  const out = text(sizeLines(readers, {}, {}));
+  assert.match(out, /Gate figure: 1\.95 GiB, cgroup `memory\.peak`, which includes page cache[^\n]*plus 10% is 2\.15 GiB\./);
+  assert.match(out, /Agent baseline: no agent baseline measured yet, priced at the gate figure \(2\.15 GiB\)\./);
+  assert.match(out, /Measured: the last 1 measured run of this project/);
+  assert.match(out, /maxSandboxes: 4 {2}\(memory: floor\(\(12 GiB - 2 GiB\) \/ 2\.15 GiB\) = 4; CPUs allow 8\)/);
+  assert.match(out, /maxGates: 1 {2}\(CPUs: floor\(8 \/ 6\) = 1\)/);
+  // A pool far above it still draws no warning: the figure counts page cache.
+  assert.deepEqual(poolWarnings(readers, {}, { maxSandboxes: 12, maxGates: 4 }), []);
+  assert.match(sizePointer({}, {}) ?? "", /run `sandcastle size`/, "doctor keeps its info line while the limits are the defaults");
+});
+
+test("memory.peak with an agent baseline prices the gates and the rest apart, naming every figure", () => {
+  // Gate 4000 -> 4400 MiB = 4.3 GiB; agent 1000 -> 1100 MiB = 1.07 GiB; 14 GiB usable.
+  // Gates: min(floor(12 / 6) = 2, floor(14 / 4.3) = 3) = 2; then floor((14 - 8.59) / 1.07) = 5 more: 7.
+  const rec = recommend(16 * GIB, 12, ran({ peakMib: 4000, agentMib: 1000 }), NOW);
+  assert.deepEqual([rec.gates, rec.sandboxes, rec.gateFrom, rec.baselineFrom], [2, 7, "peak", "agent-peak"]);
+  const out = text(sizeLines(measuredOn(12, 16, { peakMib: 4000, agentMib: 1000 }), {}, {}));
+  assert.match(out, /Gate figure: 3\.91 GiB, cgroup `memory\.peak`[^\n]*plus 10% is 4\.3 GiB\./);
+  assert.match(out, /Agent baseline: 0\.98 GiB, `memory\.peak` read before the first gate pass; plus 10% is 1\.07 GiB\./);
+  assert.match(out, /maxSandboxes: 7 {2}\(memory: 2 gates at 4\.3 GiB \+ floor\(\(16 GiB - 2 GiB - 2 x 4\.3 GiB\) \/ 1\.07 GiB\) at 1\.07 GiB = 7; CPUs allow 12\)/);
+  assert.match(out, /maxGates: 2 {2}\(CPUs: floor\(12 \/ 6\) = 2\)/);
+  assert.match(out, /fits 7 sandboxes, so maxSandboxes is 7 and maxGates 2\./);
+  assert.deepEqual(poolWarnings(measuredOn(12, 16, { peakMib: 4000, agentMib: 1000 }), {}, { maxSandboxes: 12, maxGates: 4 }), [], "no anon figure, no warning");
+});
+
+test("anon figures on a 13.7 GiB, 12-CPU VM recommend 2 gates and at least 4 sandboxes, and warn only for a pool they do not fit", () => {
+  // Gate anon 2560 MiB -> 2816 MiB = 2.75 GiB; agent anon 820 -> 902 MiB = 0.88 GiB; 11.7 GiB usable.
+  // The cache-inclusive figures (5.6 GiB peak, 3000 MiB agent peak) are not what is priced.
+  const f = { peakMib: 5734, anonMib: 2560, agentMib: 3000, agentAnonMib: 820 };
+  const rec = recommend(13.7 * GIB, 12, ran(f), NOW);
+  assert.deepEqual([rec.gates, rec.gateFrom, rec.baselineFrom], [2, "anon", "agent-anon"]);
+  assert.ok(rec.sandboxes >= 4, `sandboxes ${rec.sandboxes}`);
+  assert.equal(rec.sandboxes, 9, "2 gates + floor((11.7 - 5.5) / 0.88) = 7 more");
+  const out = text(sizeLines(measuredOn(12, 13.7, f), {}, {}));
+  assert.match(out, /Gate figure: 2\.5 GiB, the anonymous memory \(no page cache\) read during gates; plus 10% is 2\.75 GiB\./);
+  assert.match(out, /Agent baseline: 0\.8 GiB, the anonymous memory read during agent passes; plus 10% is 0\.88 GiB\./);
+  const readers = measuredOn(12, 13.7, f);
+  assert.deepEqual(poolWarnings(readers, {}, {}), [], "the default 6 and 2: 5.5 + 4 x 0.88 GiB fits");
+  assert.deepEqual(poolWarnings(readers, {}, { maxSandboxes: 9, maxGates: 2 }), [], "the recommendation itself fits");
+  assert.deepEqual(poolWarnings(readers, {}, { maxSandboxes: 4, maxGates: 4 }), [], "4 gates x 2.75 GiB = 11 GiB fits");
+  const [over] = poolWarnings(readers, {}, { maxSandboxes: 12, maxGates: 2 });
+  assert.match(over, /^maxSandboxes 12 \(config\.json\) with maxGates 2 \(config\.json\) needs about 14\.31 GiB \(2 gates x 2\.75 GiB \+ 10 x 0\.88 GiB\), above the 11\.7 GiB/);
+  assert.match(over, /set "maxSandboxes": 9 in /);
+  const [gates] = poolWarnings(readers, {}, { maxSandboxes: 6, maxGates: 4 });
+  assert.match(gates, /set "maxGates": 2 in /);
+  assert.ok(!gates.includes(`"maxSandboxes"`), gates);
+});
+
+test("memory that fits one gate gives 1 gate, never more than the sandboxes", () => {
+  // 4 GiB usable: floor(4 / 2.75) = 1 gate though 12 CPUs allow 2; then floor((4 - 2.75) / 0.88) = 1 more.
+  const rec = recommend(6 * GIB, 12, ran({ peakMib: 5734, anonMib: 2560, agentAnonMib: 820 }), NOW);
+  assert.deepEqual([rec.gates, rec.sandboxes], [1, 2]);
+  assert.equal(rec.gatesBy, "memory: floor((6 GiB - 2 GiB) / 2.75 GiB) = 1; CPUs allow 2");
+  // The ceiling of 12 sandboxes holds the gates too: 96 CPUs alone would allow 16.
+  const big = recommend(256 * GIB, 96, [], NOW);
+  assert.deepEqual([big.sandboxes, big.gates], [12, 12]);
+  assert.match(big.gatesBy, /^the sandboxes: a gate runs inside one, so at most 12/);
+});
+
+test("a VM smaller than one gate figure still gets 1 sandbox and 1 gate, at least", () => {
+  // 2 GiB usable, under the 2.75 GiB gate figure.
+  const rec = recommend(4 * GIB, 12, ran({ peakMib: 5734, anonMib: 2560, agentAnonMib: 820 }), NOW);
+  assert.deepEqual([rec.sandboxes, rec.gates], [1, 1]);
+  assert.match(rec.sandboxesBy, /^at least 1 /);
+  assert.match(rec.gatesBy, /^at least 1 /);
+});
+
+test("a VM that fits one sandbox says \"1 sandbox\", not \"1 sandboxes\"", () => {
+  // 3 GiB usable: 1 gate at 2.75 GiB, and floor(0.25 / 0.88) = 0 more.
+  const f = { peakMib: 5734, anonMib: 2560, agentAnonMib: 820 };
+  const out = text(sizeLines(measuredOn(12, 5, f, { hostMemory: () => 8 * GIB }), {}, {}));
+  assert.match(out, /fits 1 sandbox, so maxSandboxes is 1 and maxGates 1\./);
+  assert.match(out, /covers 1 sandbox\./);
+  assert.ok(!out.includes("1 sandboxes"), out);
 });
 
 // The spawned command, with a fake `docker` first on PATH.

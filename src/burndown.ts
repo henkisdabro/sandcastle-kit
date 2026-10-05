@@ -1260,7 +1260,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const cpus = sandboxCpus(project, settings.concurrency.effective, realReaders().dockerInfo);
   console.log(cpusLine(project, cpus));
   project = { ...project, cpus };
-  // Measured peaks say the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
+  // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow()) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();
