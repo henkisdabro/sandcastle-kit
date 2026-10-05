@@ -485,6 +485,12 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
 export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void }) => {
   // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
   const started = new Set<string>();
+  // The status view's queue position (`order`) follows the scheduler's start queue: a requeued ticket
+  // goes before a released one, and both before every ticket not yet started, whose order is its place
+  // in `start` (from 0). Each kind in the order it arrived, so the view's "next to start" is true.
+  const AHEAD = 1_000_000;
+  let sentBack = 0;
+  let released = 0;
   type Record = { ticket(id: string, fields: TicketRecord): void; update(fields: RunRecord): void };
   const write = (run: Record, fields: RunRecord = {}) => run.update({ waiting: o.waiting.filter((w) => !started.has(w.issue)), ...fields });
   // What the ticket waits for: the ticket that holds its file now (`holder`), not the one it was
@@ -509,13 +515,16 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
         for (const share of shares ?? []) o.say(`  ${fileShareLine(o.ref, ticket.id, share)}`);
       }
     },
-    tell(run: Record, c: HoldChange) {
+    tell(run: Record, c: HoldChange | { kind: "requeued"; id: string }) {
       switch (c.kind) {
+        case "requeued":
+          run.ticket(c.id, { order: sentBack++ - 2 * AHEAD });
+          return;
         case "started":
           started.add(c.id);
-          o.say(`  ${o.ref(c.id)} starts: ${c.after.kind === "blockers" ? "its last blocker has landed" : `${o.ref(c.after.freed)} is done with the file they both change`}`);
+          o.say(`  ${o.ref(c.id)} ${c.after.kind === "blockers" ? "released: its last blocker has landed; it starts at the next free slot" : `starts: ${o.ref(c.after.freed)} is done with the file they both change`}`);
           for (const share of c.shares) o.say(`  ${fileShareLine(o.ref, c.id, share)}`);
-          run.ticket(c.id, { state: "queued", note: null });
+          run.ticket(c.id, { state: "queued", note: null, ...(c.after.kind === "blockers" && { order: released++ - AHEAD }) });
           write(run, { stage: "running" });
           return;
         case "waits":
@@ -1383,7 +1392,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
   const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
   const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
-  // `order` in run.json: a released ticket queues behind the ones already waiting for a sandbox.
+  // `order` in run.json: the place in the start list; a released or requeued ticket is given an earlier one when it is (`createHoldRecord`).
   const order = new Map(candidates.map((t, at) => [t.id, at] as const));
   const sayWaits = () => {
     for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
@@ -1465,7 +1474,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Typed as entries, so `Object.fromEntries` cannot widen a misspelt state to `any`.
   const startTickets: [string, TicketRecord][] = [
     ...issues.map((i): [string, TicketRecord] => [i.id, { state: "queued", order: order.get(i.id), since: Math.floor(Date.now() / 1000), title: i.title }]),
-    // `order` too: a released ticket queues behind the ones already waiting for a sandbox.
+    // `order` too: the place it has until it is released.
     ...dependants.map((i): [string, TicketRecord] => [i.id, { state: "blocked", order: order.get(i.id), note: blockedNote(held.get(i.id)!.on, inRun), title: i.title }]),
     // Waiting for a file git cannot merge: starts when the ticket that has it lands or leaves the run.
     ...parked.map((p): [string, TicketRecord] => [p.ticket.id, { state: "blocked", order: order.get(p.ticket.id), note: fileWaitNote(ref, p.wait), title: p.ticket.title }]),
@@ -1680,13 +1689,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string) => {
+  // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId);
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
       gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
       log: gatesLog(project, id),
-    });
+    }, priority);
   };
 
   const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
@@ -1751,7 +1761,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
     gate: (box, id) =>
-      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate")),
+      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
     landed: new Map(),
     slotWanted,
     reds,
@@ -1914,7 +1924,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         return;
       case "requeued":
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
-        return ledger.tell(c);
+        ledger.tell(c);
+        return holds.tell(run, c);
       case "ended":
         // Its label refuses it, found as it would have started: that ticket only, never the run.
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
