@@ -290,7 +290,7 @@ type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: stri
  * after `ended` has been told the root of a run whose record says so: its file is the last
  * sign of it, and the tab bar does not tick again for a run that is not registered. So `ended`
  * returning true moves the file to the awaiting directory (`awaitReport`), for a tab still waiting to be
- * told (`tellDeadTab`), or held by another Herdr server: kept here, it held the tab bar's gate open.
+ * told (`tellDeadTab`), held by another Herdr server, or not reachable (`retry`): kept here, it held the tab bar's gate open.
  * `live` is told the root of each live run (the tab bar restarts its status view, `restartStatusView`).
  */
 export const liveRuns = (dir = RUNS_DIR, probe: Probe = commandOf, ended: (root: string) => boolean | void = () => {}, live: (root: string) => void = () => {}): Run[] => {
@@ -357,7 +357,7 @@ const awaiting = (dir: string, probe: Probe, now: number): [string, string][] =>
 
 /**
  * The tab bar, while live runs keep it ticking, tells the awaiting tabs too: `tell` is `replaceDeadTab`,
- * and its true (the status view still showing, or the tab on another server) keeps the file.
+ * and its true (the status view still showing, the tab on another server, or herdr failing) keeps the file.
  */
 export const tellAwaiting = (dir = RUNS_DIR, tell: (root: string) => boolean = replaceDeadTab, probe: Probe = commandOf, now = Date.now()) => {
   for (const [file, root] of awaiting(dir, probe, now)) if (!tell(root)) rmSync(file, { force: true });
@@ -386,10 +386,11 @@ export const requeueAwaiting = (dir = RUNS_DIR, probe: Probe = commandOf, now = 
 // directory until it can be told; a tab on another Herdr server too: that server has yet to tell it.
 // A run's exit moves its file there while its own tab is unreported (live-runs.ts). From there the
 // startup hook after a Herdr restart (`requeueAwaiting`), and the tab bar while live runs keep it
-// ticking (`tellAwaiting`), tell the tab, until it is reported, closed or `AWAIT_REPORT_DAYS` old.
+// ticking (`tellAwaiting`), tell the tab, until it is reported or `AWAIT_REPORT_DAYS` old: a closed tab
+// is a herdr error (`retry`), as a server not yet restored may answer, so it waits out the expiry too.
 export const replaceDeadTab = (root: string, kit?: string) => {
   const told = tellDeadTab(root, kit);
-  return told === "showing" || told === "elsewhere";
+  return told === "showing" || told === "elsewhere" || told === "retry";
 };
 
 /** The run of the focused pane's project first (Herdr gives the tab bar its cwd), then the newest. */

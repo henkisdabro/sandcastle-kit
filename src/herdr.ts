@@ -163,7 +163,8 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * status pane that is not a bare shell - the status view still running (it already shows how the
  * run ended), or anything a person started there since (Herdr may reuse a pane id across a
  * restart, and the command would be typed into an editor or a REPL). Any herdr error leaves the
- * tab as it is. `reported` when the report was started, and `left` for every case above but one.
+ * tab as it is (`retry`, below). `reported` when the report was started, and `left` for every other
+ * case above but one.
  *
  * The record is claimed by renaming it to a name of this caller's own, which only one of two
  * callers can do, before anything is typed; it goes back marked `reported` once the command is
@@ -184,8 +185,22 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * on another. Nothing is asked of herdr and the record is untouched; the live-runs reader moves the
  * run's file to the awaiting directory for the right server. A record without `socket`, or a caller without
  * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
+ *
+ * `retry`: herdr itself failed (a server not yet restored at startup, a transient error, or a pane
+ * it no longer has, which it answers alike: `pane_not_found`): nothing is
+ * known of the tab, so the record is as it was and the run's file stays awaiting for the next
+ * reader, until `AWAIT_REPORT_DAYS` ends it. Not `left`, which deletes the file and loses the report.
  */
-export type DeadTab = "reported" | "showing" | "quit" | "elsewhere" | "left";
+export type DeadTab = "reported" | "showing" | "quit" | "elsewhere" | "retry" | "left";
+// A failure of a herdr call, as opposed to a record that cannot be read or a claim another caller won.
+class HerdrFailure extends Error {}
+const askHerdr = <T>(call: () => T): T => {
+  try {
+    return call();
+  } catch (error) {
+    throw new HerdrFailure(error instanceof Error ? error.message : String(error));
+  }
+};
 export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
   const file = viewRecord(root);
   const claim = `${file}.${process.pid}.${randomUUID()}.claim`;
@@ -195,11 +210,11 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     if (!view.tab || !view.status || view.adopted !== false || view.reported) return "left";
     // Before any herdr call, and the record stays as it is.
     if (onOtherServer(view)) return "elsewhere";
-    const pane = paneOf(view.status);
+    const pane = askHerdr(() => paneOf(view.status!));
     if (!inRecordedTab(view, pane)) return "left";
     const quit = quitHere(view, pane);
     if (!quit) {
-      const processes = foreground(view.status);
+      const processes = askHerdr(() => foreground(view.status!));
       if (showsStatus(processes)) return "showing";
       if (!bareShell(processes)) return "left";
     }
@@ -228,7 +243,7 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     }
     try {
       // `cd`: a restored shell does not always start in the project.
-      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(recordedKit(view, kit), "bin/sandcastle"))} report`]);
+      askHerdr(() => herdr(["pane", "run", view.status!, `cd ${shellQuote(root)} && ${shellQuote(join(recordedKit(view, kit), "bin/sandcastle"))} report`]));
     } catch (error) {
       giveBack(read);
       throw error;
@@ -237,8 +252,8 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     }
     giveBack(JSON.stringify({ ...view, reported: true }) + "\n");
     return "reported";
-  } catch {
-    return "left";
+  } catch (error) {
+    return error instanceof HerdrFailure ? "retry" : "left";
   }
 };
 export const reportInDeadTab = (root: string, kit = KIT): boolean => tellDeadTab(root, kit) === "reported";
