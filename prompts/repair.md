@@ -42,6 +42,14 @@ see the whole set, and fix all of them.
   `git worktree add --detach <temp dir> {{TARGET_BRANCH}}`, removed with `git worktree remove --force <temp dir>`):
   it is not this branch's, so it gets no commit. Several branches fixing one test, each its own way,
   conflict at landing.
+- **A problem outside the ticket is not lost in prose.** For each one you found - the failure from
+  code this branch did not touch included - end your final message with a line of its own:
+
+  <followup>title - one line of evidence</followup>
+
+  with a short ticket title, then the one line that shows it is real (a test and its error, a file and
+  line). The orchestrator files each as a new ticket for triage, naming this ticket, so do not file it
+  yourself.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
 
 {{KIT_PROJECT_RULES}}
