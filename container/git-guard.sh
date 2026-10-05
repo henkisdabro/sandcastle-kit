@@ -24,8 +24,15 @@ deny() {
 
 # The shared dir of the hook's own cwd, so a package's own .git/ (node_modules) is never matched.
 COMMON=$(git -C "${CWD:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-if [ -n "$FILE" ] && [ -n "$COMMON" ]; then
-  case "$FILE" in "$COMMON"/*) deny "writing inside the shared .git" file;; esac
+# The shared dir of the dir Claude Code started in (CLAUDE_PROJECT_DIR, set for every hook). The cwd
+# moves with a `cd`: inside a scratch repository COMMON is the scratch's own dir, and from a dir in no
+# repository it is empty, so a rule that only looked at COMMON let the project's .git through.
+PROJECT_COMMON=
+[ -z "$CLAUDE_PROJECT_DIR" ] || PROJECT_COMMON=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+if [ -n "$FILE" ]; then
+  for dir in "$COMMON" "$PROJECT_COMMON"; do
+    [ -z "$dir" ] || case "$FILE" in "$dir"/*) deny "writing inside the shared .git" file;; esac
+  done
 fi
 [ -z "$CMD" ] && exit 0
 
@@ -44,8 +51,6 @@ GIT='(^|[;&|(`])[[:space:]]*(sudo[[:space:]]+)?git([[:space:]]+(-C[[:space:]]+[^
 # The shared dir here is the one of the dir Claude Code started in (CLAUDE_PROJECT_DIR), not COMMON: the
 # shell's cwd moves with a `cd`, and from inside the scratch repo COMMON is the scratch's own dir, so a
 # `-C` back into the project would pass. Without it the shared dir is unknown and these stay refused.
-PROJECT_COMMON=
-[ -z "$CLAUDE_PROJECT_DIR" ] || PROJECT_COMMON=$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 scratch_only() {
   local words w args=() pending= sub
   sub=$(sed -E 's/^[;&|(`[:space:]]*(sudo[[:space:]]+)?git[[:space:]]+//' <<<"$1")
@@ -76,5 +81,9 @@ grep -qE "${GIT}push([[:space:]]|\$)" <<<"$CMD" && deny "git push" "" "To test r
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
 grep -qE "${GIT}worktree[[:space:]]+(prune|repair)" <<<"$CMD" && deny "git worktree prune or repair (git worktree remove --force is allowed)"
 grep -qE "${GIT}branch[[:space:]]([^;&|\`]*[[:space:]])?(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]][^;&|\`]*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
-if [ -n "$COMMON" ] && grep -qE '(^|[;&|(`])[[:space:]]*(rm|mv)[[:space:]]' <<<"$CMD" && grep -qF "$COMMON/" <<<"$CMD"; then deny "rm or mv inside the shared .git"; fi
+if grep -qE '(^|[;&|(`])[[:space:]]*(rm|mv)[[:space:]]' <<<"$CMD"; then
+  for dir in "$COMMON" "$PROJECT_COMMON"; do
+    [ -z "$dir" ] || ! grep -qF "$dir/" <<<"$CMD" || deny "rm or mv inside the shared .git"
+  done
+fi
 exit 0
