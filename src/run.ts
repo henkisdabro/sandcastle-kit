@@ -477,7 +477,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // replacement pattern.
     const text = readFileSync(join(KIT, `prompts/${kind === "rereview" || kind === "remerge" ? "review" : kind}.md`), "utf8")
       .replaceAll("{{KIT_AFTER_REPAIR}}", () => (kind === "rereview" ? AFTER_REPAIR : kind === "remerge" ? AFTER_MERGE : ""))
-      .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|NEW_TICKET_REVIEW|NEW_TICKET|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
+      .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
@@ -700,8 +700,11 @@ const SOLID_HISTORY = 5;
  * longer (`chain` is the longest in-run `Blocked by` chain's length; `detail.chainAt` says which
  * tickets, by their place in `models`, and without it each takes the average). Undefined until an earlier ticket has
  * recorded tokens, so a new project prints nothing rather than a guess. It
- * covers the tickets' own pipelines - not the image check, preflight,
- * base gates, or verify, and its landings only as that floor and in the gates pool's sum. A line that does not parse is skipped.
+ * covers the tickets' own pipelines and their landings (a ticket's landing gates): the last ticket's
+ * after the pipelines, and every chain link's, since a dependant starts only once its blocker has
+ * landed. The base gates and verify (the `base gates` and `verify` lines of the window's runs) are
+ * added to it, as they run before every ticket and after the last; the image check and preflight are not.
+ * `from N ticket(s)` is how many history tickets priced the run's, not how many the window holds. A line that does not parse is skipped.
  *
  * `models` is the implement model of each ticket in the run (its `model:` label, else the default):
  * each is estimated from the history of tickets that model implemented, as an Opus ticket takes
@@ -736,6 +739,8 @@ export const estimate = (
   type Group = { ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
   const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
+  // The run's own steps before and after the tickets (issue 0): base gates hold every agent back, and verify follows the last landing.
+  const stageLines: Line[] = [];
   for (const raw of text.split("\n").filter(Boolean)) {
     let l: Line;
     try {
@@ -743,11 +748,15 @@ export const estimate = (
     } catch {
       continue;
     }
-    if (!l || typeof l !== "object" || l.project !== project.name) continue;
-    if (!l.issue || String(l.issue) === "0" || typeof l.ms !== "number") continue;
+    if (!l || typeof l !== "object" || l.project !== project.name || typeof l.ms !== "number") continue;
+    if (!l.issue || String(l.issue) === "0") {
+      if (l.phase === "base gates" || l.phase === "verify") stageLines.push(l);
+      continue;
+    }
     ticketLines.push(l);
   }
-  for (const l of recentWindow(ticketLines)) {
+  const window = recentWindow(ticketLines);
+  for (const l of window) {
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false };
     // A landing gate is the landing worker's time, not the ticket's own pipeline.
@@ -771,6 +780,8 @@ export const estimate = (
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
+  // The history tickets some ticket of the run was priced from: the line's count, not the window's.
+  const pricedFrom = new Set<Group>();
   const thin = new Map<string, number>();
   const per = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
@@ -781,6 +792,7 @@ export const estimate = (
     const priced = (pool: Group[]) => {
       const same = pool.filter((g) => g.carried === carried);
       const use = same.length ? same : pool;
+      for (const g of use) pricedFrom.add(g);
       return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
     };
     if (carried && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).some((g) => g.carried)) lowCarried++;
@@ -800,8 +812,11 @@ export const estimate = (
   const minutes = (pick: (p: (typeof per)[number]) => number, gate: (p: (typeof per)[number]) => number, land: (p: (typeof per)[number]) => number) => {
     // The tickets' summed figures over the slots, not whole rounds: a sixth ticket on five slots starts when the first slot
     // frees, so it is not a round of its own. No run is shorter than its slowest ticket, whatever the slots.
-    const serial = Math.max(sum(pick) / Math.max(slots, 1), per.reduce((n, p) => Math.max(n, pick(p)), 0));
-    const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? pick(per[at]) : 0), 0) : chain * (sum(pick) / Math.max(tickets, 1));
+    // The run ends when its last ticket has landed: one landing after the pipelines.
+    const serial = Math.max(sum(pick) / Math.max(slots, 1), per.reduce((n, p) => Math.max(n, pick(p)), 0)) + sum(land) / Math.max(tickets, 1);
+    // A dependant starts only once its blocker has landed, so each link is its pipeline and its landing, the last one's too.
+    const link = (p: (typeof per)[number]) => pick(p) + land(p);
+    const chained = detail.chainAt?.length ? detail.chainAt.reduce((n, at) => n + (per[at] ? link(per[at]) : 0), 0) : chain * (sum(link) / Math.max(tickets, 1));
     // Every ticket's gate passes share the machine's gate slots, whatever the sandboxes: the run cannot finish before they have all run.
     // The landing gates take gates slots too, beside the tickets' own passes.
     const gated = detail.gateSlots && detail.gateSlots > 0 ? (sum(gate) + sum(land)) / detail.gateSlots : 0;
@@ -816,11 +831,21 @@ export const estimate = (
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
   };
   const span = (lo: number, hi: number, show: (n: number) => string) => (show(lo) === show(hi) ? show(lo) : `${show(lo)} to ${show(hi)}`);
-  const total = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
+  // Base gates and verify, from the runs the window holds: one each per run, before every ticket and after the last.
+  const windowRuns = new Set(window.map((l) => String(l.run)));
+  const stage = (phase: string, at: (xs: number[]) => number) => {
+    const ms = stageLines.filter((l) => l.phase === phase && windowRuns.has(String(l.run))).map((l) => l.ms as number);
+    return ms.length ? at(ms) : 0;
+  };
+  const steps = (at: (xs: number[]) => number) => stage("base gates", at) + stage("verify", at);
+  const midSteps = steps(median as (xs: number[]) => number);
+  const highSteps = steps((xs) => percentile(xs, HIGH));
+  const bound = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
   const split = carriedCount ? ` (${carriedCount} carried, ${tickets - carriedCount} fresh)` : "";
   const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
-  const landBound = highMs.landed > Math.max(highMs.serial, highMs.chained, highMs.gated);
+  // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
+  const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
   const gateBound = landBound
     ? " (landing gates, one after another, set the time)"
     : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
@@ -830,9 +855,9 @@ export const estimate = (
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
   ].join("");
   return (
-    `Estimate (rough, from ${counted.length} ticket(s) in the last 3 runs): ` +
+    `Estimate (rough, from ${pricedFrom.size} ticket(s) in the last 3 runs): ` +
     `about ${span(sum((p) => p.mid.inTokens), sum((p) => p.high.inTokens), k)} tokens in / ${span(sum((p) => p.mid.out), sum((p) => p.high.out), k)} out ` +
-    `and ${span(total(midMs), total(highMs), clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}${gateBound}.${low}`
+    `and ${span(bound(midMs) + midSteps, bound(highMs) + highSteps, clock)} for ${tickets} ticket(s)${split}, ${slots} at a time${sequence}${gateBound}.${low}`
   );
 };
 

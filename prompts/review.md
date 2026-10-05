@@ -69,12 +69,13 @@ implementer's.
 
 Constraints:
 
-- **Do not expand scope.** If you find a real problem outside this ticket, {{KIT_NEW_TICKET_REVIEW}} rather than fixing it here.
+- **Do not expand scope.** If you find a real problem outside this ticket, give it a `<followup>` line (see
+  "Finishing") rather than fixing it here.
 - **A problem named only in prose is lost.** The closing summary carries the tagged lines of your
   final message, not its prose, so a "not fixed (minor)" or a "this probably needs an Upgrading note"
   that you write there and do nothing else about is never seen. Each problem you find ends one of
   three ways: fixed (if it is in scope - and a missing changelog or Upgrading note for this change
-  is), filed as a new ticket as above (if it is not), or, for an acceptance criterion you cannot do,
+  is), filed as a new ticket through a `<followup>` line (if it is not), or, for an acceptance criterion you cannot do,
   left as an `<unmet>` line under "Finishing".
 - **A fix you commit is proved by a test, the same rule as the implementer's.** A bug you fix or a
   behaviour you change gets a test that fails without your fix, at the public interface; where it
@@ -111,6 +112,14 @@ not you committed:
 with your sentence in place of the dots. The branch still merges if its gates are green; the
 line puts it in front of a person afterwards. Leave it out when a gate runs the changed code,
 even indirectly.
+
+**For each problem you found outside this ticket**, a line of its own, whether or not you committed:
+
+<followup>title - one line of evidence</followup>
+
+with a short ticket title, then the one line that shows it is real (a file and line, a command and
+what it printed). The orchestrator files each as a new ticket for triage, naming this ticket, so do not
+file it yourself.
 
 {{KIT_CHANGELOG}}**If an acceptance criterion is still unmet after your review** - the implementer skipped it and
 you could not do it, or it needs a decision that is not yours - say which one, in one sentence, on

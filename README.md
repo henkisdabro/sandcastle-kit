@@ -92,7 +92,7 @@ New to GitHub or to agents? These are the only terms you need.
 | **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
 | **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
 | **`ready-for-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. (Earlier versions called it `needs-human`; a ticket carrying that is still held.) |
-| **`needs-triage`** | Put by agents on follow-up tickets they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
+| **`needs-triage`** | Put by the kit on the follow-up tickets it files from the agents' `<followup>` lines (a label on GitHub, a `Status:` in ticket files). Never queued by itself: the closing summary lists them for you to triage. |
 
 > [!TIP]
 > **AI coding agent?** Start at [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this), then run `sandcastle doctor`.
@@ -309,21 +309,6 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
-### 🧩 A criterion left undone
-
-Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
-agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
-branch still lands if its gates are green, but the ticket stays open with a comment naming the
-criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
-finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
-ticket is still queued, the summary lists it under Runnable now and the next run picks up the
-remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
-ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
-person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
-to the hold label. The status view shows such a ticket as merged and counts it under merged, not
-needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
-lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
-
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -357,6 +342,31 @@ that the commit merges exactly the base tip and the gated head and changes nothi
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources when the merged base is gated again at the end of the run.
+
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
+ticket is still queued, the summary lists it under Runnable now and the next run picks up the
+remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
+ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
+person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
+to the hold label. The status view shows such a ticket as merged and counts it under merged, not
+needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
+lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
+
+### 🧩 A problem outside the ticket
+
+An agent that finds a problem outside its ticket - implementer, reviewer or repair - fixes nothing
+for it and files nothing itself: it ends its final message with a `<followup>title - one line of
+evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
+project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
+body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
+file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
+triage`. A dry run files none and lists them instead.
 
 ## 📋 Queue: what agents work on
 
@@ -543,7 +553,7 @@ moments earlier (the search index lags), so a run started straight after `--add-
 another run of the same project is live, or while any check fails. It prints the tickets it will
 start (with any `model:` override), the models, the Claude Code and Codex versions, the machine-wide
 pool and `Keep awake: on`, and - once the project has run before - a rough estimate of tokens and
-time, as a range from the median to the 80th percentile of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low; a model with fewer than five tickets there is blended with all of them, its own figures weighted by its share of five, and the line says so: `claude-opus-5-5 from 2 tickets, blended`). A carried branch (one ahead of the base, which a base merge may conflict with) is priced from earlier carried tickets - those that had a conflict resolved or ran as carried - and a fresh ticket from the rest; the line gives the split `(N carried, M fresh)`, and says the estimate is low for a carried ticket with no carried history. The tickets are priced as their summed figures divided by the slots, not in whole rounds (a sixth ticket on five slots starts when the first slot frees), and never below the slowest single ticket's figure, at the median and at the high end alike. When a `Blocked by` chain in the run takes longer than that, the chain sets the time, as the sum of its own tickets' times: `(N tickets in sequence)`. The machine-wide gates pool is counted too: every ticket's gate passes and landing gates (from earlier runs' gate lines, without the wait for a slot) share the `maxGates` slots, and when that takes longer than the rest it sets the time: `(gate runs on N slot(s) set the time)`. Landings go one at a time, so the landing gates added up are a floor on the end of their own: `(landing gates, one after another, set the time)`. Tickets that others wait for start first; a ticket
+time, as a range from the median to the 80th percentile of the tickets in the last three runs that the same implement model built (a ticket's `model:` label, else the default; a model with no history there is estimated from all of them and the line says the estimate is low; a model with fewer than five tickets there is blended with all of them, its own figures weighted by its share of five, and the line says so: `claude-opus-5-5 from 2 tickets, blended`). A carried branch (one ahead of the base, which a base merge may conflict with) is priced from earlier carried tickets - those that had a conflict resolved or ran as carried - and a fresh ticket from the rest; the line gives the split `(N carried, M fresh)`, and says the estimate is low for a carried ticket with no carried history. The tickets are priced as their summed figures divided by the slots, not in whole rounds (a sixth ticket on five slots starts when the first slot frees), and never below the slowest single ticket's figure, at the median and at the high end alike. The last ticket's landing (its landing gates) comes after that. When a `Blocked by` chain in the run takes longer, the chain sets the time, as the sum of its own tickets' times and their landings (a dependant starts only once its blocker has landed): `(N tickets in sequence)`. The machine-wide gates pool is counted too: every ticket's gate passes and landing gates (from earlier runs' gate lines, without the wait for a slot) share the `maxGates` slots, and when that takes longer than the rest it sets the time: `(gate runs on N slot(s) set the time)`. Landings go one at a time, so the landing gates added up are a floor on the end of their own: `(landing gates, one after another, set the time)`. The base gates and verify of the same runs are added on top, as they run before every ticket and after the last. `from N ticket(s)` counts the history tickets that priced the run (those of its models, carried or fresh), not every ticket of the last three runs. A ticket's wait for another ticket's fix, like a wait for a gates slot, is left out of its usual time. Tickets that others wait for start first; a ticket
 whose blocker is in the run starts when that blocker has landed, one whose blocker is open and not
 in the run waits for a later run, and so does one whose existing branch changes a file another ready
 ticket's branch also changes. Then come the image check, preflight, the hook check and the base
@@ -676,7 +686,8 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
-undone, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
+undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
+the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
@@ -1073,6 +1084,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
+| `cpus` | the VM's CPUs ÷ concurrency | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset: the container runtime's CPUs (`docker info`'s NCPU) divided by the run's effective concurrency, at least 2 and never more than the VM has; a gate run in a sandbox gets the same limit. A number sets the limit (cut to the VM's CPUs, which `docker run` would otherwise refuse), `false` sets none. The run's start lines say which applies (`Sandbox CPUs: 3 each`) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
@@ -1154,8 +1166,8 @@ A key not in this table is refused, naming the nearest real one, as the project 
 
 Claude Code ships almost daily, so the base image follows a release channel instead of a version
 written into the Dockerfile: by default Claude Code's `stable` channel (`"latest"` or an exact version
-can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases are
-skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
+can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases,
+deprecated or unpublished releases and any above npm's `latest` tag are skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
 build`, and the start of every run) and makes them part of the image's tag. A release therefore
 triggers one rebuild, of about a minute, and every sandbox of a run has the same version. A run's
 start lines and `sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and
@@ -1289,11 +1301,15 @@ Several projects can run at once; one project runs once at a time (`run.lock`). 
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
-[personal settings](#personal-settings). When every slot is taken, a freed slot goes to the run
+[personal settings](#personal-settings). The gate cap does not reach the tests an agent runs in its
+own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
+divided by the run's concurrency). When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`).
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The
+base check a run makes mid-run starts its sandbox inside the slot of the ticket that asked, so it
+never waits for one, but it is counted: while it lives the pool can read one past its cap (`7/6`).
 
 Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
 slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch

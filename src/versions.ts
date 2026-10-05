@@ -87,23 +87,39 @@ const valid = (v: unknown): string => {
   return s;
 };
 
+/** Whether plain `x.y.z` version `a` is above `b`, in semver order. */
+const above = (a: number[], b: number[]) => {
+  const i = a.findIndex((n, k) => n !== b[k]);
+  return i >= 0 && a[i] > b[i];
+};
+
 /**
- * The newest plain `x.y.z` in an npm packument whose `time` entry is at least the cooldown old.
- * Pre-releases and the platform builds (`0.160.0-linux-x64`) are not plain, so they never count.
+ * The newest plain `x.y.z` in an npm packument whose `time` entry is at least the cooldown old,
+ * still published, not deprecated and not above `dist-tags.latest`. Pre-releases and the platform
+ * builds (`0.160.0-linux-x64`) are not plain, so they never count.
  * Throws when there is none, which resolves like any failed fetch.
  */
 const codexAfterCooldown = (packument: unknown, now: number): string => {
-  const time = (packument as { time?: Record<string, unknown> } | null)?.time;
+  const doc = packument as { time?: Record<string, unknown>; versions?: Record<string, unknown>; "dist-tags"?: Record<string, unknown> } | null;
+  const time = doc?.time;
   if (!time || typeof time !== "object") throw new Error("npm packument has no publish times");
+  const versions = doc?.versions && typeof doc.versions === "object" ? doc.versions : {};
+  // A release deprecated for being broken can still be the newest past the cooldown, an
+  // unpublished one keeps its `time` entry (and would fail every image build), and `latest`
+  // moved back after a bad release marks everything above it as not to be used.
+  const latestTag = doc?.["dist-tags"]?.latest;
+  const ceiling = typeof latestTag === "string" && /^\d+\.\d+\.\d+$/.test(latestTag) ? latestTag.split(".").map(Number) : undefined;
   let best: number[] | undefined;
   for (const [version, published] of Object.entries(time)) {
     if (!/^\d+\.\d+\.\d+$/.test(version)) continue;
+    const manifest = versions[version];
+    if (!manifest || typeof manifest !== "object" || (manifest as { deprecated?: unknown }).deprecated) continue;
     const at = typeof published === "string" ? Date.parse(published) : NaN;
     if (!(now - at >= CODEX_COOLDOWN_MS)) continue;
     const parts = version.split(".").map(Number);
+    if (ceiling && above(parts, ceiling)) continue;
     // Semver order, not publish order: a patch release of an older line can be published later.
-    const i = best ? parts.findIndex((n, k) => n !== best![k]) : 0;
-    if (!best || (i >= 0 && parts[i] > best[i])) best = parts;
+    if (!best || above(parts, best)) best = parts;
   }
   if (!best) throw new Error("no Codex release is past the cooldown");
   return best.join(".");

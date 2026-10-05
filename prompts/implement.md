@@ -50,7 +50,7 @@ ticket names. The project rules below say what else to read.
 
 - **Scope is the ticket and nothing else.** Every acceptance criterion the ticket lists is in scope,
   and so is a regression your change causes: fix both here, never "for the next ticket". Anything you
-  discover that is out of scope becomes a new {{KIT_NEW_TICKET}}, never a TODO comment and never scope creep.
+  discover that is out of scope becomes a `<followup>` line (see "Finishing"), never a TODO comment and never scope creep.
 - **Never remove a safety guard to make something pass.** A failing assertion, a blocking lint rule
   or a type error is a signal to fix the cause. Deleting the guard is a blocked outcome, not a fix -
   unless the ticket itself names that guard as the defect *and* you can show what independently
@@ -131,9 +131,14 @@ stays open with that criterion named, and the next run picks up the remainder. L
 every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
 to omit it.
 
-**A limitation, risk or trade-off you judge outside the ticket** does not stay in your final message,
-which no reviewer and no tracker reads: file it as a new {{KIT_NEW_TICKET}}, or state it in the
-commit body for the reviewer.
+**A problem, limitation, risk or trade-off you judge outside the ticket** does not stay in the prose of
+your final message, which no reviewer and no tracker reads. Put each one on a line of its own:
+
+<followup>title - one line of evidence</followup>
+
+with a short ticket title, then the one line that shows it is real (a file and line, a command and
+what it printed). The orchestrator files each as a new ticket for triage, naming this ticket, so do not
+file it yourself. A note about this change for the reviewer goes in the commit body instead.
 
 **If the ticket turns out to be already fixed, false, or latent:** commit nothing. {{KIT_NOCHANGE}}
 Then output `<promise>COMPLETE</promise>`.

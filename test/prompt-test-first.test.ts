@@ -24,7 +24,8 @@ test("the implementer tests at the seam, reproduces a bug first, and runs each g
 
 test("the implementer files what it leaves outside the ticket", () => {
   const p = read("prompts", "implement.md");
-  assert.match(p, /A limitation, risk or trade-off you judge outside the ticket\*\* does not stay in your final message/);
+  assert.match(p, /A problem, limitation, risk or trade-off you judge outside the ticket\*\* does not stay in the prose of your final message/);
+  assert.match(p, /<followup>title - one line of evidence<\/followup>/);
 });
 
 test("neither agent stashes in the shared .git, and both are told how to run a test without the change", () => {

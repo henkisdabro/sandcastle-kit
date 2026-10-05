@@ -23,6 +23,7 @@ import { LANDING_GATES } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
+import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
@@ -79,6 +80,8 @@ export type Facts = {
   branchGone?: string[];
   /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
   filed?: { id: string; title: string }[];
+  /** What the agents' `<followup>` lines became (the run record's `followUps`): filed for triage, or only listed in a dry run. */
+  followUps?: FiledFollowUp[];
   /** The run record's last stage and exit code: "base gates" with a non-zero exit is a run that never started anything. */
   stage?: string;
   exitCode?: number | null;
@@ -320,6 +323,11 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     }
   }
 
+  // The record is a file in a repository: an entry without a title and a source says nothing.
+  const followUps: FiledFollowUp[] = (Array.isArray(run.followUps) ? run.followUps : []).filter(
+    (u: unknown): u is FiledFollowUp => !!u && typeof (u as FiledFollowUp).title === "string" && typeof (u as FiledFollowUp).from === "string" && typeof (u as FiledFollowUp).phase === "string",
+  );
+
   // Only this run's: an entry an earlier run wrote says nothing about this run's tickets.
   const outcomes = Object.fromEntries(
     Object.entries(readOutcomes(root)).flatMap(([id, o]) => (o.run === run.startedAt && o.kind ? [[id, o.kind]] : [])),
@@ -359,7 +367,9 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     mergedByHand: byHand,
     mergedByHandClosed: byHandClosed,
     branchGone,
-    filed,
+    // The kit's own filings are listed as follow-ups, with their source: not again as issues someone opened.
+    filed: filed.filter((i) => !followUps.some((u) => u.id === i.id)),
+    followUps,
     stage: run.stage,
     exitCode: run.exitCode,
     baseGates: run.baseGates,
@@ -477,6 +487,8 @@ export const render = (f: Facts, plain = false): string => {
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
   const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => sectionOf(t.state) && !LEFT.includes(t.state!) && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
+  // Tickets now in the tracker for a person to triage: a dry run's follow-ups were never filed.
+  const toTriage = (f.filed ?? []).length + (f.followUps ?? []).filter((u) => u.id).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
@@ -494,7 +506,7 @@ export const render = (f: Facts, plain = false): string => {
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
-      `${(f.filed ?? []).length ? `${(f.filed ?? []).length} to triage - ` : ""}` +
+      `${toTriage ? `${toTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -609,6 +621,14 @@ export const render = (f: Facts, plain = false): string => {
       }),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
+      ...(f.followUps ?? []).map((u) => {
+        const from = `from ${refOf(u.from)} (${u.phase})`;
+        return u.id
+          ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
+          : u.failed
+            ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
+            : `- ${u.title} - ${from}: a real run files it for triage`;
+      }),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
