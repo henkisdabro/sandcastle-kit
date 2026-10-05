@@ -21,6 +21,7 @@ const { cpusLine, sandboxCpus } = await import("../src/sandbox.ts");
 const tmp = mkdtempSync(join(tmpdir(), "sandcastle-cpus-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
+const pool = { concurrency: 4, maxGates: 2 };
 const info = (ncpu: number) => () => JSON.stringify({ NCPU: ncpu, MemTotal: 16 * 2 ** 30 });
 let n = 0;
 const load = (extra: string) => {
@@ -32,47 +33,47 @@ const load = (extra: string) => {
 
 test("12 CPUs at concurrency 4 give each sandbox 3", async () => {
   const project = await load("");
-  assert.equal(sandboxCpus(project, 4, info(12)), 3);
-  assert.equal(cpusLine(project, 3), "Sandbox CPUs: 3 each");
+  assert.equal(sandboxCpus(project, "ticket", pool, info(12)), 3);
+  assert.equal(cpusLine(project, 3, 3), "Sandbox CPUs: 3 each");
 });
 
 test("4 CPUs at concurrency 4 still give each sandbox 2", async () => {
-  assert.equal(sandboxCpus(await load(""), 4, info(4)), 2);
+  assert.equal(sandboxCpus(await load(""), "ticket", pool, info(4)), 2);
 });
 
 test("a one-CPU VM never gets a limit above what it has", async () => {
-  assert.equal(sandboxCpus(await load(""), 4, info(1)), 1);
+  assert.equal(sandboxCpus(await load(""), "ticket", pool, info(1)), 1);
 });
 
 test("the project's cpus wins over the VM's split", async () => {
   const project = await load(", cpus: 5");
-  assert.equal(sandboxCpus(project, 4, info(12)), 5);
-  assert.equal(cpusLine(project, 5), "Sandbox CPUs: 5 each (cpus in the project config)");
+  assert.equal(sandboxCpus(project, "ticket", pool, info(12)), 5);
+  assert.equal(cpusLine(project, 5, 5), "Sandbox CPUs: 5 each (cpus in the project config)");
 });
 
 test("a project's cpus above the VM's CPUs is cut to what the VM has, which docker would otherwise refuse", async () => {
   const project = await load(", cpus: 16");
-  assert.equal(sandboxCpus(project, 4, info(8)), 8);
-  assert.equal(cpusLine(project, 8), "Sandbox CPUs: 8 each (cpus 16 in the project config, but the VM has 8)");
-  assert.equal(sandboxCpus(project, 4, () => undefined), 16, "with no CPU count to check against, the project's figure stands");
+  assert.equal(sandboxCpus(project, "ticket", pool, info(8)), 8);
+  assert.equal(cpusLine(project, 8, 8), "Sandbox CPUs: 8 each (cpus 16 in the project config, but the VM has 8)");
+  assert.equal(sandboxCpus(project, "ticket", pool, () => undefined), 16, "with no CPU count to check against, the project's figure stands");
 });
 
 test("cpus: false sets no limit", async () => {
   const project = await load(", cpus: false");
-  assert.equal(sandboxCpus(project, 4, info(12)), undefined);
-  assert.equal(cpusLine(project, undefined), "Sandbox CPUs: no limit (cpus: false)");
+  assert.equal(sandboxCpus(project, "ticket", pool, info(12)), undefined);
+  assert.equal(cpusLine(project, undefined, undefined), "Sandbox CPUs: no limit (cpus: false)");
 });
 
 test("docker info failing sets no limit rather than a guess", async () => {
   const project = await load("");
-  assert.equal(sandboxCpus(project, 4, () => undefined), undefined);
-  assert.equal(sandboxCpus(project, 4, () => "not json"), undefined);
-  assert.equal(sandboxCpus(project, 4, () => "{}"), undefined);
-  assert.equal(cpusLine(project, undefined), "Sandbox CPUs: no limit (docker info gave no CPU count)");
+  assert.equal(sandboxCpus(project, "ticket", pool, () => undefined), undefined);
+  assert.equal(sandboxCpus(project, "ticket", pool, () => "not json"), undefined);
+  assert.equal(sandboxCpus(project, "ticket", pool, () => "{}"), undefined);
+  assert.equal(cpusLine(project, undefined, undefined), "Sandbox CPUs: no limit (docker info gave no CPU count)");
 });
 
 test("a cpus that is neither a positive number nor false is refused", async () => {
   for (const bad of ["0", "-2", '"4"', "true"]) {
-    await assert.rejects(load(`, cpus: ${bad}`), (e: Error) => e instanceof OperatorError && /`cpus` must be a number above 0 \(CPUs per sandbox\) or false/.test(e.message));
+    await assert.rejects(load(`, cpus: ${bad}`), (e: Error) => e instanceof OperatorError && /`cpus` must be a number of 0\.01 or more \(CPUs per sandbox\) or false/.test(e.message));
   }
 });

@@ -191,7 +191,7 @@ flowchart LR
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
 | 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
-| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. A failure that is red on the base too, in a test file the branch did not change, gets no repair: the gates run once on the base's tip, and the closing summary names the test once under Needs you. |
+| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. A pass that commits nothing (the repairer judged the red a flake) is not counted: the run's per-ticket line says `repair made no change`, and `repaired=N` counts only passes that committed. A failure that is red on the base too, in a test file the branch did not change, gets no repair: the gates run once on the base's tip, and the closing summary names the test once under Needs you. |
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
 | 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements and tests at the ticket's seams, Claude Opus 5.5 reviews the tests as well as the code, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
@@ -725,7 +725,9 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
 undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
-the run, counted in the header as "to triage"); **Needs
+the run, counted in the header as "to triage" - as are a dry run's follow-ups, which a real run would
+file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
+you"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
@@ -1128,7 +1130,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
-| `cpus` | the VM's CPUs ÷ concurrency | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset: the container runtime's CPUs (`docker info`'s NCPU) divided by the run's effective concurrency, at least 2 and never more than the VM has; a gate run in a sandbox gets the same limit. A number sets the limit (cut to the VM's CPUs, which `docker run` would otherwise refuse), `false` sets none. The run's start lines say which applies (`Sandbox CPUs: 3 each`) |
+| `cpus` | the VM's CPUs ÷ concurrency, ÷ `maxGates` for gate-only sandboxes | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset, from the container runtime's CPUs (`docker info`'s NCPU), each at least 2 and never more than the VM has: a **ticket's sandbox** (an agent works in it, and its gates run in it) gets them divided by the run's effective concurrency; a **gate-only sandbox** - a landing, the base and verify gates, `sandcastle gates` and `sandcastle land` - gets them divided by `maxGates`, since landings go one at a time and set the run's end (6 on a 12-CPU VM with `maxGates` 2, where a ticket's gets 2 at concurrency 5). A number sets the limit for both kinds (cut to the VM's CPUs, which `docker run` would otherwise refuse; at least 0.01, which `docker run` accepts), `false` sets none. The run's start lines say which applies (`Sandbox CPUs: 2 each, 6 for landing and base gates`) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
@@ -1348,7 +1350,8 @@ wait on the model, so the sandbox cap mainly limits memory and plan usage; gates
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
 [personal settings](#personal-settings). The gate cap does not reach the tests an agent runs in its
 own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
-divided by the run's concurrency). When every slot is taken, a freed slot goes to the run
+divided by the run's concurrency for a ticket's sandbox, and by `maxGates` for a gate-only one: a
+landing, the base and verify gates, `sandcastle gates` and `sandcastle land`). When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run, a
 landing's gates (and the base and verify gates) take a freed gate slot before the run's ticket
@@ -1424,9 +1427,13 @@ figure ("no agent baseline measured yet"). It prints each figure with where it c
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
 high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
-file backs) is read every 10 seconds while a gate pass runs, and once after it, and recorded as
+file backs) is read once as a gate pass starts and every 10 seconds while it runs, and recorded as
 `anonMib` (the largest reading: `anon` has no high-water mark of its own, so a reading after the test
-workers have exited would miss them), and `size` prices the gate from it. When the gate figure is
+workers have exited would miss them, and none is taken then), and `size` prices the gate from it. A line
+records that it was written this way (`sampled`): the anonymous figures of an older line, which may hold a
+reading taken after the gates, are not used, and a figure under 256 MiB is a sandbox at rest and does not
+count either, so those runs are priced from the peak until a newer run has recorded them. A VM whose memory
+less the headroom is under one gate figure is told it cannot fit one gate sandbox; the pool keeps 1 and 1. When the gate figure is
 `anonMib` and the effective limits, priced the same way (`min(maxGates, maxSandboxes)` gates at the
 gate figure, the other sandboxes at the agent baseline), need more than the VM's memory less the
 headroom, doctor and the run's start line warn, naming both numbers and the `config.json` key (or the

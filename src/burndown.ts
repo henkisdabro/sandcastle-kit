@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -57,9 +57,9 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
+import { accountLanding, type Context, createLedger, outcomesFile, repairWords } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -83,7 +83,9 @@ type Outcome = {
   /** The branch tip the gates passed on; landing refuses a branch that moved since. */
   head?: string;
   reviewCommits: number;
+  /** The repair passes that committed: one that changed nothing (the repairer judged the red a flake) is `idleRepairs`. */
   repairs: number;
+  idleRepairs?: number;
   gates: Gate[];
   /** Test ids the last red gate named. */
   failing?: string[];
@@ -106,7 +108,7 @@ type Outcome = {
  * so it reports what it carries - its commits and the gates it passed at its green head - not the
  * nothing of a ticket that did no work.
  */
-export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates"> & Partial<Pick<Outcome, "repairs">>): Outcome => ({
+export const heldResolution = (issue: string, branch: string, heldNote: string, carried: Pick<Outcome, "commits" | "reviewCommits" | "gates"> & Partial<Pick<Outcome, "repairs" | "idleRepairs">>): Outcome => ({
   issue,
   branch,
   status: "held",
@@ -746,6 +748,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       const requeued = requeuedAs.has(issue.id);
       // The repair passes of the first attempt, so the outcome line counts the ticket's whole run: `repairs` below bounds one attempt's loop only.
       const earlierRepairs = requeued ? firstAttemptRepairs(results, issue.id) : 0;
+      const earlierIdle = requeued ? firstAttemptIdleRepairs(results, issue.id) : 0;
       const behind = Number(sh("git", ["rev-list", "--count", `${branch}..${base}`], project.root));
       // Read before the base merge, which moves the tip. A branch at the head it
       // was reviewed and gated green on, or past it by merge commits only, needs no
@@ -874,6 +877,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             commits: ownCommits(base, branch, project.root),
             reviewCommits: requeued ? firstAttemptReviewCommits(results, issue.id) : 0,
             repairs: earlierRepairs,
+            idleRepairs: earlierIdle,
             gates: readHeads(project.root)[issue.id]?.gates ?? [],
           });
         }
@@ -968,7 +972,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const { blocked, report } = tags(impl.stdout);
           if (blocked) {
             notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle could not finish this.\n\n${blocked}` });
-            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
+            return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, gates: [] };
           }
           if (report) addReport(issue.id, "Implementer", report);
         }
@@ -985,7 +989,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const branchCommits = Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], project.root));
         if (impl.commits.length === 0 && branchCommits === 0) {
           // Nothing lands for a nochange, so nothing else would carry the report.
-          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, gates: [] };
+          return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, gates: [] };
         }
 
         // Only a base merge since the last completed review: review the merge, not the branch.
@@ -1049,7 +1053,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
-      // A land-only re-run ran no agent here, and gives none.
+      // A land-only re-run gives one only when a narrow review ran in this sandbox (after a resolve, or for a carried merge).
       if (agentsRan) await agentBaseline(sandbox);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
@@ -1097,6 +1101,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
       const waitedFor = new Set<string>();
       let repairs = 0;
+      // Passes that left the branch where it was: the repairer judged the red a flake, or could do nothing.
+      let idle = 0;
       for (
         let red = gated.failure;
         red && red.exitCode !== 124 && attempts > 0 && repairs < attempts + 2 && (repairs < attempts || !seen.has(failureKey(red)));
@@ -1159,6 +1165,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           `${ref(issue.id)}: ${forced ? `test red gate (SANDCASTLE_TEST_RED_GATE; ${failure.name} passed)` : why} - repair pass ${repairs}`,
         );
         forced = false;
+        const beforePass = sh("git", ["rev-parse", branch], project.root);
         // A repair that dies (idle timeout, agent exit) leaves the branch red,
         // not the issue crashed: the gate results stay in the report. A spent
         // allowance still has to stop the queue, so that one is rethrown.
@@ -1193,6 +1200,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             return false;
           },
         );
+        if (sh("git", ["rev-parse", branch], project.root) === beforePass) idle++;
         if (!fixed) break;
         gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
       }
@@ -1260,7 +1268,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         // report 0 commits while shipping its work. Without the kit's base merge-ins.
         commits: ownCommits(base, branch, project.root),
         reviewCommits,
-        repairs: earlierRepairs + repairs,
+        repairs: earlierRepairs + repairs - idle,
+        idleRepairs: earlierIdle + idle,
         gates: gated.gates,
         failing: gated.failure ? failingTests(gated.failure.output) : undefined,
         head,
@@ -1427,13 +1436,18 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
-  // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
-  // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
+  // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
+  // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
+  // gates, which run one at a time and set the run's end (`gateProject` below opens those).
   // One `docker info` for both this and the pool warning below; docker not answering stops the run here, before anything is recorded or started.
   const info = (turn?.docker ?? readDockerInfo)();
-  const cpus = sandboxCpus(project, settings.concurrency.effective, () => info);
-  console.log(cpusLine(project, cpus));
-  project = { ...project, cpus };
+  const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
+  const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
+  const gateCpus = sandboxCpus(project, "gate", pool, () => info);
+  console.log(cpusLine(project, ticketCpus, gateCpus));
+  // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
+  const gateProject = { ...project, cpus: gateCpus };
+  project = { ...project, cpus: ticketCpus };
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -1592,6 +1606,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const image = await timed("", "image", () => ensureImage(project, false, versions));
+  // The base the image was built beside: what the merges changed since, in a Dockerfile, is not in the image the verify uses.
+  const startTip = sh("git", ["rev-parse", base], project.root);
   const prompts = renderPrompts(project, tracker, DRY_RUN);
   // One entry per distinct override model, naming every ticket that asks for it.
   const extraModels = [...new Set([...overrides.values()].flatMap((o) => (o.model ? [o.model] : [])))].map((model) => {
@@ -1662,7 +1678,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(project, image, planFile, true, runId));
+      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -1763,7 +1779,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     reports,
     run,
     dryRun: DRY_RUN,
-    opener: sandboxOpener(project, image, planFile),
+    opener: sandboxOpener(gateProject, image, planFile),
     runId,
     withdrawal,
     host,
@@ -1826,7 +1842,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
-    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId, false),
+    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
@@ -2036,11 +2052,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
+  let newDockerfiles: string[] = [];
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => gateBase(gateProject, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
     verify = gated.gates;
+    newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);
     if (writeGateLog(join(project.root, VERIFY_LOG), `# gates on the merged ${base} at ${at}, ${new Date().toISOString()}: ${gateLine(verify)}`, gated.failures)) {
@@ -2066,7 +2084,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
     const o = r.value;
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
-    const repaired = o.repairs ? ` repaired=${o.repairs}` : "";
+    const repaired = repairWords(o);
     const time = took.has(o.issue) ? ` ${minutes(took.get(o.issue)!)}` : "";
     const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
@@ -2083,7 +2101,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       ? `DRY RUN BREACHED: ${changed.map(([n, was]) => `${ref(n)} ${was} -> ${after.get(n)}`).join("; ")} - an agent wrote to the tracker.`
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
-  run.update({ verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify) } : null, keptWorktrees, dryRunCheck });
+  run.update({
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    keptWorktrees,
+    dryRunCheck,
+  });
   console.log(`\n${await closingReport(project, turn && { level: turn.settings.autonomy, turn: turn.turn })}\n`);
   view.close(
     `merged ${merged.length}` +

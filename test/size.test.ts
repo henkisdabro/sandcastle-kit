@@ -142,7 +142,8 @@ test("a docker info that fails is an OperatorError telling the person to start t
 
 const NOW = Date.parse("2026-05-10T00:00:00Z");
 type Figures = { peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };
-const ran = (f: Figures) => [{ ts: "2026-05-09T00:00:00.000Z", project: "abc123", run: "r1", ...f }];
+// `sampled: 2` is the mark of a line whose anon figures were read only while a phase ran (src/peaks.ts); size counts no anon figure without it.
+const ran = (f: Figures) => [{ ts: "2026-05-09T00:00:00.000Z", project: "abc123", run: "r1", sampled: 2, ...f }];
 const measuredOn = (cpus: number, gib: number, f: Figures | undefined, over: Partial<Readers> = {}) =>
   reading(orbstack(cpus, gib), { peaks: () => (f ? ran(f) : []), now: () => NOW, projectId: () => "abc123", ...over });
 

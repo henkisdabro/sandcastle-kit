@@ -69,7 +69,8 @@ test("running every gate still stops at one that timed out", async () => {
   const run = await runGates(project, box, "fixture gates", true);
   assert.deepEqual(run.gates.map((g) => [g.name, g.pass]), [["lint", true], ["test", false]]);
   assert.ok(!box.ran.some((c) => c.includes("run-build")), "build ran beside a timed-out test gate");
-  assert.match(box.ran[0], /^timeout -k \d+ /);
+  // The first gate command, not the first command the sandbox saw: the memory read as the pass starts comes before it.
+  assert.match(box.ran.find((c) => c.includes("run-lint")) ?? "", /^timeout -k \d+ /);
   // Said as a timeout wherever the operator reads it, not as a bare exit 124.
   assert.equal(gateLine(run.gates), "lint=pass test=TIMEOUT");
   assert.match(run.failure?.output ?? "", /^The gate timed out after 45 min and was stopped/);

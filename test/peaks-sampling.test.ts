@@ -33,8 +33,12 @@ const MIB = 2 ** 20;
 beforeEach(() => mock.timers.enable({ apis: ["setInterval"] }));
 afterEach(() => mock.timers.reset());
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-/** Ten seconds pass on the sampler's clock, and the read it started answers. */
+/**
+ * Ten seconds pass on the sampler's clock, and the read it started answers. The read before them (a phase's first, taken as
+ * it starts) has answered by then, as a sandbox's does in milliseconds: the sampler takes one read at a time.
+ */
 const tenSeconds = async () => {
+  await settle();
   mock.timers.tick(10_000);
   await settle();
 };
@@ -82,7 +86,7 @@ test("a gate pass's anonMib is the highest anon read while it ran, not the sandb
   // At close the sandbox is at rest with more anon than its gate used: that reading describes no phase.
   k.anon = 5000;
   assert.equal(await recordPeak(box, TMP, "run-1", file, new Date("2026-10-05T10:00:00Z")), 3000);
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { ts: "2026-10-05T10:00:00.000Z", project: projectId(TMP), run: "run-1", peakMib: 3000, anonMib: 1200 });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { ts: "2026-10-05T10:00:00.000Z", project: projectId(TMP), run: "run-1", peakMib: 3000, sampled: 2, anonMib: 1200 });
 });
 
 test("a base or verify sandbox's line (gates, then close) has no agent fields", async () => {
@@ -105,7 +109,7 @@ test("a sandbox with no memory.stat still writes its peakMib line, and the gate 
   assert.equal(run.gates[0].pass, true);
   const file = join(mkdtempSync(join(tmpdir(), "sandcastle-peaks-file-")), "peaks.jsonl");
   assert.equal(await recordPeak(box, TMP, "run-1", file), 1800);
-  assert.deepEqual(Object.keys(JSON.parse(readFileSync(file, "utf8"))).sort(), ["peakMib", "project", "run", "ts"]);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(file, "utf8"))).sort(), ["peakMib", "project", "run", "sampled", "ts"]);
 });
 
 test("no sampler outlives its gate pass, even one whose gate throws", async () => {
@@ -258,7 +262,7 @@ test("a ticket's line: agentMib is the peak before the first gate, agentAnonMib 
   const { ts: _ts, project: _project, ...figures } = mine[0];
   // agentMib stays the peak before the first gate (2100), though later passes and gates lifted it to 5200;
   // agentAnonMib is the repair's 600, the highest of implement, review and repair; anonMib the first gate's 1500.
-  assert.deepEqual(figures, { run: runId, peakMib: 5200, anonMib: 1500, agentMib: 2100, agentAnonMib: 600 });
+  assert.deepEqual(figures, { run: runId, peakMib: 5200, sampled: 2, anonMib: 1500, agentMib: 2100, agentAnonMib: 600 });
 
   const reads = k.reads;
   await tenSeconds();

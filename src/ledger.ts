@@ -89,6 +89,15 @@ export type Said = {
 /** Why a repaired green branch is held when the review of its repair failed. */
 export const UNREVIEWED = "repair commits not reviewed: the review after repair failed";
 
+/**
+ * The per-ticket line's words for a ticket's repair passes: ` repaired=1` counts those that committed, and a pass
+ * that changed nothing is not one (the repairer judged the red a flake) - it is said apart, ` repair made no change`.
+ */
+export const repairWords = (o: { repairs: number; idleRepairs?: number }) => {
+  const idle = o.idleRepairs ?? 0;
+  return `${o.repairs ? ` repaired=${o.repairs}` : ""}${idle ? ` ${idle === 1 ? "repair made" : `${idle} repairs made`} no change` : ""}`;
+};
+
 // The ticket closes on the local merge, so the comment says the work is not on
 // the remote yet: a repo that deploys on push has nothing live when this reads "done".
 export const closeComment = (
