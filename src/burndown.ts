@@ -1601,13 +1601,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string) => {
+  // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
+  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId);
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
       gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
       log: gatesLog(project, id),
-    });
+    }, priority);
   };
 
   const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
@@ -1671,7 +1672,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
     gate: (box, id) =>
-      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate")),
+      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
     landed: new Map(),
     slotWanted,
     reds,

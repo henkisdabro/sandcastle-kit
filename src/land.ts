@@ -290,7 +290,7 @@ export const landTicket = async (
   const unmet = recordedUnmet(project, id, branch, head);
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
     landInSandbox(project, { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" }, open, (box) =>
-      runGates(project, box, `${ref} land gates`, false, { log }),
+      runGates(project, box, `${ref} land gates`, false, { log }, true),
     ),
   );
 

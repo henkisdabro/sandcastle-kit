@@ -22,8 +22,11 @@
 // has an older entry for that pool: without it, a run that has just freed a slot asks again at
 // once and almost always wins, and a second project's run waits until the first drains. A wait
 // entry whose process is gone is ignored and removed, by the same rule as a stale slot.
-// Within one run nothing is ordered here: its own waiters poll as they always did, and
-// `slotTurn` (landing.ts) puts a landing before the run's next pipeline.
+// Within one run, a waiter that asks for priority (`withSlot`'s last argument: the gates a landing, the
+// base check and the verify make, which the run's end waits on) goes before the run's other waiters for
+// the same pool, and counts from the run's oldest wait, so the run is picked as before; the rest of the
+// run's waiters poll as they always did, and `slotTurn` (landing.ts) puts a landing before the run's
+// next pipeline for sandbox slots.
 //
 // Shares (docs/adr/0001): live runs split the sandbox slots equally between them, up to each
 // run's demand. A run registers (`joinPool`: `runs/<id>.run`, written whole and renamed in) with
@@ -214,11 +217,13 @@ export const releaseLock = (file: string, mine: string) => {
 };
 
 const held = new Map<string, string>();
-const waiting = new Set<string>();
+// This process's own waits, with what the entry files do not say: the pool and whether the wait asked for priority.
+type OwnWait = Wait & { pool: PoolName; priority: boolean };
+const waiting = new Set<OwnWait>();
 let joined: Joined | undefined;
 process.on("exit", () => {
   for (const [file, mine] of held) releaseLock(file, mine);
-  for (const file of waiting) rmSync(file, { force: true });
+  for (const { file } of waiting) rmSync(file, { force: true });
   if (joined) rmSync(joined.file, { force: true });
 });
 
@@ -530,19 +535,34 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
 
 let sequence = 0;
 // Written whole, then renamed in: a reader never sees an entry half-written.
-const beginWait = (pool: PoolName, label: string): Wait => {
+const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
   mkdirSync(WAITS, { recursive: true });
   const since = clock();
   const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}.wait`);
   writeFileSync(`${file}.tmp`, `${process.pid} ${RUN_ID} ${since} ${label}\n`);
   renameSync(`${file}.tmp`, file);
-  waiting.add(file);
-  return { file, pid: process.pid, run: RUN_ID, since };
+  const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority };
+  waiting.add(wait);
+  return wait;
 };
-const endWait = (wait: Wait) => {
-  waiting.delete(wait.file);
+const endWait = (wait: OwnWait) => {
+  waiting.delete(wait);
   rmSync(wait.file, { force: true });
 };
+
+/**
+ * Where `wait` stands against the other runs. A priority wait counts from the oldest wait this run has
+ * for the pool: the run is the one the slot goes to (the longest wait across runs), and the priority
+ * wait is the one of its waiters that takes it. Any other wait counts from its own start, as it always did.
+ */
+const countedFrom = (wait: OwnWait): Wait => {
+  if (!wait.priority) return wait;
+  const oldest = Math.min(...[...waiting].filter((w) => w.pool === wait.pool).map((w) => w.since));
+  return { ...wait, since: oldest };
+};
+
+/** This run has a priority wait for `pool` that is not `wait`: `wait` leaves the slot to it. */
+const priorityAhead = (wait: OwnWait) => !wait.priority && [...waiting].some((w) => w.pool === wait.pool && w.priority);
 
 const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string } | undefined => {
   mkdirSync(DIR, { recursive: true });
@@ -560,20 +580,22 @@ export type WaitReason = "slots" | "share";
 /**
  * Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free, and why
  * (again when the reason changes). The slot goes to the run that has waited longest, within each
- * run's share; `pollMs` is how often a wait looks again.
+ * run's share; `pollMs` is how often a wait looks again. `priority` puts this wait before the run's
+ * other waits for the pool (the ones that did not ask for it), without changing which run is served.
  */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000): Promise<T> => {
-  const wait = beginWait(pool, label);
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false): Promise<T> => {
+  const wait = beginWait(pool, label, priority);
   let slot: ReturnType<typeof tryAcquire>;
   try {
     let told: WaitReason | undefined;
-    let yielded = false;
+    let yielded: "run" | "priority" | undefined;
     const attempt = (): WaitReason | undefined => {
       const seen: Seen = new Map();
       const ms = pool === "sandboxes" ? members(pool, seen) : [];
-      yielded = false;
+      yielded = undefined;
       if (overShare(pool, ms, seen)) return "share";
-      if (olderWait(pool, wait, ms, seen)) return (yielded = true), "slots";
+      if (olderWait(pool, countedFrom(wait), ms, seen)) return (yielded = "run"), "slots";
+      if (priorityAhead(wait)) return (yielded = "priority"), "slots";
       slot = tryAcquire(pool, `run=${RUN_ID} ${label}`);
       return slot ? undefined : "slots";
     };
@@ -581,9 +603,11 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
       if (why !== told) {
         told = why;
         const me = why === "share" ? myShare() : undefined;
-        console.log(
-          `  ${label}: waiting for a machine-wide ${pool} slot (${why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}` : yielded ? "another run has waited longer" : `${limit(pool)} in use`})`,
-        );
+        const reason = why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
+          : yielded === "run" ? "another run has waited longer"
+          : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
+          : `${limit(pool)} in use`;
+        console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${reason})`);
         onWait?.(why!);
       }
       await new Promise((r) => setTimeout(r, pollMs));
