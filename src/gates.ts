@@ -291,11 +291,21 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // line so a bare "FAIL" line (Go prints one) cannot borrow the next line's word.
 // ESLint ends a red lint gate with "✖ N problems (...)": not a test, and two
 // lint-red branches would otherwise read as one failing test.
+// node:test's spec reporter ends a red run with a "✖ failing tests:" summary
+// that puts "test at <path>:<line>:<col>" above each failing leaf test, so its
+// ids there are "path::name", like pytest's, and the base-red check can tell
+// whose red it is. The summary is the whole list: the body's "✖" lines before
+// it also name the describe suites and parents of a failed test, which are
+// not tests. Pairs go by position, never by name, as one name can fail in two
+// files. Without the summary (TAP, a summary cut off, Node 20 and 22's TAP
+// default with its absolute "location:" paths) the ids name no file, and the
+// red stays the branch's own.
+const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
   /^\s*FAIL\s+(\S+)/,
   /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
-  /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/,
+  SPEC_FAILED,
   /^\s*--- FAIL: (\S+)/,
   /^test (\S+) \.\.\. FAILED$/,
 ];
@@ -303,24 +313,34 @@ const FAILING_TEST_LINE = [
 export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) => re.test(line));
 /** How many failing tests `failingTests` names: a list this long may have been cut, so it is not the whole set. */
 export const FAILING_TESTS_SHOWN = 5;
-export const failingTests = (output: string) =>
-  [
-    ...new Set(
-      output
-        .split("\n")
-        .map((line) => line.replace(/\r$/, ""))
-        .flatMap((line) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined)),
-    ),
-  ].slice(0, FAILING_TESTS_SHOWN);
+const SPEC_SUMMARY = /^✖ failing tests:$/;
+const SPEC_LOCATION = /^test at (.+):\d+:\d+$/;
+const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
+export const failingTests = (output: string) => {
+  const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
+  const summary = lines.findIndex((line) => SPEC_SUMMARY.test(line));
+  if (summary < 0) return [...new Set(lines.flatMap(idsOf))].slice(0, FAILING_TESTS_SHOWN);
+  const before = lines.slice(0, summary).flatMap((line) => (SPEC_FAILED.test(line) ? [] : idsOf(line)));
+  const listed: string[] = [];
+  let at: string | undefined;
+  for (const line of lines.slice(summary + 1)) {
+    const name = line.startsWith("✖ ") ? SPEC_FAILED.exec(line)?.[1] : undefined;
+    // A file that failed to load is listed under its own path, which is the id.
+    if (name !== undefined) listed.push(at === undefined || name === at ? name : `${at}::${name}`);
+    at = SPEC_LOCATION.exec(line)?.[1];
+  }
+  return [...new Set([...before, ...listed])].slice(0, FAILING_TESTS_SHOWN);
+};
 
 /**
- * The file a failing test's id names, or undefined when it names none. pytest's "path::test" and
- * vitest's and jest's "FAIL path" do; node:test's "name", Go's "TestName" and cargo's "mod::name"
- * do not, and a guess from a test's title would call a branch's own red the base's. Relative paths only.
+ * The file a failing test's id names, or undefined when it names none. pytest's "path::test",
+ * vitest's and jest's "FAIL path" and node:test's summary "path::name" do; node:test's bare "name",
+ * Go's "TestName" and cargo's "mod::name" do not, and a guess from a test's title would call a
+ * branch's own red the base's. Relative paths inside the repo only: one through "../" is not the repo's.
  */
 export const failingTestFile = (id: string) => {
   const file = id.split("::")[0].replace(/^\.\//, "");
-  return /^[^\s/][^\s]*\.[A-Za-z0-9]+$/.test(file) ? file : undefined;
+  return /^[^\s/][^\s]*\.[A-Za-z0-9]+$/.test(file) && !file.split("/").includes("..") ? file : undefined;
 };
 
 // The red gates of a result, or undefined for a step that is not a gate run.
