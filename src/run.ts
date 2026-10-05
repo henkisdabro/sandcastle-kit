@@ -444,13 +444,21 @@ const CHANGELOG_ASK =
   "so do not fold the instruction into a `Changed:` line. If this project's own rules define an upgrading or migration note, " +
   "write it in their words. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
+// A full review that could not see the implementer's lines wrote the whole set again from the diff; it is
+// shown them (per ticket, as `IMPL_UNMET` is), so it keeps the ones that hold and corrects or adds the rest.
 const CHANGELOG_REVIEW =
-  `${CHANGELOG_ASK}The implementer has given its own, which you cannot see. If the diff shows a user-facing change you made yourself ` +
+  `${CHANGELOG_ASK}The implementer's own lines, if it gave any, are quoted just below this paragraph; none quoted means it gave ` +
+  "none. If the diff shows a user-facing change you made yourself " +
   "in this review, or a line of the implementer's that would now be wrong, give the full set of lines for the whole branch - " +
-  "its changes as well as yours, one line each: your set replaces the implementer's, so a line left out is lost, and a reworded " +
-  "one is not shown twice. Otherwise give none, and the implementer's lines stand. If the change needs an " +
-  "`Upgrading:` line and you cannot tell that the implementer gave one, give the full set with one in it (do not leave that " +
-  "to a remark in your message).\n\n";
+  "its changes as well as yours, one line each, the implementer's lines that still hold copied as they are: your set replaces " +
+  "the implementer's, so a line left out is lost, and a reworded one is not shown twice. Otherwise give none, and the " +
+  "implementer's lines stand. If the change needs an `Upgrading:` line and none of the implementer's lines is one, give the " +
+  "full set with one in it (do not leave that to a remark in your message).\n\n{{IMPL_CHANGELOG}}";
+
+// What a full review is shown of the implementer's changelog lines, for `IMPL_CHANGELOG`: each line quoted, and
+// nothing when it gave none (the prompt says that none quoted means none given). Only a full review has the
+// placeholder: a narrow review gives lines for its own changes alone and they are added to the implementer's.
+export const implChangelogView = (lines: string[]): string => (lines.length ? `${lines.map((l) => `> ${l}`).join("\n")}\n\n` : "");
 
 // A narrow review (after a repair, a base merge or a conflict resolution) sees only what it reviews, so it
 // gives lines for its own changes and the orchestrator adds them (see `addChangelog`).
@@ -492,6 +500,8 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
     if (kind === "review" || kind === "rereview" || kind === "remerge") allowed.add("IMPL_UNMET");
+    // Likewise the implementer's changelog lines, in the full review's changelog ask only (CHANGELOG_REVIEW).
+    if (kind === "review") allowed.add("IMPL_CHANGELOG");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
     if (kind === "remerge") allowed.add("REVIEW_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
