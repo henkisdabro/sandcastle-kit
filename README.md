@@ -99,7 +99,7 @@ New to GitHub or to agents? These are the only terms you need.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22+, pnpm, git, jq, the GitHub CLI signed in (`gh auth login`;
+**You need:** macOS or Linux, Node 22+, pnpm, git, jq, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
 skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
 macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
 [Full requirements](docs/INSTALL.md#-requirements).
@@ -1379,6 +1379,7 @@ is refused with a reminder to start the runtime.
 |---|---|
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
+| Live runs show as ended in the status view on Linux, or `ps (status view)` shows `FIX` | Install procps (`apt install procps` or `dnf install procps-ng`); the status view checks each run's process with `ps`. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
 | `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N`, `--detach` and `--api-key` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
