@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OperatorError } from "./errors.ts";
 import { commandOf } from "./live-runs.ts";
+import { DOCKER_INFO_ENV } from "./runtime.ts";
 import { kitRunning, liveness, type Probe } from "../mod/hooks/run-live.ts";
 
 export const OUTPUT_LOG = ".sandcastle/logs/run-output.log";
@@ -79,12 +80,13 @@ export type Detached = {
  * Starts the run as a detached process and returns once it is going: in Herdr when it has printed
  * where its status view is, elsewhere when it holds the run lock. A run that ends before that is
  * reported with the end of its output. `entry` is what node runs instead of the CLI (a test's
- * stand-in); `args` are the run's own, without `--detach`.
+ * stand-in); `args` are the run's own, without `--detach`; `dockerInfo` is the `docker info` the
+ * parent has read, which the child takes over.
  */
 export const startDetached = async (
   root: string,
   args: string[],
-  { entry = cliEntry(), inHerdr, timeoutMs = 60_000 }: { entry?: string[]; inHerdr: boolean; timeoutMs?: number },
+  { entry = cliEntry(), inHerdr, timeoutMs = 60_000, dockerInfo }: { entry?: string[]; inHerdr: boolean; timeoutMs?: number; dockerInfo?: string },
 ): Promise<Detached> => {
   const log = join(root, OUTPUT_LOG);
   mkdirSync(dirname(log), { recursive: true });
@@ -99,6 +101,9 @@ export const startDetached = async (
   const fd = openSync(log, "w");
   const env = { ...process.env, SANDCASTLE_DETACHED: "1" } as NodeJS.ProcessEnv;
   delete env.SANDCASTLE_DETACH;
+  // The one `docker info` reading of this start, so the child asks the daemon nothing the parent already did; a stale one from the starter's environment is never passed on.
+  delete env[DOCKER_INFO_ENV];
+  if (dockerInfo !== undefined) env[DOCKER_INFO_ENV] = dockerInfo;
   let ended: number | undefined;
   let failed: Error | undefined;
   const child = spawn(process.execPath, [...entry, "run", ...args], { cwd: root, detached: true, stdio: ["ignore", fd, fd], env });

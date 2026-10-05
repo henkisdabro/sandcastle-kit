@@ -37,7 +37,9 @@ const SHAPES: Record<string, Shape> = {
   compatRootless: { version: "Docker version 29.4.0, build 9d7ad9f", info: 0, security: '["name=seccomp,profile=default","name=rootless"]', server: PODMAN_SERVER },
 };
 
-const reads = (s: Shape) => ({ version: () => s.version, server: () => s.server, securityOptions: () => s.security });
+// `security` is the shape's SecurityOptions array as `docker info --format '{{json .}}'` prints it among the rest of the daemon's fields.
+const infoOf = (s: Shape) => (s.security === undefined ? undefined : `{"NCPU":4,"SecurityOptions":${s.security}}`);
+const reads = (s: Shape) => ({ version: () => s.version, server: () => s.server, info: () => infoOf(s) });
 const problem = (platform: NodeJS.Platform, uid: number, shape: Shape) => runtimeProblem({ platform, uid, reads: reads(shape) });
 
 test("on Linux, rootful Docker Engine as a normal user has no problem", () => {
@@ -79,7 +81,7 @@ test("root is refused on every platform, whatever the runtime", () => {
 
 test("a runtime printing something unexpected is no crash", () => {
   assert.equal(problem("linux", 1000, { version: "", info: 0, security: "not json", server: "{oops" }), undefined);
-  assert.equal(runtimeProblem({ platform: "linux", uid: undefined, reads: { version: () => undefined, server: () => undefined, securityOptions: () => undefined } }), undefined);
+  assert.equal(runtimeProblem({ platform: "linux", uid: undefined, reads: { version: () => undefined, server: () => undefined, info: () => undefined } }), undefined);
 });
 
 // A `docker` that prints a shape's captured output and logs each call; anything else fails, as
@@ -96,7 +98,7 @@ const shim = (shape: Shape) => {
       'case "$*" in',
       `  --version) echo ${q(shape.version)} ;;`,
       `  info) echo "Client: x"; exit ${shape.info} ;;`,
-      shape.security === undefined ? "" : `  "info --format {{json .SecurityOptions}}") echo ${q(shape.security)} ;;`,
+      shape.security === undefined ? "" : `  "info --format {{json .}}") echo ${q(infoOf(shape)!)} ;;`,
       `  "version --format {{json .Server}}") echo ${q(shape.server)} ;;`,
       "  *) echo \"Error: can't evaluate field\" >&2; exit 125 ;;",
       "esac",
@@ -167,8 +169,8 @@ test("sandcastle run on Linux with rootless Docker exits 1 with doctor's words, 
   const r = runKit(["run"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.match(r.stdout + r.stderr, /rootful Docker Engine \(found rootless Docker\): Rootless Docker is not supported yet \(#359\)/);
-  // The only docker calls were the runtime reads: no build, image, run or `info --format {{json .}}`.
+  // The only docker calls were the runtime reads, `info` among them once: no build, image or run.
   const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
-  assert.deepEqual(calls.filter((c) => !["--version", "version --format {{json .Server}}", "info --format {{json .SecurityOptions}}"].includes(c)), []);
+  assert.deepEqual(calls.filter((c) => !["--version", "version --format {{json .Server}}", "info --format {{json .}}"].includes(c)), []);
   assert.equal(existsSync(join(repo, ".sandcastle/logs")), false);
 });

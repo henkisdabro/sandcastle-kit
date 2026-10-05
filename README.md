@@ -1397,12 +1397,13 @@ why to lower it: leave the host room for your other apps, memory beyond what the
 only grows the VM's file cache (which the host then swaps), and too few CPUs slow gates and can
 flake timing-sensitive tests (2 gates want about 8 CPUs). Applying a runtime change restarts it
 and stops a live run's containers, so wait for runs to finish first. A `docker info` that fails
-is refused with a reminder to start the runtime.
+is refused with a reminder to start the runtime, and one that gives no answer within 10 s with that said.
 
 ## 🩺 Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
+| `docker did not answer within 10 s - is the runtime running?` when a run starts | The container runtime's daemon is hung or still starting (seen with OrbStack after a heavy run). A run asks `docker info` once at its start and stops on no answer, where it used to wait minutes in silence. Restart the runtime, check `docker info` answers in that shell, then run again. |
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`, macOS), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
 | `found Podman`, `found rootless Docker` or `not root` shows `FIX` | Linux needs rootful Docker Engine, with `docker` its own CLI on its socket (`docker context ls`, DOCKER_HOST); Podman and rootless Docker there are not supported yet (#359). Run sandcastle as a normal user in the docker group, never as root or with sudo. |
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |

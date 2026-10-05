@@ -99,7 +99,7 @@ import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEff
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
-import { runtimeProblemNow } from "./runtime.ts";
+import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -183,8 +183,15 @@ try {
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
       // Doctor's own refusal, before the config, the billing question or an image: a run as root or on
-      // Podman or rootless Docker on Linux would only fail inside the first sandbox. The detached child passes through here too.
-      const runtime = runtimeProblemNow();
+      // Podman or rootless Docker on Linux would only fail inside the first sandbox.
+      // `docker info` is read once for the whole start, when first asked: the check below (Linux only),
+      // then the sandbox CPU limit and the pool warning in burndown (macOS asks there). A detached
+      // child takes the reading its parent made, and does not repeat the check the parent passed.
+      const child = process.env.SANDCASTLE_DETACHED === "1";
+      let reading: { text: string | undefined } | undefined = child && process.env[DOCKER_INFO_ENV] ? { text: process.env[DOCKER_INFO_ENV] } : undefined;
+      delete process.env[DOCKER_INFO_ENV];
+      const docker = () => (reading ??= { text: readDockerInfo() }).text;
+      const runtime = child ? undefined : runtimeProblemNow(docker);
       if (runtime) throw new OperatorError(`${runtime.label}: ${runtime.fix}`);
       if (given.issues) {
         // An argument overrides both names, so the older one is dropped rather than reported as a clash.
@@ -195,7 +202,7 @@ try {
       if (given.concurrency !== undefined) process.env.CONCURRENCY = String(given.concurrency);
       if (given.apiKey) process.env.SANDCASTLE_API_KEY = "1";
       // The same run again, as a process of its own. Everything a run refuses on is refused here,
-      // before a process starts; the child (SANDCASTLE_DETACHED) runs the checks again for itself.
+      // before a process starts; the child (SANDCASTLE_DETACHED) runs the other checks again for itself.
       if ((given.detach || process.env.SANDCASTLE_DETACH === "1") && process.env.SANDCASTLE_DETACHED !== "1") {
         const project = await loadProject(root);
         if (resolveSettings({ env: process.env, project, machine: machineSettings() }).autonomy === 1) {
@@ -211,7 +218,7 @@ try {
         }
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
-        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR });
+        const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR, dockerInfo: reading?.text });
         for (const line of started.lines) console.log(line);
         process.exitCode = started.code;
         break;
@@ -251,7 +258,8 @@ try {
         } catch {}
       }
       for (let turn = 1; ; turn++) {
-        if (!(await burndown(project, { settings, turn }))) {
+        // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
+        if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
