@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
 import type { Project } from "../src/config.ts";
 import { archiveFinishedLogs, pruneArchive } from "../src/run.ts";
 
@@ -56,14 +57,15 @@ test("pruneArchive does nothing without an archive directory", () => {
   assert.equal(pruneArchive(project), 0);
 });
 
-test("archiveFinishedLogs prunes the archive as it moves a finished branch's logs in", () => {
+test("archiveFinishedLogs prunes the archive as it moves a finished branch's logs in", async () => {
   const project = repo("archiving");
   const logs = join(project.root, ".sandcastle/logs");
   const old = aged(project, "agent-issue-4-impl-4.log", 30);
   const oldRaw = aged(project, "agent-issue-4-impl-4.jsonl", 5);
   writeFileSync(join(logs, "agent-issue-5-impl-5.log"), "readable\n");
   writeFileSync(join(logs, "agent-issue-5-impl-5.jsonl"), '{"raw":1}\n');
-  archiveFinishedLogs(project);
+  const { lines } = await quietly(() => archiveFinishedLogs(project));
+  assert.match(lines.join("\n"), /Deleted 2 archived log\(s\)/);
   assert.ok(!existsSync(old));
   assert.ok(!existsSync(oldRaw));
   assert.ok(existsSync(join(logs, "archive", "agent-issue-5-impl-5.log")));

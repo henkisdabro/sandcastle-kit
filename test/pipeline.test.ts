@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 // sandbox.ts, pool.ts and peaks.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -171,7 +172,7 @@ const harness = () => {
     events.length = 0;
     passes.length = 0;
     phases.length = 0;
-    const o = await pipeline(ISSUE);
+    const { result: o } = await quietly(() => pipeline(ISSUE));
     results.splice(0, results.length, ...results.filter((r) => r.status !== "fulfilled" || r.value.issue !== ID), { status: "fulfilled", value: o });
     return o;
   };

@@ -22,7 +22,7 @@ type Project = import("../src/config.ts").Project;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-backup-size-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
-const git = (root: string, ...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const git = (root: string, ...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const project = (root: string) => ({ root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [], mounts: [] }) as unknown as Project;
 const packs = (p: Project) => readdirSync(join(backupRepo(p), "objects", "pack")).filter((f) => f.endsWith(".pack")).length;
 
