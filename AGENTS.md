@@ -41,7 +41,7 @@ read a module's section there before changing it.
 | `src/landing.ts` | Landing one green branch (`landOne`, which returns facts and writes no verdict), the scheduler's land and host ports, and `createHostGit`, the mutex every host git write goes through |
 | `src/ledger.ts` | The ticket ledger: `describe(ending)`, pure and exhaustive - the ticket state, outcome, view word and tracker text of every ending - and the writer that records it, and each requeue, as the scheduler tells them |
 | `src/resolution.ts` | `strayChanges`: a conflict resolution checked against git's own automatic merge, so a resolution that dropped another ticket's lines is held |
-| `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, the run's demand for slots, and `createQueue` |
+| `src/schedule.ts` | `createSchedule(plan)`: the run's one path for attempts and landings - the requeue-once rule, the release of dependants, the file hold, the run's demand for slots, `createQueue`, and the fix board (`createFixBoard`: who is repairing which failure) |
 | `src/report.ts` | The closing summary (`sandcastle report`, and the end of every run): gather facts from run.json, git and the tracker; render the seven sections |
 | `src/autonomy.ts` | Autonomy levels: how many turns one `sandcastle run` may make, which tickets are re-runnable, and the level-1 question |
 | `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out: the autonomy level, repair attempts and concurrency, asked and effective) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
