@@ -147,6 +147,8 @@ const harness = () => {
       assert.ok(next, "a gate run the test did not expect");
       return next;
     },
+    baseGate: async () => assert.fail("no base gate run was expected"),
+    baseWentRed: () => {},
     timed: async (_issue, phase, fn) => {
       phases.push(phase);
       return fn();

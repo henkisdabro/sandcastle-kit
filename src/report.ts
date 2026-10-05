@@ -84,6 +84,8 @@ export type Facts = {
   exitCode?: number | null;
   /** Each base gate's verdict, when the run stopped on red base gates. */
   baseGates?: { gate: string; ok: boolean }[];
+  /** Tests found red on the base mid-run (the run record's `baseRed`): no branch was repaired for them. */
+  baseRed?: string[];
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
@@ -361,6 +363,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     stage: run.stage,
     exitCode: run.exitCode,
     baseGates: run.baseGates,
+    baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
   };
 };
@@ -604,6 +607,8 @@ export const render = (f: Facts, plain = false): string => {
         const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
         return `- ${name(id)} - merged - check by hand: ${note}${more}`;
       }),
+      // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
+      ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it are held, not repaired`),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
