@@ -56,7 +56,7 @@ const project = (view?: object) => {
 };
 const tick = (dir: string, probe = (pid: number) => (pid === process.pid ? everyPidIsTheKit() : undefined)) =>
   runsLine(dir, undefined, probe, (root) => replaceDeadTab(root, KIT_DIR), (root) => void restartStatusView(root, KIT_DIR));
-const startedView = (root: string) => `pane run w1:t2-1 cd '${root}' && "${KIT_DIR}/bin/sandcastle" status`;
+const startedView = (root: string) => `pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' status`;
 const report = (root: string) => `pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' report`;
 
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ test("`sandcastle herdr line`, the tab bar's own command, starts a live run's st
     const r = runKit(["herdr", "line"], { script: HERDR_PLUGIN, encoding: "utf8", env: { ...process.env, XDG_CACHE_HOME: cache } });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^♜ shop /);
-    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${root}' && "${join(KIT, "bin/sandcastle")}" status`]);
+    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${root}' && '${join(KIT, "bin/sandcastle")}' status`]);
   } finally {
     run.kill();
   }
