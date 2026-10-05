@@ -37,9 +37,9 @@ import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./her
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
-import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
+import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason, wholeNumber } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -60,7 +60,8 @@ import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
 
@@ -678,7 +679,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     return fileOnly && failureKey(failure) !== failureKey(onBase) ? undefined : tests;
   };
 
-  return async (issue: Issue): Promise<Outcome> => {
+  // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void> }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -696,7 +698,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     releaseBranchWorktree(branch, project.root);
     // From here the agent commits to the branch; the `.git` check lets it move.
     host.begin(branch);
-    const sandbox = await timed(issue.id, "setup", () =>
+    // Reassigned when a pause closes the sandbox and the resume opens another on the same branch.
+    let sandbox = await timed(issue.id, "setup", () =>
       open(branch),
       requeuedAs.get(issue.id),
     ).catch(async (error) => {
@@ -717,6 +720,34 @@ export const createPipeline = (ctx: PipelineContext) => {
         })
         .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
     };
+
+    // A paused run starts no agent pass: before each one the ticket asks the scheduler's juncture, which
+    // returns at once unless a person has paused the run. Then the sandbox closes - every commit stays on the
+    // branch, and Sandcastle keeps a worktree that holds uncommitted files, which is locked against a prune
+    // meanwhile - and the ticket waits holding nothing (the attempt gives its slot back). On the resume a
+    // fresh sandbox opens on the same branch and the pass begins from there, so the phases already done are
+    // not repeated. It is called before the pass's `timed` step: the wait is not the pass's time, nor part of
+    // the ticket's usual one (`waited`, as a wait for a gates slot is).
+    let parkedAt = 0;
+    const juncture = (phase: TicketState) =>
+      at?.juncture(phase, {
+        suspend: async () => {
+          const head = sh("git", ["rev-parse", "--short", branch], project.root);
+          console.log(`${ref(issue.id)}: paused before ${phase} - its sandbox closes, ${branch} stays at ${head}`);
+          run.ticket(issue.id, { state: "paused", note: `before ${phase} at ${head}` });
+          unlockWorktree(sandbox.worktreePath, project.root);
+          await recordPeak(sandbox, project.root, runId);
+          const closed = await sandbox.close();
+          if (closed.preservedWorktreePath) lockWorktree(closed.preservedWorktreePath, project.root);
+          parkedAt = Date.now();
+        },
+        resume: async () => {
+          waited.set(issue.id, (waited.get(issue.id) ?? 0) + Date.now() - parkedAt);
+          releaseBranchWorktree(branch, project.root);
+          sandbox = await timed(issue.id, "setup", () => open(branch), `resumed before ${phase}`);
+          lockWorktree(sandbox.worktreePath, project.root);
+        },
+      });
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
@@ -828,6 +859,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // not resolve it without changing what the ticket does, so the full
       // implementer takes the branch, as it does for any carried branch.
       if (landOnly && mergeConflicted) {
+        await juncture("resolve");
         await timed(issue.id, "resolve", () => {
           const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
           return pass({
@@ -885,7 +917,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The narrow review, as after a repair: only what is new since `since`, which
       // is a base merge and its conflict resolution. No cross-review. A review that
       // throws behaves as the full one does.
-      const narrowReview = (since: string, note: string) => {
+      const narrowReview = async (since: string, note: string) => {
+        await juncture("review");
         let narrowModel: string | undefined;
         return timed(
           issue.id,
@@ -939,6 +972,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (u) unmet.push(u);
       }
       if (!landOnly) {
+        await juncture("implement");
         const impl = await timed(issue.id, "implement", () => {
           const logging = agentLogging(project, issue.id, `impl-${issue.id}`, runId);
           return pass({
@@ -995,6 +1029,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           const u = unmetOf(merged.stdout);
           if (u) unmet.push(u);
         } else {
+          await juncture("review");
           let reviewModel: string | undefined;
           const beforeReview = ownNow();
           const review = await timed(
@@ -1009,6 +1044,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             undefined,
             () => reviewModel,
           );
+          if (CROSS_REVIEW) await juncture("cross-review");
           const cross = CROSS_REVIEW
             ? await timed(
                 issue.id,
@@ -1105,6 +1141,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           break;
         }
         const key = failureKey(failure);
+        // Before the fix board is consulted: a ticket parked here claims nothing, so no other ticket waits for its fix through the pause.
+        await juncture("repair");
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
         const asked = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
@@ -1204,6 +1242,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       if (!gated.failure && sh("git", ["rev-parse", branch], project.root) !== preRepair) {
         // A review that dies leaves the branch held, not the ticket crashed:
         // like a failed repair, only a spent allowance stops the queue.
+        await juncture("review");
         let afterModel: string | undefined;
         const beforeAfter = ownNow();
         const after = await timed(
@@ -1514,7 +1553,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
-  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project));
+  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.paused);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
@@ -1814,7 +1853,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
-  const attempt = async (issue: Issue, { last }: { last(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
     const line = await usageStop(env);
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
@@ -1835,12 +1874,42 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         else if (shareNote) run.ticket(issue.id, { note: null });
         shareNote = why === "share";
       });
-    const result = await slotTurn(slotWanted)
-      .then(() => withSlot("sandboxes", `${project.name} ${ref(issue.id)}`, () => pipeline(issue), waitNote))
-      .then(
-        (value) => ({ status: "fulfilled", value }) as const,
-        (reason: unknown) => ({ status: "rejected", reason }) as const,
-      );
+    // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
+    // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
+    let lease: SlotLease | undefined;
+    const take = async () => {
+      await slotTurn(slotWanted);
+      lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
+      return lease !== undefined;
+    };
+    const give = () => {
+      lease?.release();
+      lease = undefined;
+    };
+    const parkable = (park?: Park): Park => ({
+      suspend: async () => {
+        await park?.suspend();
+        give();
+      },
+      resume: async () => {
+        // Paused again while it waits for the slot: it parks again, as a ticket at its start does.
+        while (!(await take())) await juncture("start", { suspend: async () => {}, resume: async () => {} });
+        await park?.resume();
+      },
+    });
+    const result = await (async () => {
+      try {
+        while (!(await take())) await juncture("start", { suspend: async () => {}, resume: async () => {} });
+        // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
+        await juncture("start", parkable());
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)) });
+      } finally {
+        give();
+      }
+    })().then(
+      (value) => ({ status: "fulfilled", value }) as const,
+      (reason: unknown) => ({ status: "rejected", reason }) as const,
+    );
     const check = tampered.has(issue.id) ? { error: tampered.get(issue.id) } : undefined;
     tampered.delete(issue.id);
     // Its ending arrives complete: an agent's hand-back is read now, not patched in after the schedule.
@@ -1887,6 +1956,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     return attempted(issue.id, ended, check, limited);
   };
 
+  // Said once per pause: the first time the scheduler tells it.
+  let pauseSaid = false;
+  const clockOf = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
     switch (c.kind) {
@@ -1906,6 +1978,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
         setDemand(c.n);
         return poolValues();
+      case "paused":
+        // The tickets still finishing; once none is, the machine may sleep (the demand is 0 by then too).
+        run.update({ paused: { since: c.since, finishing: c.finishing } });
+        if (!pauseSaid) console.log(`[${clockOf(c.since)}] paused by \`sandcastle pause\`: no new ticket or agent pass starts; ${c.finishing.length ? `finishing ${c.finishing.map(ref).join(", ")}` : "nothing is in flight"}.`);
+        pauseSaid = true;
+        if (!c.finishing.length) releaseAwake();
+        return view.refresh();
+      case "resumed":
+        run.update({ paused: undefined });
+        console.log("Resumed: each paused ticket goes on from its next phase.");
+        pauseSaid = false;
+        void holdAwake();
+        return view.refresh();
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
       case "unreleased":
@@ -1935,7 +2020,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // (`safety`: the shared .git changed) left in the record to file by hand, so the summary lists them either way.
   const stopLanding = async (error: unknown, safety: boolean): Promise<never> => {
     const why = String((error as Error).message ?? error);
-    run.update({ stopped: why });
+    run.update({ stopped: why, paused: undefined });
     try {
       await fileTheFollowUps(safety ? "the shared .git changed, so nothing more was written to the tracker" : undefined);
     } catch (e) {
@@ -1947,7 +2032,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
+    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell, pause: { read: () => readPause(project.root, process.pid) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
@@ -1955,6 +2040,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       return stopLanding(error, host.failed !== undefined);
     });
   clearInterval(heartbeat);
+  // A run whose last ticket landed while it was paused goes on to its verify and summary: not paused any more, and awake.
+  if (pauseSaid) {
+    run.update({ paused: undefined });
+    pauseSaid = false;
+    await holdAwake();
+  }
   // The cause the closing summary names: the most severe, a `.git` change before a limit.
   const headline = stop.headline;
   const stopLine = headline && stopWords(headline);

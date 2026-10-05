@@ -557,12 +557,20 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
 /** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own (or at its cap). */
 export type WaitReason = "slots" | "share";
 
+/** A slot taken with `leaseSlot`: `release` frees it, once; a second call does nothing. */
+export type SlotLease = { release(): void };
+
 /**
- * Waits for a slot, runs `fn`, frees the slot. `onWait` is told when no slot was free, and why
+ * Waits for a slot and hands it over: the caller frees it with `release()`. `withSlot` is this with
+ * the release tied to a function's end; a ticket that closes its sandbox mid-way (a paused run) gives
+ * its slot back and leases another when it resumes. `onWait` is told when no slot was free, and why
  * (again when the reason changes). The slot goes to the run that has waited longest, within each
- * run's share; `pollMs` is how often a wait looks again.
+ * run's share; `pollMs` is how often a wait looks again. With `giveUp`, asked at each look while no
+ * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000): Promise<T> => {
+export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number): Promise<SlotLease>;
+export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean): Promise<SlotLease | undefined>;
+export async function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs = 5000, giveUp?: () => boolean): Promise<SlotLease | undefined> {
   const wait = beginWait(pool, label);
   let slot: ReturnType<typeof tryAcquire>;
   try {
@@ -578,6 +586,7 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
       return slot ? undefined : "slots";
     };
     for (let why = attempt(); !slot; why = attempt()) {
+      if (giveUp?.()) return undefined;
       if (why !== told) {
         told = why;
         const me = why === "share" ? myShare() : undefined;
@@ -591,12 +600,26 @@ export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promi
   } finally {
     endWait(wait);
   }
-  held.set(slot.file, slot.mine);
+  const taken = slot;
+  held.set(taken.file, taken.mine);
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      held.delete(taken.file);
+      releaseLock(taken.file, taken.mine);
+    },
+  };
+}
+
+/** Waits for a slot, runs `fn`, frees the slot. */
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000): Promise<T> => {
+  const lease = await leaseSlot(pool, label, onWait, pollMs);
   try {
     return await fn();
   } finally {
-    held.delete(slot.file);
-    releaseLock(slot.file, slot.mine);
+    lease.release();
   }
 };
 

@@ -15,10 +15,10 @@ import { GROUPS, TICKET_STATES, type TicketState } from "../mod/hooks/run-record
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 
-// Progress: the working group's states (the phases and the landing stage), and the two a ticket
-// waits in before it begins. Every other ticket state is one a run ends on, so a state added to the
-// closed set is an ending until it is placed here.
-const PROGRESS = new Set<TicketState>([...TICKET_STATES.filter((s) => GROUPS[s] === "working"), "queued", "blocked"]);
+// Progress: the working group's states (the phases and the landing stage), the two a ticket
+// waits in before it begins, and `paused`, where a paused run parks a ticket between two phases. Every
+// other ticket state is one a run ends on, so a state added to the closed set is an ending until it is placed here.
+const PROGRESS = new Set<TicketState>([...TICKET_STATES.filter((s) => GROUPS[s] === "working"), "queued", "blocked", "paused"]);
 const ENDING = new Set<string>(TICKET_STATES.filter((s) => !PROGRESS.has(s)));
 
 // A state written from a variable is a progress write only where it is named here: `timed` writes

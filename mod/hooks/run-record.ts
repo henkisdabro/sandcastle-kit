@@ -6,7 +6,9 @@
 /**
  * Where one ticket of a run stands, as the run record holds it - every state src/run.ts
  * writes. A phase (implement, review, gates ...) is one kind of ticket state; `requeued` is
- * not one (it is a fact about a ticket's second attempt, `TicketRecord.requeued`).
+ * not one (it is a fact about a ticket's second attempt, `TicketRecord.requeued`). `paused` is a
+ * ticket parked at a juncture of a paused run: its sandbox is closed, its branch kept, and it
+ * resumes with the phase its note names.
  */
 export const TICKET_STATES = [
   "queued",
@@ -20,6 +22,7 @@ export const TICKET_STATES = [
   "repair",
   "ready",
   "landing",
+  "paused",
   "merged",
   "held",
   "conflict",
@@ -121,6 +124,7 @@ export const GROUPS: Record<TicketState, Group> = {
   stopped: "needs you",
   ready: "ready",
   queued: "queued",
+  paused: "queued",
   blocked: "blocked",
   merged: "merged",
   nochange: "other",
@@ -232,6 +236,13 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
+  /**
+   * Present while a person has paused the run (`sandcastle pause`): no agent pass starts, the
+   * passes in flight finish and green branches still land. `since` is seconds since the epoch;
+   * `finishing` the tickets still doing something (a pass, a gate run, a landing). Absent when the
+   * run is not paused: a paused run is live all the same, its process is running.
+   */
+  paused?: { since: number; finishing: string[] };
   /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
   demand?: number;
   share?: number;

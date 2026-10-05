@@ -207,6 +207,61 @@ has 'this run +wants 4 · share 2'
 hasnt 'cap [0-9]'
 
 # ---------------------------------------------------------------------------
+SCENARIO="paused run"
+# `sandcastle pause`: the run record's `paused` says since when and which tickets are still finishing
+# a pass or a landing. The run cell reads PAUSED, and the tickets finishing in the table's words
+# (a green branch waiting for the landing worker is "landing"); a ticket parked between two phases
+# has the state `paused`, and the ones that have not started wait for the resume. Where the pane has
+# no room for it all on the first row, the tickets still finishing take the second.
+branch 120 1; log 120 review 'reading the diff'
+branch 121 1; log 121 impl 'done'
+branch 122 1; log 122 impl 'done'
+since_at=$((now - 600))
+when=$(date -d "@$since_at" +%H:%M 2>/dev/null || date -r "$since_at" +%H:%M)
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running", "concurrency": 3,
+  "typical": { "implement": 600, "gates": 60, "issue": 900 },
+  "paused": { "since": $since_at, "finishing": ["120", "121"] },
+  "issues": ["120","121","122","123"],
+  "tickets": {
+    "120": { "state": "review", "since": $((now - 120)), "started": $((now - 900)) },
+    "121": { "state": "ready", "since": $((now - 60)), "note": "gates green" },
+    "122": { "state": "paused", "since": $((now - 300)), "note": "before review at a1b2c3d" },
+    "123": { "state": "queued", "order": 4, "since": $now }
+  } }
+EOF
+render "120 121 122 123"
+has "PAUSED since $when"
+has 'finishing +#120 review, #121 landing'
+hasnt 'running · '
+hasnt 'ends ~'
+row '#120' review
+row '#122' paused 'before review at a1b2c3d'
+row '#123' queued 'waits for the resume'
+# Nothing in flight: the cell says only that it is paused.
+sed -i.bak 's/"finishing": \["120", "121"\]/"finishing": []/' "$L/run.json"
+render "120 121 122 123"
+has "PAUSED since $when"
+hasnt 'finishing'
+# The time as milliseconds or as an ISO time reads the same way (the record is a file in a repository).
+sed -i.bak "s/\"since\": $since_at,/\"since\": $((since_at * 1000)),/" "$L/run.json"
+render "120 121 122 123"
+has "PAUSED since $when"
+sed -i.bak "s/\"since\": $((since_at * 1000)),/\"since\": \"$started\",/" "$L/run.json"
+render "120 121 122 123"
+has 'PAUSED since [0-9]{2}:[0-9]{2}'
+# A record that is not an object pauses nothing, and does not blank the run cell.
+sed -i.bak 's/"paused": {[^}]*},/"paused": "yes",/' "$L/run.json"
+render "120 121 122 123"
+hasnt 'PAUSED'
+has 'state +running'
+# Not paused any more: the live row is back, with the queued ticket next in line.
+sed -i.bak 's/"paused": "yes",//' "$L/run.json"
+render "120 121 122 123"
+hasnt 'PAUSED'
+row '#123' queued 'next to start'
+
+# ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
 # A commit refused by a hook leaves the finished work in a kept worktree: not "no change", and among Needs you.
 git_ branch agent/issue-113 main; log 113 impl 'done'

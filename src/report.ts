@@ -35,6 +35,8 @@ export type Facts = {
   started: string;
   finished?: string;
   live: boolean;
+  /** The run record's `paused`: a person has the live run paused (seconds since the epoch). */
+  paused?: { since: number };
   /** No finishedAt and its process gone: killed, so its end time is unknown. */
   killed?: boolean;
   dryRun: boolean;
@@ -149,6 +151,7 @@ const SECTIONS: Record<TicketState, Section> = {
   repair: "working",
   ready: "working",
   landing: "working",
+  paused: "working",
 };
 const statesIn = (section: Section) => TICKET_STATES.filter((s) => SECTIONS[s] === section);
 /** A state outside the set is in no section: a record of an older kit is not the person's to fix, nor a ticket cut short. */
@@ -342,6 +345,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     started: run.startedAt,
     finished: run.finishedAt,
     live,
+    ...(live && typeof run.paused?.since === "number" ? { paused: { since: run.paused.since } } : {}),
     killed: alive.state === "dead",
     dryRun: !!run.dryRun,
     tokens: run.tokens,
@@ -474,7 +478,10 @@ export const render = (f: Facts, plain = false): string => {
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
     (!!f.killed || !!f.stoppedBy || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
-  const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
+  // Parked at a juncture of a paused run when it ended (stopped, crashed): nothing was cut short, its branch holds every
+  // commit and the next run picks it up, so it is runnable, not cut.
+  const parked = early ? Object.keys(f.tickets).filter((id) => f.tickets[id].state === "paused") : [];
+  const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && f.tickets[id].state !== "paused" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
@@ -501,7 +508,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(
     baseRed
       ? `${h("## 🏁 Run", "## Run")} stopped: red on ${f.base} before any agent ran - nothing was started`
-      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
+      : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length} need you - ${fixing.length} need fixing - ` +
@@ -674,6 +681,7 @@ export const render = (f: Facts, plain = false): string => {
   // for (and whether that one landed); one that waited on blockers, which; a conflicted one resumes its branch.
   const runnableWhy = (id: string) => {
     const t = f.tickets[id] ?? {};
+    if (t.state === "paused") return `paused${t.note ? ` ${t.note}` : ""} - its branch resumes`;
     if (t.state === "conflict") return "conflicted - its branch resumes";
     if (partlyRerun.includes(id)) return "merged partly done - the remainder is still open";
     const overlap = /^waits for (\S+) \(this run\) - next run$/.exec(t.note ?? "");
@@ -685,7 +693,7 @@ export const render = (f: Facts, plain = false): string => {
     const on = /^waits for (.*)$/.exec(t.note ?? "")?.[1]?.replace(/\s*\([^)]*\)/g, "").split(",").map((l) => l.trim()).filter(Boolean) ?? [];
     return on.length ? `${on.length === 1 ? "blocker" : "blockers"} ${on.join(", ")} closed` : "blockers closed";
   };
-  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun])];
+  const runnable = [...new Set([...Object.keys(f.tickets).filter((id) => f.runnable.includes(id) || f.tickets[id].state === "conflict"), ...f.runnable, ...partlyRerun, ...parked])];
   const anyLeft = runnable.length + f.blocked.length + skipped.length + requeued.length + cut.length + unstarted.length > 0 || !!f.blockCheck;
   section(h("## ▶️ Runnable now / ⏳ Still blocked", "## Runnable now / Still blocked"), anyLeft ? [
     // A ticket cut short is runnable too, and its own line follows: "none" above it would contradict it.
@@ -761,9 +769,9 @@ export const render = (f: Facts, plain = false): string => {
   if (skipped.length) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
-  if (cut.length + unstarted.length) {
+  if (parked.length + cut.length + unstarted.length) {
     next.push(
-      `\`sandcastle run\` again: it picks up ${list([...cut, ...unstarted])} where this run ended` +
+      `\`sandcastle run\` again: it picks up ${list([...parked, ...cut, ...unstarted])} where this run ended` +
         (f.killed ? ", and first stops any sandbox the killed run left working." : "."),
     );
   }

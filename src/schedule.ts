@@ -513,6 +513,14 @@ export type Change<G, O, B = unknown> =
   | { kind: "landing"; at: number; of: number }
   /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
   | { kind: "demand"; n: number }
+  /**
+   * A person paused the run (`since`, seconds since the epoch): `finishing` are the tickets still
+   * doing something - an agent pass, a gate run, a landing - told again whenever they change, until
+   * the last one has reached a juncture or landed. Nothing is in flight when it is empty.
+   */
+  | { kind: "paused"; since: number; finishing: string[] }
+  /** The pause was lifted: the parked tickets continue and the run asks for its slots again. */
+  | { kind: "resumed" }
   | HoldChange
   | BlockerChange<B>;
 
@@ -646,17 +654,43 @@ export type Plan<T extends { id: string }, B = unknown> = {
   checkLabel?(ticket: T): string | undefined;
 };
 
+/**
+ * The pause a person has asked for (`sandcastle pause`), as the scheduler reads it: at each
+ * juncture and every `pollMs`, so a pause or a resume reaches the run within that, whether or not a
+ * ticket is at a juncture. A source never throws: one that cannot be read answers as it did last.
+ */
+export type PauseSource = {
+  /** The pause in force - `since` in seconds since the epoch - or undefined when the run is not paused. */
+  read(): { since: number } | undefined;
+  /** How often the pause is read between junctures, in milliseconds. 1000 when not given. */
+  pollMs?: number;
+};
+
+/**
+ * What a ticket does to leave a juncture and come back to it: `suspend` closes its sandbox and gives
+ * back what the sandbox held (a machine-wide slot), keeping the branch; `resume` opens a fresh one
+ * on the same branch and takes a slot again. Told by the scheduler only when the run is paused.
+ */
+export type Park = { suspend(): Promise<void>; resume(): Promise<void> };
+
 export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /** Pipelines at once. */
   workers: number;
   /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
   concurrency?: number;
+  /** A person's pause, if the run takes one (a dry run may: it simply has nothing to hold). Without it nothing is held. */
+  pause?: PauseSource;
   /**
    * One attempt of a ticket: `n` is 2 for a requeued ticket, which carries `again`. `last()` says
    * nothing more will start after it - none queued, none that may be freed, or a stopped run - so a
-   * sandbox's pane can close.
+   * sandbox's pane can close. `juncture(phase, park)` is awaited before each step that would start
+   * an agent pass (`phase` names it): it returns at once while the run is not paused; while paused it
+   * runs `park.suspend()`, waits for the resume, runs `park.resume()` and returns, so the attempt
+   * goes on from that phase. A paused run holds no ticket's sandbox at a juncture, and a ticket that
+   * has not begun waits before its attempt does. `paused()` reads the pause now: an attempt that waits
+   * for a machine-wide slot stops waiting when the run is paused, and reaches its first juncture instead.
    */
-  attempt(ticket: T, at: { n: 1 | 2; again?: Again; last(): boolean }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: 1 | 2; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -743,16 +777,79 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Counted from the push to the end of the attempt, so a ticket a worker has taken but not yet begun still counts.
       let inPipeline = 0;
       let demanded: number | undefined;
+      // The pause (`work.pause`, read by `sync`): the one a person asked for, told as it begins and ends.
+      let pausedSince: number | undefined;
+      // The tickets that hold no sandbox because of the pause, by the phase they wait at ("start": not begun).
+      const parked = new Map<string, string>();
+      // Tickets inside an attempt, and green branches queued for landing or landing: what a pause lets finish.
+      const running = new Set<string>();
+      const greens = new Set<string>();
+      const wakers: (() => void)[] = [];
+      let toldFinishing: string | undefined;
+      // While paused only the tickets inside an attempt that hold a sandbox ask for a slot: one queued for a
+      // worker, waiting at the start or parked at a juncture holds none.
+      const active = () => (pausedSince === undefined ? inPipeline : [...running].filter((id) => !parked.has(id)).length);
       const demand = () => {
-        const n = Math.min(cap, inPipeline + (dealt < pushed ? 1 : 0));
+        const n = Math.min(cap, active() + (dealt < pushed ? 1 : 0));
         if (n === demanded) return;
         demanded = n;
         tell({ kind: "demand", n });
       };
+      // The tickets still doing something while paused; told again each time the list changes.
+      const tellPaused = () => {
+        if (pausedSince === undefined) return;
+        const finishing = [...new Set([...[...running].filter((id) => !parked.has(id)), ...greens])];
+        const key = JSON.stringify(finishing);
+        if (key === toldFinishing) return;
+        toldFinishing = key;
+        tell({ kind: "paused", since: pausedSince, finishing });
+      };
       const stage = () => {
         demand();
+        tellPaused();
         if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
+      // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
+      // parked ticket from the demand before any of them asks for a slot again, and wakes them.
+      const sync = () => {
+        let now: { since: number } | undefined;
+        try {
+          now = work.pause?.read();
+        } catch {
+          return;
+        }
+        if (now && pausedSince === undefined) {
+          pausedSince = now.since;
+          toldFinishing = undefined;
+          tellPaused();
+          demand();
+        } else if (!now && pausedSince !== undefined) {
+          pausedSince = undefined;
+          parked.clear();
+          toldFinishing = undefined;
+          tell({ kind: "resumed" });
+          demand();
+          for (const wake of wakers.splice(0)) wake();
+        }
+      };
+      // The ticket holds nothing while the run is paused; returns once it is not.
+      const waitParked = async (id: string, phase: string) => {
+        parked.set(id, phase);
+        tellPaused();
+        demand();
+        for (sync(); pausedSince !== undefined; sync()) await new Promise<void>((wake) => wakers.push(wake));
+        parked.delete(id);
+      };
+      const juncture = async (id: string, phase: string, park?: Park) => {
+        sync();
+        if (pausedSince === undefined) return;
+        await park?.suspend();
+        await waitParked(id, phase);
+        await park?.resume();
+      };
+      // Not unref'd: with every ticket parked nothing else may keep the process alive, and a run that
+      // exits while a person has it paused is not paused. Cleared when the schedule ends.
+      const poll = work.pause && setInterval(sync, work.pause.pollMs ?? 1000);
       // Tickets without their ending. The queues stay open until none is left: a landing can send
       // one back after every other pipeline has ended. A ticket that starts counts before the ending
       // that freed it drops the count, so it never touches zero between them.
@@ -881,6 +978,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const landing = createLanding(work, stop, {
         settled: async (g, got) => {
           dealt++;
+          greens.delete(g.issue);
           stage();
           if (requeue(g, got)) return;
           const id = g.issue;
@@ -892,11 +990,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         },
         stopped: (g) => {
           dealt++;
+          greens.delete(g.issue);
           stage();
           return end(g.issue, { kind: "stopped", cause: stop.headline, finished: true, green: g });
         },
         crashed: (g, error) => {
           dealt++;
+          greens.delete(g.issue);
           stage();
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
@@ -912,13 +1012,16 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         return end(t.id, { kind: "landing", green: back.green, landed, attempts: 1 });
       };
       const attempt = async (t: T) => {
+        // A paused run starts no ticket: it waits here, holding nothing, until the resume - or a stop.
+        for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) await waitParked(t.id, "start");
         working++;
+        running.add(t.id);
         try {
           if (stop.startsNothing) return await notBegun(t, stop.headline!);
           const n = attempts.has(t.id) ? 2 : 1;
           let r: Attempted<G, O>;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => juncture(t.id, phase, park), paused: () => (sync(), pausedSince !== undefined) });
           } catch (error) {
             r = { kind: "crashed", error };
           }
@@ -931,6 +1034,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           switch (r.kind) {
             case "green":
               pushed++;
+              greens.add(r.green.issue);
               landing.push(r.green);
               return;
             case "pipeline":
@@ -945,6 +1049,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           }
         } finally {
           working--;
+          running.delete(t.id);
           inPipeline--;
           stage();
         }
@@ -953,6 +1058,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       if (open <= 0) closeAll();
       inPipeline = now.length;
       for (const c of now) pipelines.push(c.ticket);
+      // A pause asked for before the schedule began is in force from the first demand told.
+      sync();
       demand();
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
@@ -962,6 +1069,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       });
       const lands = landing.run().finally(() => pipelines.close());
       const [a, b] = await Promise.allSettled([fanOut, lands]);
+      clearInterval(poll);
       for (const { ticket } of later) if (!endings.has(ticket.id)) endings.set(ticket.id, { kind: "waiting", on: behind.has(ticket.id) ? "file" : "blockers" });
       for (const r of [a, b]) if (r.status === "rejected") throw r.reason;
       return { endings, stop: readings(stop) };

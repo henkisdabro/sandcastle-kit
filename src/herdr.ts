@@ -276,8 +276,10 @@ export const stackRatio = (open: number, panes: number) => 1 / (panes - open + 1
 
 // A run's tickets counted in the status view's own groups (status.sh `style_of`), so the
 // sidebar never says "needs you" about a ticket the view shows as fine, or the other way.
-export type RunCounts = { working: number; needsYou: number; merged: number; total: number };
-export const runCounts = (tickets: Record<string, TicketRecord>): RunCounts => {
+// `paused` is present (true) only for a run a person has paused: the tickets still finishing are not
+// "working" then, the run is held.
+export type RunCounts = { working: number; needsYou: number; merged: number; total: number; paused?: true };
+export const runCounts = (tickets: Record<string, TicketRecord>, paused = false): RunCounts => {
   // A ticket with no state, or one the guard dropped, is in the "other" group: counted in the total only.
   const groups = Object.values(tickets).map((t) => (t.state ? GROUPS[t.state] : "other"));
   return {
@@ -285,11 +287,12 @@ export const runCounts = (tickets: Record<string, TicketRecord>): RunCounts => {
     needsYou: groups.filter((g) => g === "needs you").length,
     merged: groups.filter((g) => g === "merged").length,
     total: groups.length,
+    ...(paused ? { paused: true as const } : {}),
   };
 };
 
-// What needs you first, as that is why anyone looks.
-const progress = (c: RunCounts) => `${c.merged}/${c.total}` + (c.needsYou ? ` · ${c.needsYou} needs you` : c.working ? ` · ${c.working} working` : "");
+// What needs you first, as that is why anyone looks; then that the run is paused, which "N working" would not say.
+const progress = (c: RunCounts) => `${c.merged}/${c.total}` + (c.needsYou ? ` · ${c.needsYou} needs you` : c.paused ? " · paused" : c.working ? ` · ${c.working} working` : "");
 
 // The workspace row in the sidebar, about 22 columns wide. A `contains = "needs you"` rule in
 // the sidebar config turns it red.
@@ -323,7 +326,7 @@ export const sandboxPanes = (project: Pick<Project, "herdr">, env: NodeJS.Proces
 // One run in the tab bar, which has more room: `name 4/9 · 2 working · 1 needs you · share 3`, its
 // share of the machine's sandbox slots last (a record from an older kit has none).
 export const lineText = (name: string, c: RunCounts, share?: number) =>
-  [`${name} ${c.merged}/${c.total}`, ...(c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : []), ...(share === undefined ? [] : [`share ${share}`])].join(" · ");
+  [`${name} ${c.merged}/${c.total}`, ...(c.paused ? ["paused"] : c.working ? [`${c.working} working`] : []), ...(c.needsYou ? [`${c.needsYou} needs you`] : []), ...(share === undefined ? [] : [`share ${share}`])].join(" · ");
 
 export const elapsed = (ms: number) => {
   const m = Math.max(0, Math.floor(ms / 60_000));
@@ -379,11 +382,13 @@ export type SandboxView = {
   finish(issue: string, outcome: string, release?: boolean): void;
   /** Landing decided the issue's fate; shown if its pane still shows it. */
   landed(issue: string, ok: boolean, outcome: string): void;
+  /** Send the run's sidebar tokens now: its state moved with no ticket's phase doing so (a pause or a resume). */
+  refresh(): void;
   /** The run ended: a notification with the summary. */
   close(summary: string): void;
 };
 
-const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, close() {} };
+const NONE: SandboxView = { claim() {}, phase() {}, finish() {}, landed() {}, refresh() {}, close() {} };
 const SOURCE = "sandcastle-kit";
 // Two and a half of the minute's re-sends: no flicker between them, gone soon after a kill.
 const TTL = "150000";
@@ -401,6 +406,8 @@ export const openSandboxView = (
   // Not `sandboxPanes()`'s default: the caller resolves the setting, and a view opened with no
   // word on it keeps a pane per sandbox.
   mode: SandboxPanes = "all",
+  // Whether a person has the run paused: the sidebar says so in place of "N working".
+  paused: () => boolean = () => false,
 ): SandboxView => {
   // Every way out before this run writes its own record retires the earlier one.
   const none = () => {
@@ -598,7 +605,7 @@ export const openSandboxView = (
   };
   const reportSpace = () => {
     if (workspace) {
-      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets()))}`, "--ttl-ms", TTL]);
+      herdr(["workspace", "report-metadata", workspace, "--source", SOURCE, "--token", `sandcastle=${spaceText(runCounts(tickets(), paused()))}`, "--ttl-ms", TTL]);
     }
   };
   const slotOf = (issue: string) => slots.find((s) => s.issue === issue);
@@ -609,7 +616,7 @@ export const openSandboxView = (
   let ended = false;
   let said = "";
   const reportRun = (final?: ReturnType<typeof runAgent>) => {
-    const a = final ?? runAgent(runCounts(tickets()), ended);
+    const a = final ?? runAgent(runCounts(tickets(), paused()), ended);
     if (said !== `${a.state} ${a.message}`) {
       herdr(["pane", "report-agent", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--state", a.state, "--message", a.message, "--seq", seq()]);
       said = `${a.state} ${a.message}`;
@@ -726,6 +733,9 @@ export const openSandboxView = (
       // finished result, read from the report; a crash is not.
       const s = shown.get(slot.pane);
       if (s) safe(() => show(slot.pane, { ...s, state: outcome === "crashed" ? "blocked" : "idle", phase: outcome, since: undefined }));
+    },
+    refresh() {
+      safe(reportRunAndSpace);
     },
     /** `ok` false: a human has to act - a conflict, a failed landing, a held branch. */
     landed(issue, ok, outcome) {

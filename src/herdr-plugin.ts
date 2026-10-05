@@ -283,7 +283,7 @@ export const configure = async (remove: boolean, yes: boolean, byDefault = false
 // The tab bar: one line for every live run, from the runs directory src/herdr.ts keeps.
 // ---------------------------------------------------------------------------
 
-type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: string; finishedAt?: string; share?: number; tickets?: Record<string, TicketRecord> };
+type Run = { root: string; orchestrator?: string; pid?: number; startedAt?: string; finishedAt?: string; share?: number; paused?: unknown; tickets?: Record<string, TicketRecord> };
 
 /**
  * Live runs, newest first. A file whose run has ended or died - or whose pid is some other process now - is removed,
@@ -397,7 +397,7 @@ export const replaceDeadTab = (root: string, kit?: string) => {
 export const runsLine = (dir = RUNS_DIR, focusedCwd = process.env.HERDR_ACTIVE_PANE_CWD, probe: Probe = commandOf, ended?: (root: string) => boolean | void, live?: (root: string) => void) => {
   const here = (r: Run) => !!focusedCwd && (focusedCwd === r.root || focusedCwd.startsWith(`${r.root}/`));
   const runs = liveRuns(dir, probe, ended, live).sort((a, b) => Number(here(b)) - Number(here(a)));
-  return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
+  return runs.length ? `♜ ${runs.map((r) => lineText(r.orchestrator ?? basename(r.root), runCounts(r.tickets ?? {}, !!r.paused && typeof r.paused === "object"), Number.isInteger(r.share) ? r.share : undefined)).join("  |  ")}` : "";
 };
 
 // ---------------------------------------------------------------------------

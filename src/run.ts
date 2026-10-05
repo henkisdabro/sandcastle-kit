@@ -1,7 +1,7 @@
 // Everything around a run that is not the pipeline itself: preconditions,
 // preflight, prompts, the run record, the log archive and the status pane.
 
-import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -129,6 +129,10 @@ export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean;
 // the run's start.
 const KEEP_AWAKE_SETTLE_MS = 250;
 
+// The latest inhibitor this process started, if it is still held, and whether a pause let it go.
+let inhibitor: ChildProcess | undefined;
+let released = false;
+
 export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
     return "off - the machine's energy settings apply";
@@ -149,7 +153,27 @@ export const keepAwake = async (): Promise<string> => {
   const settled = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), KEEP_AWAKE_SETTLE_MS); });
   const failed = await Promise.race([ended, settled]);
   clearTimeout(timer);
+  if (!failed) {
+    inhibitor = child;
+    released = false;
+  }
   return failed ? `off - ${cmd} failed` : `on (${cmd})`;
+};
+
+/**
+ * A paused run with nothing in flight lets the machine sleep: the inhibitor ends. Nothing when none
+ * is held (keep-awake was off, or already released).
+ */
+export const releaseAwake = () => {
+  if (!inhibitor) return;
+  inhibitor.kill();
+  inhibitor = undefined;
+  released = true;
+};
+
+/** Holds the machine awake again when a pause released it, as a resume does. Nothing otherwise. */
+export const holdAwake = async () => {
+  if (released) await keepAwake();
 };
 
 // Porcelain lines (`XY path`) of everything staged, unstaged or untracked. Not sh(): its trim
@@ -578,6 +602,8 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
       write();
     },
     tickets: (): Record<string, TicketRecord> => run.tickets ?? {},
+    /** A person has the run paused (`paused` in the record). */
+    paused: () => run.paused !== undefined,
     /** A new `state` also restarts its clock; a note alone does not. */
     ticket(id: string, fields: TicketRecord) {
       const tickets = run.tickets ?? {};

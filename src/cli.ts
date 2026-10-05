@@ -19,6 +19,12 @@
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
 //   stop             stop the live run, as Ctrl-C does in its terminal
+//   pause            hold the live run at the next safe juncture, losing no work: no new
+//                    ticket or agent pass starts, passes in flight finish and their sandboxes
+//                    close (branches kept), green branches still land, and the run gives its
+//                    sandbox slots to other runs. The process stays alive; `stop` still works
+//   resume           continue a paused run: each paused ticket goes on from its next phase,
+//                    in the same run, with one closing summary
 //   cap [N | off] [--project NAME]
 //                    cap the live run's share of the machine's sandbox slots at N (at most
 //                    its concurrency), or lift the cap; bare, print its demand, share and
@@ -87,7 +93,7 @@ import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, 
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject } from "./config.ts";
-import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
+import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
@@ -118,6 +124,9 @@ const [command = "help", ...args] = process.argv.slice(2);
 // Every command the help names, and the internal hook. Checked before the repository is, so a
 // typo typed outside one was told "Not inside a git repository" instead of what it was.
 const COMMANDS = [...HELP.flatMap((l) => /^  ([a-z][a-z-]*)/.exec(l)?.[1] ?? []), "lean-apply"];
+
+// The local time of day of a pause that began at `seconds` since the epoch, as the status view shows it.
+const clock = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
 
 // A refusal the operator acts on is a message, not a crash: no stack trace. Anything else is a
 // kit bug and keeps its stack.
@@ -393,6 +402,27 @@ try {
       }
       process.kill(pid, "SIGINT");
       console.log(`Stopping the run (pid ${pid}); \`sandcastle wait\` shows how it ended.`);
+      break;
+    }
+    case "pause": {
+      if (args.length) throw new OperatorError(`Unknown argument "${args[0]}" for sandcastle pause: it takes none.`);
+      const paused = pauseRun(root);
+      if (paused.kind === "no run") console.log("No run is live.");
+      else if (paused.kind === "already") console.log(`The run (pid ${paused.pid}) is already paused, since ${clock(paused.since)}. \`sandcastle resume\` continues it.`);
+      else {
+        console.log(
+          `Pausing the run (pid ${paused.pid}): no new ticket or agent pass starts, the passes in flight finish and their sandboxes close, and green branches still land. ` +
+            "`sandcastle resume` continues it; `sandcastle status` shows what is still finishing.",
+        );
+      }
+      break;
+    }
+    case "resume": {
+      if (args.length) throw new OperatorError(`Unknown argument "${args[0]}" for sandcastle resume: it takes none.`);
+      const resumed = resumeRun(root);
+      if (resumed.kind === "no run") console.log("No run is live.");
+      else if (resumed.kind === "not paused") console.log(`The run (pid ${resumed.pid}) is not paused.`);
+      else console.log(`Resuming the run (pid ${resumed.pid}, paused since ${clock(resumed.since)}): each paused ticket goes on from its next phase.`);
       break;
     }
     case "report": {
