@@ -10,9 +10,12 @@ prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anythin
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is
 removed with `git worktree remove --force <path>` and nothing else. A scratch repository to test a
-change, built under the temp dir and not in the project, takes `git -C <path>` for its own plumbing
-(`update-ref`, `gc`, `prune`: the rule above is about the project's `.git`). To test remote handling
-give it a bare origin there and use `git fetch`; `git push` is refused everywhere. If git ever tells you this
+change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
+plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
+remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
+**Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
+another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
+<files>`, run it, then `git apply /tmp/p`. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -69,9 +72,9 @@ ticket names. The project rules below say what else to read.
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
-- **Prefer the Edit tool to scripted replacements.** A `sed -i` or a `python3` heredoc that does a
-  string replace does nothing when the text does not match, and says nothing. If you do script an
-  edit, assert that each replacement matched.
+- **Edit files with the Edit tool.** An insert, or any change to one file, goes through Edit. Keep a
+  script (`sed -i`, a `python3` heredoc) for a mechanical change across many files, and assert that
+  each replacement matched: a string replace that does not match does nothing, and says nothing.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
@@ -126,6 +129,10 @@ with your sentence in place of the dots. The branch still merges if its gates ar
 stays open with that criterion named, and the next run picks up the remainder. Leave the line out when
 every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
 to omit it.
+
+**A limitation, risk or trade-off you judge outside the ticket** does not stay in your final message,
+which no reviewer and no tracker reads: file it as a new {{KIT_NEW_TICKET}}, or state it in the
+commit body for the reviewer.
 
 **If the ticket turns out to be already fixed, false, or latent:** commit nothing. {{KIT_NOCHANGE}}
 Then output `<promise>COMPLETE</promise>`.

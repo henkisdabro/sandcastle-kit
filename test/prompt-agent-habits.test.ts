@@ -39,9 +39,9 @@ test("every agent that runs the gates runs them in the foreground with the longe
   }
 });
 
-test("the implementer prefers the Edit tool, or asserts each scripted replacement matched", () => {
+test("the implementer edits with the Edit tool, and a script asserts each replacement matched", () => {
   const p = read("prompts", "implement.md");
-  assert.match(p, /Prefer the Edit tool to scripted replacements\./);
+  assert.match(p, /An insert, or any change to one file, goes through Edit\./);
   assert.match(p, /assert that each replacement matched/);
 });
 

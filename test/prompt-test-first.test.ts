@@ -22,6 +22,19 @@ test("the implementer tests at the seam, reproduces a bug first, and runs each g
   assert.match(p, /Before you finish, run each gate once, in its own command/);
 });
 
+test("the implementer files what it leaves outside the ticket", () => {
+  const p = read("prompts", "implement.md");
+  assert.match(p, /A limitation, risk or trade-off you judge outside the ticket\*\* does not stay in your final message/);
+});
+
+test("neither agent stashes in the shared .git, and both are told how to run a test without the change", () => {
+  for (const name of ["implement.md", "review.md"]) {
+    const p = read("prompts", name);
+    assert.match(p, /Never `git stash` in this worktree/, name);
+    assert.match(p, /git diff > \/tmp\/p && git checkout -- <files>`, run it, then `git apply \/tmp\/p`/, name);
+  }
+});
+
 test("the reviewer asks whether each test would fail if the behaviour broke", () => {
   const p = read("prompts", "review.md");
   assert.match(p, /would it fail if the behaviour broke, and survive a refactor that kept the behaviour\?/);

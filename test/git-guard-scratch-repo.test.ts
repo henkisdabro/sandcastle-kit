@@ -1,4 +1,4 @@
-// The git guard looks at where a command runs: update-ref, gc and prune with `git -C <path>` in a
+// The git guard looks at where a command runs: update-ref, gc, prune and stash with `git -C <absolute path>` in a
 // scratch repository outside the shared .git are allowed, a worktree of the shared repo is not, and
 // push is refused wherever it runs (its danger is the destination).
 //
@@ -46,6 +46,11 @@ const ALLOWED = [
   `git -C ${bare} update-ref refs/heads/main HEAD`,
   `sudo git -C ${scratch} gc`,
   `git -c gc.auto=0 -C ${scratch} prune`,
+  // a plain quoted literal is the same path
+  `git -C '${scratch}' gc`,
+  `git -C "${scratch}" update-ref refs/remotes/origin/main HEAD`,
+  // stash too: refs/stash is the scratch repo's own
+  `git -C ${scratch} stash`,
   `git -C ${scratch} update-ref -d refs/heads/x && git -C ${bare} prune`,
 ];
 
@@ -62,8 +67,15 @@ const BLOCKED = [
   `git -C ${scratch} gc && git -C ${worktree} prune`,
   // unresolvable paths, and a git dir named outright
   `git -C ${join(root, "missing")} update-ref -d refs/heads/x`,
-  `git -C '${scratch}' gc`,
   "git -C $SCRATCH gc",
+  `git -C "${scratch}$X" gc`,
+  // a relative -C is resolved from the shell's cwd at run time, which a leading cd moves
+  `cd ${worktree} && git -C . update-ref -d refs/heads/main`,
+  "git -C ../main gc",
+  // a GIT_DIR-style variable points git past the -C check
+  `GIT_DIR=${join(main, ".git")} git -C ${scratch} update-ref -d refs/heads/main`,
+  `export GIT_DIR=${join(main, ".git")}; git -C ${scratch} update-ref -d refs/heads/main`,
+  `GIT_COMMON_DIR=${join(main, ".git")} git -C ${scratch} gc`,
   `git --git-dir=${join(main, ".git")} -C ${scratch} update-ref -d refs/heads/main`,
   // -C paths accumulate: the second one climbs back into the shared repo
   `git -C ${scratch} -C ${main} gc`,
@@ -81,7 +93,7 @@ for (const command of BLOCKED) {
     const r = bash(command);
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, /^BLOCKED: git update-ref, gc or prune\./);
-    assert.match(r.stderr, /git -C <path>/);
+    assert.match(r.stderr, /git -C <absolute path>/);
   });
 }
 
@@ -98,9 +110,12 @@ for (const cwd of [scratch, root]) {
   });
 }
 
-test("from inside the scratch repo, -C . is the scratch repo and is allowed", () => {
-  const r = bash("git -C . gc", scratch);
-  assert.equal(r.status, 0, r.stderr);
+test("from inside the scratch repo a relative -C is still refused: a cd in the line can move it", () => {
+  for (const command of ["git -C . gc", `cd ${worktree} && git -C . update-ref -d refs/heads/main`]) {
+    const r = bash(command, scratch);
+    assert.equal(r.status, 2, `${command}\n${r.stderr}`);
+    assert.match(r.stderr, /git -C <absolute path>/);
+  }
 });
 
 test("with no CLAUDE_PROJECT_DIR the shared repo is unknown, so a scratch -C stays refused", () => {

@@ -7,9 +7,12 @@ prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anythin
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
 their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is
 removed with `git worktree remove --force <path>` and nothing else. A scratch repository to test a
-change, built under the temp dir and not in the project, takes `git -C <path>` for its own plumbing
-(`update-ref`, `gc`, `prune`: the rule above is about the project's `.git`). To test remote handling
-give it a bare origin there and use `git fetch`; `git push` is refused everywhere. If git ever tells you this
+change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
+plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
+remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
+**Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
+another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
+<files>`, run it, then `git apply /tmp/p`. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 

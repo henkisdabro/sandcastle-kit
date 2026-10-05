@@ -50,7 +50,16 @@ const BLOCKED = [
   "git push origin main",
   "sudo git push",
   "echo x; git prune",
+  // a variable assignment before git does not hide it
+  "FOO=1 git push origin main",
+  "GIT_TRACE=1 git update-ref -d refs/heads/main",
   `rm -rf ${shared}/worktrees/agent-2`,
+  // refs/stash is in the shared .git: a pop can apply another agent's change
+  "git stash",
+  "git stash pop -q",
+  "git stash push src/a.ts -q && pnpm test; git stash pop -q",
+  "git stash -q -- src/herdr.ts",
+  "git stash drop",
 ];
 
 const ALLOWED = [
@@ -65,7 +74,8 @@ const ALLOWED = [
   "git clean -fd",
   "git checkout .",
   "git merge --no-edit main",
-  "git stash",
+  "git stash list",
+  "git stash show -p",
   "rm -rf node_modules/pkg/.git/",
   "rm -rf dist",
   "git status --porcelain",
