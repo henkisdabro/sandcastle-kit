@@ -15,7 +15,11 @@ plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the proj
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
 another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
-<files>`, run it, then `git apply /tmp/p`. If git ever tells you this
+<files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
+timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
+of its own, never chained after the test, so a hang or a move to the background cannot leave the
+worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
+own command line: it matches your own shell and kills it. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
