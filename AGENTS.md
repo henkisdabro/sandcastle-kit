@@ -61,7 +61,7 @@ read a module's section there before changing it.
 | `src/touches.ts` | The `Touches:` line of a ticket body, and `unmergeableFiles`; a scheduling hint, never a guard |
 | `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint`; read-only advice |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
-| `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks; `KIT`, the kit's own directory |
+| `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks, the CPU limit by kind of sandbox (`sandboxCpus`: a ticket's, or gate-only); `KIT`, the kit's own directory |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/detach.ts` | `sandcastle run --detach` (output to `.sandcastle/logs/run-output.log`), `wait` and `stop` |

@@ -1427,13 +1427,18 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
-  // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
-  // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
+  // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
+  // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
+  // gates, which run one at a time and set the run's end (`gateProject` below opens those).
   // One `docker info` for both this and the pool warning below; docker not answering stops the run here, before anything is recorded or started.
   const info = (turn?.docker ?? readDockerInfo)();
-  const cpus = sandboxCpus(project, settings.concurrency.effective, () => info);
-  console.log(cpusLine(project, cpus));
-  project = { ...project, cpus };
+  const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
+  const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
+  const gateCpus = sandboxCpus(project, "gate", pool, () => info);
+  console.log(cpusLine(project, ticketCpus, gateCpus));
+  // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
+  const gateProject = { ...project, cpus: gateCpus };
+  project = { ...project, cpus: ticketCpus };
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -1654,7 +1659,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(project, image, planFile, true, runId));
+      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -1755,7 +1760,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     reports,
     run,
     dryRun: DRY_RUN,
-    opener: sandboxOpener(project, image, planFile),
+    opener: sandboxOpener(gateProject, image, planFile),
     runId,
     withdrawal,
     host,
@@ -1818,7 +1823,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
-    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId, false),
+    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
@@ -2031,7 +2036,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => gateBase(gateProject, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);
