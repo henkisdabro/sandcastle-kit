@@ -45,6 +45,7 @@ import {
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
+import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -1162,6 +1163,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
+  // Measured peaks say the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
+  for (const line of poolWarningsNow()) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
