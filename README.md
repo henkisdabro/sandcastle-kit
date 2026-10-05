@@ -1154,8 +1154,8 @@ A key not in this table is refused, naming the nearest real one, as the project 
 
 Claude Code ships almost daily, so the base image follows a release channel instead of a version
 written into the Dockerfile: by default Claude Code's `stable` channel (`"latest"` or an exact version
-can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases are
-skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
+can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases,
+deprecated or unpublished releases and any above npm's `latest` tag are skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
 build`, and the start of every run) and makes them part of the image's tag. A release therefore
 triggers one rebuild, of about a minute, and every sandbox of a run has the same version. A run's
 start lines and `sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and

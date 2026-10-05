@@ -28,7 +28,7 @@ const fake = (claude: Record<string, string>, codex = "0.200.0") => {
   const fetcher = async (url: string) => {
     urls.push(url);
     // The Codex packument: the one release, published long ago, so it is past the cooldown.
-    const body = url.startsWith("https://registry.npmjs.org/") ? JSON.stringify({ time: { [codex]: "2020-01-01T00:00:00.000Z" } }) : claude[url.split("/").pop()!];
+    const body = url.startsWith("https://registry.npmjs.org/") ? JSON.stringify({ versions: { [codex]: {} }, time: { [codex]: "2020-01-01T00:00:00.000Z" } }) : claude[url.split("/").pop()!];
     if (body === undefined) throw new Error("not found");
     return { ok: true, text: async () => body, json: async () => JSON.parse(body) };
   };
