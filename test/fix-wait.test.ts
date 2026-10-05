@@ -369,3 +369,47 @@ for (const [how, ending] of [
     }
   });
 }
+
+test("a fixer sent back at landing that lands its carried branch later still counts as the fix: a ticket red on that test merges the base, starting no repair", { timeout: 20000 }, async () => {
+  const h = harness(() => [CLOCK, GREEN]);
+  try {
+    fixing(h);
+    // 2's branch is cut before 1 lands; its first gate run finishes only once 1's fix is on the base.
+    const release = h.hold("2");
+    const second = h.attempt("2");
+    await until(() => h.events("2").includes("gate"));
+    const first = await h.attempt("1");
+    assert.equal(first.status, "green");
+    // Its landing collided; its second attempt lands the carried green branch, with no repair pass to claim the test again.
+    h.fixes.told({ kind: "requeued", id: "1", again: { kind: "conflict", with: ["3"] } });
+    h.land("1");
+    h.fixes.told(landed("1"));
+    release();
+    const o = await second;
+    assert.equal(o.status, "green");
+    assert.equal(o.repairs, 0);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "gate"]);
+    assert.ok(h.has("agent/issue-2", "src/fix.ts"), "the landed fix reached the branch by the base merge");
+    assert.ok(!h.waiting("2"), "nothing to wait for: the fix had landed");
+    assert.ok(h.lines.some((l) => l.startsWith("#2: #1 landed - merged main into its branch")));
+  } finally {
+    h.restore();
+  }
+});
+
+test("a fixer sent back at landing that then fails leaves no fix behind: a ticket red on that test repairs", { timeout: 20000 }, async () => {
+  const h = harness(() => [CLOCK, GREEN]);
+  try {
+    fixing(h);
+    await h.attempt("1");
+    h.fixes.told({ kind: "requeued", id: "1", again: { kind: "conflict", with: ["3"] } });
+    h.fixes.told(failed("1"));
+    const o = await h.attempt("2");
+    assert.equal(o.status, "green");
+    assert.equal(o.repairs, 1);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "repair", "gate", "review"]);
+    assert.ok(!h.waiting("2"));
+  } finally {
+    h.restore();
+  }
+});
