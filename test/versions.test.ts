@@ -27,7 +27,8 @@ const fake = (claude: Record<string, string>, codex = "0.200.0") => {
   const urls: string[] = [];
   const fetcher = async (url: string) => {
     urls.push(url);
-    const body = url.startsWith("https://registry.npmjs.org/") ? JSON.stringify({ version: codex }) : claude[url.split("/").pop()!];
+    // The Codex packument: the one release, published long ago, so it is past the cooldown.
+    const body = url.startsWith("https://registry.npmjs.org/") ? JSON.stringify({ time: { [codex]: "2020-01-01T00:00:00.000Z" } }) : claude[url.split("/").pop()!];
     if (body === undefined) throw new Error("not found");
     return { ok: true, text: async () => body, json: async () => JSON.parse(body) };
   };
@@ -55,7 +56,7 @@ test("the stable channel is the default; it resolves from the fetched body, Code
   const { fetcher, urls } = fake({ stable: "2.2.0\n" });
   const v = await resolveVersions({}, fetcher);
   assert.deepEqual(v, { claude: "2.2.0", codex: "0.200.0", channel: "stable", source: "network" });
-  assert.deepEqual(urls, ["https://downloads.claude.ai/claude-code-releases/stable", "https://registry.npmjs.org/@openai/codex/latest"]);
+  assert.deepEqual(urls, ["https://downloads.claude.ai/claude-code-releases/stable", "https://registry.npmjs.org/@openai/codex"]);
 });
 
 test("stable hits the /stable URL", async () => {

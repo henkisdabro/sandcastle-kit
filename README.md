@@ -1102,7 +1102,7 @@ Examples: [`examples/`](examples/).
 | `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
 | `TICKETS`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; `ISSUES` is the older name for `TICKETS` (if both are set, `TICKETS` wins). The same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
 | `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off, `drain` runs until the queue is drained) |
-| `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; npm's `latest` | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
+| `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; the newest plain Codex release at least 72 hours old | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |
 | `SKIP_PREFLIGHT=1` | off | Skip the model check |
 | `SKIP_BASE_GATES=1` | off | Start agents even though the gates were not checked on the base commit - for a known flaky gate, say |
 | `SANDBOX_PANES=none` or `all` | `herdr.panes`, else `none` | Whether a run in Herdr opens a pane per sandbox; over the config key |
@@ -1152,8 +1152,8 @@ A key not in this table is refused, naming the nearest real one, as the project 
 
 Claude Code ships almost daily, so the base image follows a release channel instead of a version
 written into the Dockerfile: by default Claude Code's `stable` channel (`"latest"` or an exact version
-can be set), and for Codex npm's `latest` tag, which is Codex's release channel (its prereleases are
-under `alpha`). The kit resolves both versions on the host when it ensures the image (`sandcastle
+can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases are
+skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
 build`, and the start of every run) and makes them part of the image's tag. A release therefore
 triggers one rebuild, of about a minute, and every sandbox of a run has the same version. A run's
 start lines and `sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and

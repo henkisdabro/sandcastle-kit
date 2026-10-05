@@ -31,7 +31,11 @@ export const isClaudeSetting = (s: unknown): s is string => typeof s === "string
 
 const CACHE_TTL_MS = 6 * 3_600_000;
 const RELEASES = "https://downloads.claude.ai/claude-code-releases";
-const CODEX_LATEST = "https://registry.npmjs.org/@openai/codex/latest";
+// The full packument: only it carries each version's publish time (`time`), and it is large (every
+// platform build is a version), hence the longer timeout and the six-hour cache.
+const CODEX_PACKUMENT = "https://registry.npmjs.org/@openai/codex";
+/** A Codex release is not used until it is this old, as the project's own pnpm config waits on dependencies. */
+const CODEX_COOLDOWN_MS = 72 * 3_600_000;
 
 type Entry = { version: string; at: number };
 type Cache = { claude?: Record<string, Entry>; codex?: Entry };
@@ -71,8 +75,8 @@ const dockerfileDefaults = () => {
   return { claude: arg("CLAUDE_CODE_VERSION"), codex: arg("CODEX_VERSION") };
 };
 
-const get = async (fetcher: Fetcher, url: string) => {
-  const res = await fetcher(url, { signal: AbortSignal.timeout(5_000) });
+const get = async (fetcher: Fetcher, url: string, timeoutMs = 5_000) => {
+  const res = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`${url}: HTTP error`);
   return res;
 };
@@ -81,6 +85,28 @@ const valid = (v: unknown): string => {
   const s = typeof v === "string" ? v.trim() : "";
   if (!VERSION.test(s)) throw new Error(`not a version: ${JSON.stringify(String(v).slice(0, 40))}`);
   return s;
+};
+
+/**
+ * The newest plain `x.y.z` in an npm packument whose `time` entry is at least the cooldown old.
+ * Pre-releases and the platform builds (`0.160.0-linux-x64`) are not plain, so they never count.
+ * Throws when there is none, which resolves like any failed fetch.
+ */
+const codexAfterCooldown = (packument: unknown, now: number): string => {
+  const time = (packument as { time?: Record<string, unknown> } | null)?.time;
+  if (!time || typeof time !== "object") throw new Error("npm packument has no publish times");
+  let best: number[] | undefined;
+  for (const [version, published] of Object.entries(time)) {
+    if (!/^\d+\.\d+\.\d+$/.test(version)) continue;
+    const at = typeof published === "string" ? Date.parse(published) : NaN;
+    if (!(now - at >= CODEX_COOLDOWN_MS)) continue;
+    const parts = version.split(".").map(Number);
+    // Semver order, not publish order: a patch release of an older line can be published later.
+    const i = best ? parts.findIndex((n, k) => n !== best![k]) : 0;
+    if (!best || (i >= 0 && parts[i] > best[i])) best = parts;
+  }
+  if (!best) throw new Error("no Codex release is past the cooldown");
+  return best.join(".");
 };
 
 type Part = { version: string; from: Versions["source"] };
@@ -108,7 +134,7 @@ const resolvePart = async (
 
 /**
  * Claude Code from `claudeCode` in the project config (default `stable`; `CLAUDE_CODE_VERSION`
- * overrides it), Codex from `CODEX_VERSION` or npm's `latest` (Codex's release channel; prereleases are `alpha`). Never throws for a network failure:
+ * overrides it), Codex from `CODEX_VERSION` or the newest plain release on npm at least 72 hours old. Never throws for a network failure:
  * the cached value is used whatever its age, then the Dockerfile's defaults. A bad setting is an
  * OperatorError. `log` gets the one line printed when a value did not come from the network.
  */
@@ -156,7 +182,7 @@ export const resolveVersions = async (
     codex = await resolvePart(
       isFresh(cache.codex),
       cache.codex,
-      async () => valid(((await (await get(fetcher, CODEX_LATEST)).json()) as { version?: unknown })?.version),
+      async () => valid(codexAfterCooldown(await (await get(fetcher, CODEX_PACKUMENT, 30_000)).json(), Date.now())),
       // Re-read: the Claude entry above may have been written since `cache` was read.
       (e) => writeCache({ ...readCache(), codex: e }),
       defaults.codex,

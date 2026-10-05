@@ -42,8 +42,9 @@ RUN corepack enable
 # Codex CLI, for the opt-in cross-family review (CROSS_REVIEW=1). It
 # signs in with a copy of the host's ~/.codex/auth.json. The cache clean drops
 # about 164 MB of /root/.npm that `npm install -g` leaves in the layer.
-# The kit passes the version it resolved (npm's `latest`, or CODEX_VERSION); this default is
-# the offline fallback, used only when there is no network and no cached value.
+# The kit passes the version it resolved (the newest plain release at least 72 hours old, or
+# CODEX_VERSION); this default is the offline fallback, used only when there is no network and
+# no cached value.
 ARG CODEX_VERSION=0.160.0
 RUN npm install -g @openai/codex@$CODEX_VERSION && npm cache clean --force
 
