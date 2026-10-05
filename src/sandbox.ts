@@ -400,8 +400,14 @@ const watchBuild = (show: (text: string) => void) => {
 // `fix` is the next step when the build fails: docker's own output above says what broke, but not
 // which file to change, and a stack trace under it buried that output.
 const build = async (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean, fix: string) => {
-  console.log(`Building ${tag} ...`);
-  const watch = watchBuild((text) => process.stderr.write(text));
+  // The start line waits for the watcher's first output: printed up front, a cached build said
+  // `Building` and then that it re-tagged, two lines where one is the whole story.
+  let started = false;
+  const watch = watchBuild((text) => {
+    if (!started) console.log(`Building ${tag} ...`);
+    started = true;
+    process.stderr.write(text);
+  });
   const code = await new Promise<number | null>((resolve) => {
     const child = spawn("docker", buildArgs(tag, args, pull), { stdio: ["pipe", "pipe", "pipe"] });
     child.stdout.setEncoding("utf8").on("data", (d: string) => watch.feed(0, d));
