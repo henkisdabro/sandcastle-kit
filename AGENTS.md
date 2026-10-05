@@ -127,7 +127,10 @@ in Linux (agents' sandboxes are Linux, so BSD tools break only here), and scans 
 for secrets, the denylist and home-directory paths.
 
 In this repository's sandbox image (`.sandcastle/Dockerfile`), `bash32` is macOS's bash 3.2 built
-from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Before
+from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Every
+host shell script (all but `container/`) parses under it too, and `test/host-shell-portability.test.ts`
+refuses a bash 4 construct or a GNU-only flag without a fallback in one: shellcheck has no 3.2
+dialect. A line that must keep one says why with `# portability-ok: <reason>`. Before
 committing a change to a shell script, run `shellcheck -S error` on it; `shellcheck` is installed there too.
 
 `sandcastle run`, `preflight` and `lean --measure` spend the user's model allowance; ask first.
