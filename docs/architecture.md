@@ -139,7 +139,7 @@ The run settings (CONTEXT.md): `resolveSettings({ env, project, machine })`, the
 
 ## `src/versions.ts`
 
-Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode` or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), Codex's npm `latest` tag (or `CODEX_VERSION`), resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag
+Which Claude Code and Codex the image gets: Claude Code's `stable` channel by default (`claudeCode` or `CLAUDE_CODE_VERSION` picks `latest` or an exact version), the newest plain Codex release on npm at least 72 hours old (from the packument's `time`; or `CODEX_VERSION`), resolved on the host, cached six hours, with the Dockerfile's defaults as the offline fallback; the versions are part of the image tag
 
 ## `prompts/`
 
