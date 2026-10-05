@@ -19,7 +19,9 @@ const fetcherFor = (time: Record<string, string> | undefined, urls: string[] = [
   urls.push(url);
   if (url.startsWith("https://registry.npmjs.org/")) {
     if (!time) return { ok: false, text: async () => "", json: async () => ({}) };
-    const body = { time: { created: ago(9999), modified: ago(1), ...time } };
+    // A real packument has a `versions` entry for every published release.
+    const versions = Object.fromEntries(Object.keys(time).map((v) => [v, {}]));
+    const body = { versions, time: { created: ago(9999), modified: ago(1), ...time } };
     return { ok: true, text: async () => JSON.stringify(body), json: async () => body };
   }
   return { ok: true, text: async () => "2.2.0", json: async () => ({}) };
