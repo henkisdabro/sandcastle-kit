@@ -297,6 +297,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const identity = ["user.name", "user.email"].filter((k) => !run("git", ["config", k], repoRoot));
   check(!identity.length, "git identity (user.name, user.email)", identity.map((k) => `\`git config --global ${k} ${k === "user.name" ? '"Your Name"' : "you@example.com"}\``).join(", then "));
   check(!!run("jq", ["--version"]), "jq (status view)", mac ? "`brew install jq`" : "Install jq: `sudo apt install jq` or `sudo dnf install jq`.");
+  // The status view trusts a run's pid only with its command (`ps -p <pid> -o command=`): a bare pid
+  // may be some other process by now. Slim Linux images ship no procps, and there every live run
+  // read as ended. macOS always has a ps that takes these flags.
+  if (!mac) check(!!run("ps", ["-p", String(process.pid), "-o", "command="]), "ps (status view)", "Install procps: `sudo apt install procps` or `sudo dnf install procps-ng`.");
 
   const onPath = run("sh", ["-c", "command -v sandcastle"]);
   const linked = (() => {

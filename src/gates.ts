@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
-import { peakOf, recordPeak, samplePeak } from "./peaks.ts";
+import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -62,24 +62,27 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     const log = progress.log;
-    for (const [i, g] of project.gates.entries()) {
-      progress.gate?.(i, g.name);
-      if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
-      const since = Date.now();
-      const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
-      const ms = Date.now() - since;
-      const timedOut = r.exitCode === 124;
-      const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
-      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
-      gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
-      if (r.exitCode === 0) continue;
-      const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
-      failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
-      // A timed-out gate may still be running in this container (or Docker
-      // may not be answering): a later gate would run beside it, or wait out
-      // its own timeout too.
-      if (!all || r.exitCode === 124) break;
-    }
+    // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
+    await sampling(sandbox, "gate", async () => {
+      for (const [i, g] of project.gates.entries()) {
+        progress.gate?.(i, g.name);
+        if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
+        const since = Date.now();
+        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
+        const ms = Date.now() - since;
+        const timedOut = r.exitCode === 124;
+        const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
+        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+        gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
+        if (r.exitCode === 0) continue;
+        const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+        failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
+        // A timed-out gate may still be running in this container (or Docker
+        // may not be answering): a later gate would run beside it, or wait out
+        // its own timeout too.
+        if (!all || r.exitCode === 124) break;
+      }
+    });
     const peakMib = await samplePeak(sandbox);
     return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}) };
   }, progress.wait);
@@ -291,11 +294,21 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // line so a bare "FAIL" line (Go prints one) cannot borrow the next line's word.
 // ESLint ends a red lint gate with "✖ N problems (...)": not a test, and two
 // lint-red branches would otherwise read as one failing test.
+// node:test's spec reporter ends a red run with a "✖ failing tests:" summary
+// that puts "test at <path>:<line>:<col>" above each failing leaf test, so its
+// ids there are "path::name", like pytest's, and the base-red check can tell
+// whose red it is. The summary is the whole list: the body's "✖" lines before
+// it also name the describe suites and parents of a failed test, which are
+// not tests. Pairs go by position, never by name, as one name can fail in two
+// files. Without the summary (TAP, a summary cut off, Node 20 and 22's TAP
+// default with its absolute "location:" paths) the ids name no file, and the
+// red stays the branch's own.
+const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
   /^\s*FAIL\s+(\S+)/,
   /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
-  /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/,
+  SPEC_FAILED,
   /^\s*--- FAIL: (\S+)/,
   /^test (\S+) \.\.\. FAILED$/,
 ];
@@ -303,24 +316,37 @@ const FAILING_TEST_LINE = [
 export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) => re.test(line));
 /** How many failing tests `failingTests` names: a list this long may have been cut, so it is not the whole set. */
 export const FAILING_TESTS_SHOWN = 5;
-export const failingTests = (output: string) =>
-  [
-    ...new Set(
-      output
-        .split("\n")
-        .map((line) => line.replace(/\r$/, ""))
-        .flatMap((line) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined)),
-    ),
-  ].slice(0, FAILING_TESTS_SHOWN);
+const SPEC_SUMMARY = /^✖ failing tests:$/;
+const SPEC_LOCATION = /^test at (.+):\d+:\d+$/;
+const CLIPPED = /^\[\.\.\. \d+ characters cut \.\.\.\]$/;
+const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
+export const failingTests = (output: string) => {
+  const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
+  const header = lines.findIndex((line) => SPEC_SUMMARY.test(line));
+  // A summary `clip` cut through is not the whole list: a test it lost could be the branch's own.
+  const summary = header >= 0 && lines.slice(header).some((line) => CLIPPED.test(line)) ? -1 : header;
+  if (summary < 0) return [...new Set(lines.flatMap(idsOf))].slice(0, FAILING_TESTS_SHOWN);
+  const before = lines.slice(0, summary).flatMap((line) => (SPEC_FAILED.test(line) ? [] : idsOf(line)));
+  const listed: string[] = [];
+  let at: string | undefined;
+  for (const line of lines.slice(summary + 1)) {
+    const name = line.startsWith("✖ ") ? SPEC_FAILED.exec(line)?.[1] : undefined;
+    // A file that failed to load is listed under its own path, which is the id.
+    if (name !== undefined) listed.push(at === undefined || name === at ? name : `${at}::${name}`);
+    at = SPEC_LOCATION.exec(line)?.[1];
+  }
+  return [...new Set([...before, ...listed])].slice(0, FAILING_TESTS_SHOWN);
+};
 
 /**
- * The file a failing test's id names, or undefined when it names none. pytest's "path::test" and
- * vitest's and jest's "FAIL path" do; node:test's "name", Go's "TestName" and cargo's "mod::name"
- * do not, and a guess from a test's title would call a branch's own red the base's. Relative paths only.
+ * The file a failing test's id names, or undefined when it names none. pytest's "path::test",
+ * vitest's and jest's "FAIL path" and node:test's summary "path::name" do; node:test's bare "name",
+ * Go's "TestName" and cargo's "mod::name" do not, and a guess from a test's title would call a
+ * branch's own red the base's. Relative paths inside the repo only: one through "../" is not the repo's.
  */
 export const failingTestFile = (id: string) => {
   const file = id.split("::")[0].replace(/^\.\//, "");
-  return /^[^\s/][^\s]*\.[A-Za-z0-9]+$/.test(file) ? file : undefined;
+  return /^[^\s/][^\s]*\.[A-Za-z0-9]+$/.test(file) && !file.split("/").includes("..") ? file : undefined;
 };
 
 // The red gates of a result, or undefined for a step that is not a gate run.
@@ -478,8 +504,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     run.failures,
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
-  // The sandbox's peak, for the run's "base gates" timings line, as a ticket's gate pass carries it.
-  if (green) return run.peakMib !== undefined ? { peakMib: run.peakMib } : undefined;
+  // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
+  // (out of `ms`) and the sandbox's peak.
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

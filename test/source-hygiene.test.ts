@@ -1,6 +1,7 @@
 // Two checks over every tracked file, so neither depends on a hand-kept list:
 // - every shell script parses: the `bash -n` lists in the docs and CI had drifted, and a script
-//   added later (herdr/entry.sh) was never checked;
+//   added later (herdr/entry.sh) was never checked; the host's scripts parse under bash 3.2 as
+//   well, where there is one;
 // - no invisible character sits raw in a source file: an editor tool once wrote `\u200b` and
 //   `\u202e` as the characters themselves, and esbuild failed on a regex it could no longer read.
 //   Write them as escapes.
@@ -10,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -50,6 +51,24 @@ test("the shell scripts are found", () => {
 
 test("every shell script parses", () => {
   for (const p of shellScripts) execFileSync("bash", ["-n", join(KIT, p)], { stdio: "pipe" });
+});
+
+// The `bash` on PATH is bash 5 on Linux and on a Mac with Homebrew's, so it is no 3.2 check; the
+// host's scripts run under 3.2 on a Mac without it. macOS's own /bin/bash is 3.2, and this
+// repository's sandbox image builds it as bash32. `container/` runs only in the Linux sandbox.
+const isBash32 = (bash: string) => {
+  try {
+    return /version 3\.2\./.test(execFileSync(bash, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    return false;
+  }
+};
+const bash32s = ["/bin/bash", "/usr/local/bin/bash32"].filter((b) => existsSync(b) && isBash32(b));
+
+test("every host shell script parses under bash 3.2", { skip: bash32s.length === 0 && "no bash 3.2 here (macOS's /bin/bash, or bash32 in this repository's sandbox image)" }, () => {
+  for (const bash of bash32s) {
+    for (const p of shellScripts.filter((p) => !p.startsWith("container/"))) execFileSync(bash, ["-n", join(KIT, p)], { stdio: "pipe" });
+  }
 });
 
 // C0 controls but tab, newline, carriage return and escape (status.sh's colours are written as

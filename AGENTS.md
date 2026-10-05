@@ -78,7 +78,7 @@ read a module's section there before changing it.
 | `src/versions.ts` | Which Claude Code and Codex versions the image gets, resolved on the host and part of the image tag |
 | `prompts/` | Implement, review, repair and resolve templates; the kit fills `{{KIT_*}}`, Sandcastle the rest |
 | `container/` | Mounted read-only at `/etc/claude-code` in every sandbox: managed settings and `git-guard.sh`, the hook that refuses damage to the shared `.git` |
-| `docker/base.Dockerfile` | The shared base image. Its entrypoint is `sleep infinity`: a debugging `docker run` needs `--entrypoint bash` |
+| `docker/base.Dockerfile` | The shared base image. PID 1 is `tini` (it reaps orphaned processes) and `CMD` is `sleep infinity`: a debugging `docker run -it <image> bash` gets a shell |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux, and no extglob in a per-cell helper (3.2 makes it slow). A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/fixtures.ts` | `fakeTracker(overrides?)`: a project's `tracker` from `resolveTracker`'s own defaults. A test builds its `tracker` with it, never a full literal (`test/fixtures.test.ts` holds that); import it after `XDG_CONFIG_HOME` is set, like `src/` |
 | `test/cli-spawn.ts` | `runKit`, `runNode`, `startKit`, `startNode`: how a test starts the kit as a child process - `process.execPath`, the launcher's V8 flags read from `bin/sandcastle` (the Node 24 exit deadlock, #164) and a time limit that fails the test with the command named, and children that die with the test process (`test/parent-watch.ts`); `test/cli-spawn.test.ts` refuses a test file that names a tsx entry itself |
@@ -128,7 +128,10 @@ in Linux (agents' sandboxes are Linux, so BSD tools break only here), and scans 
 for secrets, the denylist and home-directory paths.
 
 In this repository's sandbox image (`.sandcastle/Dockerfile`), `bash32` is macOS's bash 3.2 built
-from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Before
+from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Every
+host shell script (all but `container/`) parses under it too, and `test/host-shell-portability.test.ts`
+refuses a bash 4 construct or a GNU-only flag without a fallback in one: shellcheck has no 3.2
+dialect. A line that must keep one says why with `# portability-ok: <reason>`. Before
 committing a change to a shell script, run `shellcheck -S error` on it; `shellcheck` is installed there too.
 
 `sandcastle run`, `preflight` and `lean --measure` spend the user's model allowance; ask first.

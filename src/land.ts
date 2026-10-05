@@ -14,6 +14,7 @@ import { assertGitUnchanged, dropBackup, type Fingerprint, gitFingerprint, large
 import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
+import { recordPeak } from "./peaks.ts";
 import { gatesLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
@@ -105,11 +106,12 @@ export const squashBody = (root: string, base: string, head: string) =>
  * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
  * throws `OperatorError`, as after any sandbox. With `expected` (a run's fingerprint), its base
  * moves to the new tip in the same synchronous step as the fast-forward, so a check made by
- * another pipeline never sees the base moved and the expectation not.
+ * another pipeline never sees the base moved and the expectation not. The sandbox's peak memory
+ * is filed under `run` (a run's start time; `sandcastle land` has none, so its own) before it closes.
  */
 export const landInSandbox = async (
   project: Project,
-  t: { branch: string; head: string; message: string; squash?: boolean },
+  t: { branch: string; head: string; message: string; squash?: boolean; run?: string },
   open: Opener,
   gate?: (box: Box) => Promise<GateRun>,
   expected?: Fingerprint,
@@ -173,6 +175,8 @@ export const landInSandbox = async (
       } catch {
         /* closing still has to happen */
       }
+      // A landing gate can be the run's largest sandbox: `sandcastle size` must see it.
+      await recordPeak(box, project.root, t.run);
       await box.close();
     }
     // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.
