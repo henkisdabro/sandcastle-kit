@@ -367,7 +367,10 @@ evidence</followup>` line. Once the run has landed, the kit files each as a new 
 project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
 body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
 file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
-triage`. A dry run files none and lists them instead.
+triage`. A dry run files none and lists them instead. A run that stops before its end (a crash, or a
+safety stop) keeps what its agents named in the run record as they arrive, and files them as it
+stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
+nothing more to the tracker, and the summary lists each as one to file by hand.
 
 ## 📋 Queue: what agents work on
 
@@ -735,9 +738,10 @@ A queued ticket with a branch from an earlier run builds on that branch:
   [`generated`](#-a-gate-for-generated-files) paths is resolved by regenerating them, with no agent.
 - A branch that was reviewed and green, and has gained nothing since but merge commits, skips
   implement and review: a clean base merge goes straight to the gates, a conflicted one gets a short
-  resolver prompt first, and a merge an earlier run left on it that no review has read (a held
-  resolution, say) gets a review of the merge alone. A re-run whose only change since its last
-  review is the base merge gets a review of the merge alone too. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+  resolver prompt first (it runs the typecheck gate and the tests that cover the conflicted files, not the
+  full suite: the kit gates the merge commit once it exits), and a merge an earlier run left on it that no
+  review has read (a held resolution, say) gets a review of the merge alone. A re-run whose only change
+  since its last review is the base merge gets a review of the merge alone too. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
   agents left undone, so a branch that skips them still lands as partly done, and their
   [`changelog`](#-configuration) lines, so its closing summary still lists them; `sandcastle requeue`
   clears a ticket's entry.
@@ -1095,7 +1099,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store's parent (the store-dir, without the `vN` segment pnpm adds) into every sandbox and points the sandbox's pnpm at it before `setup`. With the same pnpm major the sandbox's `<mount>/vN` is the host's own store, so installs hardlink instead of downloading; a different major keeps its own `vN` beside it. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note |
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
-| `changelog` | `false` | For a project whose rules keep agents out of its changelog: the implement and review prompts ask for each changelog line in a `<changelog>...</changelog>` tag (starting `Added:`, `Changed:` or `Fixed:`, or `Upgrading:` for what an existing project must act on), and the closing summary lists the lines of the tickets that merged under Done, grouped by those words, with the `Upgrading:` lines in a block of their own, for you to write the entries from. A full review that changes something user-facing restates the branch's whole set, which replaces the implementer's, so a rewording shows once, while a narrow review (after a repair, a base merge or a conflict resolution) gives lines only for what it changed itself and they are added; and a tag that is no changelog line (over 500 characters, a list, a commit sha) is dropped with a note |
+| `changelog` | `false` | For a project whose rules keep agents out of its changelog: the implement and review prompts ask for each changelog line in a `<changelog>...</changelog>` tag (starting `Added:`, `Changed:` or `Fixed:`, or `Upgrading:` for what an existing project must act on), and the closing summary lists the lines of the tickets that merged under Done, grouped by those words, with the `Upgrading:` lines in a block of their own, for you to write the entries from. A full review is shown the implementer's lines, and one that changes something user-facing restates the branch's whole set (the lines that still hold copied as they are), which replaces the implementer's, so a rewording shows once, while a narrow review (after a repair, a base merge or a conflict resolution) gives lines only for what it changed itself and they are added; and a tag that is no changelog line (over 500 characters, a list, a commit sha) is dropped with a note |
 | `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
