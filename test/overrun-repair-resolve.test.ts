@@ -27,7 +27,7 @@ const TMP = mkdtempSync(join(tmpdir(), "sandcastle-overrun-repair-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
 
-const git = (root: string, ...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const git = (root: string, ...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const write = (root: string, file: string, text: string) => {
   mkdirSync(dirname(join(root, file)), { recursive: true });
   writeFileSync(join(root, file), text);

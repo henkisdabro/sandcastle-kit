@@ -41,9 +41,19 @@ test("a child that does not end is killed and the test fails naming it", () => {
 test("a started child that does not end is killed after its limit", async () => {
   const stuck = join(dir, "stuck-started.mts");
   writeFileSync(stuck, 'process.on("SIGTERM", () => {});\nsetInterval(() => {}, 1000);\n');
-  const child = startNode([stuck], { stdio: "ignore", timeoutMs: 1500 });
-  const ended = await new Promise<NodeJS.Signals | null>((resolve) => child.on("exit", (_code, signal) => resolve(signal)));
+  // The helper names the command it kills on stderr; hold that line rather than print it into the gate log.
+  const write = process.stderr.write;
+  const said: string[] = [];
+  process.stderr.write = ((chunk: string) => said.push(chunk) > 0) as typeof process.stderr.write;
+  let ended: NodeJS.Signals | null;
+  try {
+    const child = startNode([stuck], { stdio: "ignore", timeoutMs: 1500 });
+    ended = await new Promise<NodeJS.Signals | null>((resolve) => child.on("exit", (_code, signal) => resolve(signal)));
+  } finally {
+    process.stderr.write = write;
+  }
   assert.equal(ended, "SIGKILL");
+  assert.match(said.join(""), /node stuck-started\.mts did not end in 1\.5s; killed/);
 });
 
 // A tsx entry named in a test file is a spawn without the flags and the limit. test/mod.test.ts

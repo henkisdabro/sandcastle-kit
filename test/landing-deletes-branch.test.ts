@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { quietly } from "./quiet.ts";
 
 // pool.ts and sandbox.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -83,14 +84,14 @@ const land = (root: string, id: string, mode: "merge" | "squash", red = false) =
     },
     landed: new Map(),
   } as Ctx;
-  return landOne(ctx, {
+  return quietly(() => landOne(ctx, {
     issue: id,
     branch: `agent/issue-${id}`,
     status: "green",
     commits: 1,
     repairs: 0,
     head: git(root, "rev-parse", `agent/issue-${id}`),
-  });
+  })).then((r) => r.result);
 };
 
 for (const mode of ["merge", "squash"] as const) {
