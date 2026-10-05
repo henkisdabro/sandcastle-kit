@@ -1,6 +1,7 @@
 // A landing sandbox's peak memory goes to the machine-wide peaks file, filed under the run, as a
-// ticket's, base and verify sandboxes' do: a landing gate is often the run's largest. The sandbox is
-// a host worktree whose `exec` answers for the kernel's `memory.peak`, the cache directory a temp
+// ticket's, base and verify sandboxes' do: a landing gate is often the run's largest. A run's landing
+// (`landOne`) hands `landInSandbox` the run's id from its `LandContext`. The sandbox is a host
+// worktree whose `exec` answers for the kernel's `memory.peak`, the cache directory a temp
 // XDG_CACHE_HOME - no Docker, no model, no network.
 //
 //   pnpm exec tsx --test test/peaks-landing.test.ts
@@ -15,8 +16,11 @@ import { test } from "node:test";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-peaks-landing-cache-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-peaks-landing-cfg-"));
 const { landInSandbox } = await import("../src/land.ts");
+const { createHostGit, landOne } = await import("../src/landing.ts");
+const { gitFingerprint } = await import("../src/guard.ts");
 const { PEAKS_FILE } = await import("../src/peaks.ts");
 type Project = import("../src/config.ts").Project;
+type Ctx = import("../src/landing.ts").LandContext;
 type Opener = import("../src/land.ts").Opener;
 
 const tmp = mkdtempSync(join(tmpdir(), "sandcastle-peaks-landing-"));
@@ -41,7 +45,7 @@ const fixture = (peakMib: number) => {
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "branch");
   git(root, "checkout", "-q", "main");
-  const project = { root, baseBranch: "main", generated: [], setup: [] } as unknown as Project;
+  const project = { root, name: "fixture", baseBranch: "main", land: "merge", generated: [], gates: [], setup: [] } as unknown as Project;
   const events: string[] = [];
   const open: Opener = async (branch) => {
     const path = join(tmp, `wt-${n++}`);
@@ -86,4 +90,34 @@ test("a landing sandbox whose kernel gives no peak writes no line", async () => 
   const r = await landInSandbox(f.project, { branch: "agent/issue-7", head: f.head, message: "Merge agent/issue-7 (closes #7)", run: "run-2" }, f.open);
   assert.equal(r.kind, "merged");
   assert.equal(peakLines().length, before);
+});
+
+test("a run's landing files its sandbox's peak under the run's id", async () => {
+  const f = fixture(5300);
+  // The base moved past the branch's start, so the merge is made and gated in a landing sandbox.
+  writeFileSync(join(f.project.root, "c.txt"), "c\n");
+  git(f.project.root, "add", "-A");
+  git(f.project.root, "commit", "-q", "-m", "base moved");
+  const ctx: Ctx = {
+    project: f.project,
+    tracker: { ref: (id: string) => `#${id}`, close: () => {} } as unknown as Ctx["tracker"],
+    base: "main",
+    gateNames: "test",
+    reports: new Map(),
+    run: { ticket: () => {} },
+    dryRun: false,
+    opener: f.open,
+    runId: "2026-10-05T11:00:00.000Z",
+    withdrawal: () => undefined,
+    host: createHostGit(f.project, gitFingerprint(f.project)),
+    gate: async () => ({ gates: [], failures: [] }),
+    landed: new Map(),
+  };
+  const before = peakLines().length;
+  const landed = await landOne(ctx, { issue: "7", branch: "agent/issue-7", status: "green", commits: 1, repairs: 0, head: f.head });
+  assert.equal(landed.kind, "merged");
+  const lines = peakLines().slice(before);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].run, "2026-10-05T11:00:00.000Z");
+  assert.equal(lines[0].peakMib, 5300);
 });
