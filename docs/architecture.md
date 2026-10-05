@@ -2,7 +2,7 @@
 
 What each of the kit's larger modules owns, in more detail than `AGENTS.md`'s Layout table. Read
 the section for a file before changing it; update it in the same commit when a rule here changes.
-The terms (run record, attempt, ending, requeued) are defined in `CONTEXT.md`.
+The terms (run record, attempt, ending, requeued) are defined in `GLOSSARY.md`.
 
 ## `bin/sandcastle`
 
@@ -176,7 +176,7 @@ The run record's `settings` group (`RunSettings` in `mod/hooks/run-record.ts`) h
 
 ## `src/run-settings.ts`
 
-The run settings (CONTEXT.md): `resolveSettings({ env, project, machine })`, the one pure resolver of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in `src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading `agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts` and refused when bad only while the guard is on), with the unchanged precedence of environment over project config over default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and `test/run-settings-cross-review.test.ts` hold it
+The run settings (GLOSSARY.md): `resolveSettings({ env, project, machine })`, the one pure resolver of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in `src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading `agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts` and refused when bad only while the guard is on), with the unchanged precedence of environment over project config over default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and `test/run-settings-cross-review.test.ts` hold it
 
 ## `src/versions.ts`
 
