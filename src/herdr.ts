@@ -79,7 +79,7 @@ const bareShell = (processes: Foreground) => {
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
-type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string; terminal_id?: string; quit?: boolean };
+type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string; terminal_id?: string; quit?: boolean; panes?: string[] };
 // The record sits in a clone's gitignored `logs/`, where a hostile clone can force-add a file, and
 // the tab bar runs whatever kit it names: used only as an absolute path to a checkout that has
 // `bin/sandcastle`, else the caller's. A relative one would run a script from inside the repo.
@@ -497,7 +497,9 @@ export const openSandboxView = (
         /* gone or half-written: what this run knows */
       }
     }
-    writeFileSync(record, JSON.stringify({ tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, ...kept, panes: slots.filter((s) => !s.closed).map((s) => s.pane) }) + "\n");
+    // Through `writeView`: status.sh's trap and the tab bar read the record at any moment, and a
+    // plain write shows them a truncated one.
+    writeView(project.root, { tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, ...kept, panes: slots.filter((s) => !s.closed).map((s) => s.pane) });
     saved = true;
   };
   save();
