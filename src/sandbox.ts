@@ -400,8 +400,14 @@ const watchBuild = (show: (text: string) => void) => {
 // `fix` is the next step when the build fails: docker's own output above says what broke, but not
 // which file to change, and a stack trace under it buried that output.
 const build = async (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean, fix: string) => {
-  console.log(`Building ${tag} ...`);
-  const watch = watchBuild((text) => process.stderr.write(text));
+  // The start line waits for the watcher's first output: printed up front, a cached build said
+  // `Building` and then that it re-tagged, two lines where one is the whole story.
+  let started = false;
+  const watch = watchBuild((text) => {
+    if (!started) console.log(`Building ${tag} ...`);
+    started = true;
+    process.stderr.write(text);
+  });
   const code = await new Promise<number | null>((resolve) => {
     const child = spawn("docker", buildArgs(tag, args, pull), { stdio: ["pipe", "pipe", "pipe"] });
     child.stdout.setEncoding("utf8").on("data", (d: string) => watch.feed(0, d));
@@ -594,13 +600,47 @@ export const gitIdentityCommand = (root: string) => {
   return `mkdir -p "${dir}" && ${set("user.name", name)} && ${set("user.email", email)}`;
 };
 
+/**
+ * The CPUs each sandbox container may use (`docker run --cpus`), or undefined for no limit. An
+ * agent runs the project's whole suite in its own sandbox as often as it likes, outside `maxGates`,
+ * so several suites at once starved one another and every gate beside them. The VM's CPUs (`docker
+ * info`'s NCPU) are split by the run's concurrency, at least 2 and never more than the VM has; a
+ * gate run in a sandbox gets the same limit. The project's `cpus` wins: a number is the limit (no
+ * more than the VM has), `false` none. `docker info` failing (or reporting no NCPU) sets none rather than guessing.
+ */
+export const sandboxCpus = (project: Pick<Project, "cpus">, concurrency: number, dockerInfo: () => string | undefined): number | undefined => {
+  if (project.cpus === false) return undefined;
+  let ncpu: number;
+  try {
+    ncpu = Number((JSON.parse(dockerInfo() ?? "{}") as { NCPU?: unknown }).NCPU);
+  } catch {
+    ncpu = NaN;
+  }
+  const known = Number.isInteger(ncpu) && ncpu >= 1;
+  // `docker run --cpus` above the VM's CPUs is refused, so a config written on a larger machine
+  // would stop every sandbox from starting on a smaller one.
+  if (typeof project.cpus === "number") return known ? Math.min(project.cpus, ncpu) : project.cpus;
+  if (!known) return undefined;
+  return Math.min(ncpu, Math.max(2, Math.floor(ncpu / Math.max(1, concurrency))));
+};
+
+/** The run's start line for the limit `sandboxCpus` chose. */
+export const cpusLine = (project: Pick<Project, "cpus">, cpus: number | undefined) =>
+  cpus === undefined
+    ? `Sandbox CPUs: no limit${project.cpus === false ? " (cpus: false)" : " (docker info gave no CPU count)"}`
+    : `Sandbox CPUs: ${cpus} each${
+        typeof project.cpus !== "number" ? "" : cpus < project.cpus ? ` (cpus ${project.cpus} in the project config, but the VM has ${cpus})` : " (cpus in the project config)"
+      }`;
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
-// each fresh worktree before the agent sees it.
+// each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
+// run sets it from `sandboxCpus` before its first sandbox.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
   sandbox: docker({
     imageName: image,
     env: sandboxEnv(project),
     mounts: sandboxMounts(project),
+    ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
   }),
   hooks: {
     host: {

@@ -12,7 +12,11 @@ plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the proj
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
 another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
-<files>`, run it, then `git apply /tmp/p`. If git ever tells you this
+<files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
+timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
+of its own, never chained after the test, so a hang or a move to the background cannot leave the
+worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
+own command line: it matches your own shell and kills it. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -49,7 +53,8 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    the way the code computes it; a mock of this repository's own code where no boundary is
    involved; an assertion on calls or private state where the caller sees only the result.
    Rewrite such a test at the public interface. When you doubt one, break the behaviour, confirm
-   the test fails, then restore the code.
+   the test fails, then restore the code (the time limit and the restore in a command of its own,
+   as above).
 7. **Leftovers from building in steps.** Fix duplication or a misleading name this branch
    introduced when it makes the changed behaviour harder to follow. Do not reorganise sound code
    to your taste.
@@ -72,6 +77,10 @@ Constraints:
   three ways: fixed (if it is in scope - and a missing changelog or Upgrading note for this change
   is), filed as a new ticket through a `<followup>` line (if it is not), or, for an acceptance criterion you cannot do,
   left as an `<unmet>` line under "Finishing".
+- **A fix you commit is proved by a test, the same rule as the implementer's.** A bug you fix or a
+  behaviour you change gets a test that fails without your fix, at the public interface; where it
+  needs a boundary faked (a clock, a process, a slot), fake it. An `<ungated>` line is not that
+  proof: it is only for an effect no gate can run.
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
   the implementation is the suspect, not the test.
 - **Do not rewrite work that is merely not how you would have done it.** Style disagreement is not

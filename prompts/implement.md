@@ -15,7 +15,11 @@ plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the proj
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
 another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
-<files>`, run it, then `git apply /tmp/p`. If git ever tells you this
+<files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
+timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
+of its own, never chained after the test, so a hang or a move to the background cannot leave the
+worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
+own command line: it matches your own shell and kills it. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -72,9 +76,6 @@ ticket names. The project rules below say what else to read.
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
-- **Edit files with the Edit tool.** An insert, or any change to one file, goes through Edit. Keep a
-  script (`sed -i`, a `python3` heredoc) for a mechanical change across many files, and assert that
-  each replacement matched: a string replace that does not match does nothing, and says nothing.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A

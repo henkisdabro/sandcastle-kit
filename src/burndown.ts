@@ -35,7 +35,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { peakOf, recordPeak } from "./peaks.ts";
+import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -44,8 +44,8 @@ import {
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { poolWarningsNow } from "./size.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
+import { poolWarningsNow, realReaders } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -628,15 +628,18 @@ export const createPipeline = (ctx: PipelineContext) => {
     });
 
     // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
+    // Its anonymous memory is sampled while it runs, for the agent's figure on the peaks line (src/peaks.ts).
     // Its `<followup>` lines are read here too, so no pass - a narrow review, a repair - can leave one unread.
-    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
-      sandbox
-        .run(opts)
+    let agentsRan = false;
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) => {
+      agentsRan = true;
+      return sampling(sandbox, "agent", () => sandbox.run(opts))
         .then((r) => {
           for (const f of followUpsOf(r.stdout ?? "")) ctx.followUps?.push({ ...f, from: issue.id, phase: phaseOf(opts.name ?? "") });
           return r;
         })
         .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+    };
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
@@ -958,6 +961,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           }
         }
       }
+
+      // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
+      // A land-only re-run ran no agent here, and gives none.
+      if (agentsRan) await agentBaseline(sandbox);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
@@ -1319,6 +1326,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
+  // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
+  // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
+  const cpus = sandboxCpus(project, settings.concurrency.effective, realReaders().dockerInfo);
+  console.log(cpusLine(project, cpus));
+  project = { ...project, cpus };
   // Measured peaks say the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow()) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -1341,7 +1353,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
-  console.log(`Keep awake: ${keepAwake()}`);
+  console.log(`Keep awake: ${await keepAwake()}`);
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
@@ -1621,6 +1633,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(project, image, planFile),
+    runId,
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.

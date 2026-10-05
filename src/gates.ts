@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
-import { peakOf, recordPeak, samplePeak } from "./peaks.ts";
+import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -62,24 +62,27 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     const log = progress.log;
-    for (const [i, g] of project.gates.entries()) {
-      progress.gate?.(i, g.name);
-      if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
-      const since = Date.now();
-      const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
-      const ms = Date.now() - since;
-      const timedOut = r.exitCode === 124;
-      const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
-      if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
-      gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
-      if (r.exitCode === 0) continue;
-      const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
-      failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
-      // A timed-out gate may still be running in this container (or Docker
-      // may not be answering): a later gate would run beside it, or wait out
-      // its own timeout too.
-      if (!all || r.exitCode === 124) break;
-    }
+    // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
+    await sampling(sandbox, "gate", async () => {
+      for (const [i, g] of project.gates.entries()) {
+        progress.gate?.(i, g.name);
+        if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
+        const since = Date.now();
+        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
+        const ms = Date.now() - since;
+        const timedOut = r.exitCode === 124;
+        const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
+        if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
+        gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
+        if (r.exitCode === 0) continue;
+        const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+        failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
+        // A timed-out gate may still be running in this container (or Docker
+        // may not be answering): a later gate would run beside it, or wait out
+        // its own timeout too.
+        if (!all || r.exitCode === 124) break;
+      }
+    });
     const peakMib = await samplePeak(sandbox);
     return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}) };
   }, progress.wait);
@@ -501,8 +504,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     run.failures,
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
-  // The sandbox's peak, for the run's "base gates" timings line, as a ticket's gate pass carries it.
-  if (green) return run.peakMib !== undefined ? { peakMib: run.peakMib } : undefined;
+  // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
+  // (out of `ms`) and the sandbox's peak.
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

@@ -9,6 +9,13 @@ by hand. From inside this container no other agent's worktree path exists, so a 
 their records mid-run. If git ever tells you this worktree is not a git repository, stop and output
 `<promise>COMPLETE</promise>` - do not rebuild it.
 
+**Never `git stash` in this worktree:** the stash list lives in the shared `.git`. To run a test
+without your change, `git diff > /tmp/p && git checkout -- <files>`, run it, then `git apply /tmp/p`.
+Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
+it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
+or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it.
+
 # The ticket
 
 {{KIT_TICKET_VIEW}}
