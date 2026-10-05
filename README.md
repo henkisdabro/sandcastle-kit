@@ -309,31 +309,6 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
-### 🧩 A criterion left undone
-
-Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
-agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
-branch still lands if its gates are green, but the ticket stays open with a comment naming the
-criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
-finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
-ticket is still queued, the summary lists it under Runnable now and the next run picks up the
-remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
-ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
-person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
-to the hold label. The status view shows such a ticket as merged and counts it under merged, not
-needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
-lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
-
-### 🧩 A problem outside the ticket
-
-An agent that finds a problem outside its ticket - implementer, reviewer or repair - fixes nothing
-for it and files nothing itself: it ends its final message with a `<followup>title - one line of
-evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
-project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
-body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
-file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
-triage`. A dry run files none and lists them instead.
-
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -367,6 +342,31 @@ that the commit merges exactly the base tip and the gated head and changes nothi
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources when the merged base is gated again at the end of the run.
+
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
+ticket is still queued, the summary lists it under Runnable now and the next run picks up the
+remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
+ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
+person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
+to the hold label. The status view shows such a ticket as merged and counts it under merged, not
+needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
+lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
+
+### 🧩 A problem outside the ticket
+
+An agent that finds a problem outside its ticket - implementer, reviewer or repair - fixes nothing
+for it and files nothing itself: it ends its final message with a `<followup>title - one line of
+evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
+project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
+body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
+file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
+triage`. A dry run files none and lists them instead.
 
 ## 📋 Queue: what agents work on
 

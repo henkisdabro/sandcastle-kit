@@ -572,7 +572,7 @@ export type Resolved = {
   source: "config" | "docs/agents" | "default";
   /** The label (GitHub) or status (files) of a ticket held for a person: the `ready-for-human` role. */
   held: string;
-  /** The label agents put on the follow-up tickets they file: the `needs-triage` role. */
+  /** The label (GitHub) or status (files) the kit files the agents' `<followup>` lines with: the `needs-triage` role. */
   triage: string;
   note?: string;
 };

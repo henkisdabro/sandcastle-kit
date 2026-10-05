@@ -190,6 +190,20 @@ test("a filing that fails is kept with its reason, and the rest are still filed"
   ]);
 });
 
+test("a later turn of the same run files no title an earlier turn filed, and retries one whose filing failed", async () => {
+  const seen = new Set<string>();
+  let down = true;
+  const { made, tracker } = recording();
+  const flaky = { ...tracker, create: (title: string, body: string, near?: string) => (title === "second" && down ? assert.fail("HTTP 502") : tracker.create(title, body, near)) };
+  const named = (title: string) => ({ title, evidence: "e", from: "3", phase: "implement" });
+  await fileFollowUps(flaky, [named("first"), named("second")], { dryRun: false, write: direct, seen });
+  down = false;
+  // The re-run of a partly done ticket names both again.
+  const again = await fileFollowUps(flaky, [named("First"), named("second")], { dryRun: false, write: direct, seen });
+  assert.deepEqual(made.map((m) => m.title), ["first", "second"]);
+  assert.deepEqual(again.map((f) => f.title), ["second"]);
+});
+
 test("with ticket files, a follow-up is a committed ticket file beside its source ticket, with the triage status", async () => {
   const root = repo();
   commit(root, ".scratch/checkout/issues/03-pay.md", "# Pay\n\nStatus: ready-for-agent\n\nBody.\n");

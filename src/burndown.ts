@@ -315,26 +315,30 @@ const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
 // One problem named by two agents, or twice by one, is one ticket.
 const titleKey = (title: string) => title.replace(/\s+/g, " ").trim().toLowerCase();
+// The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
+// requeued) hears its agents name the same problem again, and that is still one ticket.
+const filedThisRun = new Set<string>();
 
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
- * the base). A failed filing is kept with its reason, never thrown: the run's landings stand.
+ * the base). `seen` is the titles already filed, shared by a run's turns. A failed filing is kept with
+ * its reason, never thrown, and its title left unseen for a later turn to file: the run's landings stand.
  */
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref">,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string> },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string> },
 ): Promise<FiledFollowUp[]> => {
-  const seen = new Set<string>();
+  const seen = o.seen ?? new Set<string>();
   const out: FiledFollowUp[] = [];
   for (const f of followUps) {
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
-    seen.add(key);
     const at = { title: f.title, from: f.from, phase: f.phase };
     if (o.dryRun) {
+      seen.add(key);
       out.push(at);
       continue;
     }
@@ -343,6 +347,7 @@ export const fileFollowUps = async (
       `Reported by the ${f.phase} agent working on ${tracker.ref(f.from)} as outside that ticket, and filed by sandcastle for triage: queue it or close it.`;
     try {
       out.push({ ...at, id: await o.write(() => tracker.create(f.title, body, f.from)) });
+      seen.add(key);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -1849,7 +1854,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   }
   // Through the same writer, after the run's own tickets: a ticket file is a commit on the base branch.
-  const filedFollowUps = await fileFollowUps(tracker, followUps, { dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)) });
+  const filedFollowUps = await fileFollowUps(tracker, followUps, { dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
   for (const f of filedFollowUps) {
     console.log(
       f.id
