@@ -2,7 +2,7 @@
 
 What each of the kit's larger modules owns, in more detail than `AGENTS.md`'s Layout table. Read
 the section for a file before changing it; update it in the same commit when a rule here changes.
-The terms (run record, attempt, ending, requeued) are defined in `CONTEXT.md`.
+The terms (run record, attempt, ending, requeued) are defined in `GLOSSARY.md`.
 
 ## `bin/sandcastle`
 
@@ -58,6 +58,15 @@ state.
   `blockers.open` port, and each with none open starts through the file hold. Any other ending, a
   run that starts nothing or a dry run releases none, and each held ticket is told what it waits
   for now.
+- **Start order.** The pipeline queue ranks what waits for a sandbox slot: a requeued ticket first,
+  then a released dependant, then every ticket not yet started, each group in the order it arrived.
+  Both have waited already, and every landing before they start moves the base under them; behind the
+  unstarted tickets they became the run's last landings while slots sat idle. A ticket freed from a
+  file it shared keeps its place with the unstarted. The run prints `#N released: its last blocker has
+  landed; it starts at the next free slot` when a dependant is released (the start of one freed from a
+  file reads `starts:`), and the status view's queue position follows the same order (the hold
+  record gives a requeued or released ticket an `order` below every unstarted one's).
+  `test/schedule-start-order.test.ts`.
 - **Endings.** The queues stay open until every ticket has its ending; on each ending its files are
   freed and its dependants released before the open count drops.
 - **The file hold** (the scheduler's own too). A ticket sharing a file git cannot merge with one in
@@ -95,7 +104,8 @@ state.
 - `createLanding`: the one worker that lands each green ticket, a carried branch first.
 - `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`,
   `close`, `run(workers, fn)`). Workers wait while it is open and empty, so an item can be pushed
-  mid-run; a higher `rank` goes first, equals in arrival order.
+  mid-run; a higher `rank` goes first, equals in arrival order (the pipelines' rank is the start
+  order above; the landing worker's puts a carried branch first).
 
 ## `src/upgrading.ts`
 
@@ -139,7 +149,7 @@ The machine pool: sandbox and gate slots shared by every run on the machine, and
 
 `withSlot(pool, label, fn)` is `leaseSlot(pool, label)` with the release tied to `fn`'s end; `leaseSlot` hands the slot over (`release()`, once) for a ticket that closes its sandbox mid-way and takes a slot again later: a paused run's tickets (`src/burndown.ts` `attempt`).
 
-A freed slot goes to the **longest wait, across runs**. `withSlot` writes a wait entry (`waits/<pool>-<since>-<run>-<n>.wait`, `<pid> <run> <since> <label>`, renamed into place whole) before its first try, and takes a free slot only when no other live run has an older entry for that pool (ties go to the lower run id), then removes the entry. Without it the run that has just freed a slot asks again at once and almost always wins, and a second project's run waits until the first drains. The rule is per pool, so a run holding a sandbox slot and waiting for a gates slot cannot deadlock on it. Waits of one run are never ordered against each other here: `slotTurn` (`src/landing.ts`) still puts a landing before the run's next pipeline. A wait entry or slot whose process is gone (`holderRunning`, the run lock's rule) is ignored, a wait entry's removed when seen, a slot taken over by the next `takeLock`. A younger waiter does not take a free slot while an older one polls (every 5 s), so a freed slot can idle up to one poll. A run started by an older kit writes no entries and is not waited for.
+A freed slot goes to the **longest wait, across runs**. `withSlot` writes a wait entry (`waits/<pool>-<since>-<run>-<n>.wait`, `<pid> <run> <since> <label>`, renamed into place whole) before its first try, and takes a free slot only when no other live run has an older entry for that pool (ties go to the lower run id), then removes the entry. Without it the run that has just freed a slot asks again at once and almost always wins, and a second project's run waits until the first drains. The rule is per pool, so a run holding a sandbox slot and waiting for a gates slot cannot deadlock on it. Within a run, the sandbox pool's waits are not ordered against each other here: `slotTurn` (`src/landing.ts`) puts a landing before the run's next pipeline. The gates pool has one order inside a run, **landing first**: the one landing worker sets the run's end, and its gates waited for a gates slot behind the same run's ticket gates, minutes added to the serial path of each landing. `withSlot`'s last argument, `priority` (`leaseSlot`'s last too), marks a wait the run's end waits on, and `runGates` passes it (its last argument) for a landing's gates (`LandContext.gate` in `src/burndown.ts`, and `sandcastle land`'s), the base gates at a run's start and the verify gates; a ticket's gate pass and the mid-run base check do not (`gateBase` runs that one in a ticket's own slot, `ownSlot` false). When a slot frees, the run is picked as before, by its longest wait; then a priority wait of that run takes it before the run's other waits for the pool. A priority wait counts from the oldest wait its run has for the pool (`countedFrom`), so it is not left behind another run that began waiting after its own run did, and any other wait of the run yields while one of the run's priority waits is waiting (`priorityAhead`). A run with no priority wait is served as it always was, and a run that has waited less than another is still behind it, priority or not. The priority is kept in this process (`OwnWait`, the entries in `waiting`), not in the entry file, which is unchanged: every wait of a run is this process's, and another run needs only a wait's start. A wait that yields to its run's priority wait can leave the slot idle for up to one poll, as a younger wait that yields to an older one does. A wait entry or slot whose process is gone (`holderRunning`, the run lock's rule) is ignored, a wait entry's removed when seen, a slot taken over by the next `takeLock`. A younger waiter does not take a free slot while an older one polls (every 5 s), so a freed slot can idle up to one poll. A run started by an older kit writes no entries and is not waited for.
 
 An **extra slot** (`withExtraSlot`) is a sandbox started inside a slot its run already holds: the mid-run base check (`gateBase(..., ownSlot=false)`), which would deadlock a pool of one if it waited for a slot of its own. It is a lock outside the numbered ones, `<pool>-extra-<run>-<n>.lock` with a slot's content, written at once and never waited for, released when its function ends and at exit like a held slot; one left by a killed holder counts for nothing and is removed by the next extra slot taken. `usage()`, `liveSlots` and `status.sh`'s `<pool>-*.lock` glob count it, so other runs see every live sandbox; `tryAcquire` takes only numbered slots, so it blocks none. Accepted while it lives: `usage()` can read 7/6 (the status view's gauge draws no free cell then), and `members()` counts it in its run's `held`, so that run's other tickets may wait for their share - the share arithmetic is left as it is, since hiding the slot there would hide it from the other runs too.
 
@@ -171,7 +181,7 @@ The run record's `settings` group (`RunSettings` in `mod/hooks/run-record.ts`) h
 
 ## `src/run-settings.ts`
 
-The run settings (CONTEXT.md): `resolveSettings({ env, project, machine })`, the one pure resolver of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in `src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading `agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts` and refused when bad only while the guard is on), with the unchanged precedence of environment over project config over default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and `test/run-settings-cross-review.test.ts` hold it
+The run settings (GLOSSARY.md): `resolveSettings({ env, project, machine })`, the one pure resolver of what a run is told at its start - the autonomy level, cross-review (`crossReviewSetting` in `src/agents.ts`: `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT`, the same reading `agents.ts` itself uses), the repair attempts, concurrency (asked and effective) and the usage guard (`USAGE_CHECK=1`, with its `USAGE_STOP` threshold, read through `parseUsageStop` in `src/usage.ts` and refused when bad only while the guard is on), with the unchanged precedence of environment over project config over default - and `settingsGroup`, the group a turn's run record carries. `sandcastle run` and `sandcastle status` both call it, so they cannot disagree about the next run; a later setting adds a field here. `test/run-settings.test.ts`, `test/run-settings-repair-concurrency.test.ts` and `test/run-settings-cross-review.test.ts` hold it
 
 ## `src/versions.ts`
 

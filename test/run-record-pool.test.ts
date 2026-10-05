@@ -1,4 +1,4 @@
-// The run record's live pool values (CONTEXT.md: run record): `demand` (the sandbox slots the
+// The run record's live pool values (GLOSSARY.md: run record): `demand` (the sandbox slots the
 // run could use now) and `share` (its part of the machine pool) sit beside the run's own fields,
 // never inside the `settings` group, which holds what a turn was told at its start. The record
 // writes them as they change, and the status view reads each by that name. No Docker, no network.

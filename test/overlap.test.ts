@@ -191,7 +191,7 @@ test("two tickets declaring one HTML page start together, and the start names th
   const out = await runFlow(r.project, [ticket("1", "page.html"), ticket("2", "page.html")]);
   assert.equal(out.peak, 2);
   assert.deepEqual(out.events.slice(0, 2), ["start 1", "start 2"]);
-  assert.deepEqual(out.said, ["#1 and #2 both change page.html - landing resolves it"]);
+  assert.deepEqual(out.said, ["#1 and #2 both change page.html - if they conflict at landing, the later one is sent back once and its merge resolved"]);
 });
 
 test("a lockfile from the branch diff alone, with no Touches line, still serialises", async () => {
@@ -248,7 +248,7 @@ test("mergeable files are named for each pair, three at most", () => {
     tickets: [ticket("1"), ticket("2")],
     files: { of: (t) => ({ all: t.id === "1" ? ["a", "b", "c", "d", "e"] : ["e", "d", "c", "b", "a", "z"], unmergeable: [] }) },
   });
-  assert.deepEqual(start[1].shares?.map((s) => fileShareLine(ref, "2", s)), ["#1 and #2 both change a, b, c and 2 more - landing resolves it"]);
+  assert.deepEqual(start[1].shares?.map((s) => fileShareLine(ref, "2", s)), ["#1 and #2 both change a, b, c and 2 more - if they conflict at landing, the later one is sent back once and its merge resolved"]);
 });
 
 test("ticketFiles: the branch's files and the Touches line, and which of them git cannot merge", () => {

@@ -66,7 +66,7 @@ read a module's section there before changing it.
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |
 | `src/detach.ts` | `sandcastle run --detach` (output to `.sandcastle/logs/run-output.log`), `wait`, `stop`, and `pause` and `resume` (the pause's control file, `.sandcastle/.run/paused`, which names the run it was asked of) |
 | `src/guard.ts` | Host safety: git hooks and auto-gc off, the `.git` fingerprint and branch-tip backup (`.sandcastle/backup.git`), protected paths, the run lock |
-| `src/pool.ts` | Machine-wide sandbox and gate slots (a freed slot goes to the longest wait across runs; a slot names its run; live runs register and split the sandbox slots by share, up to each run's demand), and the lock-file helper the run lock shares (pid and token, guarded takeover) |
+| `src/pool.ts` | Machine-wide sandbox and gate slots (a freed slot goes to the longest wait across runs, and within that run a landing, base or verify gate's wait goes before its ticket gates'; a slot names its run; live runs register and split the sandbox slots by share, up to each run's demand), and the lock-file helper the run lock shares (pid and token, guarded takeover) |
 | `src/run.ts` | Preconditions, prompt rendering, agent logs, the run record (`.sandcastle/logs/run.json`) and history, the estimate, the status pane |
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates, run without the kit's tokens and with their values redacted from the output |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
@@ -173,4 +173,4 @@ Matt Pocock's five default role names, unchanged (the kit reads this file too). 
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` and `docs/adr/` at the root, created when a term or decision settles. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` and `docs/adr/` at the root, created when a term or decision settles. See `docs/agents/domain.md`.

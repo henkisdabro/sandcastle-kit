@@ -56,7 +56,9 @@ export const seconds = (ms: number) => (ms < 9_950 ? `${(ms / 1000).toFixed(1)}s
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}) => {
+// `priority` is for the gates the run's end waits on - a landing's, the base check's, the verify's: when a
+// machine-wide gates slot frees, they take it before the same run's ticket gates (`withSlot` in src/pool.ts).
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false) => {
   const asked = Date.now();
   return withSlot("gates", label, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
@@ -86,7 +88,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     });
     const peakMib = await samplePeak(sandbox);
     return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}) };
-  }, progress.wait);
+  }, progress.wait, undefined, priority);
 };
 
 // ---------------------------------------------------------------------------
@@ -252,7 +254,8 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // Before the gates, which may leave the worktree anywhere: the sandbox was cut from the base's name, so a
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
-      const run = await runGates(project, sandbox, `${project.name} ${label}`, true);
+      // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
+      const run = await runGates(project, sandbox, `${project.name} ${label}`, true, undefined, ownSlot);
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
       return {
         ...run,
