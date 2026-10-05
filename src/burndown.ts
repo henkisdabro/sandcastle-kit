@@ -513,7 +513,10 @@ export const createPipeline = (ctx: PipelineContext) => {
    * The failing tests of `failure` when they fail on the base's tip as well, and no file of them is one the
    * branch changed; otherwise undefined and the red is the branch's own. A test whose file the output does not
    * name, a list that may be cut and a gate with no failing tests (lint, types) are the branch's own: the kit
-   * cannot run one test, so it never guesses.
+   * cannot run one test, so it never guesses. An id that names only a file (vitest's and jest's "FAIL path", a
+   * node:test file that failed to load) says nothing of which test in it failed: a branch that broke one test in
+   * a file where the base has a different one red prints the same id, so that red is the base's only when the
+   * gate failed the same way on both (`failureKey`).
    */
   const redOnBase = async (failure: { name: string; output: string }, branch: string): Promise<string[] | undefined> => {
     const tests = failingTests(failure.output);
@@ -526,15 +529,28 @@ export const createPipeline = (ctx: PipelineContext) => {
     const tip = sh("git", ["rev-parse", base], project.root);
     let running = baseRuns.get(tip);
     if (!running) {
-      running = baseGate();
-      baseRuns.set(tip, running);
-      // A base run that could not be made is no answer: the next red asks again.
-      running.catch(() => baseRuns.delete(tip));
+      const asked = baseGate();
+      running = asked;
+      baseRuns.set(tip, asked);
+      asked.then(
+        // The base sandbox is cut from the base's name: a landing since the tip was read means the run gated a
+        // newer commit, so it is filed under that one, and the older tip has no answer of its own.
+        (r) => {
+          if (!r.head || r.head === tip) return;
+          if (baseRuns.get(tip) === asked) baseRuns.delete(tip);
+          if (!baseRuns.has(r.head)) baseRuns.set(r.head, asked);
+        },
+        // A base run that could not be made is no answer: the next red asks again.
+        () => baseRuns.delete(tip),
+      );
     }
     const onBase = await running.then((r) => r.failures.find((f) => f.name === failure.name), () => undefined);
     if (!onBase) return undefined;
-    const there = failingTests(onBase.output);
-    return tests.every((t) => there.includes(t)) ? tests : undefined;
+    // The base's whole list: with five or more red there, the branch's test may be past the first five.
+    const there = failingTests(onBase.output, Infinity);
+    if (!tests.every((t) => there.includes(t))) return undefined;
+    const fileOnly = tests.some((t) => !t.includes("::"));
+    return fileOnly && failureKey(failure) !== failureKey(onBase) ? undefined : tests;
   };
 
   return async (issue: Issue): Promise<Outcome> => {
