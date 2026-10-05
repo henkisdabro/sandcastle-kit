@@ -355,6 +355,62 @@ export const fileFollowUps = async (
   return out;
 };
 
+/**
+ * What the pipelines' `<followup>` lines go into, and the run record behind it. Each line is written to
+ * the record as its pass ends, as an unfiled entry (no `id`): a run that stops before its end (a crash,
+ * a safety stop) never reaches the filing after the landings, and its lines were then in memory only -
+ * not in the closing summary, and unknown to the next run. A title is listed once, and not at all when
+ * an earlier turn of the run filed it (`seen`).
+ *
+ * `file` files the entries still unfiled (`fileFollowUps`) and writes what each became to the record, and
+ * returns those it settled now: calling it again files nothing twice, and a title whose filing failed is
+ * not tried again by it. `unsafe` is the reason when writing to the tracker is not safe - the shared
+ * `.git` changed - and then nothing is written: each stays in the record as failed with that reason, which
+ * the summary lists under Needs you as one to file by hand. A dry run writes nothing either way, so
+ * `unsafe` changes nothing for it.
+ */
+export type FollowUpBook = {
+  push(f: FollowUp): void;
+  file(unsafe?: string): Promise<FiledFollowUp[]>;
+};
+export const createFollowUpBook = (
+  run: { update(fields: { followUps: FiledFollowUp[] }): void },
+  o: { tracker: Pick<Tracker, "create" | "ref">; dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string> },
+): FollowUpBook => {
+  const seen = o.seen ?? new Set<string>();
+  const heard: FollowUp[] = [];
+  // By title, in the order the lines arrived: what the run record's `followUps` holds.
+  const listed = new Map<string, FiledFollowUp>();
+  const keep = () => run.update({ followUps: [...listed.values()] });
+  return {
+    push(f) {
+      const key = titleKey(f.title);
+      if (seen.has(key)) return;
+      heard.push(f);
+      if (listed.has(key)) return;
+      listed.set(key, { title: f.title, from: f.from, phase: f.phase });
+      keep();
+    },
+    async file(unsafe) {
+      const unfiled = heard.filter((f) => {
+        const at = listed.get(titleKey(f.title));
+        return at && !at.id && !at.failed;
+      });
+      const refuse = unsafe !== undefined && !o.dryRun;
+      const settled = await fileFollowUps(o.tracker, unfiled, {
+        dryRun: o.dryRun,
+        // Not the tracker's own refusal, but recorded as one: it is the same entry, and the same line to file by hand.
+        write: refuse ? async () => { throw new Error(unsafe); } : o.write,
+        seen,
+      });
+      if (!settled.length) return [];
+      for (const s of settled) listed.set(titleKey(s.title), s);
+      keep();
+      return [...new Set(settled.map((s) => titleKey(s.title)))].map((key) => listed.get(key)!);
+    },
+  };
+};
+
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
   list.split(",").map((n) => {
@@ -524,8 +580,8 @@ export type PipelineContext = {
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
   reports: Map<string, string>;
   notes: Note[];
-  /** The `<followup>` lines of every agent pass, filed once the run has landed (`fileFollowUps`). A pipeline given none keeps none. */
-  followUps?: FollowUp[];
+  /** Where the `<followup>` lines of every agent pass go as the pass ends: the run's book (`createFollowUpBook`), which records and later files them. A pipeline given none keeps none. */
+  followUps?: { push(f: FollowUp): unknown };
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -1641,8 +1697,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const reports = new Map<string, string>();
   // The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment.
   const notes: Note[] = [];
-  // Out-of-scope problems the agents named in `<followup>` lines, filed after the notes below.
-  const followUps: FollowUp[] = [];
+  // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
+  // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
+  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
@@ -1847,11 +1904,32 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   };
 
+  // Files the follow-ups still unfiled and says what each became. Where the shared .git changed, `unsafe` says
+  // why nothing is written to the tracker (a ticket file is a commit on that base): they stay in the record to file by hand.
+  const fileTheFollowUps = async (unsafe?: string) => {
+    for (const f of await followUps.file(unsafe)) {
+      console.log(
+        f.id
+          ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
+          : f.failed
+            ? `${ref(f.from)}: could not file a follow-up (${f.failed}): ${f.title}`
+            : `[dry run] would file for triage, from ${ref(f.from)}: ${f.title}`,
+      );
+    }
+  };
+
   // The run stops: the summary still prints, headed by why - a stack trace was all a
-  // stopped run left, and its report then said "Run finished".
-  const stopLanding = async (error: unknown): Promise<never> => {
+  // stopped run left, and its report then said "Run finished". The agents' follow-ups are filed first, or
+  // (`safety`: the shared .git changed) left in the record to file by hand, so the summary lists them either way.
+  const stopLanding = async (error: unknown, safety: boolean): Promise<never> => {
     const why = String((error as Error).message ?? error);
     run.update({ stopped: why });
+    try {
+      await fileTheFollowUps(safety ? "the shared .git changed, so nothing more was written to the tracker" : undefined);
+    } catch (e) {
+      // Whatever went wrong here must not replace the reason the run stopped.
+      console.log(`Could not file the agents' follow-ups: ${errorLine(e)}`);
+    }
     console.log(`\n${await closingReport(project)}\n`);
     throw error;
   };
@@ -1860,7 +1938,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
-      return stopLanding(error);
+      // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
+      // would have named is lost with its rejection, and the writer's check refuses such a write by itself.
+      return stopLanding(error, host.failed !== undefined);
     });
   clearInterval(heartbeat);
   // The cause the closing summary names: the most severe, a `.git` change before a limit.
@@ -1873,7 +1953,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   ledger.close(endings, stopLine);
   // A safety stop (a `.git` change, after a pipeline or under the landing worker, or a refused
   // write) landed nothing more: the run stops, headed by the most severe of them.
-  if (stop.landsNothing && headline) await stopLanding(stopError(headline));
+  if (stop.landsNothing && headline) await stopLanding(stopError(headline), true);
 
   // What landing decided, for the closing notification and the verify, from the ledger's entries.
   const { merged, regenerated, notLanded, needsHuman, withdrawn } = accountLanding(ledger.entries.values());
@@ -1894,19 +1974,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }
   }
   // Through the same writer, after the run's own tickets: a ticket file is a commit on the base branch.
-  const filedFollowUps = await fileFollowUps(tracker, followUps, { dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
-  for (const f of filedFollowUps) {
-    console.log(
-      f.id
-        ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
-        : f.failed
-          ? `${ref(f.from)}: could not file a follow-up (${f.failed}): ${f.title}`
-          : `[dry run] would file for triage, from ${ref(f.from)}: ${f.title}`,
-    );
-  }
-  if (filedFollowUps.length) run.update({ followUps: filedFollowUps });
+  await fileTheFollowUps();
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
-  if (stop.landsNothing) await stopLanding(stopError(stop.headline!));
+  if (stop.landsNothing) await stopLanding(stopError(stop.headline!), true);
 
   // -------------------------------------------------------------------------
   // Phase 4: the gates on the merged base branch. Each branch was gated on its
