@@ -48,12 +48,14 @@ test("an inhibitor that keeps running is reported on", async () => {
 });
 
 test("no inhibitor on PATH is reported off - not found", async () => {
-  const saved = process.env.PATH;
+  const saved = { PATH: process.env.PATH, KEEP_AWAKE: process.env.KEEP_AWAKE };
   process.env.PATH = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
   process.env.KEEP_AWAKE = "1";
   try {
     assert.equal(await keepAwake(), `off - ${cmd} not found`);
   } finally {
-    process.env.PATH = saved;
+    process.env.PATH = saved.PATH;
+    if (saved.KEEP_AWAKE === undefined) delete process.env.KEEP_AWAKE;
+    else process.env.KEEP_AWAKE = saved.KEEP_AWAKE;
   }
 });
