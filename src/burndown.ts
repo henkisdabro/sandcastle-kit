@@ -35,7 +35,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { peakOf, recordPeak } from "./peaks.ts";
+import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -563,8 +563,12 @@ export const createPipeline = (ctx: PipelineContext) => {
     });
 
     // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
-    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
-      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+    // Its anonymous memory is sampled while it runs, for the agent's figure on the peaks line (src/peaks.ts).
+    let agentsRan = false;
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) => {
+      agentsRan = true;
+      return sampling(sandbox, "agent", () => sandbox.run(opts)).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+    };
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
@@ -886,6 +890,10 @@ export const createPipeline = (ctx: PipelineContext) => {
           }
         }
       }
+
+      // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
+      // A land-only re-run ran no agent here, and gives none.
+      if (agentsRan) await agentBaseline(sandbox);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.

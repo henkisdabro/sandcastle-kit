@@ -1343,15 +1343,19 @@ largest reading goes into the gate pass's line in the project's `.sandcastle/log
 (`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
 (`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
 a time, the run's start time, the peak, the anonymous-memory figure below when the kernel gives one,
-and a hash of the project root: no path and no project name.
+and a hash of the project root: no path and no project name. A ticket's sandbox whose agents ran also
+records `agentMib`, its peak read just before its first gate pass (the peak cannot be reset, so after
+a gate it is the gate's), and `agentAnonMib`, the anonymous memory read while its agents worked; a
+line without them is a gate peak only.
 `size` takes each project's highest peak over its last 5 measured runs, then the highest of the
 projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
 project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
 high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
-file backs) is read beside it and recorded as `anonMib` (the largest reading: `anon` has no high-water
-mark of its own), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
+file backs) is read every 10 seconds while a gate pass runs, and once after it, and recorded as
+`anonMib` (the largest reading: `anon` has no high-water mark of its own, so a reading after the test
+workers have exited would miss them), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
 and the effective `maxSandboxes` or `maxGates` is above it, doctor and the run's start line warn, naming
 both numbers and the `config.json` key (or the `SANDCASTLE_MAX_*` variable that overrides it); from the assumed
 figures nothing is warned. The pool's shares divide whatever limit you set; nothing about them
