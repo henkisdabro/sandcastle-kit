@@ -136,7 +136,8 @@ This continues SKILL.md: run its "Before every action" first.
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder is a person's decision,
       when the summary suggests moving the ticket to the hold label instead). Each follow-up `filed for triage` (the kit filed it from
-      an agent's `<followup>` line) and each `needs-triage` issue opened during the run: one line on what
+      an agent's `<followup>` line; one the summary says to file by hand is one the kit could not file, after a
+      stop or a failed filing: file it, or offer to) and each `needs-triage` issue opened during the run: one line on what
       it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The

@@ -367,7 +367,10 @@ evidence</followup>` line. Once the run has landed, the kit files each as a new 
 project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
 body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
 file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
-triage`. A dry run files none and lists them instead.
+triage`. A dry run files none and lists them instead. A run that stops before its end (a crash, or a
+safety stop) keeps what its agents named in the run record as they arrive, and files them as it
+stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
+nothing more to the tracker, and the summary lists each as one to file by hand.
 
 ## 📋 Queue: what agents work on
 
