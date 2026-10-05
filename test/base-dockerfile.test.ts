@@ -63,3 +63,26 @@ test("the header comment records why not -slim", () => {
 test("the image stops on SIGKILL, so docker stop does not wait out its 10 s for sleep", () => {
   assert.ok(instructions.some((l) => /^STOPSIGNAL\s+SIGKILL\s*$/.test(l)), "expected STOPSIGNAL SIGKILL");
 });
+
+// The JSON (exec) form of an instruction, parsed, or undefined when it is missing or in shell form.
+const execForm = (name: string): string[] | undefined => {
+  const line = instructions.find((l) => new RegExp(`^${name}\\s`).test(l));
+  if (!line) return undefined;
+  try {
+    return JSON.parse(line.replace(new RegExp(`^${name}\\s+`), ""));
+  } catch {
+    return undefined;
+  }
+};
+
+test("PID 1 is tini, so orphans of exec'd processes are reaped instead of staying zombies", () => {
+  assert.deepEqual(execForm("ENTRYPOINT"), ["tini", "--"]);
+});
+
+test("the default command is sleep infinity, so a hand-run docker run <image> bash gets a shell", () => {
+  assert.deepEqual(execForm("CMD"), ["sleep", "infinity"]);
+});
+
+test("an apt-get install RUN installs tini", () => {
+  assert.ok(runs.some((l) => /apt-get install -y [^&]*\btini\b/.test(l)), "no apt-get install names tini");
+});

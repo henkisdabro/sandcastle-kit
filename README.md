@@ -99,7 +99,7 @@ New to GitHub or to agents? These are the only terms you need.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22+, pnpm, git, jq, the GitHub CLI signed in (`gh auth login`;
+**You need:** macOS or Linux, Node 22+, pnpm, git, jq, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
 skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
 macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
 [Full requirements](docs/INSTALL.md#-requirements).
@@ -772,7 +772,9 @@ machine-wide slot locks), never in the project.
 A machine that goes to sleep pauses every sandbox mid-task, so by default a run keeps it awake
 until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and prints
 `Keep awake: on` when it starts. The display can still turn off and the screen still locks. The
-helper is tied to the run's process, so it stops when the run ends, crashes or is killed.
+helper is tied to the run's process, so it stops when the run ends, crashes or is killed. If the
+helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in WSL
+without systemd or a container), the line says `off` and why, and the run goes on without it.
 
 - **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
 - **Always:** `"keepAwake": false` in your [personal settings](#personal-settings).
@@ -1071,6 +1073,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
 | `label` | `"ready-for-agent"` | The queue label (GitHub) or `Status:` value (files). Read from `docs/agents/triage-labels.md` when unset and that file exists |
 | `concurrency` | `4` | Parallel sandboxes for this project (inside the machine-wide limit) |
+| `cpus` | the VM's CPUs ÷ concurrency | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset: the container runtime's CPUs (`docker info`'s NCPU) divided by the run's effective concurrency, at least 2 and never more than the VM has; a gate run in a sandbox gets the same limit. A number sets the limit (cut to the VM's CPUs, which `docker run` would otherwise refuse), `false` sets none. The run's start lines say which applies (`Sandbox CPUs: 3 each`) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder is a person's decision); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
@@ -1287,7 +1290,9 @@ Several projects can run at once; one project runs once at a time (`run.lock`). 
 pool caps live sandboxes (default 6) and gate runs (default 2) across all projects. Agents mostly
 wait on the model, so the sandbox cap mainly limits memory and plan usage; gates are the
 CPU-heavy part, and running too many at once produces false test failures. Change the caps in your
-[personal settings](#personal-settings). When every slot is taken, a freed slot goes to the run
+[personal settings](#personal-settings). The gate cap does not reach the tests an agent runs in its
+own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
+divided by the run's concurrency). When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
@@ -1345,15 +1350,19 @@ largest reading goes into the gate pass's line in the project's `.sandcastle/log
 (`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
 (`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
 a time, the run's start time, the peak, the anonymous-memory figure below when the kernel gives one,
-and a hash of the project root: no path and no project name.
+and a hash of the project root: no path and no project name. A ticket's sandbox whose agents ran also
+records `agentMib`, its peak read just before its first gate pass (the peak cannot be reset, so after
+a gate it is the gate's), and `agentAnonMib`, the anonymous memory read while its agents worked; a
+line without them is a gate peak only.
 `size` takes each project's highest peak over its last 5 measured runs, then the highest of the
 projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
 project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
 high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
-file backs) is read beside it and recorded as `anonMib` (the largest reading: `anon` has no high-water
-mark of its own), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
+file backs) is read every 10 seconds while a gate pass runs, and once after it, and recorded as
+`anonMib` (the largest reading: `anon` has no high-water mark of its own, so a reading after the test
+workers have exited would miss them), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
 and the effective `maxSandboxes` or `maxGates` is above it, doctor and the run's start line warn, naming
 both numbers and the `config.json` key (or the `SANDCASTLE_MAX_*` variable that overrides it); from the assumed
 figures nothing is warned. The pool's shares divide whatever limit you set; nothing about them
@@ -1375,6 +1384,7 @@ is refused with a reminder to start the runtime.
 |---|---|
 | `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
+| Live runs show as ended in the status view on Linux, or `ps (status view)` shows `FIX` | Install procps (`apt install procps` or `dnf install procps-ng`); the status view checks each run's process with `ps`. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
 | `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N`, `--detach` and `--api-key` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |

@@ -15,7 +15,7 @@ process.env.XDG_CONFIG_HOME = config;
 process.env.HOME = config;
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-poolwarn-cache-"));
 const { poolWarnings, sizeLines } = await import("../src/size.ts");
-const { readAnonMib, recordPeak, readPeaks } = await import("../src/peaks.ts");
+const { readAnonMib, recordPeak, readPeaks, samplePeak } = await import("../src/peaks.ts");
 type Readers = Parameters<typeof sizeLines>[0];
 
 const GIB = 2 ** 30;
@@ -83,7 +83,7 @@ test("size says the measured peak includes page cache, and gives the anonymous f
   assert.match(withAnon, /anonymous memory \(no page cache\) read in them was at most 3\.03 GiB/);
 });
 
-test("memory.stat's anon figure is recorded beside memory.peak", async () => {
+test("memory.stat's anon figure read after a gate pass is recorded beside memory.peak", async () => {
   const stat = `file 4000000000\nanon ${3000 * MIB + 1}\nslab 100\n`;
   const box = {
     exec: async (cmd: string) =>
@@ -93,6 +93,8 @@ test("memory.stat's anon figure is recorded beside memory.peak", async () => {
   assert.equal(await readAnonMib({ exec: async () => ({ exitCode: 1, stdout: "" }) }), undefined, "no memory.stat");
   assert.equal(await readAnonMib({ exec: async () => ({ exitCode: 0, stdout: "file 1\n" }) }), undefined, "no anon line");
   const file = join(mkdtempSync(join(tmpdir(), "sandcastle-poolwarn-file-")), "peaks.jsonl");
+  // The read after a gate pass; at close, `anon` is the sandbox at rest and is not recorded (src/peaks.ts).
+  assert.equal(await samplePeak(box), 5000);
   assert.equal(await recordPeak(box, "/made-up/root", "run-1", file), 5000);
   const [line] = readPeaks(file);
   assert.equal(line.peakMib, 5000);

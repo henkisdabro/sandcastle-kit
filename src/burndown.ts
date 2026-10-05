@@ -35,7 +35,7 @@ import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lock
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { peakOf, recordPeak } from "./peaks.ts";
+import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
@@ -44,8 +44,8 @@ import {
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sh } from "./sandbox.ts";
-import { poolWarningsNow } from "./size.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
+import { poolWarningsNow, realReaders } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -563,8 +563,12 @@ export const createPipeline = (ctx: PipelineContext) => {
     });
 
     // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
-    const pass = (opts: Parameters<typeof sandbox.run>[0]) =>
-      sandbox.run(opts).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+    // Its anonymous memory is sampled while it runs, for the agent's figure on the peaks line (src/peaks.ts).
+    let agentsRan = false;
+    const pass = (opts: Parameters<typeof sandbox.run>[0]) => {
+      agentsRan = true;
+      return sampling(sandbox, "agent", () => sandbox.run(opts)).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+    };
 
     try {
       // Normally already locked by the worktree hook; this covers a worktree
@@ -887,6 +891,10 @@ export const createPipeline = (ctx: PipelineContext) => {
         }
       }
 
+      // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
+      // A land-only re-run ran no agent here, and gives none.
+      if (agentsRan) await agentBaseline(sandbox);
+
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
       // A requeue after a red landing gate, on a base that has not moved and a branch no agent has touched since
@@ -951,13 +959,17 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
-        const fixer = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
-        if (fixer) {
+        const fixing = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        if (fixing) {
+          const fixer = fixing.by;
           waitedFor.add(key);
-          const tests = failingTests(failure.output);
-          const line = `waiting for ${ref(fixer)}'s fix to ${tests.length ? tests.join(", ") : `the ${failure.name} gate`}`;
-          console.log(`${ref(issue.id)}: ${line}`);
-          run.ticket(issue.id, { note: line });
+          // A fix already on the base is merged without a wait, so no note: it would stay on the ticket's card.
+          if (!fixing.landed) {
+            const tests = failingTests(failure.output);
+            const line = `waiting for ${ref(fixer)}'s fix to ${tests.length ? tests.join(", ") : `the ${failure.name} gate`}`;
+            console.log(`${ref(issue.id)}: ${line}`);
+            run.ticket(issue.id, { note: line });
+          }
           // Not landed (it failed, gave up or was held): nothing to wait for, the repair is this ticket's own.
           if (await fixes.wait(issue.id, fixer)) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.
@@ -1243,6 +1255,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
+  // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
+  // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
+  const cpus = sandboxCpus(project, settings.concurrency.effective, realReaders().dockerInfo);
+  console.log(cpusLine(project, cpus));
+  project = { ...project, cpus };
   // Measured peaks say the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow()) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -1265,7 +1282,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
-  console.log(`Keep awake: ${keepAwake()}`);
+  console.log(`Keep awake: ${await keepAwake()}`);
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
@@ -1543,6 +1560,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(project, image, planFile),
+    runId,
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.

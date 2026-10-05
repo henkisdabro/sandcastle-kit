@@ -39,7 +39,7 @@ test("node:test TAP: a nested subtest and its parent both count, a trailing dire
   assert.deepEqual(failingTests(out), ["inner case", "parses", "flaky"]);
 });
 
-test("node:test spec: durations are dropped and the 'failing tests:' header is not a test", () => {
+test("node:test spec: durations are dropped, the 'failing tests:' header is not a test, and the summary names the file", () => {
   const out = [
     "▶ suite",
     "  ✔ passes (0.4ms)",
@@ -52,7 +52,7 @@ test("node:test spec: durations are dropped and the 'failing tests:' header is n
     "✖ breaks (1.2ms)",
     "  AssertionError: nope",
   ].join("\n");
-  assert.deepEqual(failingTests(out), ["breaks"]);
+  assert.deepEqual(failingTests(out), ["test/a.test.ts::breaks"]);
 });
 
 test("eslint: its '✖ N problems' summary is not a test", () => {

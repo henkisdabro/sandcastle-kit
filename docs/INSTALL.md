@@ -19,6 +19,7 @@ the same by hand.
 | 📦 | **pnpm** | Installs the kit's dependencies. |
 | 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.38 or newer is recommended: older git lands with a weaker check of each landing merge. |
 | 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |
+| 📋 | **procps** (`ps`), on Linux | The status view checks a run is still live with `ps -p <pid> -o command=`; without it every live run reads as ended. Most Linux has it; slim and minimal images do not. `apt install procps` or `dnf install procps-ng`. macOS has `ps` built in. |
 | 🐙 | **GitHub CLI**, signed in | `gh auth login`. Only needed when tickets are GitHub Issues; a project that keeps them as files in the repo can skip it. |
 | 🧠 | **A Claude subscription or Anthropic API key** | For the implement and review agents. A subscription token comes from `claude setup-token`, so Claude Code must be installed somewhere. |
 | 🔑 | **A fine-grained GitHub token** | Issues read/write and metadata read, on chosen repos only. `setup` walks you through it. |
@@ -59,7 +60,7 @@ install ends with it; to run it again later: `sandcastle setup`.
    already in it.
 6. **Inside Herdr, offers the kit's plugin** (`sandcastle herdr configure`): it shows what it adds
    to Herdr's config and asks first, with yes as the default.
-7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`) and prints the fix
+7. **Runs `sandcastle doctor`**, which checks the rest (Docker, `gh`, git, `jq`, `ps` on Linux) and prints the fix
    for anything missing.
 
 It installs no software. Re-run it any time: finished steps show `ok`; for a credential it also asks whether to replace it (default no) - the way to put in a new token.
