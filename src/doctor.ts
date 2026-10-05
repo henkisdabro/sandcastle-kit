@@ -9,6 +9,7 @@ import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject } from "./config.ts";
+import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
@@ -272,7 +273,13 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       ? "Start your container runtime: `open -a OrbStack`, `open -a Docker` or `podman machine start` - then `docker info` must work in this shell."
       : "Start the Docker daemon: `sudo systemctl start docker` - then `docker info` must work in this shell.",
   );
-  const runtime = runtimeProblemNow();
+  let runtime: ReturnType<typeof runtimeProblemNow>;
+  try {
+    runtime = runtimeProblemNow();
+  } catch (error) {
+    // A docker that does not answer in time is the `Docker running` line's to report; here it is no problem found, not a crash.
+    if (!(error instanceof OperatorError)) throw error;
+  }
   if (runtime) check(false, runtime.label, runtime.fix);
   const ghInstalled = run("gh", ["--version"]) !== undefined;
   const ghSignedIn = !!run("gh", ["auth", "status"]);

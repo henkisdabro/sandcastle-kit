@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
 import { type PeakLine, projectId, readPeaks } from "./peaks.ts";
 import { poolLimit } from "./pool.ts";
+import { readDockerInfo } from "./runtime.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
 
 const GIB = 2 ** 30;
@@ -32,7 +33,7 @@ export const MAX_SANDBOXES = 12;
 export type Runtime = "orbstack" | "docker-desktop" | "podman" | "colima" | "native";
 
 export type Readers = {
-  /** `docker info --format '{{json .}}'`, or undefined when docker fails (not installed, not running). */
+  /** `docker info --format '{{json .}}'`, or undefined when docker fails (not installed, not running); throws an `OperatorError` when docker does not answer in time (`readDockerInfo`). */
   dockerInfo: () => string | undefined;
   hostMemory: () => number;
   hostCpus: () => number;
@@ -51,10 +52,7 @@ export type Readers = {
 };
 
 export const realReaders = (): Readers => ({
-  dockerInfo: () => {
-    const r = spawnSync("docker", ["info", "--format", "{{json .}}"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 });
-    return r.status === 0 && r.stdout.trim() ? r.stdout : undefined;
-  },
+  dockerInfo: readDockerInfo,
   hostMemory: totalmem,
   hostCpus: availableParallelism,
   freeDisk: (path) => {
@@ -380,10 +378,14 @@ export const poolWarnings = (readers: Readers, env: Record<string, string | unde
   ];
 };
 
-/** `poolWarnings` for this process. A bad config.json or pool setting is reported elsewhere (doctor's own FIX, the run's refusal): no warning here. */
-export const poolWarningsNow = (): string[] => {
+/**
+ * `poolWarnings` for this process, over `info` (the start's one `docker info` reading) when the
+ * caller has one. A bad config.json or pool setting is reported elsewhere (doctor's own FIX, the
+ * run's refusal): no warning here, and none when docker does not answer.
+ */
+export const poolWarningsNow = (info?: () => string | undefined): string[] => {
   try {
-    return poolWarnings(realReaders(), process.env, machineSettings());
+    return poolWarnings({ ...realReaders(), ...(info ? { dockerInfo: info } : {}) }, process.env, machineSettings());
   } catch {
     return [];
   }

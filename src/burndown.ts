@@ -45,7 +45,8 @@ import {
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
-import { poolWarningsNow, realReaders } from "./size.ts";
+import { readDockerInfo } from "./runtime.ts";
+import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
@@ -1221,8 +1222,12 @@ export const createPipeline = (ctx: PipelineContext) => {
 
 let unlockOnExit = false;
 
-/** False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow. */
-export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number }): Promise<boolean> => {
+/**
+ * False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow.
+ * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
+ * runtime check (cli.ts); a turn handed none reads its own.
+ */
+export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
@@ -1354,11 +1359,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   console.log(versionsLine(versions));
   // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
   // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
-  const cpus = sandboxCpus(project, settings.concurrency.effective, realReaders().dockerInfo);
+  // One `docker info` for both this and the pool warning below; docker not answering stops the run here, before anything is recorded or started.
+  const info = (turn?.docker ?? readDockerInfo)();
+  const cpus = sandboxCpus(project, settings.concurrency.effective, () => info);
   console.log(cpusLine(project, cpus));
   project = { ...project, cpus };
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
-  for (const line of poolWarningsNow()) console.log(`warning: ${line}`);
+  for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
   const others = otherRuns();
   const split = others.length ? splitAtStart(workers, others) : undefined;
