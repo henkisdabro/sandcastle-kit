@@ -772,7 +772,9 @@ machine-wide slot locks), never in the project.
 A machine that goes to sleep pauses every sandbox mid-task, so by default a run keeps it awake
 until the run ends - `caffeinate -i` on macOS, `systemd-inhibit` on Linux - and prints
 `Keep awake: on` when it starts. The display can still turn off and the screen still locks. The
-helper is tied to the run's process, so it stops when the run ends, crashes or is killed.
+helper is tied to the run's process, so it stops when the run ends, crashes or is killed. If the
+helper is missing, or fails as soon as it starts (`systemd-inhibit` with no system bus, as in WSL
+without systemd or a container), the line says `off` and why, and the run goes on without it.
 
 - **One run on your energy settings:** `KEEP_AWAKE=0 sandcastle run`.
 - **Always:** `"keepAwake": false` in your [personal settings](#personal-settings).

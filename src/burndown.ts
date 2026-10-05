@@ -1269,7 +1269,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   );
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
-  console.log(`Keep awake: ${keepAwake()}`);
+  console.log(`Keep awake: ${await keepAwake()}`);
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
