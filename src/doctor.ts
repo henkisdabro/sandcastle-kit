@@ -17,6 +17,7 @@ import { poolWarningsNow, sizePointerNow } from "./size.ts";
 import { apiKeySpend, baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
+import { runtimeProblemNow } from "./runtime.ts";
 import { resolveVersions } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string, timeout?: number) => {
@@ -258,17 +259,21 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
   // Not installed and not started need different fixes: "start OrbStack" to someone with no runtime sent them looking for an app they never had.
   const dockerInstalled = run("docker", ["--version"]) !== undefined;
+  // The exit status alone: a `--format` field Podman lacks failed there, calling Podman "not running".
+  const dockerRunning = run("docker", ["info"], undefined, 30_000) !== undefined;
   check(
-    !!run("docker", ["info", "--format", "{{.ServerVersion}}"]),
+    dockerRunning,
     dockerInstalled ? "Docker running" : "Docker installed",
     !dockerInstalled
       ? mac
         ? "Install a container runtime that provides `docker`: OrbStack (`brew install --cask orbstack`), Podman or Docker Desktop - see docs/INSTALL.md."
-        : "Install Docker Engine (https://docs.docker.com/engine/install/) or Podman with `podman-docker` - see docs/INSTALL.md."
+        : "Install Docker Engine (https://docs.docker.com/engine/install/) - see docs/INSTALL.md."
       : mac
       ? "Start your container runtime: `open -a OrbStack`, `open -a Docker` or `podman machine start` - then `docker info` must work in this shell."
-      : "Start the Docker daemon: `sudo systemctl start docker` (or `podman machine start`) - then `docker info` must work in this shell.",
+      : "Start the Docker daemon: `sudo systemctl start docker` - then `docker info` must work in this shell.",
   );
+  const runtime = runtimeProblemNow();
+  if (runtime) check(false, runtime.label, runtime.fix);
   const ghInstalled = run("gh", ["--version"]) !== undefined;
   const ghSignedIn = !!run("gh", ["auth", "status"]);
   // Offline, `gh auth status` calls a good token invalid; `gh auth login` would not help.

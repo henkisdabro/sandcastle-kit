@@ -14,7 +14,7 @@ gated and merged while you are away from the keyboard.
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-implement%20%2B%20review-d97757?style=flat-square&logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-cross--review-10a37f?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
-[![Docker](https://img.shields.io/badge/sandbox-Docker%20%7C%20OrbStack%20%7C%20Podman-2496ed?style=flat-square&logo=docker&logoColor=white)](docs/INSTALL.md#-requirements)
+[![Docker](https://img.shields.io/badge/sandbox-Docker%20%7C%20OrbStack-2496ed?style=flat-square&logo=docker&logoColor=white)](docs/INSTALL.md#-requirements)
 [![Node](https://img.shields.io/badge/node-22%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
@@ -49,7 +49,7 @@ tickets, and want the well-specified ones done while they are away from the keyb
   `.scratch/` layout from [Matt Pocock's skills](https://github.com/mattpocock/skills), if you use them - you do not have to);
 - ✅ have real **gates** - lint, typecheck, tests, a build - that a machine can run. They are how the kit
   knows work is good, so the better your tests, the more you can hand over;
-- 🖥️ have a Mac or Linux machine with Docker (or OrbStack, or Podman) and a Claude subscription or API key;
+- 🖥️ have a Mac with OrbStack or Docker Desktop, or a Linux machine with rootful Docker Engine, and a Claude subscription or API key;
 - 🌙 are happy to come back to a report and review what merged, rather than watch it happen.
 
 **It is probably not for you if:**
@@ -100,8 +100,9 @@ New to GitHub or to agents? These are the only terms you need.
 ## ⚡ Quick start
 
 **You need:** macOS or Linux, Node 22+, pnpm, git, jq, the GitHub CLI signed in (`gh auth login`;
-skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) or [Podman](https://podman.io) on
-macOS, [Docker Engine](https://docs.docker.com/engine/install/) on Linux.
+skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) on macOS ([Podman](https://podman.io) is untested there),
+rootful [Docker Engine](https://docs.docker.com/engine/install/) on Linux, run as a normal user in the docker group
+(rootless Docker and Podman on Linux are not supported yet).
 [Full requirements](docs/INSTALL.md#-requirements).
 
 **1. Install the kit** (once per machine) - one line, paste it into your terminal:
@@ -1371,7 +1372,8 @@ is refused with a reminder to start the runtime.
 
 | Symptom | Cause and fix |
 |---|---|
-| `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
+| `Docker running` shows `FIX` | Start OrbStack, the Podman machine (`podman machine start`, macOS), Docker Desktop or the Docker daemon, and check `docker info` works in that shell. |
+| `found Podman`, `found rootless Docker` or `not root` shows `FIX` | Linux needs rootful Docker Engine, with `docker` its own CLI on its socket (`docker context ls`, DOCKER_HOST); Podman and rootless Docker there are not supported yet (#359). Run sandcastle as a normal user in the docker group, never as root or with sudo. |
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |

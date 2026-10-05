@@ -99,6 +99,7 @@ import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEff
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
+import { runtimeProblemNow } from "./runtime.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -181,6 +182,10 @@ try {
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.
       const given = parseRunArgs(args);
+      // Doctor's own refusal, before the config, the billing question or an image: a run as root or on
+      // Podman or rootless Docker on Linux would only fail inside the first sandbox. The detached child passes through here too.
+      const runtime = runtimeProblemNow();
+      if (runtime) throw new OperatorError(`${runtime.label}: ${runtime.fix}`);
       if (given.issues) {
         // An argument overrides both names, so the older one is dropped rather than reported as a clash.
         delete process.env.ISSUES;
