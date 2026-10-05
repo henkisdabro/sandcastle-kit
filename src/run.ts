@@ -578,6 +578,8 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
       write();
     },
     tickets: (): Record<string, TicketRecord> => run.tickets ?? {},
+    /** The plan usage the record holds now, for the Herdr sidebar's token. */
+    usage: () => run.usage,
     /** A new `state` also restarts its clock; a note alone does not. */
     ticket(id: string, fields: TicketRecord) {
       const tickets = run.tickets ?? {};

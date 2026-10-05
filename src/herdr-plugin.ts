@@ -51,14 +51,16 @@ const END = "# <<< sandcastle-kit";
 // so the block is valid TOML after any config - a plain `tab_bar_right = [...]` would have
 // to go inside the user's own `[ui]` table.
 export const configBlock = (kit = KIT) => `${BEGIN}
-# Herdr's default sidebar rows, plus one. A row whose tokens nobody reports disappears, so
-# other agents and spaces look as before: the extra row is a sandbox's step and how long it
-# has been at it, and a run's progress under its space.
+# Herdr's default sidebar rows, plus two. A row whose tokens nobody reports disappears, so
+# other agents and spaces look as before: the extra rows are a sandbox's step and how long it
+# has been at it, the plan's usage under a run's own agent (amber from 75%, red from 90%, which
+# the run's text marks with ▲ and ■), and a run's progress under its space.
 [ui.sidebar.agents]
 rows = [
   ["state_icon", "machine", "workspace", "tab"],
   ["agent"],
   ["$sc_phase", { token = "$sc_elapsed", dim = true }],
+  [{ token = "$sc_usage", rules = [{ contains = "■", fg = "#e8796a", bold = true }, { contains = "▲", fg = "#e8c36a" }] }],
 ]
 
 [ui.sidebar.spaces]

@@ -210,6 +210,22 @@ export type RunSettings = {
   apiKey?: boolean;
 };
 
+/** One of a plan's usage windows: how much of it is spent (0 to 100) and when it resets (seconds since the epoch). */
+export type PlanWindow = { percent: number; resetsAt: number };
+
+/**
+ * The plan usage a live run shows (`usage` in the run record, read by the status view, the Herdr
+ * token and the closing summary), keyed by the provider that reports it. `windows` and `at` are
+ * absent until the first agent's reading: the run is watching for one and none has come.
+ */
+export type PlanUsage = {
+  provider: "claude";
+  /** The 5-hour and the weekly window, from an agent's own rate-limit event. */
+  windows?: { fiveHour: PlanWindow; week: PlanWindow };
+  /** Seconds since the epoch at which the kit read the event: the reading's age is measured from it. */
+  at?: number;
+};
+
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
 export type RunRecord = {
   /** The project's name. */
@@ -232,6 +248,8 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
+  /** The plan's usage, newest reading across the run's agent logs; written only while the run spends a subscription on a Claude model (`src/usage.ts`). */
+  usage?: PlanUsage;
   /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
   demand?: number;
   share?: number;
