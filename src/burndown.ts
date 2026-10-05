@@ -31,7 +31,7 @@ import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
+import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -1246,6 +1246,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   assertCleanBase(project);
   lockRun(project);
   reapOrphans(project);
+  // A held branch merged or deleted by hand leaves its backup entry behind: only a landing drops one.
+  const swept = pruneBackup(project);
+  if (swept.length) console.log(`Dropped the backup of ${swept.length} branch(es) that no longer need one: ${swept.join(", ")}.`);
 
   // The work list lives in the tracker (GitHub labels, or ticket files), never
   // in an agent's context. Named tickets are checked on the host, so a typo or

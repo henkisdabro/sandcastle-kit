@@ -771,7 +771,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
-| `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)) |
+| `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch that was deleted or merged by hand, and prune the repository once none is left |
 | `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by, and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
@@ -1071,7 +1071,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
-| `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, and archives their logs; lists unmerged ones, which `--all` deletes too, without asking. Refuses while a run is live | ➖ no |
+| `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, archives their logs, and drops the `backup.git` copy of a branch that is gone or already on the base; lists unmerged ones, which `--all` deletes too, without asking (their backup copy goes with them). Refuses while a run is live | ➖ no |
 
 ## 🔧 Configuration
 
@@ -1265,7 +1265,8 @@ and the kit narrows what can cross it:
   that copy with a warning line; a tip that moves for a ticket that is not running stops the run. A
   base that was deleted or moved stops it with the exact `git update-ref` that puts it back, and a
   sandbox's worktree record rewritten to a container path (`git worktree repair`) is named. A branch
-  the kit deletes itself, a landed one, is never restored.
+  the kit deletes itself, a landed one, is never restored. The copy of a branch you deleted or merged
+  by hand is dropped at the next run's start (or by `sandcastle clean`), so the backup does not grow.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `stash`
   (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune` and `repair`,
