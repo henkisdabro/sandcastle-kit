@@ -606,7 +606,8 @@ greyed `○ repair`, which drops below 80 columns) and the run's concurrency aft
 sandbox cap (`concurrency 4`, or `concurrency 6 (asked 8)` when the cap clamped what
 `--concurrency`, `CONCURRENCY` or the config asked for).
 Cross-review is on the row too: `● cross-review gpt-6-astra high` when it runs, and a greyed
-`○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. A live
+`○ cross-review` when it is off (dropped below 80 columns); the models cell then holds only models. With
+Codex signed in to a ChatGPT plan, cross-review also adds a `codex` line to the **usage** row (below). A live
 run's row comes from its record; between runs `sandcastle status` shows what the next run would use,
 prefixed `next run:` (so it is not read as the ended run's recorded settings), and a bare `status.sh` falls back to the last run's record, marked
 `(last run)`. The row shows only what the record holds: a record from an older kit has no settings,
@@ -638,6 +639,20 @@ on the closing summary. It is the plan's own account of itself, so it needs no s
 credential and is independent of the usage guard (`USAGE_CHECK`), which asks the plan's endpoint
 before each ticket and can stop the queue. With an API key there is no plan to show: no row, and
 the settings row says `API credits`. A record from an older kit, or a run with no Claude model, has no `usage` and draws no row.
+
+**Codex's usage, with cross-review.** With `CROSS_REVIEW=1` and Codex signed in with a ChatGPT plan
+(`~/.codex/auth.json`'s ChatGPT sign-in, not an API key, and no `CODEX_API_KEY` in the sandboxes'
+environment), the usage row draws Codex's plan on a line of its own under Claude's, in the same form:
+`codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets 18:10   week ▓▓░░░░░░░░ 16% · resets Wed 06:00   (2m ago)`, and
+`codex   waiting for the first cross-review's reading` until the first cross-review pass has ended.
+A run that spends no Claude plan (an `ANTHROPIC_API_KEY`) still shows the `codex` line; a run without
+cross-review, or with Codex on an API key, has none. The 5-hour and the weekly window are told apart by
+their length (300 and 10080 minutes), not by Codex's `primary` and `secondary`. `codex exec --json`
+prints no rate limits, so each cross-review pass's command prints the last `rate_limits` its Codex session
+recorded as its closing line once Codex has ended (the session lives in the sandbox's `~/.codex/sessions`
+and goes with it: it is never copied to the host's `~/.codex`), and the run reads that line from the pass's
+`.jsonl` like Claude's: the line updates when a cross-review pass ends, not during it. The Herdr token joins
+the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line stays Claude's.
 
 | State | Means |
 |---|---|
@@ -840,7 +855,8 @@ out its own view:
   conflicted, else *idle*. While the run spends a subscription on a Claude model, that pane also
   reports the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%,
   which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
-  reported one).
+  reported one). With cross-review on a ChatGPT plan the token joins both providers' weekly windows
+  (`claude wk 93% · codex wk 16% ■`), the mark that of the worst window of either.
 - 🧱 **A pane per sandbox, if you want them.** `herdr: { panes: "all" }` in `.sandcastle/config.ts`
   (or `SANDBOX_PANES=all` for one run; the variable wins) stacks one pane per concurrent sandbox
   on the right of the status view, named after its ticket and following that sandbox's log
@@ -1141,7 +1157,7 @@ Examples: [`examples/`](examples/).
 |---|---|---|
 | `IMPL_MODEL`, `IMPL_EFFORT` | `claude-sonnet-5-5`, `high` | The implementer. The order, first wins: a ticket's `model:` / `effort:` label, then these, then `implement` in the config, then the kit's default. To override a label for one run, remove the label; `sandcastle queue` shows each ticket's label as `[implement <model>/<effort>]` |
 | `REVIEW_MODEL`, `REVIEW_EFFORT` | `claude-opus-5-5`, `high` | The reviewer |
-| `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`) |
+| `CROSS_REVIEW=1`, `CROSS_REVIEW_MODEL`, `CROSS_REVIEW_EFFORT` | off, `gpt-6-astra`, `high` | Codex review, signed in with a read-only copy of `~/.codex/auth.json`. Its effort goes up to `xhigh` (Codex has no `max`). With a ChatGPT sign-in, the status view's usage row also shows Codex's 5-hour and weekly usage |
 | `TICKETS`, `CONCURRENCY`, `DRY_RUN` | queue label, config, off | Per run; `ISSUES` is the older name for `TICKETS` (if both are set, `TICKETS` wins). The same as `sandcastle run 12 15`, `--concurrency N` and `--dry` |
 | `AUTONOMY_LEVEL` | config, else `0` | Overrides `autonomy` for one run (`0` turns a configured level off, `drain` runs until the queue is drained) |
 | `CLAUDE_CODE_VERSION`, `CODEX_VERSION` | `claudeCode`, else `stable`; the newest plain Codex release at least 72 hours old | The Claude Code channel or version, and the Codex version, the image installs ([The image's agent versions](#-the-images-agent-versions)) |

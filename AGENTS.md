@@ -47,7 +47,7 @@ read a module's section there before changing it.
 | `src/run-settings.ts` | The run settings: `resolveSettings` (environment, project config and machine settings in, the settings out: the autonomy level, repair attempts and concurrency, asked and effective) and `settingsGroup`, the group each turn's run record carries and the status view's settings row shows |
 | `src/size.ts` | `sandcastle size`: recommends the pool's `maxSandboxes` and `maxGates` from the runtime's VM (`docker info`) and the measured sandbox peaks (`measuredPeak`), through injectable `Readers`; read-only, the assumed figures are constants at its top |
 | `src/peaks.ts` | Sandbox peak memory: `memory.peak` read inside the container (`samplePeak`, `recordPeak`), and the machine-wide `peaks.jsonl` (`readPeaks`) that `size` reads |
-| `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`); `usageToken` picks its credential, only when the sandboxes spend `CLAUDE_CODE_OAUTH_TOKEN` and no `ANTHROPIC_API_KEY`: the host's Claude Code login, read-only, else that token. Also the plan's usage on screen, with no request: `usageFromEvent` (a `rate_limit_event` line of an agent's stream) and `watchUsage`, which keeps the newest reading across the run's agent logs in the run record's `usage` |
+| `src/usage.ts` | Opt-in plan usage guard (`USAGE_CHECK=1`); `usageToken` picks its credential, only when the sandboxes spend `CLAUDE_CODE_OAUTH_TOKEN` and no `ANTHROPIC_API_KEY`: the host's Claude Code login, read-only, else that token. Also the plan's usage on screen, with no request: `usageFromEvent` (a `rate_limit_event` line of an agent's stream) and `usageFromCodexEvent` (Codex's `rate_limits`, by window length), one reader per provider, and `watchUsage`, which keeps each provider's newest reading across the run's agent logs in the run record's `usage` |
 | `src/api-key.ts` | Spending an API key is never silent: the red line (`red`, as the status view's NO_COLOR and terminal rule), doctor's and the start line's words, and `confirmApiKey`, the question before a run, `preflight` or `lean --measure` bills API credits (`--api-key` or `SANDCASTLE_API_KEY=1` with no terminal); `projectApiKeySpend` in `src/sandbox.ts` says whether one would |
 | `src/notify.ts` | End-of-run notify command from the personal config.json |
 | `src/upgrading.ts` | Unacted **Upgrading** notes against the project's update record (`.sandcastle/.run/kit-updated`), and `kitVersion` |
@@ -60,7 +60,7 @@ read a module's section there before changing it.
 | `src/blockers.ts` | What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), `openBlockersNow`, `blockedNote` |
 | `src/touches.ts` | The `Touches:` line of a ticket body, and `unmergeableFiles`; a scheduling hint, never a guard |
 | `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint`; read-only advice |
-| `src/agents.ts` | Models, effort, review fallback, Codex cross-review |
+| `src/agents.ts` | Models, effort, review fallback, Codex cross-review (and the readout its command prints for the plan usage row) |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks; `KIT`, the kit's own directory |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement |

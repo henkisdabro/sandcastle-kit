@@ -35,8 +35,10 @@ A live run that spends a subscription on a Claude model also has a `usage` row i
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent
 last reported them (`usage  claude  5h ... 14% · resets 18:10   week ... 93% · resets Wed 06:00   (2m ago)`).
 Amber from 75% and red from 90%; grey with its age when no agent has reported for 15 minutes; `waiting
-for the first agent's reading` before the first. A run on an API key has no row (its settings row
-says `API credits`: there is no plan to spend).
+for the first agent's reading` before the first. With cross-review on a ChatGPT-signed-in Codex, a
+second line, `codex`, shows that plan's windows the same way (`waiting for the first cross-review's
+reading` before the first pass ends). A run on an Anthropic API key has no `claude` line (its settings
+row says `API credits`: there is no plan to spend).
 
 After a run, or for a ticket outside it, the state is inferred from branches and logs: `left
 over` is a branch from an earlier run, for `sandcastle clean`. The live view fits its pane and
