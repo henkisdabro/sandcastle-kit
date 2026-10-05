@@ -25,7 +25,8 @@ export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolea
 type Failure = { name: string; command: string; exitCode: number; output: string };
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number };
+// `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; head?: string };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -248,10 +249,14 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     try {
+      // Before the gates, which may leave the worktree anywhere: the sandbox was cut from the base's name, so a
+      // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
+      const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       const run = await runGates(project, sandbox, `${project.name} ${label}`, true);
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
       return {
         ...run,
+        head,
         hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
         gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
       };
@@ -315,18 +320,19 @@ const FAILING_TEST_LINE = [
 ];
 /** True when a single output line is a failing-test match (the patterns `failingTests` reads). */
 export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) => re.test(line));
-/** How many failing tests `failingTests` names: a list this long may have been cut, so it is not the whole set. */
+/** How many failing tests `failingTests` names by default: a list this long may have been cut, so it is not the whole set. */
 export const FAILING_TESTS_SHOWN = 5;
 const SPEC_SUMMARY = /^✖ failing tests:$/;
 const SPEC_LOCATION = /^test at (.+):\d+:\d+$/;
 const CLIPPED = /^\[\.\.\. \d+ characters cut \.\.\.\]$/;
 const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
-export const failingTests = (output: string) => {
+// `limit`: the base-red check reads the base's whole list (Infinity): a branch's test sixth on it is still the base's.
+export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
   const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
   const header = lines.findIndex((line) => SPEC_SUMMARY.test(line));
   // A summary `clip` cut through is not the whole list: a test it lost could be the branch's own.
   const summary = header >= 0 && lines.slice(header).some((line) => CLIPPED.test(line)) ? -1 : header;
-  if (summary < 0) return [...new Set(lines.flatMap(idsOf))].slice(0, FAILING_TESTS_SHOWN);
+  if (summary < 0) return [...new Set(lines.flatMap(idsOf))].slice(0, limit);
   const before = lines.slice(0, summary).flatMap((line) => (SPEC_FAILED.test(line) ? [] : idsOf(line)));
   const listed: string[] = [];
   let at: string | undefined;
@@ -336,7 +342,7 @@ export const failingTests = (output: string) => {
     if (name !== undefined) listed.push(at === undefined || name === at ? name : `${at}::${name}`);
     at = SPEC_LOCATION.exec(line)?.[1];
   }
-  return [...new Set([...before, ...listed])].slice(0, FAILING_TESTS_SHOWN);
+  return [...new Set([...before, ...listed])].slice(0, limit);
 };
 
 /**
