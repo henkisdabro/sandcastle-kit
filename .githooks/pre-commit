@@ -20,7 +20,9 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   echo "pre-commit: gitleaks is required (brew install gitleaks, or a release from https://github.com/gitleaks/gitleaks/releases) - it keeps secrets out of this public repo." >&2
   exit 1
 fi
-gitleaks protect --staged --redact --no-banner
+# Silent when clean: its info lines ("0 commits scanned", in colour) landed in every agent's context
+# on every commit. A finding still prints its rule, file and line, and fails the commit.
+gitleaks protect --staged --redact --no-banner --log-level warn --verbose
 
 deny="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/denylist"
 allow="${XDG_CONFIG_HOME:-$HOME/.config}/sandcastle-kit/allowlist"
