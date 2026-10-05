@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { quietly } from "./quiet.ts";
 
@@ -21,7 +21,7 @@ const bin = join(dir, "bin");
 mkdirSync(bin);
 writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n");
 chmodSync(join(bin, "docker"), 0o755);
-process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
+process.env.PATH = [bin, dirname(process.execPath), process.env.PATH].join(delimiter);
 // Made-up credentials: a sandbox's environment needs them, and the fake docker never reads them.
 mkdirSync(join(dir, "config/sandcastle-kit"), { recursive: true });
 writeFileSync(join(dir, "config/sandcastle-kit/.env"), "CLAUDE_CODE_OAUTH_TOKEN=made-up\nGH_TOKEN=github_pat_made-up\n");
