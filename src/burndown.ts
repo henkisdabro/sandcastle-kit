@@ -1049,7 +1049,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
-      // A land-only re-run ran no agent here, and gives none.
+      // A land-only re-run gives one only when a narrow review ran in this sandbox (after a resolve, or for a carried merge).
       if (agentsRan) await agentBaseline(sandbox);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us

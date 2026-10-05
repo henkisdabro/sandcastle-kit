@@ -15,7 +15,7 @@ process.env.XDG_CONFIG_HOME = config;
 process.env.HOME = config;
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-poolwarn-cache-"));
 const { poolWarnings, sizeLines } = await import("../src/size.ts");
-const { readAnonMib, recordPeak, readPeaks, samplePeak } = await import("../src/peaks.ts");
+const { readAnonMib, recordPeak, readPeaks, samplePeak, sampling } = await import("../src/peaks.ts");
 type Readers = Parameters<typeof sizeLines>[0];
 
 const GIB = 2 ** 30;
@@ -26,6 +26,7 @@ const peak = (peakMib: number, anonMib?: number, agentAnonMib?: number) => ({
   project: "abc123",
   run: "r1",
   peakMib,
+  sampled: 2,
   ...(anonMib ? { anonMib } : {}),
   ...(agentAnonMib ? { agentAnonMib } : {}),
 });
@@ -99,7 +100,7 @@ test("size says memory.peak includes page cache, and prices the gate from the an
   assert.match(withAnon, /Gate figure: 2\.93 GiB, the anonymous memory \(no page cache\) read during gates; plus 10% is 3\.22 GiB\. \(Their cgroup `memory\.peak`, page cache included, was 5\.13 GiB\.\)/);
 });
 
-test("memory.stat's anon figure read after a gate pass is recorded beside memory.peak", async () => {
+test("memory.stat's anon figure read while a gate pass runs is recorded beside memory.peak", async () => {
   const stat = `file 4000000000\nanon ${3000 * MIB + 1}\nslab 100\n`;
   const box = {
     exec: async (cmd: string) =>
@@ -109,7 +110,8 @@ test("memory.stat's anon figure read after a gate pass is recorded beside memory
   assert.equal(await readAnonMib({ exec: async () => ({ exitCode: 1, stdout: "" }) }), undefined, "no memory.stat");
   assert.equal(await readAnonMib({ exec: async () => ({ exitCode: 0, stdout: "file 1\n" }) }), undefined, "no anon line");
   const file = join(mkdtempSync(join(tmpdir(), "sandcastle-poolwarn-file-")), "peaks.jsonl");
-  // The read after a gate pass; at close, `anon` is the sandbox at rest and is not recorded (src/peaks.ts).
+  // The read as the pass starts; after it and at close, `anon` is the sandbox at rest and is not recorded (src/peaks.ts).
+  await sampling(box, "gate", async () => {});
   assert.equal(await samplePeak(box), 5000);
   assert.equal(await recordPeak(box, "/made-up/root", "run-1", file), 5000);
   const [line] = readPeaks(file);
