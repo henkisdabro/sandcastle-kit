@@ -40,10 +40,11 @@ test("a deprecated release past the cooldown is skipped for the one before it", 
 });
 
 test("an unpublished release (a publish time and no version entry) is skipped", async () => {
+  // Below `latest`, so only the missing `versions` entry can rule 0.160.0 out.
   const { v } = await resolve({
-    "dist-tags": { latest: "0.159.0" },
-    versions: { "0.158.0": {}, "0.159.0": {} },
-    time: { "0.158.0": ago(300), "0.159.0": ago(200), "0.160.0": ago(100) },
+    "dist-tags": { latest: "0.160.1" },
+    versions: { "0.158.0": {}, "0.159.0": {}, "0.160.1": {} },
+    time: { "0.158.0": ago(300), "0.159.0": ago(200), "0.160.0": ago(100), "0.160.1": ago(10) },
   });
   assert.equal(v.codex, "0.159.0");
 });
