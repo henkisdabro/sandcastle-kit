@@ -48,6 +48,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Two projects building the shared base image at once no longer crash on `docker tag`**: the base
   build, cleanup and tag run under a machine-wide lock, so the second waits and reuses the image, and
   a docker failure there is a one-line error naming the image.
+- **The git guard's file-write and `rm`/`mv` rules also refuse the project's shared `.git`** after
+  the shell has `cd`'d into a scratch repository or out of every repository.
 
 ## [0.7.0] - 2026-10-04
 
