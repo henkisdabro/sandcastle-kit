@@ -29,12 +29,22 @@ test("stepTimes never records a wait longer than the step", () => {
   assert.deepEqual(stepTimes(1_000, { waitMs: 9_000 }), { ms: 0, waitMs: 1_000 });
 });
 
-test("a gate run reports how long it waited for its slot", async () => {
+test("a gate run reports how long it waited for its slot, and not the gate's own time", async (t) => {
+  // The clock is the one boundary here: it moves only when the fake gate takes its five seconds, so the
+  // wait is exactly the time before the gate started (none, with no other run holding a slot) on any
+  // machine. A bound on the real time the run took fails on a loaded one.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const project = { name: "fixture", gates: [{ name: "lint", command: "run-lint" }] } as Parameters<typeof runGates>[0];
-  const box = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) };
+  const box = {
+    exec: async (cmd: string) => {
+      if (cmd.includes("run-lint")) t.mock.timers.tick(5_000);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  };
   const run = await runGates(project, box, "fixture gates");
   assert.equal(typeof run.waitMs, "number");
-  assert.ok(run.waitMs! >= 0 && run.waitMs! < 1_000);
+  assert.equal(run.gates[0].ms, 5_000, "the gate's own time is in its gate");
+  assert.equal(run.waitMs, 0, "and out of the wait");
 });
 
 test("typicalTimes reads the run time of a gates line, not the wait", () => {
