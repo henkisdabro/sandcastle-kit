@@ -517,3 +517,9 @@ has '█████'
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
+# This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without
+# this second pass, an agent's gate proved bash 5 only and 3.2 breakage surfaced after landing.
+if [ -z "${STATUS_BASH:-}" ] && [ -x /usr/local/bin/bash32 ]; then
+  echo "status view again under bash32 (bash 3.2):"
+  STATUS_BASH=/usr/local/bin/bash32 bash "$0"; exit $?
+fi
