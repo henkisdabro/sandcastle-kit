@@ -36,7 +36,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -52,10 +52,12 @@ export const herdr = (args: string[]) =>
 export const herdrJson = (args: string[]) => JSON.parse(herdr(args));
 export const IN_HERDR = process.env.HERDR_ENV === "1";
 
+const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+
 // This kit's own entry, not whichever `sandcastle` PATH finds first: a second
 // checkout (a branch under test, say) would otherwise run with the other
 // checkout's status view.
-export const statusCommand = (kit = KIT) => `"${kit}/bin/sandcastle" status`;
+export const statusCommand = (kit = KIT) => `${shellQuote(join(kit, "bin/sandcastle"))} status`;
 export const STATUS_COMMAND = statusCommand();
 
 // Where the status pane opened beside the caller is recorded (run.ts).
@@ -78,6 +80,11 @@ const bareShell = (processes: Foreground) => {
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
 type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string; terminal_id?: string; quit?: boolean };
+// The record sits in a clone's gitignored `logs/`, where a hostile clone can force-add a file, and
+// the tab bar runs whatever kit it names: used only as an absolute path to a checkout that has
+// `bin/sandcastle`, else the caller's. A relative one would run a script from inside the repo.
+const recordedKit = (view: View, kit: string) =>
+  typeof view.kit === "string" && isAbsolute(view.kit) && existsSync(join(view.kit, "bin/sandcastle")) ? view.kit : kit;
 // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
 // a bare shell of someone else's. A record without `socket`, or a caller without
 // HERDR_SOCKET_PATH, cannot tell.
@@ -115,7 +122,6 @@ const retireViewRecord = (root: string) => {
     /* no record, or not readable: nothing for a reader to act on */
   }
 };
-const shellQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /**
  * A live run's own tab after a cold Herdr restart: the panes come back as idle shells, and the
@@ -136,7 +142,7 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
     const pane = paneOf(view.status);
     if (!inRecordedTab(view, pane) || quitHere(view, pane) || !bareShell(foreground(view.status))) return false;
     // `cd`: a restored shell does not always start in the project, and the view is the project's.
-    herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(view.kit ?? kit)}`]);
+    herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${statusCommand(recordedKit(view, kit))}`]);
     // A quit before the restart does not hold after it; the view now runs in this terminal.
     if (pane.terminal_id && (view.quit || view.terminal_id !== pane.terminal_id)) {
       const { quit: _, ...rest } = view;
@@ -222,7 +228,7 @@ export const tellDeadTab = (root: string, kit = KIT): DeadTab => {
     }
     try {
       // `cd`: a restored shell does not always start in the project.
-      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(view.kit ?? kit, "bin/sandcastle"))} report`]);
+      herdr(["pane", "run", view.status, `cd ${shellQuote(root)} && ${shellQuote(join(recordedKit(view, kit), "bin/sandcastle"))} report`]);
     } catch (error) {
       giveBack(read);
       throw error;

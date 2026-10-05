@@ -72,7 +72,7 @@ const LIVE = { pid: process.pid };
 const DEAD = { pid: 2 ** 22 + 12345 };
 const tick = (dir: string) =>
   runsLine(dir, undefined, probe, (root) => replaceDeadTab(root, KIT_DIR), (root) => void restartStatusView(root, KIT_DIR));
-const startedView = (root: string) => `pane run w1:t2-1 cd '${root}' && "${KIT_DIR}/bin/sandcastle" status`;
+const startedView = (root: string) => `pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' status`;
 const report = (root: string) => `pane run w1:t2-1 cd '${root}' && '${KIT_DIR}/bin/sandcastle' report`;
 
 // ---------------------------------------------------------------------------
