@@ -126,7 +126,7 @@ test("a status pane still running the status view already shows how the run ende
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, undefined);
 });
 
-test("a pane Herdr no longer has leaves the tab and the record as they were, and the run's file goes", () => {
+test("a herdr that fails leaves the tab and the record as they were, and the run's file awaits a retry", () => {
   reset("w1:t2", "bash /kit/status.sh 5");
   const dir = runs();
   const root = project(dir, DEAD, OWN);
@@ -143,8 +143,9 @@ test("a pane Herdr no longer has leaves the tab and the record as they were, and
     process.env.PATH = path;
   }
   assert.equal(JSON.parse(readFileSync(viewRecord(root), "utf8")).reported, undefined);
-  // A Herdr that cannot answer cannot say the status view still runs: the file is not kept for it.
+  // A Herdr that cannot answer says nothing about the tab: the file waits out of the tab bar's way (test/herdr-dead-tab-retry.test.ts).
   assert.equal(readdirSync(dir).length, 0);
+  assert.equal(readdirSync(awaitingDir(dir)).length, 1);
 });
 
 test("a killed run whose status view still runs keeps its file awaiting until a later restart leaves the pane a shell", () => {
