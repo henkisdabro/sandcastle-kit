@@ -237,8 +237,11 @@ export const gitHooksLine = (g: GitHooks) =>
 // the project's hook tests there, against the plan's kept hooks, and probes
 // the repo's git commit hooks.
 // `runId` is the run these gates belong to, which the sandbox's peak is filed under.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string) =>
-  withSlot("sandboxes", `${project.name} ${label}`, async () => {
+// `ownSlot` false runs it in the sandbox slot the caller holds: a ticket's pipeline that waits on
+// the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
+// with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true) => {
+  const gated = async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     try {
@@ -259,7 +262,9 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
         /* never created */
       }
     }
-  });
+  };
+  return ownSlot ? withSlot("sandboxes", `${project.name} ${label}`, gated) : gated();
+};
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}`).join(" ");
 
@@ -296,6 +301,8 @@ const FAILING_TEST_LINE = [
 ];
 /** True when a single output line is a failing-test match (the patterns `failingTests` reads). */
 export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) => re.test(line));
+/** How many failing tests `failingTests` names: a list this long may have been cut, so it is not the whole set. */
+export const FAILING_TESTS_SHOWN = 5;
 export const failingTests = (output: string) =>
   [
     ...new Set(
@@ -304,7 +311,17 @@ export const failingTests = (output: string) =>
         .map((line) => line.replace(/\r$/, ""))
         .flatMap((line) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined)),
     ),
-  ].slice(0, 5);
+  ].slice(0, FAILING_TESTS_SHOWN);
+
+/**
+ * The file a failing test's id names, or undefined when it names none. pytest's "path::test" and
+ * vitest's and jest's "FAIL path" do; node:test's "name", Go's "TestName" and cargo's "mod::name"
+ * do not, and a guess from a test's title would call a branch's own red the base's. Relative paths only.
+ */
+export const failingTestFile = (id: string) => {
+  const file = id.split("::")[0].replace(/^\.\//, "");
+  return /^[^\s/][^\s]*\.[A-Za-z0-9]+$/.test(file) ? file : undefined;
+};
 
 // The red gates of a result, or undefined for a step that is not a gate run.
 // A timings line once said `ok: true` for a red gate run, because `ok` meant

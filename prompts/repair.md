@@ -38,6 +38,10 @@ see the whole set, and fix all of them.
   configuration.
 - **Stay inside the ticket.** If the failure comes from code this branch did not touch and cannot be
   fixed without scope creep, commit nothing and say so {{KIT_SAY}}.
+  That includes a failure that also fails on `{{TARGET_BRANCH}}` (check in a scratch worktree,
+  `git worktree add --detach <temp dir> {{TARGET_BRANCH}}`, removed with `git worktree remove --force <temp dir>`):
+  it is not this branch's, so it gets no commit. Several branches fixing one test, each its own way,
+  conflict at landing.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
 
 {{KIT_PROJECT_RULES}}

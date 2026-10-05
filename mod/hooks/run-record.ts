@@ -244,6 +244,8 @@ export type RunRecord = {
   /** How a person ended the run: "sandcastle stop", "Ctrl-C", or the signal's name. Absent for a crash, a kill -9 and a run that ended by itself. */
   stoppedBy?: string;
   baseGates?: unknown;
+  /** Tests found red on the base mid-run, each once: a failure no branch caused, so none was repaired. */
+  baseRed?: string[];
   verify?: { green: boolean; line: string } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;

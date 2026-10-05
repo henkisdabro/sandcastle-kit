@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, type Gate, type GateRun, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -442,6 +442,10 @@ export type PipelineContext = {
   open: (branch: string) => Promise<PipelineBox>;
   /** One run of the project's gates in the ticket's sandbox. */
   gate: (box: PipelineBox, id: string) => Promise<GateRun>;
+  /** Every gate on the base's tip, in a sandbox of its own (`gateBase`): what a failure no branch caused is checked against. */
+  baseGate: () => Promise<GateRun>;
+  /** Tests found red on the base mid-run, told once each: the run record keeps them for the closing summary. */
+  baseWentRed: (tests: string[]) => void;
   timed: Timed;
   run: { ticket(id: string, fields: TicketRecord): void };
   view: Pick<SandboxView, "claim">;
@@ -465,7 +469,7 @@ export type PipelineContext = {
 
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
-  const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
+  const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
   const base = project.baseBranch;
   const ref = tracker.ref;
   // A run that died between merging a branch and closing its issue leaves the
@@ -494,6 +498,40 @@ export const createPipeline = (ctx: PipelineContext) => {
     } catch (error) {
       console.log(`${ref(id)}: could not record its head (${String(error).split("\n")[0].slice(0, 160)}); a re-run runs it in full.`);
     }
+  };
+
+  // A test that goes red on the base mid-run goes red on every branch that has the base merged in, and each
+  // one's repair pass fixed it its own way: the fixes then conflicted at landing. A gate run on the base's tip
+  // answers once per tip, for every branch red on the same failure (a promise, so branches red at the same
+  // moment share one run).
+  const baseRuns = new Map<string, Promise<GateRun>>();
+  const toldRed = new Set<string>();
+  /**
+   * The failing tests of `failure` when they fail on the base's tip as well, and no file of them is one the
+   * branch changed; otherwise undefined and the red is the branch's own. A test whose file the output does not
+   * name, a list that may be cut and a gate with no failing tests (lint, types) are the branch's own: the kit
+   * cannot run one test, so it never guesses.
+   */
+  const redOnBase = async (failure: { name: string; output: string }, branch: string): Promise<string[] | undefined> => {
+    const tests = failingTests(failure.output);
+    if (!tests.length || tests.length >= FAILING_TESTS_SHOWN) return undefined;
+    const files = tests.map(failingTestFile);
+    if (files.some((f) => f === undefined)) return undefined;
+    // Against the merge base: a branch that merged the base in has not changed what the base did.
+    const changed = new Set(sh("git", ["diff", "--no-renames", "--name-only", `${base}...${branch}`], project.root).split("\n").filter(Boolean));
+    if (files.some((f) => changed.has(f!))) return undefined;
+    const tip = sh("git", ["rev-parse", base], project.root);
+    let running = baseRuns.get(tip);
+    if (!running) {
+      running = baseGate();
+      baseRuns.set(tip, running);
+      // A base run that could not be made is no answer: the next red asks again.
+      running.catch(() => baseRuns.delete(tip));
+    }
+    const onBase = await running.then((r) => r.failures.find((f) => f.name === failure.name), () => undefined);
+    if (!onBase) return undefined;
+    const there = failingTests(onBase.output);
+    return tests.every((t) => there.includes(t)) ? tests : undefined;
   };
 
   return async (issue: Issue): Promise<Outcome> => {
@@ -895,6 +933,16 @@ export const createPipeline = (ctx: PipelineContext) => {
         red = gated.failure
       ) {
         const failure = red;
+        const onBase = await redOnBase(failure, branch);
+        if (onBase) {
+          const fresh = onBase.filter((t) => !toldRed.has(t));
+          for (const t of fresh) {
+            toldRed.add(t);
+            console.log(`base went red mid-run: ${t}`);
+          }
+          if (fresh.length) baseWentRed(fresh);
+          break;
+        }
         seen.add(failureKey(failure));
         repairs++;
         const why = forced ? "test red gate" : `${failure.name} red`;
@@ -1508,6 +1556,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const ledger = createLedger({ run, outcomes: outcomesFile(project, runId), view, context, bookkeep, dropFirst: dropFirstResult, ref, say: (line) => console.log(line) });
   // The line a requeued ticket's second attempt's setup carries.
   const { requeuedAs } = ledger;
+  const baseRed: string[] = [];
   const pipeline = createPipeline({
     project,
     tracker,
@@ -1519,6 +1568,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
+    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId, false),
+    baseWentRed: (tests) => {
+      baseRed.push(...tests);
+      run.update({ baseRed: [...baseRed] });
+    },
     timed,
     run,
     view,
