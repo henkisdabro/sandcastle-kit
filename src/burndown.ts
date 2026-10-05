@@ -463,6 +463,8 @@ export type PipelineContext = {
   notes: Note[];
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
+  /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
+  waited?: Map<string, number>;
   /** Worktrees Sandcastle kept for their uncommitted files. */
   keptWorktrees: { issue: string; path: string }[];
   /** The `.git` check that failed after a ticket's pipeline, by ticket: its attempt stops the run with it. */
@@ -473,6 +475,7 @@ export type PipelineContext = {
 export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
   const fixes = ctx.fixes ?? createFixBoard();
+  const waited = ctx.waited ?? new Map<string, number>();
   const base = project.baseBranch;
   const ref = tracker.ref;
   // A run that died between merging a branch and closing its issue leaves the
@@ -971,7 +974,11 @@ export const createPipeline = (ctx: PipelineContext) => {
             run.ticket(issue.id, { note: line });
           }
           // Not landed (it failed, gave up or was held): nothing to wait for, the repair is this ticket's own.
-          if (await fixes.wait(issue.id, fixer)) {
+          // The wait is another ticket's work, like a slot wait: in its usual time, it would inflate every later estimate.
+          const asked = Date.now();
+          const fixLanded = await fixes.wait(issue.id, fixer);
+          waited.set(issue.id, (waited.get(issue.id) ?? 0) + Date.now() - asked);
+          if (fixLanded) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.
             const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
             const pull = await sandbox.exec(`git ${hostIdentity(project.root)} merge --no-edit ${shq(base)}`);
@@ -1363,7 +1370,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<string, { phase: string; since: number }>();
   const took = new Map<string, number>();
-  // Each issue's waits for a gates slot, inside `took` but not part of its usual time.
+  // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
@@ -1638,6 +1645,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     reports,
     notes,
     took,
+    waited,
     keptWorktrees,
     tampered,
   });
