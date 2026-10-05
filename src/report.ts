@@ -492,7 +492,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${(f.filed ?? []).length ? `${(f.filed ?? []).length} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
@@ -608,7 +608,7 @@ export const render = (f: Facts, plain = false): string => {
         return `- ${name(id)} - merged - check by hand: ${note}${more}`;
       }),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
-      ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it are held, not repaired`),
+      ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
@@ -690,6 +690,14 @@ export const render = (f: Facts, plain = false): string => {
 
   // Next step: the first thing that unblocks the most, then the rest in order.
   const next: string[] = [];
+  // A re-run of a ticket that failed on a red base goes red the same way: the base comes before any ticket.
+  const redTests = f.baseRed ?? [];
+  if (redTests.length) {
+    next.push(
+      `Fix ${f.base} first: ${redTests.join(", ")} ${redTests.length === 1 ? "fails" : "fail"} on ${f.base} itself; ` +
+        `once \`sandcastle gates\` is green, \`sandcastle run\` again for the tickets under Needs fixing that failed on it.`,
+    );
+  }
   // First: the work is done, and a further turn or a redo would only repeat the refusal.
   if (uncommitted.length) next.push(`Commit the finished work of ${list(uncommitted)}: fix what refused the commit (a hook, a full disk, signing), then \`sandcastle requeue <ticket>\` - the next run reuses the kept worktree - or commit it there yourself (paths under Needs you).`);
   if (baseRed) {
