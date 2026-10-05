@@ -66,16 +66,20 @@ leg_linux() {
     | docker run --rm -i -e FULL_CHECK_SHARDS="$shards" node:24-trixie bash -c '
       set -e
       apt-get update -qq >/dev/null && apt-get install -y -qq jq bsdutils git >/dev/null
-      mkdir /w && cd /w && tar -xf -
-      git init -q && git add -A
-      git config --global user.email t@example.com && git config --global user.name t
-      corepack enable >/dev/null 2>&1 && CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
-      pnpm exec tsc --noEmit
-      # The host worked out the count against its own cores; the VM may have fewer.
-      bash test/status.test.sh >/tmp/status.log 2>&1 || { tail -20 /tmp/status.log; exit 1; }
-      [ "$FULL_CHECK_SHARDS" -le "$(nproc)" ] || export FULL_CHECK_SHARDS=$(nproc)
-      bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
-      cat /tmp/t.log' >"$logs/linux.log" 2>&1 \
+      corepack enable >/dev/null 2>&1
+      mkdir /w && cd /w && tar -xf - && chown -R node:node /w
+      # As the image'"'"'s own non-root user, as CI and every real run are: the kit refuses root
+      # (src/runtime.ts), so a root suite fails each `sandcastle run` test and skips the Linux ones.
+      exec runuser -u node -- env HOME=/home/node FULL_CHECK_SHARDS="$FULL_CHECK_SHARDS" bash -ec "
+        git init -q && git add -A
+        git config --global user.email t@example.com && git config --global user.name t
+        CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
+        pnpm exec tsc --noEmit
+        bash test/status.test.sh >/tmp/status.log 2>&1 || { tail -20 /tmp/status.log; exit 1; }
+        # The host worked out the count against its own cores; the VM may have fewer.
+        [ \"\$FULL_CHECK_SHARDS\" -le \"\$(nproc)\" ] || export FULL_CHECK_SHARDS=\$(nproc)
+        bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
+        cat /tmp/t.log"' >"$logs/linux.log" 2>&1 \
     && { printf 'pnpm test: '; tail -1 "$logs/linux.log"; } \
     || { echo "FAIL"; tail -60 "$logs/linux.log"; return 1; }
 }

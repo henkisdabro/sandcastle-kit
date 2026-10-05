@@ -87,7 +87,8 @@ export const detectRuntime = (info: Info, platform: NodeJS.Platform): Runtime | 
   if (names.includes("orbstack")) return "orbstack";
   if (/docker desktop|docker-desktop/.test(names)) return "docker-desktop";
   if (names.includes("colima")) return "colima";
-  // Podman on Linux is native too (`podman-docker`): only a machine's VM has advice to give.
+  // Podman is a runtime only on macOS, where it runs a machine (untested); on Linux doctor and run
+  // refuse it for now (#359, src/runtime.ts), and a Linux name without a machine's is native.
   if (names.includes("podman") && (platform !== "linux" || /podman-machine|coreos/.test(names))) return "podman";
   return platform === "linux" ? "native" : undefined;
 };

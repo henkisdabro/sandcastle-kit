@@ -28,13 +28,14 @@ the same by hand.
 
 | OS | Recommended | Also works |
 |---|---|---|
-| 🍎 **macOS** | **[OrbStack](https://orbstack.dev)** - light, fast, and provides `docker` out of the box | **[Podman](https://podman.io)** with Docker compatibility turned on (Podman Desktop -> Settings -> Docker Compatibility, so `docker` talks to the Podman machine), or Docker Desktop |
-| 🐧 **Linux** | **[Docker Engine](https://docs.docker.com/engine/install/)** | **Podman** with the `podman-docker` package, which installs a `docker` command |
+| 🍎 **macOS** | **[OrbStack](https://orbstack.dev)** - light, fast, and provides `docker` out of the box | Docker Desktop, or **[Podman](https://podman.io)** with Docker compatibility turned on (Podman Desktop -> Settings -> Docker Compatibility, so `docker` talks to the Podman machine) - untested |
+| 🐧 **Linux** | **[Docker Engine](https://docs.docker.com/engine/install/)**, rootful, run as a user in the docker group | Nothing else yet: rootless Docker and Podman (including `podman-docker`) are not supported yet - [#359](https://github.com/henkisdabro/sandcastle-kit/issues/359) |
 | 🪟 **Windows** | Not supported | Try WSL 2 with Docker Engine inside it, at your own risk |
 
 > [!TIP]
 > Whichever runtime you choose, `docker info` must succeed in the same shell you run `sandcastle`
-> from. `sandcastle doctor` checks this for you.
+> from. `sandcastle doctor` checks this for you, and refuses (as `sandcastle run` does) a run as root
+> on any OS, and Podman or rootless Docker on Linux, where the agent could not write its worktree.
 
 **Optional:** [Codex CLI](https://github.com/openai/codex) (cross-review), [Herdr](https://herdr.dev) 0.9.3 or later (a tab with the status view,
 opened automatically; a pane per sandbox is opt-in with `herdr: { panes: "all" }`; `sandcastle herdr configure` adds the kit's plugin - see the README's
