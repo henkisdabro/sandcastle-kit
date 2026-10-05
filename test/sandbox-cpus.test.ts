@@ -50,6 +50,13 @@ test("the project's cpus wins over the VM's split", async () => {
   assert.equal(cpusLine(project, 5), "Sandbox CPUs: 5 each (cpus in the project config)");
 });
 
+test("a project's cpus above the VM's CPUs is cut to what the VM has, which docker would otherwise refuse", async () => {
+  const project = await load(", cpus: 16");
+  assert.equal(sandboxCpus(project, 4, info(8)), 8);
+  assert.equal(cpusLine(project, 8), "Sandbox CPUs: 8 each (cpus 16 in the project config, but the VM has 8)");
+  assert.equal(sandboxCpus(project, 4, () => undefined), 16, "with no CPU count to check against, the project's figure stands");
+});
+
 test("cpus: false sets no limit", async () => {
   const project = await load(", cpus: false");
   assert.equal(sandboxCpus(project, 4, info(12)), undefined);
