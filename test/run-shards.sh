@@ -10,6 +10,12 @@
 # cores and one pass. SHARD_CONCURRENCY (default 1) is the test
 # files each shard runs at once.
 set -u
+# All the shards' temp files go in one directory that is removed when this ends (test/in-temp.sh),
+# also when it is killed. Before the `cd`: LOGDIR may be relative to where this was started.
+if [ -z "${SANDCASTLE_TEST_TEMP:-}" ]; then
+  self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  SANDCASTLE_TEST_TEMP=1 exec bash "$(dirname "$self")/in-temp.sh" bash "$self" "$@"
+fi
 cd "$(dirname "$0")/.." || exit 1
 dir="${1:?usage: run-shards.sh LOGDIR [SHARDS]}"
 mkdir -p "$dir" && rm -f "$dir"/shard-*
