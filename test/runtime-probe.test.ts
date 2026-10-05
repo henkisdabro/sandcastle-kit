@@ -105,8 +105,8 @@ test("on Linux, a run's start reads docker info once and the CPU limit comes fro
   const c = setup();
   const r = runKit(["run", "--dry"], { cwd: c.repo, env: c.env, encoding: "utf8" });
   const out = r.stdout + r.stderr;
-  // The run got to its start lines, and its CPU limit is what the one reading gave: 12 CPUs shared by the default concurrency of 4.
-  assert.match(out, /^Sandbox CPUs: 3 each$/m, out);
+  // The run got to its start lines, and its CPU limits are what the one reading gave: 12 CPUs shared by the default concurrency of 4, and by the default 2 gates.
+  assert.match(out, /^Sandbox CPUs: 3 each, 6 for landing and base gates$/m, out);
   const calls = c.logged();
   assert.equal(calls.filter((l) => l.startsWith("info")).length, 1, calls.join("\n"));
   assert.equal(calls.filter((l) => l.startsWith("info --format {{json .SecurityOptions}}")).length, 0, "the security options come from the same reading");
@@ -119,7 +119,7 @@ test("the detached child takes its parent's reading: no second info, and the che
   const r = runKit(["run", "--dry"], { cwd: c.repo, env: { ...c.env, SANDCASTLE_DETACHED: "1", [DOCKER_INFO_ENV]: ROOTLESS }, encoding: "utf8" });
   const out = r.stdout + r.stderr;
   assert.doesNotMatch(out, /rootless Docker/, out);
-  assert.match(out, /^Sandbox CPUs: 3 each$/m, out);
+  assert.match(out, /^Sandbox CPUs: 3 each, 6 for landing and base gates$/m, out);
   assert.deepEqual(c.logged().filter((l) => l.startsWith("info") || l === "--version" || l.startsWith("version")), [], "the child asked the daemon nothing of what its parent had");
 });
 
