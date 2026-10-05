@@ -26,6 +26,7 @@
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
 import { OperatorError } from "./errors.ts";
+import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type Effort = (typeof EFFORTS)[number];
@@ -199,6 +200,23 @@ export const reviewWithFallback = <T>(
     return run(claude(IMPL_MODEL, REVIEW_EFFORT), IMPL_MODEL);
   });
 
+// Codex's `exec --json` stream has no rate limits (its events are the thread, the turns and the items), and
+// with `captureSessions: false` the session that does carry them - `rate_limits` on each `token_count` event -
+// stays in the sandbox, out of the host's ~/.codex, and goes with it. So the pass's command, once `codex exec`
+// has ended, prints that session's last `rate_limits` as one more stdout line (`CODEX_RATE_LIMITS_READOUT`),
+// which the raw stream carries into the pass's `.jsonl` sidecar like any other line, and `watchUsage` reads it
+// there. The exit code is codex's own; the library's parser drops the line as it does any it does not know.
+const codexAgent = (model: string, effort: Exclude<Effort, "max">) => {
+  const provider = codex(model, { effort, captureSessions: false });
+  return {
+    ...provider,
+    buildPrintCommand(options: Parameters<typeof provider.buildPrintCommand>[0]) {
+      const printed = provider.buildPrintCommand(options);
+      return { ...printed, command: `${printed.command}; rc=$?; ${CODEX_RATE_LIMITS_READOUT}; exit $rc` };
+    },
+  };
+};
+
 // The cross-family pass is a second opinion, not a gate: if it fails, the
 // branch still has the Opus review and still has to pass the gates.
 // Session capture is off so its sessions stay out of the host's ~/.codex.
@@ -208,7 +226,7 @@ export const crossReview = async <T>(
 ): Promise<T | undefined> => {
   if (!CROSS_REVIEW) return undefined;
   try {
-    return await run(codex(CROSS_REVIEW_MODEL, { effort: CROSS_REVIEW_EFFORT, captureSessions: false }));
+    return await run(codexAgent(CROSS_REVIEW_MODEL, CROSS_REVIEW_EFFORT));
   } catch (error) {
     console.log(`${label}: ${CROSS_REVIEW_MODEL} cross-review failed (${agentFailure(error)}); continuing without it.`);
     return undefined;

@@ -36,7 +36,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLine
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
-import { isTicketState, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
+import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
@@ -51,7 +51,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
-import { showsPlanUsage, usageLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -1611,21 +1611,29 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   noteReading();
   if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
-  // The plan's usage on screen, from the agents' own rate-limit events: only a run that spends a
-  // subscription on a Claude model has one (an API key bills credits no plan describes). Until the
-  // first agent reports, the record says it is waiting for one. After the archive above, which moves
+  // The plan's usage on screen, from the agents' own rate-limit events: one entry per provider the run
+  // spends a plan of. Claude's when the run spends a subscription on a Claude model (an API key bills
+  // credits no plan describes); Codex's when cross-review runs on a ChatGPT sign-in, not an API key. Until
+  // a provider's first reading, its entry says it is waiting for one. After the archive above, which moves
   // finished branches' logs away: the watch reads the logs that are left.
   let usageWatch: UsageWatch | undefined;
   const passModels = [IMPL_MODEL, REVIEW_MODEL, ...[...overrides.values()].flatMap((o) => (o.model ? [o.model] : []))];
-  if (showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels })) {
-    run.update({ usage: { provider: "claude" } });
+  const planUsage: PlanUsage[] = [
+    ...(showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels }) ? [{ provider: "claude" as const }] : []),
+    ...(showsCodexUsage({ crossReview: CROSS_REVIEW, apiKey: !!env.CODEX_API_KEY, auth: CROSS_REVIEW ? readCodexAuth() : undefined }) ? [{ provider: "codex" as const }] : []),
+  ];
+  if (planUsage.length) {
+    run.update({ usage: [...planUsage] });
     usageWatch = watchUsage({
       logs: join(project.root, ".sandcastle/logs"),
       run: runId,
+      providers: planUsage.map((u) => u.provider),
       // A record the next turn replaced is not this watch's to write.
       finished: () => run.finished,
       write: (reading) => {
-        if (!run.finished) run.update({ usage: reading });
+        if (run.finished) return;
+        planUsage[planUsage.findIndex((u) => u.provider === reading.provider)] = reading;
+        run.update({ usage: [...planUsage] });
       },
     });
   }
