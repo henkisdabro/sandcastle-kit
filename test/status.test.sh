@@ -650,6 +650,81 @@ sed -i.bak "s/\"stage\": \"running\",/\"stage\": \"running\", \"finishedAt\": \"
 render "105"
 hasnt '^│ usage |5h ▓|waiting for the first'
 
+# ---------------------------------------------------------------------------
+SCENARIO="live run, Claude's and Codex's plan usage"
+# With cross-review on a ChatGPT plan the record's `usage` is a list with an entry for each provider, and the
+# row draws each on a line of its own, the names one width so the bars start in one column. Codex's
+# numbers are its `rate_limits` of the ticket: the 5-hour window spent, the week 16%.
+count() { # pattern lines
+  local n; n=$(grep -cE "$1" "$TMP/frame")
+  [ "$n" -eq "$2" ] || { echo "FAIL [$SCENARIO] $n line(s) match /$1/, want $2"; fails=$((fails+1)); }
+}
+usage_list() { # entries-json [settings json]
+  local settings=""
+  [ -n "${2:-}" ] && settings="\"settings\": $2,"
+  cat >"$L/run.json" <<RECORD
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["105"], $settings "usage": $1,
+  "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
+RECORD
+}
+reading() { # provider percent5 percentWeek age-seconds
+  printf '{ "provider": "%s", "at": %s, "windows": { "fiveHour": { "percent": %s, "resetsAt": %s }, "week": { "percent": %s, "resetsAt": %s } } }' \
+    "$1" "$((now - $4))" "$2" "$r5" "$3" "$rw"
+}
+claude_reading=$(reading claude 14 93 120); codex_reading=$(reading codex 100 16 120)
+usage_list "[$claude_reading, $codex_reading]"
+COLS=160 render "105"
+has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5   week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+has "^│ +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5   week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
+count '^│ usage ' 1
+count 'week ▓' 2
+# At 80 columns each provider's line wraps whole items, the second one's under the first's.
+render "105"
+has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5 +│"
+has "^│ +week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+has "^│ +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5 +│"
+has "^│ +week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
+# Each line has its own age: Codex's reading is from the last cross-review pass, Claude's from the latest agent.
+usage_list "[$claude_reading, $(reading codex 100 16 1200)]"
+COLS=160 render "105"
+has "^│ usage +claude  5h .*\\(2m ago\\) +│"
+has "^│ +codex   5h .*\\(20m ago\\) +│"
+# A record with only Claude draws one line, as a list or as the object an older kit wrote ...
+usage_list "[$claude_reading]"
+COLS=160 render "105"
+count 'week ▓' 1
+hasnt 'codex'
+usage_list "$claude_reading"
+COLS=160 render "105"
+count 'week ▓' 1
+hasnt 'codex'
+# ... and each provider waits for its own first reading, Codex's coming from the cross-review pass.
+usage_list "[$claude_reading, { \"provider\": \"codex\" }]"
+COLS=160 render "105"
+has '^│ usage +claude  5h '
+has "^│ +codex   waiting for the first cross-review.s reading +│"
+usage_list '[{ "provider": "claude" }, { "provider": "codex" }]'
+COLS=160 render "105"
+has "^│ usage +claude  waiting for the first agent.s reading +│"
+has "^│ +codex   waiting for the first cross-review.s reading +│"
+# A run on an Anthropic API key has no Claude line, whatever the record holds, but cross-review's Codex plan is another account's ...
+usage_list "[$claude_reading, $codex_reading]" '{ "autonomy": 0, "apiKey": true }'
+COLS=160 render "105"
+has '^│ settings .*API credits'
+hasnt 'claude  5h'
+has "^│ usage +codex   5h ▓▓▓▓▓▓▓▓▓▓ 100% · resets $at5   week ▓▓░░░░░░░░ 16% · resets $atw   \\(2m ago\\) +│"
+# ... and a run whose settings say cross-review is off has no Codex line, whatever the record holds.
+usage_list "[$claude_reading, $codex_reading]" '{ "autonomy": 0, "crossReview": false }'
+COLS=160 render "105"
+has '^│ usage +claude  5h '
+hasnt 'codex'
+# An entry that is not an object, or names a provider the view does not know, draws nothing.
+usage_list "[$claude_reading, 3, \"codex\", { \"provider\": \"other\", \"windows\": 1 }]"
+COLS=160 render "105"
+count 'week ▓' 1
+hasnt 'codex|other'
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
 # This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without

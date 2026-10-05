@@ -19,7 +19,7 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
-import { readPlanUsage } from "./usage.ts";
+import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
@@ -92,7 +92,7 @@ export type Facts = {
   baseRed?: string[];
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
-  /** The plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
+  /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
   usage?: PlanUsage;
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
   next?: { level: Level; turn: number; tickets: string[] };
@@ -378,7 +378,8 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
-    usage: readPlanUsage(run.usage),
+    // The summary gives Claude's line; Codex's reading, when cross-review shows one, is the status view's and the sidebar's.
+    usage: readPlanUsages(run.usage).find((u) => u.provider === "claude"),
   };
 };
 

@@ -26,8 +26,8 @@
 // The sidebar also carries the run itself: each sandbox's row is named after
 // its ticket and reports `$sc_phase` and `$sc_elapsed` tokens, the run's
 // workspace reports `$sandcastle` ("4/9 · 1 needs you"), and the run's status
-// pane `$sc_usage` (the plan's usage, "5h 14% · wk 93%") once an agent has
-// reported it. Herdr shows a token only where a sidebar row names it
+// pane `$sc_usage` (the plan's usage, "5h 14% · wk 93%"; "claude wk 93% · codex wk 16%" when
+// cross-review shows Codex's too) once an agent has reported it. Herdr shows a token only where a sidebar row names it
 // (`sandcastle herdr configure` adds the rows), and keeps none across a
 // server restart, so everything is re-sent once a minute: the sidebar heals
 // itself after a restart or a live handoff.
@@ -44,7 +44,7 @@ import { OperatorError } from "./errors.ts";
 import { GROUPS, type PlanUsage, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
-import { readPlanUsage, usageBand } from "./usage.ts";
+import { readPlanUsages, usageBand } from "./usage.ts";
 
 export { viewRecord };
 
@@ -345,15 +345,19 @@ export const sandboxTokens = (run: string, phase: string, since: number | undefi
 export const USAGE_MARKS = { normal: "", amber: " ▲", red: " ■" } as const;
 
 /**
- * The status pane's `sc_usage` token: `5h 14% · wk 93%`, and the mark of the worse window's band after it
- * (`USAGE_MARKS`). Undefined until a reading exists, and for a record whose reading is not well-formed:
+ * The status pane's `sc_usage` token, and the mark of the worst window's band (`USAGE_MARKS`) after it. One
+ * provider's reading, Claude's, is `5h 14% · wk 93%`; with another provider's too, each is its name and its
+ * weekly window, `claude wk 93% · codex wk 16%` (the sidebar's row is narrow), and the mark is the worst of every
+ * window of both. Undefined until a reading exists, and for a record whose readings are not well-formed:
  * the token is then not sent at all.
  */
-export const usageText = (usage: PlanUsage | undefined): string | undefined => {
-  const w = readPlanUsage(usage)?.windows;
-  if (!w) return undefined;
-  const worst = Math.max(w.fiveHour.percent, w.week.percent);
-  return `5h ${w.fiveHour.percent}% · wk ${w.week.percent}%${USAGE_MARKS[usageBand(worst)]}`;
+export const usageText = (usage: PlanUsage[] | PlanUsage | undefined): string | undefined => {
+  const readings = readPlanUsages(usage).flatMap((u) => (u.windows ? [{ provider: u.provider, ...u.windows }] : []));
+  if (!readings.length) return undefined;
+  const worst = Math.max(...readings.flatMap((r) => [r.fiveHour.percent, r.week.percent]));
+  const [only] = readings;
+  const text = readings.length === 1 && only.provider === "claude" ? `5h ${only.fiveHour.percent}% · wk ${only.week.percent}%` : readings.map((r) => `${r.provider} wk ${r.week.percent}%`).join(" · ");
+  return `${text}${USAGE_MARKS[usageBand(worst)]}`;
 };
 
 /** `--token k=v` to set, `--clear-token k` for null: Herdr's token patch, as CLI arguments. */
@@ -420,7 +424,7 @@ export const openSandboxView = (
   // word on it keeps a pane per sandbox.
   mode: SandboxPanes = "all",
   // The plan usage the run record holds now, sent as the status pane's `sc_usage` token.
-  usage: () => PlanUsage | undefined = () => undefined,
+  usage: () => PlanUsage[] | PlanUsage | undefined = () => undefined,
 ): SandboxView => {
   // Every way out before this run writes its own record retires the earlier one.
   const none = () => {

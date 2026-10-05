@@ -214,13 +214,13 @@ export type RunSettings = {
 export type PlanWindow = { percent: number; resetsAt: number };
 
 /**
- * The plan usage a live run shows (`usage` in the run record, read by the status view, the Herdr
- * token and the closing summary), keyed by the provider that reports it. `windows` and `at` are
- * absent until the first agent's reading: the run is watching for one and none has come.
+ * One provider's plan usage, as a live run shows it (`usage` in the run record, read by the status view,
+ * the Herdr token and the closing summary), keyed by the provider that reports it. `windows` and `at` are
+ * absent until the first reading: the run is watching for one and none has come.
  */
 export type PlanUsage = {
-  provider: "claude";
-  /** The 5-hour and the weekly window, from an agent's own rate-limit event. */
+  provider: "claude" | "codex";
+  /** The 5-hour and the weekly window: from a Claude agent's rate-limit event, or Codex's `rate_limits` (matched by their length, not their position). */
   windows?: { fiveHour: PlanWindow; week: PlanWindow };
   /** Seconds since the epoch at which the kit read the event: the reading's age is measured from it. */
   at?: number;
@@ -248,8 +248,12 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
-  /** The plan's usage, newest reading across the run's agent logs; written only while the run spends a subscription on a Claude model (`src/usage.ts`). */
-  usage?: PlanUsage;
+  /**
+   * The plan's usage, one entry per provider the run shows, each its newest reading across the run's agent logs
+   * (`src/usage.ts`): Claude's while the run spends a subscription on a Claude model, Codex's while cross-review
+   * runs on a ChatGPT plan. An older kit wrote the one entry as an object, and readers still take that.
+   */
+  usage?: PlanUsage[] | PlanUsage;
   /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
   demand?: number;
   share?: number;
