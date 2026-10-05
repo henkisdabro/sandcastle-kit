@@ -1,5 +1,5 @@
 // Preloaded into every test file's process (`--import ./test/no-stray.ts` in package.json's `test`
-// and `test:shard`): a test file that writes to stdout or stderr outside `quietly` (test/quiet.ts)
+// and `test:shard`, and test/run-shards.sh): a test file that writes to stdout or stderr outside `quietly` (test/quiet.ts)
 // fails, so a green gate log carries nothing but node:test's own lines and a new noisy test cannot
 // slip in unseen (test/no-stray.test.ts holds that).
 //

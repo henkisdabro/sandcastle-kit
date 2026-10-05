@@ -59,3 +59,7 @@ test("both test scripts in package.json preload the guard", () => {
   const { scripts } = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")) as { scripts: Record<string, string> };
   for (const name of ["test", "test:shard"]) assert.match(scripts[name]!, /--import \.\/test\/no-stray\.ts --test /, name);
 });
+
+test("test/full-check.sh's shards preload the guard as pnpm test does", () => {
+  assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /tsx --import \.\/test\/no-stray\.ts --test /);
+});

@@ -24,7 +24,7 @@ i=1
 while [ "$i" -le "$n" ]; do
   (
     files=$(TEST_SHARD="$i/$n" pnpm exec tsx test/shard.ts) \
-      && pnpm exec tsx --test --test-timeout=300000 --test-concurrency="$conc" $files
+      && pnpm exec tsx --import ./test/no-stray.ts --test --test-timeout=300000 --test-concurrency="$conc" $files
     echo $? >"$dir/shard-$i.status"
   ) >"$dir/shard-$i.log" 2>&1 &
   i=$((i + 1))
