@@ -461,10 +461,10 @@ const liveUsers = (pids: number[]) => pids.filter((p) => kitRunning(p, commandOf
  * used it: a run that outlasts `IMAGE_KEEP_DAYS` keeps its image. Best effort - a cache directory that
  * cannot be written must not stop a build.
  */
-const noteUse = (tag: string, now = Date.now()) => {
+const noteUse = (tag: string, now = Date.now(), user = true) => {
   try {
     mkdirSync(IMAGE_USE_DIR, { recursive: true });
-    const pids = [...new Set([...liveUsers(readUse(tag)?.pids ?? []), process.pid])];
+    const pids = [...new Set([...liveUsers(readUse(tag)?.pids ?? []), ...(user ? [process.pid] : [])])];
     writeFileSync(useFile(tag), JSON.stringify({ at: now, pids }));
   } catch {
     /* the tag simply looks unused, and is kept for a while from the first prune that sees it */
@@ -480,7 +480,8 @@ const prune = (repo: string, keep: string, now = Date.now()) => {
   for (const t of tags.filter((t) => t !== keep && !t.endsWith(":latest"))) {
     const use = readUse(t);
     if (!use) {
-      noteUse(t, now);
+      // Seen, not used: naming this process would keep the tag for as long as this run lasts.
+      noteUse(t, now, false);
       continue;
     }
     if (now - use.at < IMAGE_KEEP_DAYS * 24 * 60 * 60 * 1000 || liveUsers(use.pids).length > 0) continue;

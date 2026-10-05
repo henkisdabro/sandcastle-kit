@@ -123,8 +123,10 @@ test("a base image with no use stamp is kept, and its days start from the build 
   otherImage(m, "unstamped");
   assert.equal(build(m, "real").status, 0);
   assert.ok(has(m, "unstamped"));
-  const stamp = JSON.parse(readFileSync(join(m.cache, "sandcastle-kit", "image-use", "sandcastle-base_unstamped"), "utf8")) as { at: number };
+  const stamp = JSON.parse(readFileSync(join(m.cache, "sandcastle-kit", "image-use", "sandcastle-base_unstamped"), "utf8")) as { at: number; pids: number[] };
   assert.ok(Math.abs(Date.now() - stamp.at) < 60_000, `stamped at ${stamp.at}`);
+  // The build saw the tag, it did not use it: a long run that pruned must not keep it alive.
+  assert.deepEqual(stamp.pids, []);
 });
 
 test("an old base image a live kit process used survives, and is pruned once that process is gone", async () => {
