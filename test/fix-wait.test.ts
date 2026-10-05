@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -31,12 +31,19 @@ const TMP = mkdtempSync(join(tmpdir(), "sandcastle-fix-wait-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+// The scenarios are a few dozen git processes each (about 100 ms alone), so what a loaded machine
+// stretches is process start-up: each one the harness avoids is time the test does not lose. A commit
+// spawns `git maintenance run --auto` after itself unless that is off, and the commits an agent made
+// are counted as they are made rather than read back with two more git calls.
+const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "maintenance.auto=false", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+/** How many commits each worktree has been given by `commit`. */
+const made = new Map<string, number>();
 const commit = (cwd: string, file: string, text: string) => {
   mkdirSync(dirname(join(cwd, file)), { recursive: true });
   writeFileSync(join(cwd, file), text);
   git(cwd, "add", file);
   git(cwd, "commit", "-q", "-m", `change ${file}`);
+  made.set(cwd, (made.get(cwd) ?? 0) + 1);
 };
 
 const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
@@ -52,20 +59,27 @@ const CLOCK = red("✖ rolls over at midnight (3.1ms)\nℹ fail 1");
 const landed = (id: string): Change => ({ kind: "ended", id, ending: { kind: "landing", green: { issue: id }, landed: { kind: "merged" }, attempts: 1 } });
 const failed = (id: string): Change => ({ kind: "ended", id, ending: { kind: "pipeline", outcome: {}, attempts: 1 } });
 
+// Every test's own limit (the one that fails a scenario that hangs) is this long; a pipeline that has not
+// got where the test waits for it by 50 s fails here first, and says where it stopped.
+const LIMIT = 60_000;
 const until = async (cond: () => boolean) => {
-  for (let i = 0; i < 500 && !cond(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (const stop = Date.now() + 50_000; Date.now() < stop && !cond(); ) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(cond(), "the pipeline never got there");
 };
+
+// The repository every scenario starts from, built once: copying its files starts no process.
+const START = join(TMP, "start");
+mkdirSync(START);
+git(START, "init", "-q", "-b", "main");
+git(START, "config", "user.name", "Operator Example");
+git(START, "config", "user.email", "operator@example.com");
+git(START, "config", "commit.gpgsign", "false");
+commit(START, "shared.txt", "start\n");
 
 /** Two tickets' pipelines over one repo and one board; `gateOf` says what each ticket's gate runs return, in order. */
 const harness = (gateOf: (id: string) => GateRun[], starved?: () => boolean) => {
   const root = join(TMP, `repo${n++}`);
-  mkdirSync(root);
-  git(root, "init", "-q", "-b", "main");
-  git(root, "config", "user.name", "Operator Example");
-  git(root, "config", "user.email", "operator@example.com");
-  git(root, "config", "commit.gpgsign", "false");
-  commit(root, "shared.txt", "start\n");
+  cpSync(START, root, { recursive: true });
   const prompts = Object.fromEntries(
     ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((kind) => {
       const file = join(root, `.sandcastle/.run/${kind}.md`);
@@ -102,9 +116,9 @@ const harness = (gateOf: (id: string) => GateRun[], starved?: () => boolean) => 
       run: async (opts: { name?: string }) => {
         const [kind, id] = (opts.name ?? "").split("-");
         eventsOf(id).push(kind);
-        const before = git(path, "rev-parse", "HEAD");
+        const before = made.get(path) ?? 0;
         agents[kind]?.(id, path);
-        const commits = git(path, "rev-list", `${before}..HEAD`).split("\n").filter(Boolean).map((sha) => ({ sha }));
+        const commits = Array.from({ length: (made.get(path) ?? 0) - before }, (_, i) => ({ sha: `${path}#${before + i}` }));
         return { iterations: [], stdout: "", commits };
       },
       close: async () => {
@@ -170,7 +184,7 @@ const fixing = (h: ReturnType<typeof harness>) => {
   h.agents.repair = (id, wt) => commit(wt, "src/fix.ts", `fix by ${id}\n`);
 };
 
-test("two tickets red on the same test start one repair, and the second gates green after the first lands, with no resolve pass", { timeout: 20000 }, async () => {
+test("two tickets red on the same test start one repair, and the second gates green after the first lands, with no resolve pass", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
@@ -196,7 +210,7 @@ test("two tickets red on the same test start one repair, and the second gates gr
   }
 });
 
-test("a ticket whose first one's repair fails then starts its own repair", { timeout: 20000 }, async () => {
+test("a ticket whose first one's repair fails then starts its own repair", { timeout: LIMIT }, async () => {
   const h = harness((id) => (id === "1" ? [CLOCK] : [CLOCK, GREEN]));
   try {
     h.agents.repair = (id, wt) => {
@@ -220,7 +234,7 @@ test("a ticket whose first one's repair fails then starts its own repair", { tim
   }
 });
 
-test("a ticket sent back at landing frees the ones waiting for its fix, which repair on their own", { timeout: 20000 }, async () => {
+test("a ticket sent back at landing frees the ones waiting for its fix, which repair on their own", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
@@ -237,7 +251,7 @@ test("a ticket sent back at landing frees the ones waiting for its fix, which re
   }
 });
 
-test("a ticket still red after the first one's fix landed repairs, and does not wait a second time", { timeout: 20000 }, async () => {
+test("a ticket still red after the first one's fix landed repairs, and does not wait a second time", { timeout: LIMIT }, async () => {
   const h = harness((id) => (id === "1" ? [CLOCK, GREEN] : [CLOCK, CLOCK, GREEN]));
   try {
     fixing(h);
@@ -256,7 +270,7 @@ test("a ticket still red after the first one's fix landed repairs, and does not 
   }
 });
 
-test("a ticket that repaired before it waited has those repair commits reviewed once it gates green on the merged base", { timeout: 20000 }, async () => {
+test("a ticket that repaired before it waited has those repair commits reviewed once it gates green on the merged base", { timeout: LIMIT }, async () => {
   const TYPES = red("src/ticket-2.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.");
   const h = harness((id) => (id === "1" ? [CLOCK, GREEN] : [TYPES, CLOCK, GREEN]));
   try {
@@ -275,7 +289,7 @@ test("a ticket that repaired before it waited has those repair commits reviewed 
   }
 });
 
-test("a landing left waiting for a sandbox slot frees the tickets waiting for a fix, which repair on their own", { timeout: 20000 }, async () => {
+test("a landing left waiting for a sandbox slot frees the tickets waiting for a fix, which repair on their own", { timeout: LIMIT }, async () => {
   // The waiter holds its slot; the landing it waits for may need that very slot (the run's share shrank).
   let landingWaits = false;
   const h = harness(() => [CLOCK, GREEN], () => landingWaits);
@@ -293,7 +307,7 @@ test("a landing left waiting for a sandbox slot frees the tickets waiting for a 
   }
 });
 
-test("a ticket never waits on one that waits on it", { timeout: 20000 }, async () => {
+test("a ticket never waits on one that waits on it", { timeout: LIMIT }, async () => {
   const board = createFixBoard();
   board.claim("a", "1");
   board.claim("b", "2");
@@ -304,7 +318,7 @@ test("a ticket never waits on one that waits on it", { timeout: 20000 }, async (
   assert.equal(await wait, false);
 });
 
-test("a ticket red on a test whose fix landed just before its gate finished merges the base and gates again, starting no repair", { timeout: 20000 }, async () => {
+test("a ticket red on a test whose fix landed just before its gate finished merges the base and gates again, starting no repair", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
@@ -330,7 +344,7 @@ test("a ticket red on a test whose fix landed just before its gate finished merg
   }
 });
 
-test("a ticket cut after the fix landed and still red on that test repairs once, without a wait", { timeout: 20000 }, async () => {
+test("a ticket cut after the fix landed and still red on that test repairs once, without a wait", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
@@ -352,7 +366,7 @@ for (const [how, ending] of [
   ["stopped", { kind: "stopped", cause: undefined, finished: true, green: { issue: "1" } }],
   ["crashed", { kind: "crashed", error: new Error("land port threw"), attempts: 1, green: { issue: "1" } }],
 ] as const) {
-  test(`a ticket waiting for a fix whose ticket ${how} repairs on its own`, { timeout: 20000 }, async () => {
+  test(`a ticket waiting for a fix whose ticket ${how} repairs on its own`, { timeout: LIMIT }, async () => {
     const h = harness(() => [CLOCK, GREEN]);
     try {
       fixing(h);
@@ -370,7 +384,7 @@ for (const [how, ending] of [
   });
 }
 
-test("a fixer sent back at landing that lands its carried branch later still counts as the fix: a ticket red on that test merges the base, starting no repair", { timeout: 20000 }, async () => {
+test("a fixer sent back at landing that lands its carried branch later still counts as the fix: a ticket red on that test merges the base, starting no repair", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
@@ -397,7 +411,7 @@ test("a fixer sent back at landing that lands its carried branch later still cou
   }
 });
 
-test("a fixer sent back at landing that then fails leaves no fix behind: a ticket red on that test repairs", { timeout: 20000 }, async () => {
+test("a fixer sent back at landing that then fails leaves no fix behind: a ticket red on that test repairs", { timeout: LIMIT }, async () => {
   const h = harness(() => [CLOCK, GREEN]);
   try {
     fixing(h);
