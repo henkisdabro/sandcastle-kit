@@ -2,7 +2,7 @@
 // to be read by a person or by a coding agent helping them set up.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
@@ -50,7 +50,10 @@ export const claudeCode = (): { version: string; mods: boolean } | undefined => 
  * with no mod is how it says which.
  */
 const modsOff = (): string | undefined => {
-  const r = spawnSync("claude", ["plugin", "test"], { cwd: mkdtempSync(join(tmpdir(), "sandcastle-mods-")), encoding: "utf8" });
+  const cwd = mkdtempSync(join(tmpdir(), "sandcastle-mods-"));
+  // Removed once asked: every doctor run left one empty directory in the temp directory.
+  const r = spawnSync("claude", ["plugin", "test"], { cwd, encoding: "utf8" });
+  rmSync(cwd, { recursive: true, force: true });
   return `${r.stdout}${r.stderr}`.match(/hooks modules are (turned off[^\n]*)/)?.[1].replace(/, and a plugin's tests run only while it is on$/, "");
 };
 

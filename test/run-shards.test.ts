@@ -16,12 +16,13 @@ import { KIT } from "./cli-spawn.ts";
 const root = mkdtempSync(join(tmpdir(), "run-shards-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-// A kit checkout with only the helper, and a `pnpm` that answers its two calls: the shard's file
+// A kit checkout with only the helpers, and a `pnpm` that answers its two calls: the shard's file
 // list (a file named by FAKE_<i>, else a passing one) and the test run over those files.
 mkdirSync(join(root, "test"));
 mkdirSync(join(root, "bin"));
 copyFileSync(join(KIT, "test/run-shards.sh"), join(root, "test/run-shards.sh"));
 copyFileSync(join(KIT, "test/shard-count.sh"), join(root, "test/shard-count.sh"));
+copyFileSync(join(KIT, "test/in-temp.sh"), join(root, "test/in-temp.sh"));
 writeFileSync(
   join(root, "bin/pnpm"),
   `#!/usr/bin/env bash
