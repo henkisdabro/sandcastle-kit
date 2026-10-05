@@ -225,6 +225,21 @@ test("a VM smaller than one gate figure still gets 1 sandbox and 1 gate, at leas
   assert.match(rec.gatesBy, /^at least 1 /);
 });
 
+test("a pool at the recommendation that still does not fit is told to grow the VM, not to set what it already has", () => {
+  // 2 GiB usable, under the 2.75 GiB gate figure: 1 and 1 is the recommendation and still too much.
+  const small = measuredOn(12, 4, { peakMib: 5734, anonMib: 2560, agentAnonMib: 820 });
+  const [one] = poolWarnings(small, {}, { maxSandboxes: 1, maxGates: 1 });
+  assert.match(one, /needs about 2\.75 GiB \(1 gate x 2\.75 GiB \+ 0 x 0\.88 GiB\), above the 2 GiB/);
+  assert.match(one, /neither limit is above it, so give the VM more memory\./);
+  assert.ok(!one.includes("set \""), one);
+  // A cache-inclusive agent baseline (3500 -> 3850 MiB = 3.76 GiB) heavier than the anon gate (1000 -> 1100 MiB = 1.07 GiB):
+  // 7.8 GiB usable recommends 2 gates + floor((7.8 - 2.15) / 3.76) = 3 sandboxes, and 3 with 1 gate needs 8.59 GiB.
+  const heavy = measuredOn(12, 9.8, { peakMib: 4000, anonMib: 1000, agentMib: 3500 });
+  const [three] = poolWarnings(heavy, {}, { maxSandboxes: 3, maxGates: 1 });
+  assert.match(three, /recommends maxSandboxes 3 and maxGates 2/);
+  assert.match(three, /neither limit is above it, so lower maxSandboxes further or give the VM more memory\./);
+});
+
 test("a VM that fits one sandbox says \"1 sandbox\", not \"1 sandboxes\"", () => {
   // 3 GiB usable: 1 gate at 2.75 GiB, and floor(0.25 / 0.88) = 0 more.
   const f = { peakMib: 5734, anonMib: 2560, agentAnonMib: 820 };

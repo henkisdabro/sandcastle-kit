@@ -368,10 +368,11 @@ export const poolWarnings = (readers: Readers, env: Record<string, string | unde
     { pool: "gates", name: "maxGates", variable: "SANDCASTLE_MAX_GATES", c: gates },
   ] as const;
   const above = limits.filter((l) => l.c.value > rec[l.pool]);
-  // Neither above its recommendation and still too much (a baseline heavier than the gate): the sandboxes are the lever.
-  const set = (above.length ? above : [limits[0]])
-    .map((l) => (l.c.source.startsWith("environment") ? `change or unset ${l.variable}` : `set "${l.name}": ${rec[l.pool]} in ${join(USER_CONFIG, "config.json")}`))
-    .join(" and ");
+  // Neither above its recommendation and still too much (a VM under one gate figure, a baseline heavier than
+  // the gate): setting a limit to the value it already has would be advice the person cannot act on.
+  const set = above.length
+    ? above.map((l) => (l.c.source.startsWith("environment") ? `change or unset ${l.variable}` : `set "${l.name}": ${rec[l.pool]} in ${join(USER_CONFIG, "config.json")}`)).join(" and ")
+    : `neither limit is above it, so ${sandboxes.value > 1 ? "lower maxSandboxes further or " : ""}give the VM more memory`;
   const priced = `${g} gate${g === 1 ? "" : "s"} x ${gib2(rec.gateGib)} GiB + ${sandboxes.value - g} x ${gib2(rec.baselineGib)} GiB`;
   return [
     `maxSandboxes ${sandboxes.value} (${sandboxes.source}) with maxGates ${gates.value} (${gates.source}) needs about ${gib2(need)} GiB (${priced}), above the ${gib2(usable)} GiB this VM has after ${HEADROOM_GIB} GiB headroom; \`sandcastle size\` recommends maxSandboxes ${rec.sandboxes} and maxGates ${rec.gates} from the measured anonymous memory: ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`,
