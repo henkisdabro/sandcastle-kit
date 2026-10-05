@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -1051,7 +1051,11 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
-        const fixing = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        const asked = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        // A fix whose landing this branch already holds (it started after) is no news: merging the moved base
+        // would gate the same failure again, one gate run for nothing. The red is this ticket's own. A landing
+        // with no commit on record, or one git cannot place, is not known to be in the branch: it merges as before.
+        const fixing = asked?.landed && asked.commit && isAncestor(project.root, asked.commit, branch) ? undefined : asked;
         if (fixing) {
           const fixer = fixing.by;
           waitedFor.add(key);
@@ -1717,7 +1721,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
   // A landing left waiting for a sandbox slot may be waiting for the very slots the waiters hold (the run's
   // share shrank, a cap): they stop waiting and repair, so no wait outlasts the landing it waits for.
-  const fixes = createFixBoard(() => slotWanted.n > 0);
+  const fixes = createFixBoard(() => slotWanted.n > 0, undefined, (id) => ctx.landed.get(id)?.commit);
   const pipeline = createPipeline({
     project,
     tracker,

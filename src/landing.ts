@@ -357,7 +357,7 @@ export type Landed =
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
 export class LandingStop extends OperatorError {}
 
-const isAncestor = (root: string, ancestor: string, of: string) => {
+export const isAncestor = (root: string, ancestor: string, of: string) => {
   try {
     sh("git", ["merge-base", "--is-ancestor", ancestor, of], root);
     return true;
