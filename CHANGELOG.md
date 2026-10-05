@@ -15,26 +15,54 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   behaviour change's test boundary is not obvious, naming the interface a test should drive.
   Existing tickets need nothing: without it, the implementer tests at the highest existing public
   interface.
+- **Runs cap each sandbox's CPUs by default**, gate sandboxes included. A project whose gates need
+  more than their share sets `cpus` in `.sandcastle/config.ts` (a number, or `false` for no limit).
+- **A run files its agents' follow-ups itself**: on GitHub as issues with the `needs-triage` role's
+  label, with ticket files as new committed files with that status, next to the source ticket. Map
+  the role in `docs/agents/triage-labels.md` to use another label.
+- **Run `sandcastle size` again once a run on this version has ended**: the pool warning stays
+  quiet, and doctor keeps its info line, until a run has recorded anonymous-memory figures.
+- **On Linux, `sandcastle doctor` and `sandcastle run` refuse Podman behind `docker` and rootless
+  or userns-remapped Docker, and on any OS a run as root**, where the agent could not write its
+  worktree. Linux needs rootful Docker Engine and a normal user in the `docker` group.
 
 ### Added
 
-- **`sandcastle doctor` and a run's start line warn when the pool is larger than the measured
-  sandbox peaks fit the VM**: `maxSandboxes` or `maxGates` above what `sandcastle size` recommends
-  from measured peaks, naming both numbers and the `config.json` key (or `SANDCASTLE_MAX_*`) to set.
-  A recommendation from assumed figures keeps doctor's info line.
+- **`sandcastle doctor` and a run's start line warn when the pool needs more memory than the VM
+  has**: `maxSandboxes` and `maxGates` priced together, gates at a gate's recorded anonymous memory
+  and the other sandboxes at an agent's, never at `memory.peak` (which counts page cache). It names
+  both numbers and the `config.json` key (or `SANDCASTLE_MAX_*`) to set.
 - **A ticket red on a test another ticket is already repairing waits for that landing**
   (`#N: waiting for #M's fix to <test>`), merges the new base and gates again, instead of starting a
   repair that conflicts at landing. If the other ticket fails or gives up, it repairs as before.
+- **Each sandbox gets a CPU limit** (`docker run --cpus`), by default the VM's CPUs divided by the
+  run's concurrency and at least 2, so agents' own full-suite runs, which `maxGates` does not limit,
+  no longer slow every gate beside them. The project config's `cpus` overrides it (a number, cut to
+  the VM's CPUs, or `false`), and the run's start lines show the limit.
+- **Agents name each problem they find outside their ticket in a `<followup>title - evidence</followup>`
+  line, and the kit files it as a ticket for triage**, once per title per run, its body naming the
+  source ticket and phase. The closing summary lists them under Needs you as "filed for triage"; a
+  dry run files none and lists what it would have filed.
+- **A test keeps the kit's host shell scripts free of bash 4 constructs and GNU-only flags**, and
+  parses them under bash 3.2 where one is installed, so a script that would break on a Mac's stock
+  bash is caught on Linux.
 
 ### Changed
 
 - **The git guard refuses `git stash` in the shared repository**, since its list is shared by every
   agent's worktree and a pop could apply another agent's change; `stash list` and `show` pass, and
   the prompts give the diff-and-apply way to run a test without a change.
-- **Implementers edit with the Edit tool and file what they leave outside the ticket**, instead of
-  naming it only in a final message no reviewer reads.
+- **Implementers file what they leave outside the ticket** with a `<followup>` line, instead of
+  naming it only in a final message no reviewer reads; the prompts no longer ask for
+  `gh issue create` or a "Follow-up:" entry. The Edit-tool rule is dropped: agents did not follow
+  it, and the review and the gates catch a bad replace.
 - **The sandbox image stops at once** (`STOPSIGNAL SIGKILL`): every sandbox close waited out
   `docker stop`'s 10 s. Every project's image rebuilds once.
+- **The review, implement and repair prompts carry three more lessons**: a fix the reviewer commits
+  needs a test; a test run with the change removed gets a time limit and a separate restore step;
+  never `pgrep -f` or `pkill -f` a pattern from your own command line.
+- **The docs say Linux needs rootful Docker Engine and a normal user in the `docker` group**;
+  Podman is listed only on macOS, as untested.
 - **pnpm 12.8.2, `@types/node` 24.19.1 and Codex 0.160.0 as the image's offline default.**
 - **A cached image build prints one line** (`Image <tag> re-tagged from cache`) instead of docker's
   output; a real build or a failure still shows it all.
@@ -46,7 +74,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   that kept it, and tidies duplication or misleading names the branch introduced.
 
 - **`sandcastle size` says the measured peak (`memory.peak`) includes page cache** and prints the
-  sandboxes' anonymous memory as the lower bound; `peaks.jsonl` records it as `anonMib`.
+  sandboxes' anonymous memory as the lower bound. `peaks.jsonl` records it as `anonMib`, read while
+  the gates run (not after their test workers exit), and a ticket's sandbox also records `agentMib`
+  (its peak before the first gate) and `agentAnonMib` (anonymous memory while its agents work).
 - **The image's Codex is the newest plain release at least 72 hours old**, not npm's `latest` the
   moment it is published; pre-releases are skipped, and `CODEX_VERSION` still overrides it.
 
@@ -103,6 +133,44 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `sandcastle doctor` no longer leaves a `sandcastle-mods-*` directory on every run.
 - **A passing test file that prints outside `quietly` fails** (a preload, `test/no-stray.ts`), so a
   green gate log carries only reporter lines.
+- **The base-red check works for node:test projects, the kit's own suite included**: it reads
+  each failing test's file from node:test's `✖ failing tests:` summary, so a base red there no
+  longer gets a repair pass on every branch.
+- **A branch that breaks a test in a file where the base already has a different failing test
+  gets its repair pass**: a failure named only by file (vitest's or jest's `FAIL <file>`) was taken
+  for the base's own red. The check reads the base's whole list of failing tests, not the first
+  five, and saves each base gate run under the commit it tested.
+- **A ticket red on a test another ticket has just fixed and landed merges that fix and gates
+  again**, rather than starting a repair whose changes conflict with the fix at landing. A fixer
+  sent back at landing that lands on its second try still counts as that test's fix.
+- **When the base goes red mid-run, the closing summary counts it under need you**, no longer calls
+  the tickets that failed on it "held", and makes fixing the base (naming the test) the first next
+  step.
+- **Killing `pnpm test` or `test/run-shards.sh` ends the test shards and their processes too**,
+  instead of leaving them running after their temp directory is deleted.
+- **The image's Codex is never a release npm marks deprecated, one that was unpublished, or one
+  newer than npm's `latest` tag.**
+- **The run's start estimate includes each landing in a blocker chain, the base gates and
+  verify**, and says how many past tickets it priced from. Time a ticket spends waiting for another
+  ticket's fix no longer counts towards the status view's usual ticket time.
+- **`sandcastle size` counts the sandboxes where branches are merged and gated**, often a run's
+  largest; their peaks were never recorded. It prices gate sandboxes at a gate figure and the rest
+  at an agent baseline, so it no longer recommends 1 sandbox for a VM that runs 4, limits gates by
+  memory and never above the sandboxes, and names each figure and the runs behind it.
+- **The `base gates` line in `.sandcastle/logs/timings.jsonl` has per-gate times and the slot
+  wait**, like verify's.
+- **Sandboxes run `tini` as PID 1**, so a killed child process is reaped instead of lingering as a
+  zombie that process checks still see as alive. Each project's image rebuilds once.
+- **`sandcastle doctor` flags a missing `ps` on Linux** (procps, absent from slim images), which
+  made the status view show every live run as ended; the install docs list procps.
+- **The start line no longer says "Keep awake: on" when the inhibitor fails at once**
+  (`systemd-inhibit` with no system bus, in WSL or a container); it says
+  `off - systemd-inhibit failed`, and the same for caffeinate.
+- **The base check a run makes mid-run counts in the machine-wide pool**, so other runs see every
+  live sandbox. While it runs the status header can read one past the cap (`sandboxes 7/6`), and the
+  gauge no longer draws a stray free cell then.
+- **`sandcastle doctor` on Linux no longer reports `podman-docker` as a failed "Docker running"**;
+  it names the Podman refusal and #359.
 
 ## [0.7.0] - 2026-10-04
 
