@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -179,6 +179,20 @@ test("openSandboxView records the status pane's terminal_id, and its rewrites ke
   writeFileSync(viewRecord(root), JSON.stringify({ ...record(root), terminal_id: "term-5" }) + "\n");
   view.finish("7", "merged", true);
   assert.equal(record(root).terminal_id, "term-5");
+});
+
+test("openSandboxView's rewrite replaces the record whole, so a reader never sees a truncated one", () => {
+  const root = fresh("atomic");
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  reset("term-1");
+  (process.stdout as { isTTY?: boolean }).isTTY = false;
+  const view = openSandboxView({ root, name: "shop" } as Project, 1, (id) => `#${id}`, () => ({}), "all");
+  // A write in place truncates the file the reader has open; a rename gives the path a new file.
+  const before = statSync(viewRecord(root)).ino;
+  view.claim("7", "a ticket");
+  assert.deepEqual(record(root).panes, ["w1:t2-2"], "the rewrite happened");
+  assert.notEqual(statSync(viewRecord(root)).ino, before, "the record was renamed into place");
+  assert.deepEqual(readdirSync(join(root, ".sandcastle/logs")).filter((f) => f.includes("herdr-view")), ["herdr-view.json"], "no temp file is left");
 });
 
 // ---------------------------------------------------------------------------
