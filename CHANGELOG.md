@@ -26,6 +26,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The sandbox image stops at once** (`STOPSIGNAL SIGKILL`): every sandbox close waited out
   `docker stop`'s 10 s. Every project's image rebuilds once.
 - **pnpm 12.8.2, `@types/node` 24.19.1 and Codex 0.160.0 as the image's offline default.**
+- **A cached image build prints one line** (`Image <tag> re-tagged from cache`) instead of docker's
+  output; a real build or a failure still shows it all.
 - **Implementers test at the ticket's seams and run the full gates once.** A bug is first
   reproduced by a failing test; expected values come from outside the code and mocks only from
   real boundaries; single test files run while working, and each gate runs once, in its own
@@ -58,6 +60,20 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   a docker failure there is a one-line error naming the image.
 - **The git guard's file-write and `rm`/`mv` rules also refuse the project's shared `.git`** after
   the shell has `cd`'d into a scratch repository or out of every repository.
+- **Building a base image no longer deletes the images of other kit checkouts or projects**: a tag is
+  pruned only when nothing has built or used it for 14 days and no live run uses it, so each checkout
+  stopped rebuilding every run.
+- **A project's layer build no longer fails when another project's base build prunes its base tag**:
+  the layer build runs under the same machine-wide base-image lock.
+- **The Herdr view record is written whole** (temp file and rename), so a Ctrl-C of the status view
+  can no longer lose its quit mark to a half-written record.
+- **The Herdr tab bar runs a view record's kit path only if it is an absolute path to a kit
+  checkout**, and shell-quotes it.
+- **A finished run's Herdr report is no longer lost when herdr fails while delivering it** (the
+  server not yet restored at Herdr's start, say): it stays waiting and is tried again until its 7 days
+  run out. The README's Herdr section says when the report is delivered.
+- **A failing test's title is quoted and cut to 40 characters** in the requeue and red lines,
+  instead of running into the sentence, and a run's `#N waits for ...` lines print under its header.
 - **The git guard's scratch-repository allowance needs an absolute `git -C` path**: a relative one
   after a `cd` in the same line, or a `GIT_DIR` assignment, could reach the shared `.git`. A quoted
   path now works, and a variable assignment before `git` (`FOO=1 git push`) no longer hides a command
