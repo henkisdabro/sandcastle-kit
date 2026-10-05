@@ -2,8 +2,8 @@
 
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,8 @@ import { CROSS_REVIEW } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
-import { KIT_CACHE } from "./live-runs.ts";
+import { commandOf, KIT_CACHE } from "./live-runs.ts";
+import { kitRunning } from "../mod/hooks/run-live.ts";
 import { withLock } from "./pool.ts";
 import { hideFromGates, KIT_CREDENTIALS, unlockWorktree } from "./worktree-lock.ts";
 import { resolveVersions, type Versions } from "./versions.ts";
@@ -352,14 +353,67 @@ export const buildArgs = (tag: string, args: Record<string, string>, pull: boole
   "-",
 ];
 
+/**
+ * Reads docker's build output as it arrives and decides whether it is worth showing. BuildKit's plain
+ * progress (what docker prints when its output is a pipe) says `#<n> CACHED` for a step it did not run, and
+ * `#<n> DONE` or `#<n> <seconds> <output>` for one it did. A build in which every step was cached is a
+ * re-tag, about 85 lines of nothing; the output is held until a step does real work, then shown from its
+ * first line on. Output of any other shape (the classic builder, Podman) never shows a cached step, so it
+ * is never collapsed. `FROM` steps are left out of the decision: a cached build still resolves them, with a
+ * `DONE`, and a base that was really pulled makes the `RUN` steps after it real.
+ */
+const watchBuild = (show: (text: string) => void) => {
+  const names = new Map<number, "from" | "step">();
+  const partial = ["", ""];
+  let held = "";
+  let real = false;
+  let cached = 0;
+  const line = (text: string) => {
+    const step = /^#(\d+) \[(?:\S+ )?\d+\/\d+\] (.*)/.exec(text);
+    if (step) names.set(Number(step[1]), step[2]!.startsWith("FROM ") ? "from" : "step");
+    const work = /^#(\d+) (?:DONE|ERROR|\d+\.\d+ )/.exec(text);
+    if (work && names.get(Number(work[1])) === "step") real = true;
+    if (/^#\d+ CACHED/.test(text)) cached++;
+    if (!real) {
+      held += `${text}\n`;
+      return;
+    }
+    show(held + `${text}\n`);
+    held = "";
+  };
+  return {
+    feed: (stream: 0 | 1, chunk: string) => {
+      const parts = (partial[stream] + chunk).split("\n");
+      partial[stream] = parts.pop()!;
+      parts.forEach(line);
+    },
+    // `ok`: docker exited 0. A build that failed shows everything it said.
+    end: (ok: boolean) => {
+      partial.filter(Boolean).forEach(line);
+      const collapsed = ok && !real && cached > 0;
+      if (!collapsed) show(held);
+      return collapsed;
+    },
+  };
+};
+
 // `fix` is the next step when the build fails: docker's own output above says what broke, but not
 // which file to change, and a stack trace under it buried that output.
-const build = (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean, fix: string) => {
+const build = async (tag: string, dockerfile: string, args: Record<string, string>, pull: boolean, fix: string) => {
   console.log(`Building ${tag} ...`);
-  try {
-    execFileSync("docker", buildArgs(tag, args, pull), { input: dockerfile, stdio: ["pipe", "inherit", "inherit"] });
-  } catch (e) {
-    const code = (e as { status?: number | null }).status;
+  const watch = watchBuild((text) => process.stderr.write(text));
+  const code = await new Promise<number | null>((resolve) => {
+    const child = spawn("docker", buildArgs(tag, args, pull), { stdio: ["pipe", "pipe", "pipe"] });
+    child.stdout.setEncoding("utf8").on("data", (d: string) => watch.feed(0, d));
+    child.stderr.setEncoding("utf8").on("data", (d: string) => watch.feed(1, d));
+    child.once("error", () => resolve(null));
+    // Docker may exit before reading the Dockerfile; the exit code says why.
+    child.stdin.on("error", () => {});
+    child.stdin.end(dockerfile);
+    child.once("close", resolve);
+  });
+  if (watch.end(code === 0)) console.log(`Image ${tag} re-tagged from cache`);
+  if (code !== 0) {
     throw new OperatorError(`Building ${tag} failed${code ? ` (docker build exited ${code})` : ""} - the step that failed is in docker's output above. ${fix}`);
   }
 };
@@ -376,14 +430,63 @@ const dockerCall = (what: string, args: string[]) => {
   }
 };
 
-// A superseded tag of the same repository is removed once its successor is
-// built; these images are several GB each. An image a container still uses
-// is left alone (docker refuses), and so is any other repository.
-const prune = (repo: string, keep: string) => {
+/** One small file per image tag, written by `ensureImage`: docker keeps no "last used" time, so the kit does. */
+export const IMAGE_USE_DIR = join(KIT_CACHE, "image-use");
+
+/**
+ * A tag nobody has used or built for this many days may be pruned. Several checkouts of the kit, or of one
+ * project, hash different Dockerfiles and so different tags: pruning every tag but its own made each
+ * checkout delete the others' images, and rebuild its own at the next run.
+ */
+export const IMAGE_KEEP_DAYS = 14;
+
+type Use = { at: number; pids: number[] };
+
+const useFile = (tag: string) => join(IMAGE_USE_DIR, tag.replace(/[^A-Za-z0-9_.-]/g, "_"));
+
+const readUse = (tag: string): Use | undefined => {
+  try {
+    const { at, pids } = JSON.parse(readFileSync(useFile(tag), "utf8")) as Partial<Use>;
+    if (typeof at !== "number" || !Number.isFinite(at)) return undefined;
+    return { at, pids: Array.isArray(pids) ? pids.filter((p) => Number.isInteger(p)) : [] };
+  } catch {
+    return undefined;
+  }
+};
+
+const liveUsers = (pids: number[]) => pids.filter((p) => kitRunning(p, commandOf));
+
+/**
+ * Records that this process uses `tag` now, and keeps the pids of the kit processes that still run and
+ * used it: a run that outlasts `IMAGE_KEEP_DAYS` keeps its image. Best effort - a cache directory that
+ * cannot be written must not stop a build.
+ */
+const noteUse = (tag: string, now = Date.now()) => {
+  try {
+    mkdirSync(IMAGE_USE_DIR, { recursive: true });
+    const pids = [...new Set([...liveUsers(readUse(tag)?.pids ?? []), process.pid])];
+    writeFileSync(useFile(tag), JSON.stringify({ at: now, pids }));
+  } catch {
+    /* the tag simply looks unused, and is kept for a while from the first prune that sees it */
+  }
+};
+
+// A tag of the same repository that has not been used for IMAGE_KEEP_DAYS, and that no live kit process
+// used, is removed once its successor is built; these images are several GB each. A tag with no use stamp
+// (built before the kit kept them) starts its days at the first prune that sees it. An image a container
+// still uses is left alone (docker refuses), and so is any other repository.
+const prune = (repo: string, keep: string, now = Date.now()) => {
   const tags = dockerCall("listing the images of " + repo, ["image", "ls", repo, "--format", "{{.Repository}}:{{.Tag}}"]).split("\n").filter(Boolean);
   for (const t of tags.filter((t) => t !== keep && !t.endsWith(":latest"))) {
+    const use = readUse(t);
+    if (!use) {
+      noteUse(t, now);
+      continue;
+    }
+    if (now - use.at < IMAGE_KEEP_DAYS * 24 * 60 * 60 * 1000 || liveUsers(use.pids).length > 0) continue;
     try {
       sh("docker", ["image", "rm", t]);
+      rmSync(useFile(t), { force: true });
     } catch {
       /* in use */
     }
@@ -419,13 +522,14 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
   return withLock(
     BASE_LOCK,
     `${project.name} ${baseTag}`,
-    () => {
+    async () => {
       if (force || !imageExists(baseTag)) {
         // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
         // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
-        build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
+        await build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
         prune("sandcastle-base", baseTag);
       }
+      noteUse(baseTag);
       // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
       dockerCall(`tagging ${baseTag} as sandcastle-base:latest`, ["tag", baseTag, "sandcastle-base:latest"]);
 
@@ -441,9 +545,10 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
       const tag = `${repo}:${hash(baseTag, layerFile)}`;
       if (force || !imageExists(tag)) {
-        build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
+        await build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
         prune(repo, tag);
       }
+      noteUse(tag);
       return tag;
     },
     (owner) => console.log(`Waiting for another sandcastle build of the base image${owner ? ` (pid ${owner})` : ""} to finish ...`),
