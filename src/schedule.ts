@@ -516,6 +516,74 @@ export type Change<G, O, B = unknown> =
   | HoldChange
   | BlockerChange<B>;
 
+/**
+ * Whether a landing put the branch on the base: what a ticket waiting for its fix needs to know.
+ * `partly-done` merged too, though it leaves the ticket open.
+ */
+export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kind === "close-failed" || landed.kind === "partly-done" || landed.kind === "closed-earlier";
+
+/**
+ * Which ticket is repairing which failure, so a second ticket red on the same one waits for the first
+ * one's landing instead of repairing it its own way (the two fixes then conflicted at landing and
+ * needed resolve passes that repeated the same fix). A pipeline `claim`s a failure key as its repair
+ * starts, asks `fixing` before its own, and `wait`s for the ticket's ending, which `told` reads from
+ * the scheduler's changes: `wait` answers whether that ticket landed. A ticket that failed, gave up
+ * or was held never landed, so the waiter repairs as before - nobody waits on a landing that will
+ * not come. A cycle (A waits on B's fix while B waits on A's) is refused at `fixing`, so no two
+ * tickets wait on each other. In memory, one per run.
+ */
+export const createFixBoard = () => {
+  const claims = new Map<string, string>();
+  // A ticket that ended: whether it landed.
+  const ended = new Map<string, boolean>();
+  const resumes = new Map<string, ((landed: boolean) => void)[]>();
+  const waitingOn = new Map<string, string>();
+  const release = (id: string, landed: boolean) => {
+    for (const resume of resumes.get(id)?.splice(0) ?? []) resume(landed);
+  };
+  return {
+    /** `id` is repairing `key`. The first ticket to claim it that has not ended keeps it. */
+    claim(key: string, id: string) {
+      const by = claims.get(key);
+      if (by === undefined || by === id || ended.has(by)) claims.set(key, id);
+    },
+    /** The other ticket whose repair of `key` is yet to land, when `id` may wait for it. */
+    fixing(key: string, id: string): string | undefined {
+      const by = claims.get(key);
+      if (by === undefined || by === id || ended.has(by)) return undefined;
+      for (let at = waitingOn.get(by); at !== undefined; at = waitingOn.get(at)) if (at === id) return undefined;
+      return by;
+    },
+    /** Resolves when `on` has ended or been sent back for a second attempt: true when it landed. */
+    async wait(id: string, on: string): Promise<boolean> {
+      if (ended.has(on)) return ended.get(on) === true;
+      waitingOn.set(id, on);
+      try {
+        return await new Promise<boolean>((resume) => resumes.set(on, [...(resumes.get(on) ?? []), resume]));
+      } finally {
+        waitingOn.delete(id);
+      }
+    },
+    /**
+     * The scheduler's changes: a ticket's ending is what its waiters wait for. A ticket sent back at
+     * landing has landed nothing yet, and its second attempt may wait behind the very pipelines that
+     * wait for it (every worker a waiter): they stop waiting, and its claims go until it repairs again.
+     */
+    told<G, O, B>(change: Change<G, O, B>) {
+      if (change.kind === "requeued") {
+        for (const [key, by] of claims) if (by === change.id) claims.delete(key);
+        release(change.id, false);
+      } else if (change.kind === "ended") {
+        const landed = change.ending.kind === "landing" && onBase(change.ending.landed);
+        ended.set(change.id, landed);
+        release(change.id, landed);
+      }
+    },
+  };
+};
+
+export type FixBoard = ReturnType<typeof createFixBoard>;
+
 /** One candidate at the start, in start order: `wait` when it starts later, and `file` when that is behind a file git cannot merge. */
 export type Start<T> = { ticket: T; wait?: "file" | "blockers"; file?: FileWait; shares?: FileShare[] };
 

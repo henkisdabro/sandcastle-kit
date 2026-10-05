@@ -16,7 +16,7 @@ Commands: help, `--version`, setup, doctor, init, updated, build, gates, land, p
 
 The orchestrator: base gates, then every attempt and landing through `createSchedule(plan).run(work)` (the attempt port: implement, review, gate with repair, in the pipeline `createPipeline(ctx)` makes; the land port: merge or squash, on the landing worker as each ticket goes green), then verify and report; it records what the scheduler tells, handing each ending to the ledger (`src/ledger.ts`), and posts the hold notes and the comments the ledger words after the schedule; the attempt reports its pipeline (`attempted`) with the agent's hand-back read as it ends (`handBack`) and the `.git` check after its sandbox closed (`settleAfter`), whose failure stops the run without replacing the pipeline's own ending, and writes only the pipeline's facts (commits, minutes, tokens); dependencies, the files the scheduler's hold compares (`ticketFiles`, `refreshFiles`: one ticket at a time per file git cannot merge) and the record of what it tells (`createHoldRecord`), re-runs of carried branches (land-only, narrow review), timings. A red gate whose failing tests all lie in files the branch did not change (`failingTestFile`; a test whose file the output does not name is the branch's own) is checked against the base: `redOnBase` in `createPipeline` runs every gate once per base tip through `gateBase` (`baseGate`, a promise cached by the tip, so branches red together share it), and a failure the base has too gets no repair pass, is printed once as `base went red mid-run: <test>` and is kept once in the run record's `baseRed`, which the closing summary lists under Needs you (`test/base-red-mid-run.test.ts`)
 
-The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its `LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in it), its gate runs (`gate`), the step timer (`timed`), and what the run keeps across a ticket's attempts (`requeuedAs`, `results`, `reds`, the heads record under the project root). `test/pipeline.test.ts` drives it over a temp repo with a worktree for the sandbox, scripted agents and scripted gate runs: a change to the pipeline is tested there, by what it does, not by matching the source of `src/burndown.ts`.
+The pipeline takes everything outside itself through one `PipelineContext`, as a landing takes its `LandContext`: its sandbox (`open`, whose `run` is every agent pass and `exec` every git command in it), its gate runs (`gate`), the step timer (`timed`), and what the run keeps across a ticket's attempts (`requeuedAs`, `results`, `reds`, the heads record under the project root), and the fix board it shares with the run's other pipelines (`fixes`, `src/schedule.ts`). `test/pipeline.test.ts` drives it over a temp repo with a worktree for the sandbox, scripted agents and scripted gate runs: a change to the pipeline is tested there, by what it does, not by matching the source of `src/burndown.ts`.
 
 ## `src/landing.ts`
 
@@ -63,6 +63,16 @@ state.
   only named. A ticket in flight has its branch's files read again before each comparison; a run
   that starts nothing tells each parked ticket it waits for the next run; a dry run (no `files`)
   holds nothing.
+- **The fix board** (`createFixBoard`, `FixBoard`). Which ticket is repairing which failure
+  (`failureKey`): a pipeline `claim`s it as its repair pass starts and asks `fixing` before its own,
+  and a ticket red on a failure another is repairing prints `#N: waiting for #M's fix to <test>`,
+  `wait`s for that ticket's ending (`told`, fed every change by burndown's `tell`), then merges the
+  base into its branch in its sandbox and gates again. A ticket that did not land (red, gave up,
+  crashed, held, stopped) or was sent back at landing (`requeued`: its second attempt may sit behind
+  the very pipelines that wait for it) frees its waiters, which repair as before; so do a merge that
+  conflicts and a re-gate that is still red (it waits once per failure). A wait that would close a
+  cycle is refused, a forced red (`SANDCASTLE_TEST_RED_GATE`) never waits, and the waiting ticket
+  keeps its sandbox slot. `test/fix-wait.test.ts`.
 - `createStopState`: the stop state, whose `add` only the scheduler holds.
 - `createLanding`: the one worker that lands each green ticket, a carried branch first.
 - `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`,

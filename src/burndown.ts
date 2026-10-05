@@ -59,7 +59,7 @@ import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile } from "./ledger.ts";
-import { type Attempted, type Change, createSchedule, fileShareLine, fileWaitNote, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
 
@@ -456,6 +456,8 @@ export type PipelineContext = {
   results: readonly PromiseSettledResult<Outcome>[];
   /** Each ticket's red landing gate, for its requeue (`repairFromRed`); read once, by its next pipeline. */
   reds: Map<string, RedLanding>;
+  /** Who is repairing which failure, shared by the run's pipelines: a ticket red on one another is repairing waits for that landing. A pipeline given none waits for no one. */
+  fixes?: FixBoard;
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
   reports: Map<string, string>;
   notes: Note[];
@@ -470,6 +472,7 @@ export type PipelineContext = {
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
+  const fixes = ctx.fixes ?? createFixBoard();
   const base = project.baseBranch;
   const ref = tracker.ref;
   // A run that died between merging a branch and closing its issue leaves the
@@ -924,8 +927,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       // (`pytest -x`) showed a repair one test, hid a second, and a branch one
       // line from green stayed unmerged. The same failure twice stops it.
       const attempts = repair;
-      const preRepair = sh("git", ["rev-parse", branch], project.root);
+      let preRepair = sh("git", ["rev-parse", branch], project.root);
       const seen = new Set<string>();
+      // The failures this ticket has already waited a fix for: a second wait on one would never end the loop's own repair.
+      const waitedFor = new Set<string>();
       let repairs = 0;
       for (
         let red = gated.failure;
@@ -943,7 +948,33 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (fresh.length) baseWentRed(fresh);
           break;
         }
-        seen.add(failureKey(failure));
+        const key = failureKey(failure);
+        // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
+        // the new base and gate again. A forced red is the same text on every ticket and waits for none.
+        const fixer = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        if (fixer) {
+          waitedFor.add(key);
+          const tests = failingTests(failure.output);
+          const line = `waiting for ${ref(fixer)}'s fix to ${tests.length ? tests.join(", ") : `the ${failure.name} gate`}`;
+          console.log(`${ref(issue.id)}: ${line}`);
+          run.ticket(issue.id, { note: line });
+          // Not landed (it failed, gave up or was held): nothing to wait for, the repair is this ticket's own.
+          if (await fixes.wait(issue.id, fixer)) {
+            // A merge that conflicts is left for the repair, as the carried branch's is at landing.
+            const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
+            const pull = await sandbox.exec(`git ${hostIdentity(project.root)} merge --no-edit ${shq(base)}`);
+            if (pull.exitCode !== 0) await sandbox.exec("git merge --abort");
+            else if ((await sandbox.exec("git rev-parse HEAD")).stdout.trim() !== before) {
+              console.log(`${ref(issue.id)}: ${ref(fixer)} landed - merged ${base} into its branch, gating again`);
+              // The merge is the base's lines, not repair commits: the review after a repair reads from here.
+              preRepair = sh("git", ["rev-parse", branch], project.root);
+              gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+              continue;
+            }
+          }
+        }
+        seen.add(key);
+        if (!forced) fixes.claim(key, issue.id);
         repairs++;
         const why = forced ? "test red gate" : `${failure.name} red`;
         console.log(
@@ -1557,6 +1588,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // The line a requeued ticket's second attempt's setup carries.
   const { requeuedAs } = ledger;
   const baseRed: string[] = [];
+  // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
+  const fixes = createFixBoard();
   const pipeline = createPipeline({
     project,
     tracker,
@@ -1580,6 +1613,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     requeuedAs,
     results,
     reds,
+    fixes,
     reports,
     notes,
     took,
@@ -1663,6 +1697,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
+    fixes.told(c);
     switch (c.kind) {
       case "landing":
         // Only the run line: the next landing writes it again.
