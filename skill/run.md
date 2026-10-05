@@ -113,7 +113,9 @@ This continues SKILL.md: run its "Before every action" first.
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
-      merged base re-gated green. If it is **RED TOGETHER**, say so first and plainly: do not push.
+      merged base re-gated green, and on which image. If it is **RED TOGETHER**, say so first and plainly: do not push.
+      If the line says the re-gate ran on the run's starting image because a merged ticket changed a
+      Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
@@ -127,7 +129,9 @@ This continues SKILL.md: run its "Before every action" first.
       (the project has `changelog: true`), carry those lines into your message, grouped Added,
       Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from
       them. A block headed `Upgrading notes` is what an existing project must act on: keep it apart,
-      never among the changes.
+      never among the changes. A `Landed on a second attempt` line names the tickets the run sent back
+      once after a conflict or a red gate at landing and then merged: say so, as it is the reason a
+      ticket's work took two passes.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
       names one (`sandcastle land` leaves that ticket open), and anything that needs a decision.

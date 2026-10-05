@@ -191,7 +191,7 @@ flowchart LR
 |---|---|---|
 | 🚦 | **Gates run by the orchestrator** | Your lint/build/test, run after the agents, in the sandbox. Only green branches merge, and the merged base branch is gated once more. |
 | 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
-| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. A failure that is red on the base too, in a test file the branch did not change, gets no repair: the gates run once on the base's tip, and the closing summary names the test once under Needs you. |
+| 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. A pass that commits nothing (the repairer judged the red a flake) is not counted: the run's per-ticket line says `repair made no change`, and `repaired=N` counts only passes that committed. A failure that is red on the base too, in a test file the branch did not change, gets no repair: the gates run once on the base's tip, and the closing summary names the test once under Needs you. |
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
 | 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements and tests at the ticket's seams, Claude Opus 5.5 reviews the tests as well as the code, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
@@ -691,7 +691,9 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
 undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
-the run, counted in the header as "to triage"); **Needs
+the run, counted in the header as "to triage" - as are a dry run's follow-ups, which a real run would
+file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
+you"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and

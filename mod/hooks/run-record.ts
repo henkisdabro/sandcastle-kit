@@ -248,7 +248,11 @@ export type RunRecord = {
   baseRed?: string[];
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
   followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
-  verify?: { green: boolean; line: string } | null;
+  /**
+   * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
+   * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
+   */
+  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[] } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;

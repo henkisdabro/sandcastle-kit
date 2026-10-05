@@ -43,7 +43,7 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
-  verify?: { green: boolean; line: string } | null;
+  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[] } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -487,9 +487,21 @@ export const render = (f: Facts, plain = false): string => {
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
   const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => sectionOf(t.state) && !LEFT.includes(t.state!) && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
-  // Tickets now in the tracker for a person to triage: a dry run's follow-ups were never filed.
-  const toTriage = (f.filed ?? []).length + (f.followUps ?? []).filter((u) => u.id).length;
+  // The follow-ups, split the way their lines under Needs you are: filed, whose filing failed (a person files it by
+  // hand, so it needs them), and not filed yet - a dry run's, which a real run would file, or those of a run that
+  // ended before its filing. The last are counted to triage with the filed ones: they are what a real run leaves there.
+  const followUps = f.followUps ?? [];
+  const filingFailed = followUps.filter((u) => !u.id && u.failed).length;
+  const toTriage = (f.filed ?? []).length + followUps.filter((u) => u.id || !u.failed).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
+  // The image the verify ran on, from the record (a file in a repository: a value of the wrong type is no image). The
+  // run's image is built before any ticket lands, so a Dockerfile a merged ticket changed is not in it: the verify
+  // gated the merged tree on the old image, and only a rebuild shows how the new one does.
+  const verifyImage = typeof f.verify?.image === "string" && f.verify.image ? ` on image ${f.verify.image}` : "";
+  const newDockerfiles = Array.isArray(f.verify?.dockerfiles) ? f.verify!.dockerfiles.filter((d): d is string => typeof d === "string" && !!d) : [];
+  const startingImage = newDockerfiles.length
+    ? ` Merged work changed ${newDockerfiles.join(", ")}, so this ran on the run's starting image - rebuild and run sandcastle gates to check the new one.`
+    : "";
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
   const h = (decorated: string, bare: string) => (plain ? bare : decorated);
@@ -504,7 +516,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? "still running - partial summary" : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage ? `${toTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
@@ -515,8 +527,8 @@ export const render = (f: Facts, plain = false): string => {
       // ticket closed as merged earlier merges nothing); undefined: it never got there.
       ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green
-        ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green.`
-        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line}) - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log`,
+        ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
+        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line})${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
@@ -536,6 +548,15 @@ export const render = (f: Facts, plain = false): string => {
   if (partly.length) done.push(`${partly.length} merged, partly done, and left open in the tracker: ${list(partly)} (see Needs you)`);
   if (closed.length && f.tracker === "github") done.push(`Closed on GitHub, but the code is only on your local ${f.base} until you push it.`);
   else if (merged.length) done.push(`The code is only on your local ${f.base} until you push it.`);
+  // A ticket the scheduler sent back once (a conflict or a red gate at landing) and landed on its second attempt.
+  // `requeued` stays on a merged ticket's record, and is null when the second attempt never began.
+  const sentBack = new Map<string, string[]>();
+  for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
+    const line = f.tickets[id].requeued!;
+    const why = /^requeued after conflict/.test(line) ? "sent back after a conflict at landing" : /^requeued after red/.test(line) ? "sent back after a red gate at landing" : "sent back at landing";
+    sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
+  }
+  if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);
   if (wouldMerge.length) {
     // Each branch was gated alone; whether they merge together is a separate question.
     const together = wouldMerge.length > 1 ? " Each was gated on its own: `sandcastle preview` shows which would conflict with each other." : "";
@@ -621,7 +642,7 @@ export const render = (f: Facts, plain = false): string => {
       }),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
-      ...(f.followUps ?? []).map((u) => {
+      ...followUps.map((u) => {
         const from = `from ${refOf(u.from)} (${u.phase})`;
         return u.id
           ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
