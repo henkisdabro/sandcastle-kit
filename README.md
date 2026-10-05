@@ -92,7 +92,7 @@ New to GitHub or to agents? These are the only terms you need.
 | **Sandbox** | A throwaway Docker container in which one agent works on one ticket, on its own git branch, so it cannot touch your machine or other tickets. |
 | **Base branch** | The branch (usually `main`) that green work is merged into, locally. Nothing is pushed. |
 | **`ready-for-human`** | Added by the kit when a change is risky or a ticket cannot be finished unattended. It takes the ticket out of the queue until you look. (Earlier versions called it `needs-human`; a ticket carrying that is still held.) |
-| **`needs-triage`** | Put by agents on follow-up tickets they file during a run (GitHub). Never queued by itself: the closing summary lists them for you to triage. |
+| **`needs-triage`** | Put by the kit on the follow-up tickets it files from the agents' `<followup>` lines (a label on GitHub, a `Status:` in ticket files). Never queued by itself: the closing summary lists them for you to triage. |
 
 > [!TIP]
 > **AI coding agent?** Start at [the section written for you](#-if-you-are-an-ai-coding-agent-reading-this), then run `sandcastle doctor`.
@@ -309,21 +309,6 @@ sitemap), a gate should prove they match the sources. Otherwise a branch can lan
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
 closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
 
-### 🧩 A criterion left undone
-
-Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
-agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
-branch still lands if its gates are green, but the ticket stays open with a comment naming the
-criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
-finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
-ticket is still queued, the summary lists it under Runnable now and the next run picks up the
-remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
-ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
-person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
-to the hold label. The status view shows such a ticket as merged and counts it under merged, not
-needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
-lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
-
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores
 only those paths and fails, listing them, if any differed:
@@ -357,6 +342,31 @@ that the commit merges exactly the base tip and the gated head and changes nothi
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources when the merged base is gated again at the end of the run.
+
+### 🧩 A criterion left undone
+
+Every acceptance criterion a ticket lists is in scope, and so is a regression the branch causes. An
+agent that knowingly leaves a criterion undone says so in an `<unmet>` line of its final message. The
+branch still lands if its gates are green, but the ticket stays open with a comment naming the
+criterion (its merge says `part of` the ticket, not `closes` it, so the next run does not take it for
+finished), and the closing summary lists it under Needs you as `merged, partly done`. While the
+ticket is still queued, the summary lists it under Runnable now and the next run picks up the
+remainder (an autonomy level 2 or above, or `drain`, re-runs it too, and `drain` stops if the same
+ticket is left partly done twice running). When the agent's `<unmet>` line says the remainder is a
+person's decision, no run is promised: the summary and the ticket comment suggest moving the ticket
+to the hold label. The status view shows such a ticket as merged and counts it under merged, not
+needs you; it says so in its note. A held branch's criterion is on its Needs you line, and `sandcastle land <n>`
+lands such a branch the same way: `part of` the ticket, left open with the criterion commented.
+
+### 🧩 A problem outside the ticket
+
+An agent that finds a problem outside its ticket - implementer, reviewer or repair - fixes nothing
+for it and files nothing itself: it ends its final message with a `<followup>title - one line of
+evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
+project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
+body naming the source ticket and the phase; a title already filed in the run is filed once. A ticket
+file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
+triage`. A dry run files none and lists them instead.
 
 ## 📋 Queue: what agents work on
 
@@ -676,7 +686,8 @@ A run in a terminal of your own (`sandcastle run`) works as before.
 
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
-undone, `needs-triage` issues opened during the run, counted in the header as "to triage"); **Needs
+undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
+the run, counted in the header as "to triage"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and

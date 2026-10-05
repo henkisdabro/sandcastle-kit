@@ -135,8 +135,9 @@ This continues SKILL.md: run its "Before every action" first.
       check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder is a person's decision,
-      when the summary suggests moving the ticket to the hold label instead). Each `needs-triage` issue opened during the run (an agent
-      or a person may have opened it): one line on what it asks, and offer the `queue` action for it.
+      when the summary suggests moving the ticket to the hold label instead). Each follow-up `filed for triage` (the kit filed it from
+      an agent's `<followup>` line) and each `needs-triage` issue opened during the run: one line on what
+      it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a

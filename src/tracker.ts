@@ -16,7 +16,7 @@
 // GitHub, "checkout-03" for .scratch/checkout/issues/03-*.md.
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
@@ -46,6 +46,11 @@ export interface Tracker {
   close(id: string, text: string): void;
   /** Out of the queue and marked for a human, with the reason. */
   hold(id: string, text: string): void;
+  /**
+   * A new ticket for triage, carrying the triage label (GitHub) or status (files), and its id. A ticket
+   * file goes beside `near`'s, when that is one, else under a `follow-ups` feature.
+   */
+  create(title: string, body: string, near?: string): string;
   /** Back in the queue: the queue label (GitHub) or status (files) on, the hold off, the note (if any) as a comment first. */
   requeue(id: string, note?: string): void;
   /** State, labels, comment count and a title/body hash (GitHub also keys LATEST_ISSUE), to prove a dry run wrote nothing. */
@@ -59,7 +64,7 @@ export interface Tracker {
   /** What a dry run tells agents not to touch. */
   readonly dryRunNote: string;
   /** Prompt wording that differs by tracker; fills the prompts' {{KIT_<NAME>}}. */
-  readonly words: Record<"LOST" | "TICKET_VIEW" | "COMMENTS_VIEW" | "NEW_TICKET" | "NEW_TICKET_REVIEW" | "RECORD" | "NOCHANGE" | "BLOCKED" | "SAY", string>;
+  readonly words: Record<"LOST" | "TICKET_VIEW" | "COMMENTS_VIEW" | "RECORD" | "NOCHANGE" | "BLOCKED" | "SAY", string>;
 }
 
 /** The snapshot key for the GitHub repo's highest issue number: a new issue moves it. Not a ticket id. */
@@ -89,7 +94,7 @@ const LIST_LIMIT = 500;
 
 /**
  * Makes sure the triage label (`needs-triage` unless the repo maps it) exists,
- * so agents can put it on the follow-up issues they file. Created here, on the
+ * for the follow-up issues filed from the agents' `<followup>` lines. Created here, on the
  * host with its own `gh` login: the sandbox token can add a label but not
  * create one. No --force, so a label a person already made keeps its colour and
  * description. A failure only costs the label, never the run.
@@ -200,6 +205,20 @@ const github = (project: Project): Tracker => {
       gh(["issue", "edit", id, "--remove-label", project.label, "--add-label", project.tracker.held]);
       gh(["issue", "comment", id, "--body", text]);
     },
+    create: (title, body) => {
+      const args = ["issue", "create", "--title", title, "--body", body];
+      let made: string;
+      try {
+        made = gh([...args, "--label", project.tracker.triage]);
+      } catch (e) {
+        // The label is a convenience: a repo that refuses it (no such label, no right to add one)
+        // still gets the ticket, unlabelled, rather than losing the problem.
+        if (!/label/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        made = gh(args);
+      }
+      // gh prints the new issue's URL.
+      return made.trim().match(/\/issues\/(\d+)$/)?.[1] ?? made.trim();
+    },
     requeue: (id, note) => {
       // The note first: a run that picks the ticket up straight away already sees it.
       if (note) gh(["issue", "comment", id, "--body", note]);
@@ -249,8 +268,6 @@ const github = (project: Project): Tracker => {
       LOST: "comment on the ticket that the sandbox's git record was lost",
       TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
       COMMENTS_VIEW: "# Comments on the ticket\n\n!`gh issue view {{ISSUE_NUMBER}} --comments`\n\n",
-      NEW_TICKET: `GitHub issue (\`gh issue create --label ${project.tracker.triage}\`; if that label is refused, create it without the label)`,
-      NEW_TICKET_REVIEW: `open a new GitHub issue\n  (\`gh issue create --label ${project.tracker.triage}\`; if that label is refused, create it without the label)`,
       RECORD:
         "**Before you finish, comment on the ticket** with what you changed, the commit(s), and anything a\n" +
         "human must still do. The ticket is closed automatically when your branch merges, so that comment is\n" +
@@ -428,6 +445,16 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
       write(t, project.tracker.held, text);
       commit(t.path, `sandcastle: hold ${id} for a human`);
     },
+    create: (title, body, near) => {
+      const feature = (near && scan().find((t) => t.id === near)?.feature) || "follow-ups";
+      const number = String(Math.max(0, ...scan().filter((t) => t.feature === feature).map((t) => Number(t.number))) + 1).padStart(2, "0");
+      const path = join(dir, feature, "issues", `${number}-${slug(title).slice(0, 60).replace(/-+$/, "") || "follow-up"}.md`);
+      mkdirSync(join(root, dir, feature, "issues"), { recursive: true });
+      writeFileSync(join(root, path), `# ${title}\n\nStatus: ${project.tracker.triage}\n\n${body.trim()}\n`);
+      const id = `${slug(feature)}-${number}`;
+      commit(path, `sandcastle: file ${id} for triage`);
+      return id;
+    },
     requeue: (id, note) => {
       const t = find(id);
       write(t, project.label, note);
@@ -475,8 +502,6 @@ const files = (project: Project, dir: string, done: string[]): Tracker => {
       LOST: "say in a `<blocked>...</blocked>` block in your final message that the sandbox's git record was lost",
       TICKET_VIEW: "{{TICKET_BODY}}",
       COMMENTS_VIEW: "",
-      NEW_TICKET: "entry under \"Follow-up:\" in your final `<report>`",
-      NEW_TICKET_REVIEW: "note it in a `<report>...</report>` block in your final message under \"Follow-up:\"",
       RECORD:
         "**Before you finish, write a report** with what you changed, the commit(s), and anything a human must still do,\n" +
         "between `<report>` and `</report>` in your final message. The orchestrator posts it on the ticket and marks the\n" +
@@ -547,7 +572,7 @@ export type Resolved = {
   source: "config" | "docs/agents" | "default";
   /** The label (GitHub) or status (files) of a ticket held for a person: the `ready-for-human` role. */
   held: string;
-  /** The label agents put on the follow-up tickets they file: the `needs-triage` role. */
+  /** The label (GitHub) or status (files) the kit files the agents' `<followup>` lines with: the `needs-triage` role. */
   triage: string;
   note?: string;
 };

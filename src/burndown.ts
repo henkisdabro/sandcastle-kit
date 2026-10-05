@@ -292,6 +292,69 @@ export const addChangelog = (have: string[], text: string, narrow = false): numb
   return read.dropped;
 };
 
+/** A problem outside its ticket that an agent named in a `<followup>` line: the kit files it for triage once the run has landed. */
+export type FollowUp = { title: string; evidence: string; from: string; phase: string };
+/** A follow-up as the run record keeps it: `id` is the ticket filed, absent in a dry run (which files nothing) or when filing failed (`failed`). */
+export type FiledFollowUp = { title: string; from: string; phase: string; id?: string; failed?: string };
+
+// A ticket title is short: a longer one is a paragraph, cut at a word. GitHub refuses more than 256.
+export const FOLLOWUP_TITLE_MAX = 120;
+// Every own-line `<followup>title - evidence</followup>` of one final message, in order. An agent that
+// left a problem in prose lost it (nobody reads the message), so the kit reads these and files them.
+// The title is what comes before the first " - "; the echoed placeholder counts for nothing.
+const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
+  ownLineTags(text, "followup").flatMap((raw) => {
+    const said = raw.replace(/\s+/g, " ").trim();
+    if (!said || said === "..." || said === "title - one line of evidence") return [];
+    const at = said.indexOf(" - ");
+    const title = (at > 0 ? said.slice(0, at) : said).trim();
+    return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
+  });
+// The phase a pass's name says, in the words a person reads in the filed ticket.
+const phaseOf = (name: string) =>
+  name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
+// One problem named by two agents, or twice by one, is one ticket.
+const titleKey = (title: string) => title.replace(/\s+/g, " ").trim().toLowerCase();
+// The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
+// requeued) hears its agents name the same problem again, and that is still one ticket.
+const filedThisRun = new Set<string>();
+
+/**
+ * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
+ * naming the source ticket and phase, a title already filed in this run once. A dry run files nothing and returns them unfiled, for the summary to list.
+ * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
+ * the base). `seen` is the titles already filed, shared by a run's turns. A failed filing is kept with
+ * its reason, never thrown, and its title left unseen for a later turn to file: the run's landings stand.
+ */
+export const fileFollowUps = async (
+  tracker: Pick<Tracker, "create" | "ref">,
+  followUps: readonly FollowUp[],
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string> },
+): Promise<FiledFollowUp[]> => {
+  const seen = o.seen ?? new Set<string>();
+  const out: FiledFollowUp[] = [];
+  for (const f of followUps) {
+    const key = titleKey(f.title);
+    if (seen.has(key)) continue;
+    const at = { title: f.title, from: f.from, phase: f.phase };
+    if (o.dryRun) {
+      seen.add(key);
+      out.push(at);
+      continue;
+    }
+    const body =
+      `${f.evidence || "(no evidence given)"}\n\n` +
+      `Reported by the ${f.phase} agent working on ${tracker.ref(f.from)} as outside that ticket, and filed by sandcastle for triage: queue it or close it.`;
+    try {
+      out.push({ ...at, id: await o.write(() => tracker.create(f.title, body, f.from)) });
+      seen.add(key);
+    } catch (error) {
+      out.push({ ...at, failed: errorLine(error) });
+    }
+  }
+  return out;
+};
+
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
 export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
   list.split(",").map((n) => {
@@ -461,6 +524,8 @@ export type PipelineContext = {
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
   reports: Map<string, string>;
   notes: Note[];
+  /** The `<followup>` lines of every agent pass, filed once the run has landed (`fileFollowUps`). A pipeline given none keeps none. */
+  followUps?: FollowUp[];
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -567,10 +632,16 @@ export const createPipeline = (ctx: PipelineContext) => {
 
     // Every agent pass goes through here: its readable log is tidied once the pass has returned, or thrown.
     // Its anonymous memory is sampled while it runs, for the agent's figure on the peaks line (src/peaks.ts).
+    // Its `<followup>` lines are read here too, so no pass - a narrow review, a repair - can leave one unread.
     let agentsRan = false;
     const pass = (opts: Parameters<typeof sandbox.run>[0]) => {
       agentsRan = true;
-      return sampling(sandbox, "agent", () => sandbox.run(opts)).finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
+      return sampling(sandbox, "agent", () => sandbox.run(opts))
+        .then((r) => {
+          for (const f of followUpsOf(r.stdout ?? "")) ctx.followUps?.push({ ...f, from: issue.id, phase: phaseOf(opts.name ?? "") });
+          return r;
+        })
+        .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
     };
 
     try {
@@ -1551,6 +1622,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const reports = new Map<string, string>();
   // The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment.
   const notes: Note[] = [];
+  // Out-of-scope problems the agents named in `<followup>` lines, filed after the notes below.
+  const followUps: FollowUp[] = [];
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
@@ -1644,6 +1717,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     fixes,
     reports,
     notes,
+    followUps,
     took,
     waited,
     keptWorktrees,
@@ -1800,6 +1874,18 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     }
   }
+  // Through the same writer, after the run's own tickets: a ticket file is a commit on the base branch.
+  const filedFollowUps = await fileFollowUps(tracker, followUps, { dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun });
+  for (const f of filedFollowUps) {
+    console.log(
+      f.id
+        ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
+        : f.failed
+          ? `${ref(f.from)}: could not file a follow-up (${f.failed}): ${f.title}`
+          : `[dry run] would file for triage, from ${ref(f.from)}: ${f.title}`,
+    );
+  }
+  if (filedFollowUps.length) run.update({ followUps: filedFollowUps });
   // A note refused by the writer's `.git` check: the verify would start a container and run git on the host.
   if (stop.landsNothing) await stopLanding(stopError(stop.headline!));
 

@@ -246,6 +246,8 @@ export type RunRecord = {
   baseGates?: unknown;
   /** Tests found red on the base mid-run, each once: a failure no branch caused, so none was repaired. */
   baseRed?: string[];
+  /** Out-of-scope problems agents named in `<followup>` lines: `id` is the ticket filed for triage, absent in a dry run or when filing `failed`. */
+  followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
   verify?: { green: boolean; line: string } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
