@@ -71,7 +71,11 @@ state.
   `wait`s for that ticket's ending (`told`, fed every change by burndown's `tell`), then merges the
   base into its branch in its sandbox and gates again. A ticket red on a failure whose fix has
   already landed (its gate finished just after that landing) merges the base and gates again the
-  same way, without a wait or its line. A ticket that did not land (red, gave up, crashed, held,
+  same way, without a wait or its line - unless its branch holds the fixer's landing already (the
+  board keeps the commit that put the fixer on the base, read from the landing record as the ticket
+  ends, and burndown checks it with `git merge-base --is-ancestor`): the ticket started after the fix, the merge
+  would bring it nothing, and the red is its own, so it repairs at once. A landing with no commit
+  on record merges as before. A ticket that did not land (red, gave up, crashed, held,
   stopped) or was sent back at landing (`requeued`: its second attempt may sit behind the very
   pipelines that wait for it) frees its waiters, which repair as before. A ticket sent back keeps
   the failures it had claimed until it ends: its second attempt is often a land-only one with no

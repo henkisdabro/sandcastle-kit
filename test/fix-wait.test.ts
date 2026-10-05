@@ -3,7 +3,8 @@
 // agents and gate runs, and the scheduler's endings told to the board as burndown's `tell` tells them.
 // No Docker, model, gh or network. The second ticket waits for the first one's landing, merges the new
 // base and gates again (no repair, no resolve pass) - at once, when that fix landed before its gate went
-// red; if the first ticket's fix never lands, it repairs.
+// red; if the first ticket's fix never lands, it repairs. A ticket whose branch already holds the first
+// one's landing (it started after) repairs at once: a merge would bring it nothing.
 //
 //   pnpm exec tsx --test test/fix-wait.test.ts
 
@@ -118,7 +119,9 @@ const harness = (gateOf: (id: string) => GateRun[], starved?: () => boolean) => 
     root, name: "fixture", baseBranch: "main", gates: [{ name: "test", command: "run-tests" }],
     generated: [], setup: [], implement: {}, review: {}, repair: {}, changelog: true,
   } as unknown as Ctx["project"];
-  const fixes = createFixBoard(starved, 10);
+  // The commit each landing put on the base: burndown's landing record, which the board reads as a ticket ends.
+  const landings = new Map<string, string>();
+  const fixes = createFixBoard(starved, 10, (id) => landings.get(id));
   const log = console.log;
   console.log = (...args: unknown[]) => void lines.push(args.join(" "));
   const pipeline = createPipeline({
@@ -160,10 +163,15 @@ const harness = (gateOf: (id: string) => GateRun[], starved?: () => boolean) => 
   });
   const attempt = (id: string): Promise<Outcome> => pipeline({ id, title: `ticket ${id}`, body: "" } as Parameters<typeof pipeline>[0]);
   /** The landing worker merges the ticket's branch into the base, as `landOne` does. */
-  const land = (id: string) => git(root, "merge", "--no-ff", "-q", "-m", `Merge agent/issue-${id} (closes #${id})`, `agent/issue-${id}`);
+  const land = (id: string) => {
+    git(root, "merge", "--no-ff", "-q", "-m", `Merge agent/issue-${id} (closes #${id})`, `agent/issue-${id}`);
+    landings.set(id, git(root, "rev-parse", "HEAD"));
+  };
+  /** Another ticket's landing: the base moves, so a merge of it into a branch would make a new commit. */
+  const moveBase = (file: string) => commit(root, file, "landed meanwhile\n");
   const has = (branch: string, file: string) => spawnSync("git", ["cat-file", "-e", `${branch}:${file}`], { cwd: root }).status === 0;
   const waiting = (id: string) => lines.some((l) => l.startsWith(`#${id}: waiting for `));
-  return { agents, events: eventsOf, lines, fixes, attempt, land, has, waiting, hold, restore: () => void (console.log = log) };
+  return { agents, events: eventsOf, lines, fixes, attempt, land, moveBase, has, waiting, hold, restore: () => void (console.log = log) };
 };
 
 const fixing = (h: ReturnType<typeof harness>) => {
@@ -343,6 +351,57 @@ test("a ticket cut after the fix landed and still red on that test repairs once,
     assert.deepEqual(h.events("2"), ["impl", "review", "gate", "repair", "gate", "review"]);
     assert.ok(!h.waiting("2"));
     assert.ok(!h.lines.some((l) => l.startsWith("#2: #1 landed")), "the merge moved nothing");
+  } finally {
+    h.restore();
+  }
+});
+
+test("a ticket cut after the fix landed, with the base moved since, repairs at once instead of merging and gating the same red again", { timeout: 20000 }, async () => {
+  const h = harness(() => [CLOCK, GREEN]);
+  try {
+    fixing(h);
+    const first = await h.attempt("1");
+    assert.equal(first.status, "green");
+    h.land("1");
+    h.fixes.told(landed("1"));
+    // 2's branch is cut after 1's landing, so it holds the fix; its gate run goes red only once another landing moved the base.
+    const release = h.hold("2");
+    const second = h.attempt("2");
+    await until(() => h.events("2").includes("gate"));
+    h.moveBase("src/other.ts");
+    release();
+    const o = await second;
+    assert.equal(o.status, "green");
+    assert.equal(o.repairs, 1);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "repair", "gate", "review"], "its red is its own: no merge, no second gate run before the repair");
+    assert.ok(!h.waiting("2"));
+    assert.ok(!h.lines.some((l) => l.startsWith("#2: #1 landed")), "no merge of the moved base was made");
+    assert.ok(!h.has("agent/issue-2", "src/other.ts"), "the base was never merged into the branch");
+  } finally {
+    h.restore();
+  }
+});
+
+test("a ticket cut before the fix landed, with the base moved after it, still merges the fix and gates again, starting no repair", { timeout: 20000 }, async () => {
+  const h = harness(() => [CLOCK, GREEN]);
+  try {
+    fixing(h);
+    const release = h.hold("2");
+    const second = h.attempt("2");
+    await until(() => h.events("2").includes("gate"));
+    const first = await h.attempt("1");
+    assert.equal(first.status, "green");
+    h.land("1");
+    h.fixes.told(landed("1"));
+    h.moveBase("src/other.ts");
+    release();
+    const o = await second;
+    assert.equal(o.status, "green");
+    assert.equal(o.repairs, 0);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "gate"]);
+    assert.ok(h.has("agent/issue-2", "src/fix.ts"), "the landed fix reached the branch by the base merge");
+    assert.ok(h.has("agent/issue-2", "src/other.ts"), "with the rest of the moved base");
+    assert.ok(h.lines.some((l) => l.startsWith("#2: #1 landed - merged main into its branch")));
   } finally {
     h.restore();
   }
