@@ -841,6 +841,67 @@ settings_row() {
   return 0
 }
 
+# The plan's usage: a live run's record holds the newest reading across its agents' own rate-limit
+# events (`usage`, written by src/usage.ts), and the row shows both windows beside the reading's age.
+# Only a live run that spends a subscription on a Claude model has one: the record says nothing
+# (no row) for any other run, and a record whose settings say API credits is none either, whatever
+# else it holds. Before the first agent reports, the row says it is waiting. The fields come
+# out of the record as "provider US 5h percent US 5h resets US week percent US week resets US at"
+# and are checked here, a record being a file in a repository.
+read_usage() {
+  USAGE_FIELDS=""
+  [ "$RUN_LIVE" = 1 ] || return 0
+  USAGE_FIELDS=$(jq -r 'def num(f): try (f | if type == "number" then tostring else "" end) catch "";
+    if ((.settings | type) == "object" and .settings.apiKey == true) or ((.usage | type) != "object") or .usage.provider != "claude" then empty
+    else (.usage // {}) | [.provider, num(.windows.fiveHour.percent), num(.windows.fiveHour.resetsAt), num(.windows.week.percent), num(.windows.week.resetsAt), num(.at)] | join("\u001f") end' logs/run.json 2>/dev/null)
+}
+# One window as "5h ▓░░░░░░░░░ 14% · resets 18:10", the bar and the percentage in the band's
+# colour: the normal one below 75%, amber from 75%, red from 90% (src/usage.ts holds the same two
+# numbers), grey once the reading is stale ($USAGE_GREY). $1 label, $2 percent, $3 resets (epoch
+# seconds), $4 the reset time's date format.
+usage_window() {
+  local n when="" c filled empty
+  if [ "$USAGE_GREY" = 1 ]; then c="$gry"; elif [ "$2" -ge 90 ]; then c="$hot"; elif [ "$2" -ge 75 ]; then c="$ylw"; else c="$head"; fi
+  n=$(( ($2 + 5) / 10 )); [ "$2" -gt 0 ] && [ "$n" -eq 0 ] && n=1
+  rep ▓ "$n"; filled="$REPLY"
+  rep ░ $(( 10 - n )); empty="$REPLY"
+  REPLY="${mute}$1${off} ${c}${filled}${gry}${empty}${off} ${c}${2}%${off}"
+  when=$(epoch_fmt "$3" "$4")
+  [ -n "$when" ] && REPLY="${REPLY} ${mute}· resets ${when}${off}"
+  return 0
+}
+# A whole number from $1 into REPLY: a fraction loses its decimals, anything else is empty.
+whole_number() { if [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then REPLY="${1%%.*}"; else REPLY=""; fi; }
+# The usage row into the header's rows (SETTINGS_ROWS, which settings_row filled), wrapped at
+# whole items from the pane's width in $cols: "claude  5h ...   week ...   (2m ago)".
+usage_row() {
+  local prov p5 r5 pw rw at age w5 ww i WRAP_SEP="   "
+  local -a items=()
+  read_usage
+  [ -n "$USAGE_FIELDS" ] || return 0
+  IFS="$US" read -r prov p5 r5 pw rw at <<<"$USAGE_FIELDS"
+  whole_number "$p5"; p5="$REPLY"; whole_number "$r5"; r5="$REPLY"
+  whole_number "$pw"; pw="$REPLY"; whole_number "$rw"; rw="$REPLY"
+  whole_number "$at"; at="$REPLY"
+  if [ -n "$p5" ] && [ -n "$r5" ] && [ -n "$pw" ] && [ -n "$rw" ] && [ -n "$at" ]; then
+    # A percentage past 100 stops there.
+    [ "$p5" -gt 100 ] && p5=100
+    [ "$pw" -gt 100 ] && pw=100
+    age=$(( $(date +%s) - at )); [ "$age" -lt 0 ] && age=0
+    # A reading older than 15 minutes (USAGE_STALE_SECONDS) is greyed, its age beside it.
+    USAGE_GREY=0; [ "$age" -gt 900 ] && USAGE_GREY=1
+    usage_window 5h "$p5" "$r5" +%H:%M; w5="$REPLY"
+    usage_window week "$pw" "$rw" '+%a %H:%M'; ww="$REPLY"
+    items=("${mute}claude${off}  ${w5}" "$ww" "${mute}($(ago "$age") ago)${off}")
+  else
+    items=("${mute}claude${off}  ${gry}waiting for the first agent's reading${off}")
+  fi
+  wrap_items $(( cols - 14 )) "${items[@]}"
+  kvl usage "${WRAPPED[0]}"; SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="$REPLY"
+  for (( i=1; i<${#WRAPPED[@]}; i++ )); do SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="          ${WRAPPED[i]}"; done
+  return 0
+}
+
 # How many commits a merged ticket landed: once merged, its branch has none
 # left over the base, and a 0 read as "merged nothing". Its merge commit's
 # second parent says (a squash is the one commit); "-" when none is found. A merge that left a
@@ -1195,6 +1256,7 @@ render() {
   MAC[2]="$REPLY"
   # "implement X · review Y", one row each in the models cell.
   settings_row
+  usage_row
   models=$(models_line); mprefix=""
   case "$models" in "next run: "*|"last run: "*) mprefix="${models%%: *}"; models="${models#*: }";; esac
   # A record that carries cross-review as a setting shows it in the settings row, so the models cell

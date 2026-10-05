@@ -19,12 +19,13 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
+import { readPlanUsage } from "./usage.ts";
 import { LANDING_GATES } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
-import { isTicketState, type OutcomeKind, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
+import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
 
 /** "stopped by `sandcastle stop`", "stopped by Ctrl-C": what a run's `stoppedBy` reads as in the summary and the notify line. */
 export const stoppedByText = (by: string) => `stopped by ${by === "sandcastle stop" ? "`sandcastle stop`" : by}`;
@@ -93,6 +94,8 @@ export type Facts = {
   baseRed?: string[];
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
+  /** The plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
+  usage?: PlanUsage;
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
   next?: { level: Level; turn: number; tickets: string[] };
 };
@@ -379,6 +382,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
+    usage: readPlanUsage(run.usage),
   };
 };
 
@@ -393,7 +397,10 @@ const API_CREDITS = "billing API credits (ANTHROPIC_API_KEY)";
  */
 export const settingsLines = (f: Facts, bare = false): string[] => {
   const s = f.settings;
-  if (!s || typeof s !== "object") return [];
+  // The plan's usage, as the last agent reported it: a fact of the run, so it stands with or without a settings group. Under an API key there is none.
+  const w = f.usage?.windows;
+  const usage = w ? [`Plan usage ${f.live ? "so far" : "at the end"}: 5h ${w.fiveHour.percent}%, week ${w.week.percent}%`] : [];
+  if (!s || typeof s !== "object") return usage;
   const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
   const plain = (v: unknown, pattern: RegExp) => (typeof v === "string" && pattern.test(v) ? v : undefined);
   const level = LEVELS.includes(s.autonomy as never) ? s.autonomy : undefined;
@@ -412,9 +419,9 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   else if (s.usageGuard === false) items.push("usage guard off");
   // Never silent: red where colour is wanted, and the words say it where it is not.
   if (s.apiKey === true) items.push(bare ? API_CREDITS : red(API_CREDITS));
-  if (!items.length) return [];
+  if (!items.length) return usage;
 
-  const lines = [`Settings: ${items.join(" · ")}`];
+  const lines = [`Settings: ${items.join(" · ")}`, ...usage];
   const again = level === 0 && !f.next ? rerunnable(f) : undefined;
   const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? [])])] : [];
   if (left.length) {

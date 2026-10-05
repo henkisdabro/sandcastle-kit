@@ -92,7 +92,7 @@ import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
-import { loadProject } from "./config.ts";
+import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
@@ -104,7 +104,7 @@ import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend } from "./sandbox.ts";
+import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
@@ -119,6 +119,13 @@ import { nearest, OperatorError } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 import { realReaders, sizeLines } from "./size.ts";
+
+/**
+ * The project as the sandbox of `sandcastle gates` or `sandcastle land` sees it: both open gate-only
+ * sandboxes, so `cpus` is the gate share a run's landing and base gates get (`sandboxCpus`), cut to the VM's CPUs.
+ * Outside a run nothing divides by a concurrency. Read when first needed: `docker info` answers once per sandbox.
+ */
+const gateOnly = (project: Project): Project => ({ ...project, cpus: sandboxCpus(project, "gate", { concurrency: 1, maxGates: limit("gates") }, readDockerInfo) });
 
 const [command = "help", ...args] = process.argv.slice(2);
 // Every command the help names, and the internal hook. Checked before the repository is, so a
@@ -536,7 +543,7 @@ try {
       pinHostGitConfig(project.root);
       const fingerprint = gitFingerprint(project);
       try {
-        await requireGreenBase(project, await ensureImage(project), writePlan(project).file, false);
+        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false);
       } finally {
         assertGitUnchanged(project, fingerprint, "after the gates");
       }
@@ -553,7 +560,7 @@ try {
       console.log(
         await landTicket(project, makeTracker(project), args[0], async () => {
           const image = await ensureImage(project);
-          return { open: sandboxOpener(project, image, writePlan(project).file) };
+          return { open: sandboxOpener(gateOnly(project), image, writePlan(project).file) };
         }),
       );
       break;

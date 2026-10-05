@@ -10,14 +10,17 @@
 // `memory.peak` counts page cache the kernel has not yet reclaimed, so it can overstate what a
 // sandbox needs. `memory.stat`'s `anon` (memory no file backs) has no high-water mark: it is the
 // figure at the moment of the read, so only a reading taken while a phase runs describes it - read
-// after the gates, the test workers have exited. So `anon` is read every 10 s through the sandbox's
-// own `exec` while a gate pass runs (and once after it), kept as `anonMib`, and while an agent pass
-// runs (implement, review, repair, resolve), kept as `agentAnonMib`. Each is a lower bound.
+// after the gates, the test workers have exited, and the sandbox at rest (running only `sleep`) reads
+// about 1 MiB. So `anon` is read through the sandbox's own `exec` once as a gate pass starts and every
+// 10 s while it runs, kept as `anonMib`, and likewise while an agent pass runs (implement, review,
+// repair, resolve), kept as `agentAnonMib`; a reading taken after a phase counts towards neither (the
+// first read is what gives a pass shorter than 10 s one taken during it). Each is a lower bound.
 //
 // Two records: a `peakMib` on the timings line of the gate pass (the project's own, in
 // `.sandcastle/logs/timings.jsonl`), and one line per sandbox in the machine-wide `peaks.jsonl`
 // beside the live-runs directory (whose files go once a run has ended and its tab no longer needs a report). A peaks line carries a time, the
-// run, and a hash of the project root: no path, no name. Best effort throughout: a file that is
+// run, a hash of the project root (no path, no name) and `sampled`, which version of the reading above
+// its `anon` figures rest on. Best effort throughout: a file that is
 // missing (cgroup v1, an older kernel), a sandbox that is gone or a cache directory that cannot be
 // written records nothing and never fails the pass.
 
@@ -33,6 +36,10 @@ const MEMORY_STAT = "/sys/fs/cgroup/memory.stat";
 // so a closing sandbox's last read cannot hold up the run.
 const READ_LIMIT_MS = 10_000;
 const SAMPLE_EVERY_MS = 10_000;
+// Which reading a line's `anonMib` and `agentAnonMib` rest on. 2: only readings taken while a phase ran. A line
+// without it (written before this marker) may hold the sandbox at rest, which reads about 1 MiB, with nothing on
+// the line to say so, so `measuredPeak` (src/size.ts) leaves those two figures out.
+export const SAMPLED = 2;
 
 export type Exec = { exec(cmd: string): Promise<{ exitCode: number; stdout: string }> };
 /**
@@ -40,10 +47,12 @@ export type Exec = { exec(cmd: string): Promise<{ exitCode: number; stdout: stri
  * `peakMib` is the whole life's `memory.peak`, page cache included; `anonMib` the largest anonymous memory
  * (no page cache) read while a gate pass ran. `agentMib` is `memory.peak` just before the first gate pass and
  * `agentAnonMib` the largest anonymous memory read while an agent pass ran: only a ticket's sandbox whose
- * agents ran has them, so a line without `agentMib` (base, verify, landing, a land-only re-run, every older line) is a
- * gate peak only. Each optional figure is absent where the kernel gave none.
+ * agents ran has them (a land-only re-run's has them only if a narrow review ran there, after a resolve or for a
+ * carried merge), so a line without `agentMib` (base, verify, landing, every older line) is a gate peak only.
+ * `sampled` marks a line whose two anon figures were read only while a phase ran (`SAMPLED`). Each optional figure is
+ * absent where the kernel gave none.
  */
-export type PeakLine = { ts: string; project: string; run: string; peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };
+export type PeakLine = { ts: string; project: string; run: string; peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number; sampled?: number };
 
 /** A hash of the project root, as the peaks file names a project: the same project by any path (symlinks resolved) is one. */
 export const projectId = (root: string) => createHash("sha256").update(real(root)).digest("hex").slice(0, 12);
@@ -105,35 +114,43 @@ const readLargest = async (sandbox: Exec): Promise<number | undefined> => {
   return mib;
 };
 
-/** Reads the sandbox's peak after a gate pass, with its anonymous memory, and returns the largest peak so far, or undefined when it never gave one. */
+/**
+ * Reads the sandbox's peak after a gate pass and returns the largest peak so far, or undefined when it never gave one.
+ * Its `anon` is not read here: the gate has ended, so that is the sandbox at rest (`sampling` reads it while one runs).
+ */
 export const samplePeak = async (sandbox: Exec): Promise<number | undefined> => {
-  if ((await readLargest(sandbox)) !== undefined) noteAnon(sandbox, "gate", await readAnonMib(sandbox));
+  await readLargest(sandbox);
   return largest.get(sandbox);
 };
 
 /**
- * Runs `fn`, a gate or an agent pass, reading the sandbox's anonymous memory every 10 s while it runs.
- * The timer is unref'd and cleared when `fn` settles, and a reading that answers after that is dropped:
- * an agent at rest after a gate is not the gate's figure.
+ * Runs `fn`, a gate or an agent pass, reading the sandbox's anonymous memory once as it starts and every 10 s
+ * while it runs. The first read is what gives a pass shorter than 10 s a reading taken during it: it is issued
+ * with the pass, and waited for when the pass ends first. The timer is unref'd and cleared when `fn` settles, and
+ * a periodic reading that answers after that is dropped: an agent at rest after a gate is not the gate's figure.
  */
 export const sampling = async <T>(sandbox: Exec, phase: Phase, fn: () => Promise<T>): Promise<T> => {
-  let running = true;
+  let ended = false;
   let reading = false;
-  const timer = setInterval(() => {
+  const read = (late: boolean) => {
     // One read at a time: a sandbox slow to answer must not pile up `cat`s.
-    if (reading) return;
+    if (reading) return undefined;
     reading = true;
-    void readAnonMib(sandbox).then((mib) => {
+    return readAnonMib(sandbox).then((mib) => {
       reading = false;
-      if (running) noteAnon(sandbox, phase, mib);
+      if (!ended || late) noteAnon(sandbox, phase, mib);
     });
-  }, SAMPLE_EVERY_MS);
+  };
+  const timer = setInterval(() => void read(false), SAMPLE_EVERY_MS);
   timer.unref();
+  const first = read(true);
   try {
     return await fn();
   } finally {
-    running = false;
+    ended = true;
     clearInterval(timer);
+    // Issued while the pass ran, so what it answers describes the pass; `readAnonMib` bounds the wait.
+    await first;
   }
 };
 
@@ -167,6 +184,7 @@ export const recordPeak = async (sandbox: Exec, root: string, run: string = new 
     project: projectId(root),
     run,
     peakMib,
+    sampled: SAMPLED,
     ...(anonMib ? { anonMib } : {}),
     ...(agentMib ? { agentMib } : {}),
     ...(agentAnonMib ? { agentAnonMib } : {}),
@@ -193,7 +211,7 @@ export const readPeaks = (file = PEAKS_FILE): PeakLine[] => {
     try {
       const l = JSON.parse(raw) as Partial<PeakLine>;
       if (typeof l.project === "string" && typeof l.ts === "string" && Number.isFinite(Date.parse(l.ts)) && typeof l.peakMib === "number" && l.peakMib > 0) {
-        const optional = Object.fromEntries((["anonMib", "agentMib", "agentAnonMib"] as const).flatMap((k) => (typeof l[k] === "number" && l[k] > 0 ? [[k, l[k]]] : [])));
+        const optional = Object.fromEntries((["anonMib", "agentMib", "agentAnonMib", "sampled"] as const).flatMap((k) => (typeof l[k] === "number" && l[k] > 0 ? [[k, l[k]]] : [])));
         lines.push({ ts: l.ts, project: l.project, run: typeof l.run === "string" ? l.run : `ts:${l.ts}`, peakMib: l.peakMib, ...optional });
       }
     } catch {

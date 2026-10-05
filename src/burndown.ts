@@ -26,7 +26,7 @@
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
@@ -51,7 +51,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
-import { usageLine, usageReadingLost, usageStop } from "./usage.ts";
+import { showsPlanUsage, usageLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -1085,7 +1085,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
-      // A land-only re-run ran no agent here, and gives none.
+      // A land-only re-run gives one only when a narrow review ran in this sandbox (after a resolve, or for a carried merge).
       if (agentsRan) await agentBaseline(sandbox);
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
@@ -1466,13 +1466,18 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
   console.log(versionsLine(versions));
-  // Before any sandbox: every one this turn opens (attempts, landings, gates) takes the same CPU
-  // limit, so agents' own full-suite runs cannot crowd out each other and the gates beside them.
+  // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
+  // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
+  // gates, which run one at a time and set the run's end (`gateProject` below opens those).
   // One `docker info` for both this and the pool warning below; docker not answering stops the run here, before anything is recorded or started.
   const info = (turn?.docker ?? readDockerInfo)();
-  const cpus = sandboxCpus(project, settings.concurrency.effective, () => info);
-  console.log(cpusLine(project, cpus));
-  project = { ...project, cpus };
+  const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
+  const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
+  const gateCpus = sandboxCpus(project, "gate", pool, () => info);
+  console.log(cpusLine(project, ticketCpus, gateCpus));
+  // The project as the gate-only sandboxes see it; `project` from here is a ticket's.
+  const gateProject = { ...project, cpus: gateCpus };
+  project = { ...project, cpus: ticketCpus };
   // The measured anonymous memory says the pool is larger than the VM fits: said here, where the run's cost is read, and not only in doctor.
   for (const line of poolWarningsNow(() => info)) console.log(`warning: ${line}`);
   // Another live run shares the pool: say how it is split, before the estimate that divides by this run's share.
@@ -1562,7 +1567,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
-  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.paused);
+  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage, run.paused);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
@@ -1650,6 +1655,24 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   noteReading();
   if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
+  // The plan's usage on screen, from the agents' own rate-limit events: only a run that spends a
+  // subscription on a Claude model has one (an API key bills credits no plan describes). Until the
+  // first agent reports, the record says it is waiting for one. After the archive above, which moves
+  // finished branches' logs away: the watch reads the logs that are left.
+  let usageWatch: UsageWatch | undefined;
+  const passModels = [IMPL_MODEL, REVIEW_MODEL, ...[...overrides.values()].flatMap((o) => (o.model ? [o.model] : []))];
+  if (showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels })) {
+    run.update({ usage: { provider: "claude" } });
+    usageWatch = watchUsage({
+      logs: join(project.root, ".sandcastle/logs"),
+      run: runId,
+      // A record the next turn replaced is not this watch's to write.
+      finished: () => run.finished,
+      write: (reading) => {
+        if (!run.finished) run.update({ usage: reading });
+      },
+    });
+  }
   // Written next to the prompts; the worktree hook applies it to each sandbox.
   const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);
@@ -1675,7 +1698,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(project, image, planFile, true, runId));
+      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -1776,7 +1799,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     reports,
     run,
     dryRun: DRY_RUN,
-    opener: sandboxOpener(project, image, planFile),
+    opener: sandboxOpener(gateProject, image, planFile),
     runId,
     withdrawal,
     host,
@@ -1839,7 +1862,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
-    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId, false),
+    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
@@ -2046,6 +2069,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell, pause: { read: () => readPause(project.root, process.pid) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
+      usageWatch?.stop();
       // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
       // would have named is lost with its rejection, and the writer's check refuses such a write by itself.
       return stopLanding(error, host.failed !== undefined);
@@ -2057,6 +2081,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     pauseSaid = false;
     await holdAwake();
   }
+  // The last reading is in the record before the closing summary reads it.
+  usageWatch?.stop();
   // The cause the closing summary names: the most severe, a `.git` change before a limit.
   const headline = stop.headline;
   const stopLine = headline && stopWords(headline);
@@ -2101,7 +2127,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(project, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => gateBase(gateProject, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
     verify = gated.gates;
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);

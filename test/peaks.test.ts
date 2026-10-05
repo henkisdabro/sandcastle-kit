@@ -69,7 +69,7 @@ test("the largest reading of a sandbox is kept, and one line per sandbox goes to
   assert.equal(await recordPeak(box, "/made-up/root", "2026-05-01T09:00:00.000Z", file, now), 1500, "the last reading (700) does not lower it");
   const lines = readFileSync(file, "utf8").trim().split("\n");
   assert.equal(lines.length, 1);
-  assert.deepEqual(JSON.parse(lines[0]), { ts: "2026-05-01T10:00:00.000Z", project: projectId("/made-up/root"), run: "2026-05-01T09:00:00.000Z", peakMib: 1500 });
+  assert.deepEqual(JSON.parse(lines[0]), { ts: "2026-05-01T10:00:00.000Z", project: projectId("/made-up/root"), run: "2026-05-01T09:00:00.000Z", peakMib: 1500, sampled: 2 });
   assert.deepEqual(readPeaks(file), [JSON.parse(lines[0])]);
 });
 
@@ -82,7 +82,7 @@ test("peaks.jsonl carries no path and no project name", async () => {
   assert.ok(!text.includes("client-acme-portal"), text);
   assert.ok(!text.includes(root), text);
   assert.ok(!text.includes(tmpdir()), text);
-  assert.deepEqual(Object.keys(JSON.parse(text.trim().split("\n")[0])).sort(), ["peakMib", "project", "run", "ts"]);
+  assert.deepEqual(Object.keys(JSON.parse(text.trim().split("\n")[0])).sort(), ["peakMib", "project", "run", "sampled", "ts"]);
   assert.match(projectId(root), /^[0-9a-f]{12}$/);
   assert.equal(PEAKS_FILE, join(cache, "sandcastle-kit", "peaks.jsonl"), "beside the live-runs directory, not inside it");
 });
