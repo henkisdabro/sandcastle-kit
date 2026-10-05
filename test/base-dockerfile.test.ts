@@ -59,3 +59,7 @@ test("the header comment records why not -slim", () => {
   assert.match(comments, /python3/);
   assert.match(comments, /Alpine/);
 });
+
+test("the image stops on SIGKILL, so docker stop does not wait out its 10 s for sleep", () => {
+  assert.ok(instructions.some((l) => /^STOPSIGNAL\s+SIGKILL\s*$/.test(l)), "expected STOPSIGNAL SIGKILL");
+});

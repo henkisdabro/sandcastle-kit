@@ -69,4 +69,8 @@ ENV COREPACK_HOME=/home/agent/.cache/node/corepack
 
 WORKDIR /home/agent
 # Sandcastle bind-mounts the worktree at /home/agent/workspace and works there.
+# sleep as PID 1 has no SIGTERM handler, so every `docker stop` of a sandbox waited out Docker's 10 s
+# before its SIGKILL, inside a slot or on the landing worker. Nothing in the container keeps state of its
+# own (the work is in the bind-mounted worktree), so the kill comes first.
+STOPSIGNAL SIGKILL
 ENTRYPOINT ["sleep", "infinity"]
