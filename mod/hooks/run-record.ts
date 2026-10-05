@@ -1,7 +1,7 @@
 // What a run record (.sandcastle/logs/run.json) holds and what the status view says about it:
 // the record's types, the closed set of ticket states, the derived states, and the tables from
 // ticket state to group and to word. Pure: it imports nothing, so the mod (which cannot import
-// the kit's source) and the kit's own tests can both read it. Terms are CONTEXT.md's.
+// the kit's source) and the kit's own tests can both read it. Terms are GLOSSARY.md's.
 
 /**
  * Where one ticket of a run stands, as the run record holds it - every state src/run.ts
@@ -171,7 +171,7 @@ export type TicketRecord = {
 export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
 
 /**
- * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
+ * The run's settings as one turn's record holds them (GLOSSARY.md: run setting): the autonomy
  * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
  * and effective), whether cross-review runs, and the usage guard. Each field is optional and a
  * reader shows only what is there - an older kit's record has no group at all, level 1 has no cap

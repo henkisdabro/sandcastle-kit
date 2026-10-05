@@ -173,4 +173,4 @@ Matt Pocock's five default role names, unchanged (the kit reads this file too). 
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` and `docs/adr/` at the root, created when a term or decision settles. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` and `docs/adr/` at the root, created when a term or decision settles. See `docs/agents/domain.md`.
