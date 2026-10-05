@@ -1291,7 +1291,9 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
 freed one does not take it back from another run that was already waiting. Within one run nothing
 changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`).
+killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The
+base check a run makes mid-run starts its sandbox inside the slot of the ticket that asked, so it
+never waits for one, but it is counted: while it lives the pool can read one past its cap (`7/6`).
 
 Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
 slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch
