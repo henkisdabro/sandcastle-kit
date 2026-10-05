@@ -163,7 +163,8 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * status pane that is not a bare shell - the status view still running (it already shows how the
  * run ended), or anything a person started there since (Herdr may reuse a pane id across a
  * restart, and the command would be typed into an editor or a REPL). Any herdr error leaves the
- * tab as it is. `reported` when the report was started, and `left` for every case above but two.
+ * tab as it is (`retry`, below). `reported` when the report was started, and `left` for every other
+ * case above but one.
  *
  * The record is claimed by renaming it to a name of this caller's own, which only one of two
  * callers can do, before anything is typed; it goes back marked `reported` once the command is
@@ -185,7 +186,8 @@ export const restartStatusView = (root: string, kit = KIT): boolean => {
  * run's file to the awaiting directory for the right server. A record without `socket`, or a caller without
  * HERDR_SOCKET_PATH, cannot tell and acts as it always did.
  *
- * `retry`: herdr itself failed (a server not yet restored at startup, a transient error): nothing is
+ * `retry`: herdr itself failed (a server not yet restored at startup, a transient error, or a pane
+ * it no longer has, which it answers alike: `pane_not_found`): nothing is
  * known of the tab, so the record is as it was and the run's file stays awaiting for the next
  * reader, until `AWAIT_REPORT_DAYS` ends it. Not `left`, which deletes the file and loses the report.
  */

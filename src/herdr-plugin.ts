@@ -386,7 +386,8 @@ export const requeueAwaiting = (dir = RUNS_DIR, probe: Probe = commandOf, now = 
 // directory until it can be told; a tab on another Herdr server too: that server has yet to tell it.
 // A run's exit moves its file there while its own tab is unreported (live-runs.ts). From there the
 // startup hook after a Herdr restart (`requeueAwaiting`), and the tab bar while live runs keep it
-// ticking (`tellAwaiting`), tell the tab, until it is reported, closed or `AWAIT_REPORT_DAYS` old.
+// ticking (`tellAwaiting`), tell the tab, until it is reported or `AWAIT_REPORT_DAYS` old: a closed tab
+// is a herdr error (`retry`), as a server not yet restored may answer, so it waits out the expiry too.
 export const replaceDeadTab = (root: string, kit?: string) => {
   const told = tellDeadTab(root, kit);
   return told === "showing" || told === "elsewhere" || told === "retry";
