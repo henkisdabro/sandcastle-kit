@@ -1,7 +1,7 @@
 // What a run record (.sandcastle/logs/run.json) holds and what the status view says about it:
 // the record's types, the closed set of ticket states, the derived states, and the tables from
 // ticket state to group and to word. Pure: it imports nothing, so the mod (which cannot import
-// the kit's source) and the kit's own tests can both read it. Terms are CONTEXT.md's.
+// the kit's source) and the kit's own tests can both read it. Terms are GLOSSARY.md's.
 
 /**
  * Where one ticket of a run stands, as the run record holds it - every state src/run.ts
@@ -171,7 +171,7 @@ export type TicketRecord = {
 export const sessionId = (value: unknown): string | undefined => (typeof value === "string" && /^[\w-]{1,100}$/.test(value) ? value : undefined);
 
 /**
- * The run's settings as one turn's record holds them (CONTEXT.md: run setting): the autonomy
+ * The run's settings as one turn's record holds them (GLOSSARY.md: run setting): the autonomy
  * level, the turn this record is, the level's cap, the repair attempts, the concurrency (asked
  * and effective), whether cross-review runs, and the usage guard. Each field is optional and a
  * reader shows only what is there - an older kit's record has no group at all, level 1 has no cap
@@ -210,6 +210,22 @@ export type RunSettings = {
   apiKey?: boolean;
 };
 
+/** One of a plan's usage windows: how much of it is spent (0 to 100) and when it resets (seconds since the epoch). */
+export type PlanWindow = { percent: number; resetsAt: number };
+
+/**
+ * The plan usage a live run shows (`usage` in the run record, read by the status view, the Herdr
+ * token and the closing summary), keyed by the provider that reports it. `windows` and `at` are
+ * absent until the first agent's reading: the run is watching for one and none has come.
+ */
+export type PlanUsage = {
+  provider: "claude";
+  /** The 5-hour and the weekly window, from an agent's own rate-limit event. */
+  windows?: { fiveHour: PlanWindow; week: PlanWindow };
+  /** Seconds since the epoch at which the kit read the event: the reading's age is measured from it. */
+  at?: number;
+};
+
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
 export type RunRecord = {
   /** The project's name. */
@@ -232,6 +248,8 @@ export type RunRecord = {
   concurrency?: number;
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
+  /** The plan's usage, newest reading across the run's agent logs; written only while the run spends a subscription on a Claude model (`src/usage.ts`). */
+  usage?: PlanUsage;
   /** Live values, not settings: the sandbox slots the run could use now, and its share of the machine pool (src/pool.ts), rewritten as either changes. */
   demand?: number;
   share?: number;

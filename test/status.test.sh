@@ -528,6 +528,86 @@ SHOW=collapse ROWS=40 render "101 102 103"
 has 's a n d c a s t l e'
 has '█████'
 
+# ---------------------------------------------------------------------------
+SCENARIO="live run, the plan's usage"
+# The newest reading across the agents' own rate-limit events is the record's `usage` (src/usage.ts):
+# both windows with a bar, the percentage and the reset time, and the reading's age. Only a live run
+# that spends a subscription has one. Colours are the pty test's (test/status-usage.test.ts); here, each band's text.
+# A bar is ten cells, a tenth for each ten percent rounded: 14% fills one, 93% nine.
+r5=$((now + 7200)); rw=$((now + 3 * 86400))
+at5=$(date -d "@$r5" +%H:%M 2>/dev/null || date -r "$r5" +%H:%M)
+atw=$(date -d "@$rw" '+%a %H:%M' 2>/dev/null || date -r "$rw" '+%a %H:%M')
+usage_record() { # percent5 percentWeek age-seconds [settings json]
+  local settings=""
+  [ -n "${4:-}" ] && settings="\"settings\": $4,"
+  cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["105"], $settings
+  "usage": { "provider": "claude", "at": $((now - $3)),
+    "windows": { "fiveHour": { "percent": $1, "resetsAt": $r5 }, "week": { "percent": $2, "resetsAt": $rw } } },
+  "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
+EOF
+}
+usage_record 14 93 120
+render "105"
+# At 80 columns the row wraps whole items: the provider and the 5-hour window, then the week and the age.
+has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5 +│"
+has "^│ +week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+COLS=160 render "105"
+has "^│ usage +claude  5h ▓░░░░░░░░░ 14% · resets $at5   week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(2m ago\\) +│"
+# Amber from 75%, red from 90%, a full week: the bars follow the percentage (colours: the pty test).
+usage_record 75 80 300
+COLS=160 render "105"
+has "^│ usage +claude  5h ▓▓▓▓▓▓▓▓░░ 75% · resets $at5   week ▓▓▓▓▓▓▓▓░░ 80% · resets $atw   \\(5m ago\\) +│"
+usage_record 90 100 300
+COLS=160 render "105"
+has "^│ usage +claude  5h ▓▓▓▓▓▓▓▓▓░ 90% · resets $at5   week ▓▓▓▓▓▓▓▓▓▓ 100% · resets $atw   \\(5m ago\\) +│"
+# A reading older than 15 minutes shows its age (and is greyed: the pty test).
+usage_record 14 93 1200
+COLS=160 render "105"
+has "week ▓▓▓▓▓▓▓▓▓░ 93% · resets $atw   \\(20m ago\\) +│"
+# A percentage past 100 stops at 100; a record with a window that is no number waits for a reading instead.
+usage_record 14 250 30
+COLS=160 render "105"
+has "week ▓▓▓▓▓▓▓▓▓▓ 100% · resets"
+sed -i.bak 's/"percent": 14/"percent": "lots"/' "$L/run.json"
+COLS=160 render "105"
+has '^│ usage +claude  waiting for the first agent.s reading +│'
+hasnt '5h ▓'
+
+SCENARIO="live run, no usage to show"
+# Before the first agent's reading the row says it waits (the run is watching for one) ...
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["105"], "usage": { "provider": "claude" },
+  "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
+EOF
+render "105"
+has '^│ usage +claude  waiting for the first agent.s reading +│'
+# ... a record without `usage` (an API-key run, a run on no Claude model, an older kit's) draws no row ...
+sed -i.bak 's/"usage": { "provider": "claude" },//' "$L/run.json"
+render "105"
+hasnt '^│ usage '
+# ... and neither does one whose settings say the run bills API credits, whatever `usage` holds ...
+usage_record 14 93 120 '{ "autonomy": 0, "apiKey": true }'
+render "105"
+has '^│ settings .*API credits'
+hasnt '^│ usage |5h ▓'
+# ... nor a usage that is not an object, or names another provider, nor a run that has ended.
+for u in '"claude"' '[1]' '{ "provider": "other", "windows": 1 }'; do
+  cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["105"], "usage": $u,
+  "tickets": { "105": { "state": "queued", "order": 5, "since": $now } } }
+EOF
+  render "105"
+  hasnt '^│ usage |5h ▓|waiting for the first'
+done
+usage_record 14 93 120
+sed -i.bak "s/\"stage\": \"running\",/\"stage\": \"running\", \"finishedAt\": \"$started\", \"exitCode\": 0,/" "$L/run.json"
+render "105"
+hasnt '^│ usage |5h ▓|waiting for the first'
+
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"
 # This repo's sandbox image builds macOS's bash 3.2 as bash32 (.sandcastle/Dockerfile): without

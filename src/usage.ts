@@ -20,9 +20,11 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import type { PlanUsage, PlanWindow } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
@@ -238,4 +240,212 @@ export const usageStop = async (env: Record<string, string>, readers: LoginReade
   lastReading = Array.isArray(windows) ? "got" : "none";
   const over = Array.isArray(windows) ? windows.filter((w) => w.percent >= stop) : undefined;
   return over?.length ? `plan usage ${describe(over)} reached USAGE_STOP=${stop}%` : undefined;
+};
+
+// ---------------------------------------------------------------------------
+// The plan's usage on screen, from the agents' own readings.
+//
+// Claude Code's stream-json output carries `rate_limit_event` lines, about three a pass, with the 5-hour
+// and the weekly window's utilisation and reset time. They are in each agent's raw `.jsonl` sidecar
+// already (run.ts, `agentLogging`), so unlike the guard's endpoint above they cost no request: the run
+// reads what its agents' logs gained since the last look, keeps the newest reading in the run record
+// (`usage`) and the status view, the Herdr sidebar and the closing summary show it. It needs no
+// credential and never asks the endpoint, so it is separate from the guard (`USAGE_CHECK`) and does
+// not depend on it. Another provider's readings (Codex) are one more reader beside `usageFromEvent`.
+// ---------------------------------------------------------------------------
+
+/** One reading of a provider's plan: what the record's `usage` holds once an agent has reported. */
+export type UsageReading = Required<PlanUsage>;
+
+/** The bands the readers colour by: normal below `USAGE_AMBER` percent, amber from it, red from `USAGE_RED`. status.sh holds the same two numbers (it cannot import them). */
+export const USAGE_AMBER = 75;
+export const USAGE_RED = 90;
+export const usageBand = (percent: number): "normal" | "amber" | "red" => (percent >= USAGE_RED ? "red" : percent >= USAGE_AMBER ? "amber" : "normal");
+
+/** How often the run looks at its agents' logs, and the longest it goes between writes of the record. status.sh greys a reading older than `USAGE_STALE_SECONDS`. */
+export const USAGE_INTERVAL_MS = 15_000;
+export const USAGE_STALE_SECONDS = 15 * 60;
+
+const windowOf = (value: unknown): PlanWindow | undefined => {
+  const w = value as { utilization?: unknown; resetsAt?: unknown } | null | undefined;
+  if (typeof w?.utilization !== "number" || typeof w.resetsAt !== "number" || !Number.isFinite(w.utilization) || !(w.resetsAt > 0) || !Number.isFinite(w.resetsAt)) return undefined;
+  // Utilisation is a fraction of the window (0.92 is 92%).
+  return { percent: Math.min(100, Math.max(0, Math.round(w.utilization * 100))), resetsAt: w.resetsAt };
+};
+
+/**
+ * The reading a Claude Code `rate_limit_event` stream line holds, or undefined for any other line, a
+ * malformed one, or an event without both windows. `at` is when the kit read the line, in seconds since
+ * the epoch: the stream carries no time of its own, and an agent's clock is not the host's.
+ */
+export const usageFromEvent = (line: string, at: number): UsageReading | undefined => {
+  if (!line.includes("rate_limit_event")) return undefined;
+  let event: { type?: unknown; rate_limit_info?: { unifiedWindows?: { five_hour?: unknown; seven_day?: unknown } } | null } | null;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (event?.type !== "rate_limit_event") return undefined;
+  const windows = event.rate_limit_info?.unifiedWindows;
+  const fiveHour = windowOf(windows?.five_hour);
+  const week = windowOf(windows?.seven_day);
+  return fiveHour && week ? { provider: "claude", windows: { fiveHour, week }, at } : undefined;
+};
+
+/** A run record's `usage`, checked: the record is a file in a repository, so only well-formed numbers pass. `windows` and `at` are dropped together when either is wrong. */
+export const readPlanUsage = (value: unknown): PlanUsage | undefined => {
+  const u = value as { provider?: unknown; windows?: { fiveHour?: unknown; week?: unknown } | null; at?: unknown } | null | undefined;
+  if (u?.provider !== "claude") return undefined;
+  const pct = (w: unknown) => {
+    const x = w as { percent?: unknown; resetsAt?: unknown } | null | undefined;
+    return typeof x?.percent === "number" && Number.isFinite(x.percent) && typeof x.resetsAt === "number" && Number.isFinite(x.resetsAt)
+      ? { percent: Math.min(100, Math.max(0, Math.round(x.percent))), resetsAt: x.resetsAt }
+      : undefined;
+  };
+  const fiveHour = pct(u.windows?.fiveHour);
+  const week = pct(u.windows?.week);
+  return fiveHour && week && typeof u.at === "number" && Number.isFinite(u.at) ? { provider: "claude", windows: { fiveHour, week }, at: u.at } : { provider: "claude" };
+};
+
+// A Claude Code model is an id `claude-...` or one of the aliases Claude Code takes (`sonnet`, `opus[1m]`).
+const CLAUDE_MODEL = /^(claude-|(sonnet|opus|opusplan|haiku|fable)(\[[\w.-]*\])?$)/i;
+export const isClaudeModel = (model: string) => CLAUDE_MODEL.test(model);
+
+/**
+ * Whether the run shows the plan's usage: it spends a subscription (`CLAUDE_CODE_OAUTH_TOKEN`, and no API
+ * key: `apiKey` is `projectApiKeySpend`'s answer, and a key is spent first even beside a token, which
+ * bills API credits no plan describes) and at least one of the models implement, review and repair run
+ * on is a Claude model.
+ */
+export const showsPlanUsage = ({ apiKey, oauthToken, models }: { apiKey: boolean; oauthToken: boolean; models: string[] }) =>
+  !apiKey && oauthToken && models.some(isClaudeModel);
+
+export type UsageWatch = {
+  /** Reads what the logs gained since the last look and writes the record when a newer reading came (not more often than the interval, unless `final`). */
+  poll(final?: boolean): void;
+  /** One last look, written whatever the interval says, and no more after it. */
+  stop(): void;
+};
+
+type Tail = { ino: number; offset: number; decoder: StringDecoder; carry: string; skipping: boolean; mine: boolean };
+
+// A raw stream line is a whole tool result at most; one this long is not a rate-limit event.
+const LONGEST_LINE = 8 << 20;
+// A timer tick a few milliseconds early must not cost a whole interval of waiting.
+const TICK_SLACK_MS = 1000;
+
+/**
+ * Watches this run's agent logs (`agent-issue-*.jsonl` in `logs`) for rate-limit events: every
+ * `interval` it reads only what each file gained since the last look, and the newest reading - the
+ * latest-written file's last event - goes to `write` when one came, at most once an interval. A file counts
+ * from the run's own marker line (`{"sandcastle":"run","run":<run>}`, which `agentLogging` writes
+ * first) to the next one, so an earlier run's lines in the same file are not this run's reading. A failure
+ * to read or to write is no reading: a full disk must not stop a run.
+ */
+export const watchUsage = ({
+  logs,
+  run,
+  write,
+  now = Date.now,
+  interval = USAGE_INTERVAL_MS,
+  finished = () => false,
+}: {
+  logs: string;
+  run: string;
+  write: (reading: UsageReading) => void;
+  now?: () => number;
+  interval?: number;
+  finished?: () => boolean;
+}): UsageWatch => {
+  const tails = new Map<string, Tail>();
+  let lastWrite = -Infinity;
+  let pending: UsageReading | undefined;
+  let stopped = false;
+
+  // The last reading in what `file` gained, or undefined.
+  const gained = (name: string, at: number): { mtime: number; reading: UsageReading } | undefined => {
+    const file = join(logs, name);
+    const st = statSync(file);
+    let tail = tails.get(name);
+    // A file that shrank or changed identity is another file under the same name (archived, then started again).
+    if (!tail || st.size < tail.offset || st.ino !== tail.ino) {
+      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false };
+      tails.set(name, tail);
+    }
+    if (st.size === tail.offset) return undefined;
+    let reading: UsageReading | undefined;
+    const fd = openSync(file, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(st.size - tail.offset, 1 << 20));
+      while (tail.offset < st.size) {
+        const n = readSync(fd, buffer, 0, Math.min(buffer.length, st.size - tail.offset), tail.offset);
+        if (n <= 0) break;
+        tail.offset += n;
+        let text = tail.decoder.write(buffer.subarray(0, n));
+        if (tail.skipping) {
+          const end = text.indexOf("\n");
+          if (end < 0) continue;
+          text = text.slice(end + 1);
+          tail.skipping = false;
+        }
+        const lines = (tail.carry + text).split("\n");
+        tail.carry = lines.pop()!;
+        if (tail.carry.length > LONGEST_LINE) Object.assign(tail, { carry: "", skipping: true });
+        for (const line of lines) {
+          if (line.startsWith('{"sandcastle":"run"')) {
+            try {
+              tail.mine = (JSON.parse(line) as { run?: unknown }).run === run;
+            } catch {
+              tail.mine = false;
+            }
+          } else if (tail.mine) reading = usageFromEvent(line, at) ?? reading;
+        }
+      }
+    } finally {
+      closeSync(fd);
+    }
+    return reading && { mtime: st.mtimeMs, reading };
+  };
+
+  const poll = (final = false) => {
+    if (stopped && !final) return;
+    try {
+      const at = Math.floor(now() / 1000);
+      // Oldest write first: where several files gained a reading, the last one written is the newest.
+      const found = readdirSync(logs)
+        .filter((name) => /^agent-issue-.+\.jsonl$/.test(name))
+        .sort()
+        .flatMap((name) => {
+          try {
+            const g = gained(name, at);
+            return g ? [g] : [];
+          } catch {
+            return []; // archived or removed between the listing and the read
+          }
+        })
+        .sort((a, b) => a.mtime - b.mtime);
+      if (found.length) pending = found[found.length - 1].reading;
+    } catch {
+      /* no logs directory yet */
+    }
+    if (!pending || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
+    try {
+      write(pending);
+      lastWrite = now();
+      pending = undefined;
+    } catch {
+      /* the record could not be written: the reading is tried again at the next look */
+    }
+  };
+
+  const timer = setInterval(() => (finished() ? stop() : poll()), interval);
+  timer.unref();
+  const stop = () => {
+    if (stopped) return;
+    poll(true);
+    stopped = true;
+    clearInterval(timer);
+  };
+  return { poll, stop };
 };
