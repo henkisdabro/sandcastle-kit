@@ -493,9 +493,51 @@ has '^x+…$'
 # The strip is the frame's last four rows, after the table's bottom border.
 [ "$(wc -l <"$TMP/frame")" -eq "$(( $(wc -l <"$TMP/frame-plain") + 4 ))" ] || { echo "FAIL [$SCENARIO] the strip is not four rows"; fails=$((fails+1)); }
 [ "$(grep -n '^── run output' "$TMP/frame" | cut -d: -f1)" = "$(( $(wc -l <"$TMP/frame-plain") + 1 ))" ] || { echo "FAIL [$SCENARIO] the strip does not follow the plain frame"; fails=$((fails+1)); }
-# The two renders can fall in different seconds: the clock and the AGE cells are not what is compared.
-steady() { sed -E 's/[0-9]{2}:[0-9]{2}:[0-9]{2}/HH:MM:SS/g; s/│ +[0-9]+[smh] +│/│ age │/g'; }
+# The two renders can fall in different seconds, or minutes, so nothing the clock sets is compared: a
+# time of day (23:10, 23:10:37) and an age or duration wherever it stands (an age cell, the header's
+# "running · 0m", "quiet 9m", "(57s ago)", 1h12m, 1m 2s), with the padding round it, which a longer
+# figure ("9m" to "10m") shifts. Every other cell is. A figure is cut from its neighbours by a
+# non-alphanumeric character, so "3x over" and "275.8MiB" stay; the second pass takes a figure whose
+# left neighbour the first one used up ("57s,1m").
+steady() {
+  sed -E -e 's/[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?/<time>/g' \
+    -e 's/(^|[^0-9A-Za-z])([0-9]+[hms] ?)+([^0-9A-Za-z]|$)/\1<time>\3/g' \
+    -e 's/(^|[^0-9A-Za-z])([0-9]+[hms] ?)+([^0-9A-Za-z]|$)/\1<time>\3/g' \
+    -e 's/ *<time> */<time>/g'
+}
+# The live frame is rendered 61 s later than the plain one - a minute boundary between them, as under
+# load - by a `date` that runs ahead where status.sh asks for the time (+%s) and is the real one
+# otherwise. Before the filter masked the header's "running · 0m", this scenario failed on that alone.
+mkdir -p "$TMP/skew"
+cat >"$TMP/skew/date" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = "+%s" ]; then echo $(( $("$REAL_DATE" +%s) + ${FAKE_SKEW:-0} )); else exec "$REAL_DATE" "$@"; fi
+EOF
+chmod +x "$TMP/skew/date"
+REAL_DATE="$(command -v date)"
+skewed() { PATH="$TMP/skew:$PATH" REAL_DATE="$REAL_DATE" FAKE_SKEW=61 render "$1"; }
+skewed ""
 head -n "$(wc -l <"$TMP/frame-plain")" "$TMP/frame" | steady | diff -q - <(steady <"$TMP/frame-plain") >/dev/null || { echo "FAIL [$SCENARIO] the frame above the strip changed"; fails=$((fails+1)); }
+# A real cell still counts: the same run with its ticket in another state is another frame.
+sed -i.bak 's/"state": "implement"/"state": "gates"/' "$L/run.json" && rm -f "$L/run.json.bak"
+skewed ""
+head -n "$(wc -l <"$TMP/frame-plain")" "$TMP/frame" | steady | diff -q - <(steady <"$TMP/frame-plain") >/dev/null && { echo "FAIL [$SCENARIO] a ticket's new state did not change the frame"; fails=$((fails+1)); }
+# The figures a live frame holds that this scenario's own does not, each pair a clock tick apart.
+same() { [ "$(steady <<<"$1")" = "$(steady <<<"$2")" ]; }
+for pair in \
+  '│  9s  │|│ 10s  │' '│ 59s  │|│  1m  │' '│ 59m  │|│  1h  │' \
+  'running · 9m      │|running · 10m     │' 'running · 59m     │|running · 1h00m   │' \
+  'ends ~23:10 · since 22:40|ends ~23:11 · since 22:40' 'base main  ·  23:10:37|base main  ·  23:10:38' \
+  'quiet 9m - Bash|quiet 10m - Bash' 'claude  5h 41%  (57s ago)|claude  5h 41%  (1m ago)' \
+  'took 1m 2s, 1h12m|took 1m 3s, 1h13m' '(57s,1m,2h)|(58s,2m,3h)'; do
+  same "${pair%%|*}" "${pair#*|}" || { echo "FAIL [$SCENARIO] the clock changes the frame: ${pair%%|*} / ${pair#*|}"; fails=$((fails+1)); }
+done
+for pair in \
+  '│ #301 │ ● impl  │ 5s │|│ #301 │ ● gates │ 5s │' '│ #301 │ ● impl │ 5s │|│ #302 │ ● impl │ 5s │' \
+  'claude  5h 41%  (57s ago)|claude  5h 42%  (57s ago)' '3x over, usually 1m|2x over, usually 1m' \
+  '275.8MiB / 11.73GiB|275.9MiB / 11.73GiB'; do
+  ! same "${pair%%|*}" "${pair#*|}" || { echo "FAIL [$SCENARIO] the filter hides a real change: ${pair%%|*} / ${pair#*|}"; fails=$((fails+1)); }
+done
 # A finished run's output is in its report, not on the view.
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": 1, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0, "models": "m", "issues": [] }
