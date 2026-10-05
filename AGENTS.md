@@ -71,6 +71,7 @@ read a module's section there before changing it.
 | `src/worktree-lock.ts` | Worktree locks against `git worktree prune`; time-bounded gates, run without the kit's tokens and with their values redacted from the output |
 | `src/setup.ts` | Interactive install: links, credentials file, then doctor |
 | `src/doctor.ts` | Setup self-check; the single source of truth for what a working install needs |
+| `src/runtime.ts` | `runtimeProblem`: the setups a run cannot work on (root anywhere; Podman behind `docker`, rootless or userns-remapped Docker on Linux), over injectable `docker` reads; doctor prints it as a FIX, `sandcastle run` refuses with it |
 | `src/errors.ts` | `OperatorError`: a refusal the operator acts on; `cli.ts` prints its message with no stack trace and exits 1, any other error keeps its stack |
 | `src/generated.ts` | Generated files: `covers`, `regensFor`, and `resolveGenerated` (take a side, rerun setup and `regen` in the sandbox, commit); also the shell quoting and host git identity the base merge uses |
 | `src/config.ts` | The `ProjectConfig` type, loader and validation; `pnpmStore`'s run-time mount and setup step |
