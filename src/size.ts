@@ -8,7 +8,7 @@ import { existsSync, statfsSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
-import { type PeakLine, projectId, readPeaks } from "./peaks.ts";
+import { type PeakLine, projectId, readPeaks, SAMPLED } from "./peaks.ts";
 import { poolLimit } from "./pool.ts";
 import { readDockerInfo } from "./runtime.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
@@ -27,6 +27,10 @@ export const PER_SANDBOX_GIB = 1.5;
 export const RECENT_RUNS = 5;
 export const FRESH_DAYS = 30;
 export const MARGIN = 1.1;
+// A gate or an agent that ran in under this much memory did not run: the figure is a sandbox at rest (about 1 MiB
+// with only `sleep` in it). A figure below it is not measured, so a recommendation never rests on one: a gate priced
+// at about 0 GiB fits thousands of sandboxes.
+export const MIN_MEASURED_MIB = 256;
 export const CPUS_PER_GATE = 6;
 export const MAX_SANDBOXES = 12;
 
@@ -124,7 +128,10 @@ export type Measured = { peakMib: number; project: string; runs: number; anonMib
  * The heaviest project's figures: each project's highest over its last `RECENT_RUNS` measured runs
  * (a run is the peaks sharing a `run`, as old as its newest line), then the project with the
  * highest `peakMib` of those whose newest measured run is within `FRESH_DAYS` of `now`. Undefined
- * with nothing measured, in which case the caller keeps the assumed figure.
+ * with nothing measured, in which case the caller keeps the assumed figure. A figure under
+ * `MIN_MEASURED_MIB` is not measured: a project whose `peakMib` is under it is left out, and any other figure
+ * under it is left off (a gate with no anonymous figure is priced from `peakMib`). The anonymous figures of a
+ * line not marked `sampled` are left out too: it may hold the sandbox at rest, and nothing on it says.
  */
 export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
   type RunPeak = { at: number; peakMib: number; anonMib: number; agentMib: number; agentAnonMib: number };
@@ -132,12 +139,13 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
   for (const l of peaks) {
     const runs = byProject.get(l.project) ?? new Map<string, RunPeak>();
     const run = runs.get(l.run) ?? { at: 0, peakMib: 0, anonMib: 0, agentMib: 0, agentAnonMib: 0 };
+    const read = (l.sampled ?? 0) >= SAMPLED;
     runs.set(l.run, {
       at: Math.max(run.at, Date.parse(l.ts)),
       peakMib: Math.max(run.peakMib, l.peakMib),
-      anonMib: Math.max(run.anonMib, l.anonMib ?? 0),
+      anonMib: Math.max(run.anonMib, read ? (l.anonMib ?? 0) : 0),
       agentMib: Math.max(run.agentMib, l.agentMib ?? 0),
-      agentAnonMib: Math.max(run.agentAnonMib, l.agentAnonMib ?? 0),
+      agentAnonMib: Math.max(run.agentAnonMib, read ? (l.agentAnonMib ?? 0) : 0),
     });
     byProject.set(l.project, runs);
   }
@@ -146,10 +154,11 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
     const recent = [...runs.values()].sort((a, b) => b.at - a.at).slice(0, RECENT_RUNS);
     if (!recent.length || recent[0].at < now - FRESH_DAYS * 86_400_000) continue;
     const peakMib = Math.max(...recent.map((r) => r.peakMib));
+    if (peakMib < MIN_MEASURED_MIB) continue;
     if (!best || peakMib > best.peakMib || (peakMib === best.peakMib && recent[0].at > best.at)) {
       const most = (k: "anonMib" | "agentMib" | "agentAnonMib") => {
         const v = Math.max(...recent.map((r) => r[k]));
-        return v > 0 ? { [k]: v } : {};
+        return v >= MIN_MEASURED_MIB ? { [k]: v } : {};
       };
       best = { peakMib, project, runs: recent.length, ...most("anonMib"), ...most("agentMib"), ...most("agentAnonMib"), at: recent[0].at };
     }
@@ -168,7 +177,7 @@ export type Recommendation = {
   gates: number;
   sandboxesBy: string;
   gatesBy: string;
-  /** Memory alone allows this many sandboxes, the gates among them (the CPUs and the ceiling may lower the limit). */
+  /** Memory alone allows this many sandboxes, the gates among them (the CPUs and the ceiling may lower the limit); 0 when it fits no gate sandbox. */
   byMemory: number;
   /** What one sandbox running a gate is priced at, in GiB, the margin included. */
   gateGib: number;
@@ -207,9 +216,11 @@ export const recommend = (memory: number, cpus: number, peaks: PeakLine[] = [], 
   }
   const usable = memory / GIB - HEADROOM_GIB;
   const gatesByCpus = Math.floor(cpus / CPUS_PER_GATE);
-  const gatesByMemory = Math.floor(usable / gateGib);
+  const gatesByMemory = Math.max(0, Math.floor(usable / gateGib));
   const g = Math.max(1, Math.min(gatesByCpus, gatesByMemory));
-  const byMemory = g + Math.floor((usable - g * gateGib) / baselineGib);
+  // Under one gate figure the VM fits no gate sandbox, and the one gate the pool is forced to keep would leave a
+  // negative memory for the rest: that is a capacity of none, not of -3.
+  const byMemory = gatesByMemory < 1 ? 0 : g + Math.floor((usable - g * gateGib) / baselineGib);
   const raw = Math.min(byMemory, cpus);
   const sandboxes = Math.max(1, Math.min(MAX_SANDBOXES, raw));
   const gates = Math.min(g, sandboxes);
@@ -218,14 +229,15 @@ export const recommend = (memory: number, cpus: number, peaks: PeakLine[] = [], 
     gateGib === baselineGib
       ? `floor((${gib(memory)} - ${HEADROOM_GIB} GiB) / ${gib2(gateGib)} GiB) = ${byMemory}`
       : `${g} gate${g === 1 ? "" : "s"} at ${gib2(gateGib)} GiB + floor((${gib(memory)} - ${HEADROOM_GIB} GiB - ${g} x ${gib2(gateGib)} GiB) / ${gib2(baselineGib)} GiB) at ${gib2(baselineGib)} GiB = ${byMemory}`;
+  const tooSmall = `${gib(memory)} less ${HEADROOM_GIB} GiB headroom is under the ${gib2(gateGib)} GiB one gate sandbox is priced at`;
   let sandboxesBy: string;
-  if (raw < 1) sandboxesBy = `at least 1 (memory allows ${byMemory}: ${memoryNote})`;
+  if (raw < 1) sandboxesBy = `at least 1 (this VM cannot fit one gate sandbox: ${tooSmall})`;
   else if (raw > MAX_SANDBOXES) sandboxesBy = `the ceiling of ${MAX_SANDBOXES} (memory allows ${byMemory}, CPUs ${cpus})`;
   else if (byMemory < cpus) sandboxesBy = `memory: ${memoryNote}; CPUs allow ${cpus}`;
   else if (byMemory > cpus) sandboxesBy = `CPUs: ${cpus}; memory allows ${byMemory} (${memoryNote})`;
   else sandboxesBy = `memory and CPUs agree: ${memoryNote}, ${cpus} CPUs`;
   const cpuNote = `floor(${cpus} / ${CPUS_PER_GATE}) = ${gatesByCpus}`;
-  const gateMemoryNote = `floor((${gib(memory)} - ${HEADROOM_GIB} GiB) / ${gib2(gateGib)} GiB) = ${gatesByMemory}`;
+  const gateMemoryNote = gatesByMemory < 1 ? `cannot fit one gate sandbox: ${tooSmall}` : `floor((${gib(memory)} - ${HEADROOM_GIB} GiB) / ${gib2(gateGib)} GiB) = ${gatesByMemory}`;
   let gatesBy: string;
   if (gates < g) gatesBy = `the sandboxes: a gate runs inside one, so at most ${sandboxes} (CPUs: ${cpuNote}; memory: ${gateMemoryNote})`;
   else if (Math.min(gatesByCpus, gatesByMemory) < 1) gatesBy = `at least 1 (CPUs: ${cpuNote}; memory: ${gateMemoryNote})`;
@@ -281,7 +293,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
     const gate =
       rec.gateFrom === "anon"
         ? `Gate figure: ${gib2(m.anonMib! / 1024)} GiB, the anonymous memory (no page cache) read during gates; ${plus} is ${gib2(rec.gateGib)} GiB. (Their cgroup \`memory.peak\`, page cache included, was ${gib2(m.peakMib / 1024)} GiB.)`
-        : `Gate figure: ${gib2(m.peakMib / 1024)} GiB, cgroup \`memory.peak\`, which includes page cache the kernel has not yet reclaimed, so it can overstate what a sandbox needs; ${plus} is ${gib2(rec.gateGib)} GiB. No anonymous-memory (no page cache) figure was recorded during gates in those runs, so no pool warning is given until one is.`;
+        : `Gate figure: ${gib2(m.peakMib / 1024)} GiB, cgroup \`memory.peak\`, which includes page cache the kernel has not yet reclaimed, so it can overstate what a sandbox needs; ${plus} is ${gib2(rec.gateGib)} GiB. No usable anonymous-memory (no page cache) figure was recorded during gates in those runs, so no pool warning is given until one is.`;
     const baseline =
       rec.baselineFrom === "agent-anon"
         ? `Agent baseline: ${gib2(m.agentAnonMib! / 1024)} GiB, the anonymous memory read during agent passes; ${plus} is ${gib2(rec.baselineGib)} GiB.`
@@ -292,7 +304,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
       `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days.`,
       gate,
       baseline,
-      `A gate runs inside a sandbox, so maxGates sandboxes are priced at the gate figure and the rest at the agent baseline. This VM's memory fits ${rec.byMemory} sandbox${rec.byMemory === 1 ? "" : "es"}, so maxSandboxes is ${rec.sandboxes} and maxGates ${rec.gates}.`,
+      `A gate runs inside a sandbox, so maxGates sandboxes are priced at the gate figure and the rest at the agent baseline. ${rec.byMemory < 1 ? "This VM's memory cannot fit one gate sandbox" : `This VM's memory fits ${rec.byMemory} sandbox${rec.byMemory === 1 ? "" : "es"}`}, so maxSandboxes is ${rec.sandboxes} and maxGates ${rec.gates}${rec.byMemory < 1 ? ", the least a pool takes" : ""}.`,
       `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
     );
   } else {
@@ -374,7 +386,7 @@ export const poolWarnings = (readers: Readers, env: Record<string, string | unde
     : `neither limit is above it, so ${sandboxes.value > 1 ? "lower maxSandboxes further or " : ""}give the VM more memory`;
   const priced = `${g} gate${g === 1 ? "" : "s"} x ${gib2(rec.gateGib)} GiB + ${sandboxes.value - g} x ${gib2(rec.baselineGib)} GiB`;
   return [
-    `maxSandboxes ${sandboxes.value} (${sandboxes.source}) with maxGates ${gates.value} (${gates.source}) needs about ${gib2(need)} GiB (${priced}), above the ${gib2(usable)} GiB this VM has after ${HEADROOM_GIB} GiB headroom; \`sandcastle size\` recommends maxSandboxes ${rec.sandboxes} and maxGates ${rec.gates} from the measured anonymous memory: ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`,
+    `maxSandboxes ${sandboxes.value} (${sandboxes.source}) with maxGates ${gates.value} (${gates.source}) needs about ${gib2(need)} GiB (${priced}), above the ${gib2(Math.max(0, usable))} GiB this VM has after ${HEADROOM_GIB} GiB headroom; \`sandcastle size\` recommends maxSandboxes ${rec.sandboxes} and maxGates ${rec.gates} from the measured anonymous memory: ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`,
   ];
 };
 

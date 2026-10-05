@@ -1385,9 +1385,13 @@ figure ("no agent baseline measured yet"). It prints each figure with where it c
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
 high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
-file backs) is read every 10 seconds while a gate pass runs, and once after it, and recorded as
+file backs) is read once as a gate pass starts and every 10 seconds while it runs, and recorded as
 `anonMib` (the largest reading: `anon` has no high-water mark of its own, so a reading after the test
-workers have exited would miss them), and `size` prices the gate from it. When the gate figure is
+workers have exited would miss them, and none is taken then), and `size` prices the gate from it. A line
+records that it was written this way (`sampled`): the anonymous figures of an older line, which may hold a
+reading taken after the gates, are not used, and a figure under 256 MiB is a sandbox at rest and does not
+count either, so those runs are priced from the peak until a newer run has recorded them. A VM whose memory
+less the headroom is under one gate figure is told it cannot fit one gate sandbox; the pool keeps 1 and 1. When the gate figure is
 `anonMib` and the effective limits, priced the same way (`min(maxGates, maxSandboxes)` gates at the
 gate figure, the other sandboxes at the agent baseline), need more than the VM's memory less the
 headroom, doctor and the run's start line warn, naming both numbers and the `config.json` key (or the
