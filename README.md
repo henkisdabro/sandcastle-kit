@@ -595,6 +595,9 @@ for ten. Each agent pass writes a readable log and its raw stream - every tool c
 `USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket, with
 the host's Claude Code login, read-only, when the sandboxes spend a subscription token (with an
 API key it says it does not apply; the details are under [Configuration](#-configuration)).
+To hold a live run without losing work - the machine, the allowance or a quiet moment is needed -
+`sandcastle pause` stops new tickets and agent passes at the next safe juncture and `sandcastle resume`
+carries on ([Pausing a run](#-pausing-a-run)); `sandcastle stop` still ends the run.
 
 The status view reads each ticket of a live run from the run's own record, so it always agrees
 with the run. Under the run band, one full-width **settings** row shows the run's settings:
@@ -685,6 +688,49 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   their own.
 
 A run in a terminal of your own (`sandcastle run`) works as before.
+
+### ⏸️ Pausing a run
+
+`sandcastle stop` ends every sandbox mid-pass, and the summary splits across two runs. To hold a live
+run for a while - you need the machine, the plan allowance or a quiet moment - without losing
+anything, pause it:
+
+```bash
+sandcastle pause                      # hold the live run at the next safe juncture
+sandcastle resume                     # continue it, in the same run
+```
+
+A **soft pause**, from any terminal (the run may be attached or detached):
+
+- **No new work starts.** No new ticket, and no new agent pass for a ticket in flight (implement,
+  review, cross-review, repair or resolve). A pass already running finishes.
+- **At that juncture the ticket's sandbox closes.** Its branch keeps every commit (a worktree
+  holding uncommitted files is kept too, locked against a prune of worktree records), and the
+  ticket waits, holding no sandbox slot. Gate runs are not agent passes: a ticket whose pass has
+  ended goes on to its gates, and a green branch **still lands** - landing spends gates but no
+  model allowance.
+- **The run lets go of the machine.** It stays alive, but its [demand](#-concurrency) is 0 once
+  nothing is in flight, so the other runs can use its sandbox slots, and the
+  [keep-awake](#-sleep) helper ends so the machine may sleep. Both come back on resume.
+- **`sandcastle resume`** opens a fresh sandbox on the same branch for each paused ticket and goes
+  on with its next phase - a branch that was implemented is reviewed on the commit its implement
+  pass left, and is not implemented again - with one closing summary at the end of the run.
+
+Both commands print what they did, or `No run is live.`; pausing a paused run, or resuming a run
+that is not paused, says so and changes nothing. They write and remove a control file,
+`.sandcastle/.run/paused`, which names the run it was asked of (a file a dead run left behind pauses
+no later one) and which the run reads at each juncture and every second.
+
+While paused, the status view's run cell reads `PAUSED since 15:40 - finishing #12 review, #14
+landing`, then `PAUSED since 15:40` once nothing is in flight (a narrow pane puts the tickets
+finishing on the cell's second row); a ticket parked between two phases shows as `paused`, with the
+phase it resumes at in its note. The Herdr sidebar and tab bar say `paused` in place of the working
+count, and the Claude Code mod treats a paused run as live: no "the run ended" prompt.
+`sandcastle wait` keeps waiting through a pause, and `sandcastle stop` works while paused. A run
+that ends while paused (stopped, crashed) lists the paused tickets under **Runnable now** in its
+summary: each branch holds its work, and the next `sandcastle run` picks it up. A pause does not
+count as no progress for the `drain` autonomy level, which judges a turn by what it landed, and
+a turn cannot end while it is paused.
 
 ### 📊 After a run
 
@@ -796,6 +842,8 @@ without systemd or a container), the line says `off` and why, and the run goes o
 - **Always:** `"keepAwake": false` in your [personal settings](#personal-settings).
 - **A laptop lid is the exception.** Closing it sleeps a MacBook whatever the kit does, unless it is
   on power with an external display attached. Leave the lid open, or run on a desktop machine.
+- **A paused run lets go of it.** `sandcastle pause` ends the helper once nothing is in flight, and
+  `sandcastle resume` starts it again ([Pausing a run](#-pausing-a-run)).
 
 It is a machine setting, not a project one: `.sandcastle/config.ts` is committed, and would
 decide it for every teammate's machine.
@@ -1072,6 +1120,8 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle run [--detach] [--api-key]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
+| `sandcastle pause` | Holds the live run at the next safe juncture ([Pausing a run](#-pausing-a-run)): no new ticket or agent pass starts, passes in flight finish and their sandboxes close (branches kept), green branches still land, and the run gives its sandbox slots to other runs and lets the machine sleep. `No run is live.` when none is; `already paused` when it is | ➖ no |
+| `sandcastle resume` | Continues a paused run: each paused ticket goes on from its next phase, in the same run. `No run is live.` when none is; `is not paused` when it is not | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
@@ -1320,7 +1370,8 @@ never waits for one, but it is counted: while it lives the pool can read one pas
 Live runs also split the sandbox slots between them, by **share**. A run's **demand** is how many
 slots it could use now: the tickets in a sandbox or ready to start, plus one while a green branch
 waits to land, never more than its concurrency; a ticket held for a blocker adds nothing until the
-blocker lands, and a run that has drained its queue asks for none. The pool is divided equally
+blocker lands, and a run that has drained its queue asks for none, nor does a [paused](#-pausing-a-run)
+run once the passes in flight have ended (its tickets give their slots back). The pool is divided equally
 between the runs that ask for slots, and a run that needs less than an equal part releases the rest
 to the others, again equally. A run's share is its part: with two runs wanting 5 each on 6 slots,
 each gets 3; a run wanting 1 leaves 5 to the other; a run alone gets everything it asks for, as
