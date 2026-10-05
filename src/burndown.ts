@@ -40,7 +40,7 @@ import { isTicketState, type RunRecord, type TicketRecord, type TicketState } fr
 import { estimateSlots, joinPool, limit, myShare, otherRuns, recordOfRun, setDemand, splitAtStart, startLines, usage, type WaitReason, wholeNumber, withSlot } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -626,8 +626,9 @@ export const createPipeline = (ctx: PipelineContext) => {
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
     const implModel = own.model ?? IMPL_MODEL;
-    // `IMPL_UNMET` is empty here: only a full review is shown the implementer's line (see `implUnmetView`).
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", ...tracker.promptArgs(issue.id) };
+    // `IMPL_UNMET` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's unmet
+    // line and changelog lines (see `implUnmetView`, `implChangelogView`).
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_CHANGELOG: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
@@ -945,7 +946,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             () => {
               return reviewWithFallback(ref(issue.id), (agent, model) => {
                 reviewModel = model;
-                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) })(agent);
+                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
               });
             },
             undefined,
@@ -956,7 +957,7 @@ export const createPipeline = (ctx: PipelineContext) => {
                 issue.id,
                 "cross-review",
                 () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet) }));
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) }));
                 },
                 undefined,
                 () => CROSS_REVIEW_MODEL,

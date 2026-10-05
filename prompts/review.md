@@ -98,7 +98,9 @@ to time it.
 
 The orchestrator runs every one of them on this branch as soon as you finish, and a red gate gets a
 repair pass. So run the tests and checks that cover what you are looking at or changing, as often as
-you need - but a full gate run of your own adds nothing when you commit nothing.
+you need. Run the full suite once, and only if your own commits changed code; after docs-only
+commits (prose in a README, a doc or a comment), none. A full gate run of your own adds nothing when
+you commit nothing.
 
 # Finishing
 
