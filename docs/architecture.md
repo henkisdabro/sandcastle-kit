@@ -67,10 +67,11 @@ state.
   (`failureKey`): a pipeline `claim`s it as its repair pass starts and asks `fixing` before its own,
   and a ticket red on a failure another is repairing prints `#N: waiting for #M's fix to <test>`,
   `wait`s for that ticket's ending (`told`, fed every change by burndown's `tell`), then merges the
-  base into its branch in its sandbox and gates again. A fix that has already landed (its gate went
-  red just after that landing) is merged and re-gated the same way, without a wait or its line. A ticket that did not land (red, gave up,
-  crashed, held, stopped) or was sent back at landing (`requeued`: its second attempt may sit behind
-  the very pipelines that wait for it) frees its waiters, which repair as before; so do a merge that
+  base into its branch in its sandbox and gates again. A ticket red on a failure whose fix has
+  already landed (its gate finished just after that landing) merges the base and gates again the
+  same way, without a wait or its line. A ticket that did not land (red, gave up, crashed, held,
+  stopped) or was sent back at landing (`requeued`: its second attempt may sit behind the very
+  pipelines that wait for it) frees its waiters, which repair as before; so do a merge that
   conflicts and a re-gate that is still red (it waits once per failure). A wait that would close a
   cycle is refused, a forced red (`SANDCASTLE_TEST_RED_GATE`) never waits, and the waiting ticket
   keeps its sandbox slot - so while a landing of the run waits for a slot (`slotWanted`), every
