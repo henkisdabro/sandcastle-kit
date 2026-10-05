@@ -1051,7 +1051,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor, then points to `sandcastle size` while neither machine pool limit is set | ➖ no |
 | `sandcastle help` | Lists every command | ➖ no |
 | `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, warns when a pool limit is above what `sandcastle size` recommends from measured sandbox peaks (both numbers and the `config.json` key; a run's start prints the same warning), and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, warns when the pool limits need more memory than the VM has, priced from the measured anonymous memory of gates and agents (both numbers and the `config.json` key; a run's start prints the same warning), and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release and every Upgrading note it has now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes the tags of its repository that nothing has used or built for 14 days (a tag a live run uses is kept; the kit stamps each tag it builds or uses under its cache directory, `image-use/`, as docker keeps no last-used time), so kit checkouts on different commits do not delete each other's images. A build in which every step was cached prints one line (`Image <tag> re-tagged from cache`); docker's output is shown for a real build or a failure. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
@@ -1348,12 +1348,16 @@ share (`wants 4 · share 2 · cap 2`).
 
 **Sizing the pool.** `sandcastle size` is read-only: it reads the container runtime's VM
 (`docker info`: its CPUs and memory), the host's RAM and the free disk where images and worktrees
-live, and recommends the limits above, naming the figure that set each. Sandboxes are the smaller
-of `floor((VM memory - 2 GiB) / the sandbox's memory)` and the VM's CPUs, at least 1 and at most
-12; gates are `floor(VM CPUs / 6)`, at least 1. The 2 GiB headroom and the 6 CPUs a gate wants are
-assumptions, and are printed with the answer.
+live, and recommends the limits above, naming the figure that set each. A gate runs inside a
+sandbox, so the gates' sandboxes are priced at a **gate figure** and the rest at an **agent
+baseline**, what a sandbox needs between gates. Gates are the smaller of `floor(VM CPUs / 6)` and
+`floor((VM memory - 2 GiB) / the gate figure)`, at least 1; sandboxes are those gates plus
+`floor((VM memory - 2 GiB - gates x the gate figure) / the agent baseline)`, at least 1 and at most
+the smaller of 12 and the VM's CPUs, and the gates never more than the sandboxes. The 2 GiB headroom
+and the 6 CPUs a gate wants are assumptions, and are printed with the answer. On native Linux Docker
+the VM's memory is the whole host's, so the 2 GiB covers less: the desktop and everything else share it.
 
-The sandbox's memory is **measured** once runs have been recorded, and assumed (1.5 GiB, and the
+The two figures are **measured** once runs have been recorded, and both assumed (1.5 GiB, and the
 answer says so) until then. Every sandbox's peak memory is read from inside it, from the kernel's
 own high-water mark (cgroup v2 `memory.peak`), after each gate pass and again before it closes.
 Gates run in the agent's own sandbox, and the base and verify gates in a throwaway one, so a
@@ -1366,18 +1370,23 @@ and a hash of the project root: no path and no project name. A ticket's sandbox 
 records `agentMib`, its peak read just before its first gate pass (the peak cannot be reset, so after
 a gate it is the gate's), and `agentAnonMib`, the anonymous memory read while its agents worked; a
 line without them is a gate peak only.
-`size` takes each project's highest peak over its last 5 measured runs, then the highest of the
-projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
-project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
+`size` takes the project with the highest peak over its last 5 measured runs, of the projects
+measured in the last 30 days, and that project's highest figures over those runs, plus 10%. The gate
+figure is `anonMib` when any of the runs recorded it, else the peak; the agent baseline is
+`agentAnonMib` when the gate figure is `anonMib` and a run recorded it, else `agentMib`, else the gate
+figure ("no agent baseline measured yet"). It prints each figure with where it came from, the project
+(`this project` when you run it inside it, else the hash), the runs it rests on and the resulting limits.
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
 keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
 high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
 file backs) is read every 10 seconds while a gate pass runs, and once after it, and recorded as
 `anonMib` (the largest reading: `anon` has no high-water mark of its own, so a reading after the test
-workers have exited would miss them), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
-and the effective `maxSandboxes` or `maxGates` is above it, doctor and the run's start line warn, naming
-both numbers and the `config.json` key (or the `SANDCASTLE_MAX_*` variable that overrides it); from the assumed
-figures nothing is warned. The pool's shares divide whatever limit you set; nothing about them
+workers have exited would miss them), and `size` prices the gate from it. When the gate figure is
+`anonMib` and the effective limits, priced the same way (`min(maxGates, maxSandboxes)` gates at the
+gate figure, the other sandboxes at the agent baseline), need more than the VM's memory less the
+headroom, doctor and the run's start line warn, naming both numbers and the `config.json` key (or the
+`SANDCASTLE_MAX_*` variable that overrides it). From `memory.peak` alone or the assumed figures nothing
+is warned (a pool it priced past the VM ran clean: page cache is reclaimed), and doctor keeps its `info` pointer. The pool's shares divide whatever limit you set; nothing about them
 changes. `size` shows the current limits beside the
 recommendation (environment, then `config.json`, then the defaults) and says when they already
 match; it changes nothing, so you copy the numbers into your [personal settings](#personal-settings)

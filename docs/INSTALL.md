@@ -129,8 +129,9 @@ native Linux Docker has no VM). It is read-only and writes nothing, not even `co
 numbers into `~/.config/sandcastle-kit/config.json` yourself. Applying a runtime change restarts it
 and stops a live run's containers. While neither limit is set (no `maxSandboxes` or `maxGates` in
 `config.json`, no `SANDCASTLE_MAX_*` in the environment), `setup` and `doctor` (as an `info` line) point
-here; `init` does not, as the pool is machine-wide. Once runs have measured sandbox peaks, a limit
-above what `size` recommends is a `warn` in doctor and a `warning:` on a run's start line instead,
+here; `init` does not, as the pool is machine-wide. Once a run has recorded the anonymous memory a
+gate used, limits that need more memory than the VM has (the gates priced at the gate's figure, the
+other sandboxes at an agent's) are a `warn` in doctor and a `warning:` on a run's start line instead,
 naming both numbers and the key to set. The reasoning is in the README's
 [Concurrency](../README.md#-concurrency) section.
 
