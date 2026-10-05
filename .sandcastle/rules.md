@@ -43,4 +43,6 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
 - Leave `docker/base.Dockerfile` version pins alone unless the ticket is about them.
 - **How the test runner reports.** `pnpm test` runs `node:test` with its spec output: a pass is
   `ℹ pass N`, a failure is a line starting `✖` and `ℹ fail N`. It does not print TAP, so grepping
-  for `^not ok` or `^# pass` finds nothing. Redirect the run to a file and grep that.
+  for `^not ok` or `^# pass` finds nothing. Redirect the run to a file and grep that. `pnpm test`
+  runs `test/status.test.sh` first, and it reports a failure as a line starting `FAIL [` instead:
+  grep for both (`^✖|^FAIL \[`), or a red run can show no matching line.

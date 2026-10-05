@@ -20,8 +20,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A run files its agents' follow-ups itself**: on GitHub as issues with the `needs-triage` role's
   label, with ticket files as new committed files with that status, next to the source ticket. Map
   the role in `docs/agents/triage-labels.md` to use another label.
-- **Run `sandcastle size` again once a run on this version has ended**: the pool warning stays
-  quiet, and doctor keeps its info line, until a run has recorded anonymous-memory figures.
+- **Do not act on `sandcastle size`'s recommendation yet**: until #370 lands it reads the
+  at-rest memory figures in earlier runs' `peaks.jsonl` lines as a gate's, prices a gate at about
+  0 GiB and recommends a pool larger than the VM fits; the pool warning is quiet for the same
+  reason. Keep the limits you have.
 - **On Linux, `sandcastle doctor` and `sandcastle run` refuse Podman behind `docker` and rootless
   or userns-remapped Docker, and on any OS a run as root**, where the agent could not write its
   worktree. Linux needs rootful Docker Engine and a normal user in the `docker` group.
