@@ -1311,9 +1311,10 @@ CPU-heavy part, and running too many at once produces false test failures. Chang
 own sandbox, so each sandbox also gets a CPU limit (the project's `cpus`, by default the VM's CPUs
 divided by the run's concurrency). When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
-freed one does not take it back from another run that was already waiting. Within one run nothing
-changes (a landing still goes before its next ticket). A wait or a slot left by a run that was
-killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The
+freed one does not take it back from another run that was already waiting. Within one run, a
+landing's gates (and the base and verify gates) take a freed gate slot before the run's ticket
+gates, since the one landing worker sets the run's end, and a landing still goes before its next
+ticket for a sandbox slot. A wait or a slot left by a run that was killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The
 base check a run makes mid-run starts its sandbox inside the slot of the ticket that asked, so it
 never waits for one, but it is counted: while it lives the pool can read one past its cap (`7/6`).
 
