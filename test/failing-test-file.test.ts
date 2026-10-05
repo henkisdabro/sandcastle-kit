@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { failingTestFile, failingTests } from "../src/gates.ts";
+import { clip, failingTestFile, failingTests } from "../src/gates.ts";
 
 // Captured from `node --test src/a.test.js` on Node 24 (spec reporter, piped); `tsx --test src/a.test.js`
 // prints the same lines. Stack frames trimmed.
@@ -111,4 +111,15 @@ test("a failing test with no 'test at' line names no file", () => {
 test("eslint's '✖ N problems' line in front of a node:test summary is still not a test", () => {
   const out = ["✖ 2 problems (2 errors, 0 warnings)", "✖ failing tests:", "", "test at src/a.test.js:4:1", "✖ clock is early (0.3ms)"].join("\n");
   assert.deepEqual(failingTests(out), ["src/a.test.js::clock is early"]);
+});
+
+test("a summary the gate's output clip cut through names no file: a test it lost could be the branch's own", () => {
+  const entry = (file: string, name: string) => [`test at ${file}:3:1`, `✖ ${name} (1ms)`, ...Array(600).fill("    at a long stack frame of the failure")];
+  const out = clip(
+    ["✖ base red (1ms)", "✖ own red (1ms)", "✖ also base (1ms)", "", "✖ failing tests:", "", ...entry("test/a.test.js", "base red"), ...entry("test/b.test.js", "own red"), ...entry("test/c.test.js", "also base")].join("\n"),
+  );
+  assert.ok(!out.includes("own red (1ms)\n    at"), "the fixture's clip must cut the middle entry away");
+  const ids = failingTests(out);
+  assert.ok(ids.includes("own red"));
+  assert.deepEqual(ids.map(failingTestFile), ids.map(() => undefined));
 });

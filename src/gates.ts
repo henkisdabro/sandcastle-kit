@@ -315,10 +315,13 @@ export const namesFailingTest = (line: string) => FAILING_TEST_LINE.some((re) =>
 export const FAILING_TESTS_SHOWN = 5;
 const SPEC_SUMMARY = /^✖ failing tests:$/;
 const SPEC_LOCATION = /^test at (.+):\d+:\d+$/;
+const CLIPPED = /^\[\.\.\. \d+ characters cut \.\.\.\]$/;
 const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
 export const failingTests = (output: string) => {
   const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
-  const summary = lines.findIndex((line) => SPEC_SUMMARY.test(line));
+  const header = lines.findIndex((line) => SPEC_SUMMARY.test(line));
+  // A summary `clip` cut through is not the whole list: a test it lost could be the branch's own.
+  const summary = header >= 0 && lines.slice(header).some((line) => CLIPPED.test(line)) ? -1 : header;
   if (summary < 0) return [...new Set(lines.flatMap(idsOf))].slice(0, FAILING_TESTS_SHOWN);
   const before = lines.slice(0, summary).flatMap((line) => (SPEC_FAILED.test(line) ? [] : idsOf(line)));
   const listed: string[] = [];
