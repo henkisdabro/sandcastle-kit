@@ -2,7 +2,7 @@
 // guess. The kernel keeps the high-water mark itself (cgroup v2 `memory.peak`, in bytes), so it is
 // read from inside the container after each gate pass and again before the sandbox closes: nothing
 // to name or find a container by. A gate pass runs in the agent's own sandbox (base and verify
-// gates in a throwaway one), so the sandbox's peak covers its gates.
+// gates in a throwaway one, a landing's gates in its landing sandbox), so the sandbox's peak covers its gates.
 //
 // `memory.peak` cannot be reset from inside a sandbox (`/sys/fs/cgroup` is read-only there), so what
 // an agent needs between gates is read once, just before the sandbox's first gate pass, as `agentMib`.
@@ -40,7 +40,7 @@ export type Exec = { exec(cmd: string): Promise<{ exitCode: number; stdout: stri
  * `peakMib` is the whole life's `memory.peak`, page cache included; `anonMib` the largest anonymous memory
  * (no page cache) read while a gate pass ran. `agentMib` is `memory.peak` just before the first gate pass and
  * `agentAnonMib` the largest anonymous memory read while an agent pass ran: only a ticket's sandbox whose
- * agents ran has them, so a line without `agentMib` (base, verify, a land-only re-run, every older line) is a
+ * agents ran has them, so a line without `agentMib` (base, verify, landing, a land-only re-run, every older line) is a
  * gate peak only. Each optional figure is absent where the kernel gave none.
  */
 export type PeakLine = { ts: string; project: string; run: string; peakMib: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };

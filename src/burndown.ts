@@ -1560,6 +1560,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(project, image, planFile),
+    runId,
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.

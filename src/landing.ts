@@ -291,6 +291,8 @@ export type LandContext = {
   dryRun: boolean;
   /** Opens a sandbox on a branch, for redoing a conflict confined to generated files. */
   opener: Opener;
+  /** The run's start time, which a landing sandbox's peak memory is filed under. */
+  runId?: string;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
   withdrawal: (id: string) => { held: boolean; reason: string } | undefined;
   /** Where every write to the host's git goes. */
@@ -487,7 +489,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
           waiting = false;
           return landInSandbox(
             project,
-            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash },
+            { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
             opener,
             (box) => ctx.gate(box, o.issue),
             host.expected,
