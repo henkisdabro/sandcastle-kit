@@ -49,6 +49,7 @@ test("a gate limit above the CPUs' recommendation warns too, naming maxGates", (
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^maxGates is 2 \(default\), above the 1 that `sandcastle size` recommends/);
   assert.match(lines[0], /set "maxGates": 1 in /);
+  assert.ok(!lines[0].includes("sandbox peaks"), `the gate limit rests on the CPUs, not the peaks: ${lines[0]}`);
 });
 
 test("limits at or below the recommendation, from config.json or the environment, do not warn", () => {

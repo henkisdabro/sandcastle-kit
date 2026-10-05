@@ -1342,7 +1342,8 @@ sandbox's peak covers its gates, and a heavy gate (a browser test suite, say) sh
 largest reading goes into the gate pass's line in the project's `.sandcastle/logs/timings.jsonl`
 (`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
 (`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
-a time, the run's start time, the peak and a hash of the project root: no path and no project name.
+a time, the run's start time, the peak, the anonymous-memory figure below when the kernel gives one,
+and a hash of the project root: no path and no project name.
 `size` takes each project's highest peak over its last 5 measured runs, then the highest of the
 projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
 project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.

@@ -290,8 +290,9 @@ export const poolWarnings = (readers: Readers, env: Record<string, string | unde
     const c = current(pool, env, machine);
     if (c.value <= rec[pool]) continue;
     const set = c.source.startsWith("environment") ? `change or unset ${variable}` : `set "${name}": ${rec[pool]} in ${join(USER_CONFIG, "config.json")}`;
-    const by = pool === "sandboxes" ? rec.sandboxesBy : rec.gatesBy;
-    lines.push(`${name} is ${c.value} (${c.source}), above the ${rec[pool]} that \`sandcastle size\` recommends from the measured sandbox peaks (${by}): ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`);
+    // The gate limit rests on the CPUs alone: naming the peaks as its source would send the person to the wrong figure.
+    const by = pool === "sandboxes" ? `from the measured sandbox peaks (${rec.sandboxesBy})` : `(${rec.gatesBy})`;
+    lines.push(`${name} is ${c.value} (${c.source}), above the ${rec[pool]} that \`sandcastle size\` recommends ${by}: ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`);
   }
   return lines;
 };
