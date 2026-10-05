@@ -77,7 +77,7 @@ read a module's section there before changing it.
 | `src/versions.ts` | Which Claude Code and Codex versions the image gets, resolved on the host and part of the image tag |
 | `prompts/` | Implement, review, repair and resolve templates; the kit fills `{{KIT_*}}`, Sandcastle the rest |
 | `container/` | Mounted read-only at `/etc/claude-code` in every sandbox: managed settings and `git-guard.sh`, the hook that refuses damage to the shared `.git` |
-| `docker/base.Dockerfile` | The shared base image. Its entrypoint is `sleep infinity`: a debugging `docker run` needs `--entrypoint bash` |
+| `docker/base.Dockerfile` | The shared base image. PID 1 is `tini` (it reaps orphaned processes) and `CMD` is `sleep infinity`: a debugging `docker run -it <image> bash` gets a shell |
 | `status.sh` | Status view; bash 3.2-safe, macOS and Linux, and no extglob in a per-cell helper (3.2 makes it slow). A live run's tickets come from `run.json`'s `tickets`, never inferred |
 | `test/fixtures.ts` | `fakeTracker(overrides?)`: a project's `tracker` from `resolveTracker`'s own defaults. A test builds its `tracker` with it, never a full literal (`test/fixtures.test.ts` holds that); import it after `XDG_CONFIG_HOME` is set, like `src/` |
 | `test/cli-spawn.ts` | `runKit`, `runNode`, `startKit`, `startNode`: how a test starts the kit as a child process - `process.execPath`, the launcher's V8 flags read from `bin/sandcastle` (the Node 24 exit deadlock, #164) and a time limit that fails the test with the command named, and children that die with the test process (`test/parent-watch.ts`); `test/cli-spawn.test.ts` refuses a test file that names a tsx entry itself |
