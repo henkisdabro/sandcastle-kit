@@ -404,17 +404,19 @@ export const baseImage = (versions: Pick<Versions, "claude" | "codex">) => {
   return { file, ids, tag: `sandcastle-base:${hash(file, ...Object.values(ids))}` };
 };
 
-/** The lock the base image's build, prune and tag are taken under, machine-wide. */
+/** The lock the base image's build, prune and tag, and the project layer built on it, are taken under, machine-wide. */
 export const BASE_LOCK = join(KIT_CACHE, "locks", "base-image.lock");
 
 /** `versions` is what the caller already resolved and showed; left out, they are resolved here. */
 export const ensureImage = async (project: Project, force = false, versions?: Versions): Promise<string> => {
   const { file: baseFile, ids, tag: baseTag } = baseImage(versions ?? (await resolveVersions(project)));
-  // The whole base step is one machine-wide critical section, for any base tag: projects share the
-  // images, and every project rebuilds after an update. Two builds of one tag race to `docker tag` an
-  // image the other is still making, and two tags (each project's Claude Code version is in it) have
-  // each prune the other's fresh image. The second waits, then finds the image built.
-  await withLock(
+  // The base step and the project layer's build are one machine-wide critical section, for any base tag:
+  // projects share the images, and every project rebuilds after an update. Two builds of one tag race
+  // to `docker tag` an image the other is still making, and two tags (each project's Claude Code version
+  // is in it) have each prune the other's fresh image. The second waits, then finds the image built. The
+  // layer build is inside too: its `FROM` names the base tag, which another project's base build would
+  // otherwise prune before the layer's `docker build` resolved it.
+  return withLock(
     BASE_LOCK,
     `${project.name} ${baseTag}`,
     () => {
@@ -426,25 +428,26 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       }
       // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
       dockerCall(`tagging ${baseTag} as sandcastle-base:latest`, ["tag", baseTag, "sandcastle-base:latest"]);
+
+      if (!project.dockerfile) {
+        // Written by hand from the template, it does nothing until the config names it.
+        if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {
+          console.log('Not built: .sandcastle/Dockerfile - the config names no `dockerfile`. Add `dockerfile: ".sandcastle/Dockerfile"` to .sandcastle/config.ts to build it.');
+        }
+        return baseTag;
+      }
+
+      const layerFile = readFileSync(join(project.root, project.dockerfile), "utf8");
+      const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
+      const tag = `${repo}:${hash(baseTag, layerFile)}`;
+      if (force || !imageExists(tag)) {
+        build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
+        prune(repo, tag);
+      }
+      return tag;
     },
     (owner) => console.log(`Waiting for another sandcastle build of the base image${owner ? ` (pid ${owner})` : ""} to finish ...`),
   );
-  if (!project.dockerfile) {
-    // Written by hand from the template, it does nothing until the config names it.
-    if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {
-      console.log('Not built: .sandcastle/Dockerfile - the config names no `dockerfile`. Add `dockerfile: ".sandcastle/Dockerfile"` to .sandcastle/config.ts to build it.');
-    }
-    return baseTag;
-  }
-
-  const layerFile = readFileSync(join(project.root, project.dockerfile), "utf8");
-  const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
-  const tag = `${repo}:${hash(baseTag, layerFile)}`;
-  if (force || !imageExists(tag)) {
-    build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
-    prune(repo, tag);
-  }
-  return tag;
 };
 
 // ---------------------------------------------------------------------------
