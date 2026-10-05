@@ -13,7 +13,7 @@ import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hi
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { limit } from "./pool.ts";
-import { sizePointerNow } from "./size.ts";
+import { poolWarningsNow, sizePointerNow } from "./size.ts";
 import { apiKeySpend, baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
@@ -452,8 +452,12 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       console.log(`warn Could not reach the release channel; using ${versions.source === "cache" ? "the cached" : "the Dockerfile's default"} versions.\n       -> Fine while runs work. If preflight says a model needs a newer Claude Code, check the network and run \`sandcastle build\`, or pin one with \`claudeCode: "x.y.z"\` in ${CONFIG_PATH}.`);
     }
   }
-  // Info, never a warn or a FIX: the defaults work, and `size` is only the better number.
-  const pointer = pointToSize ? sizePointerNow() : undefined;
+  // A warn when measured sandbox peaks say the pool's limits are above what the VM fits (the
+  // owner's choice: never a FIX, a run still starts), and then in place of the pointer. From the
+  // assumed figures it stays info: the defaults work, and `size` is only the better number.
+  const poolWarns = poolWarningsNow();
+  for (const line of poolWarns) console.log(`warn ${line}`);
+  const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
   if (process.env.HERDR_ENV === "1") {

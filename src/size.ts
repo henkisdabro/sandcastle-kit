@@ -112,7 +112,7 @@ const gib = (bytes: number) => `${(Math.round((bytes / GIB) * 10) / 10).toString
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
 
 /** What the peaks say a sandbox needs: the heaviest project's peak, the project, the runs it rests on and the figure with the margin. */
-export type Measured = { peakMib: number; project: string; runs: number; perSandboxMib: number };
+export type Measured = { peakMib: number; project: string; runs: number; perSandboxMib: number; anonMib?: number };
 
 /**
  * A sandbox's measured need: each project's highest peak over its last `RECENT_RUNS` measured runs
@@ -121,11 +121,12 @@ export type Measured = { peakMib: number; project: string; runs: number; perSand
  * nothing measured, in which case the caller keeps the assumed figure.
  */
 export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
-  const byProject = new Map<string, Map<string, { at: number; peakMib: number }>>();
+  type RunPeak = { at: number; peakMib: number; anonMib: number };
+  const byProject = new Map<string, Map<string, RunPeak>>();
   for (const l of peaks) {
-    const runs = byProject.get(l.project) ?? new Map<string, { at: number; peakMib: number }>();
-    const run = runs.get(l.run) ?? { at: 0, peakMib: 0 };
-    runs.set(l.run, { at: Math.max(run.at, Date.parse(l.ts)), peakMib: Math.max(run.peakMib, l.peakMib) });
+    const runs = byProject.get(l.project) ?? new Map<string, RunPeak>();
+    const run = runs.get(l.run) ?? { at: 0, peakMib: 0, anonMib: 0 };
+    runs.set(l.run, { at: Math.max(run.at, Date.parse(l.ts)), peakMib: Math.max(run.peakMib, l.peakMib), anonMib: Math.max(run.anonMib, l.anonMib ?? 0) });
     byProject.set(l.project, runs);
   }
   let best: (Measured & { at: number }) | undefined;
@@ -134,10 +135,11 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
     if (!recent.length || recent[0].at < now - FRESH_DAYS * 86_400_000) continue;
     const peakMib = Math.max(...recent.map((r) => r.peakMib));
     if (!best || peakMib > best.peakMib || (peakMib === best.peakMib && recent[0].at > best.at)) {
-      best = { peakMib, project, runs: recent.length, perSandboxMib: Math.ceil(peakMib * MARGIN - 1e-9), at: recent[0].at };
+      const anonMib = Math.max(...recent.map((r) => r.anonMib));
+      best = { peakMib, project, runs: recent.length, perSandboxMib: Math.ceil(peakMib * MARGIN - 1e-9), ...(anonMib > 0 ? { anonMib } : {}), at: recent[0].at };
     }
   }
-  return best && { peakMib: best.peakMib, project: best.project, runs: best.runs, perSandboxMib: best.perSandboxMib };
+  return best && { peakMib: best.peakMib, project: best.project, runs: best.runs, perSandboxMib: best.perSandboxMib, ...(best.anonMib ? { anonMib: best.anonMib } : {}) };
 };
 
 export type Recommendation = {
@@ -223,6 +225,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
     const where = m.project === readers.projectId?.() ? "this project" : `project ${m.project}`;
     lines.push(
       `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where} peaked at ${gib2(m.peakMib / 1024)} GiB in one sandbox, the highest of any project in the last ${FRESH_DAYS} days; plus ${Math.round((MARGIN - 1) * 100)}% is ${gib2(rec.perSandboxGib)} GiB. This VM's memory fits ${rec.byMemory} sandboxes, so maxSandboxes is ${rec.sandboxes}.`,
+      `The peak is cgroup \`memory.peak\`, which includes page cache the kernel has not yet reclaimed, so it can overstate what a sandbox needs; ${m.anonMib === undefined ? "no anonymous-memory (no page cache) figure was recorded for those runs" : `the anonymous memory (no page cache) read in them was at most ${gib2(m.anonMib / 1024)} GiB, the lower bound`}.`,
       `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
     );
   } else {
@@ -259,6 +262,48 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
   lines.push(runtime ? `  Where: ${WHERE[runtime]}.` : "  Where: in your runtime's own settings (OrbStack: `orb config set`; Docker Desktop: Settings -> Resources; Podman: `podman machine set`; Colima: `colima start --cpu --memory`).");
   lines.push("  Warning: applying a runtime change restarts it and stops a live run's containers. Wait for runs to finish (`sandcastle wait`).");
   return lines;
+};
+
+/**
+ * Warnings for a pool limit above what `size` recommends, one per limit, naming both numbers and the
+ * key (or the environment variable that overrides it) to set. Only when the recommendation rests on
+ * measured peaks: from the assumed figures it is a guess, and the untouched-defaults pointer already
+ * says so. Nothing when the runtime cannot be asked, rather than an error: doctor and the start
+ * line have no use for one.
+ */
+export const poolWarnings = (readers: Readers, env: Record<string, string | undefined>, machine: Record<string, unknown>): string[] => {
+  const raw = readers.dockerInfo();
+  if (raw === undefined) return [];
+  let info: Info;
+  try {
+    info = JSON.parse(raw) as Info;
+  } catch {
+    return [];
+  }
+  const cpus = Number(info.NCPU);
+  const memory = Number(info.MemTotal);
+  if (!(cpus >= 1) || !(memory > 0)) return [];
+  const rec = recommend(memory, cpus, readers.peaks?.() ?? [], readers.now?.() ?? Date.now());
+  if (!rec.measured) return [];
+  const lines: string[] = [];
+  for (const [pool, name, variable] of [["sandboxes", "maxSandboxes", "SANDCASTLE_MAX_SANDBOXES"], ["gates", "maxGates", "SANDCASTLE_MAX_GATES"]] as const) {
+    const c = current(pool, env, machine);
+    if (c.value <= rec[pool]) continue;
+    const set = c.source.startsWith("environment") ? `change or unset ${variable}` : `set "${name}": ${rec[pool]} in ${join(USER_CONFIG, "config.json")}`;
+    // The gate limit rests on the CPUs alone: naming the peaks as its source would send the person to the wrong figure.
+    const by = pool === "sandboxes" ? `from the measured sandbox peaks (${rec.sandboxesBy})` : `(${rec.gatesBy})`;
+    lines.push(`${name} is ${c.value} (${c.source}), above the ${rec[pool]} that \`sandcastle size\` recommends ${by}: ${set}. More at once than the VM fits risks out-of-memory faults and slow gates.`);
+  }
+  return lines;
+};
+
+/** `poolWarnings` for this process. A bad config.json or pool setting is reported elsewhere (doctor's own FIX, the run's refusal): no warning here. */
+export const poolWarningsNow = (): string[] => {
+  try {
+    return poolWarnings(realReaders(), process.env, machineSettings());
+  } catch {
+    return [];
+  }
 };
 
 /**

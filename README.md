@@ -1037,7 +1037,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle setup` | Interactive install: links the command and skill, writes the credentials file, runs doctor, then points to `sandcastle size` while neither machine pool limit is set | ➖ no |
 | `sandcastle help` | Lists every command | ➖ no |
 | `sandcastle --version` | The kit version: the release (`X.Y.Z`), and in a clone that is past it or has local changes, how far and at which commit (`X.Y.Z +1 (1c4f46f)`). Doctor's first line says the same | ➖ no |
-| `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
+| `sandcastle doctor [--verify]` | Checks machine and project setup (inside a project also the tracker and, on GitHub, the queue label) and prints the fix for each problem as the command that applies it; doctor itself changes nothing. Names the Claude Code and Codex versions sandbox images will get, shows the size of Docker's build cache with the `docker builder prune` hint, points to `sandcastle size` (an `info` line) while neither machine pool limit is set, warns when a pool limit is above what `sandcastle size` recommends from measured sandbox peaks (both numbers and the `config.json` key; a run's start prints the same warning), and warns - never fails - when the release channel cannot be reached, the project's base image is more than 30 days old, or a pulled kit has Upgrading notes the project has not had since its last update. `--verify` also asks GitHub and Anthropic whether the tokens are accepted (a fingerprint, never the value; no model call), and in a GitHub project whether `GH_TOKEN` can push there - a probe that writes nothing; a token that can is a FIX | ➖ no |
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release and every Upgrading note it has now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
 | `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes the tags of its repository that nothing has used or built for 14 days (a tag a live run uses is kept; the kit stamps each tag it builds or uses under its cache directory, `image-use/`, as docker keeps no last-used time), so kit checkouts on different commits do not delete each other's images. A build in which every step was cached prints one line (`Image <tag> re-tagged from cache`); docker's output is shown for a real build or a failure. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
@@ -1342,13 +1342,19 @@ sandbox's peak covers its gates, and a heavy gate (a browser test suite, say) sh
 largest reading goes into the gate pass's line in the project's `.sandcastle/logs/timings.jsonl`
 (`peakMib`) and, one line per sandbox, into `peaks.jsonl` in the kit's cache directory
 (`~/.cache/sandcastle-kit/`, or under `XDG_CACHE_HOME`) beside the live-runs directory. A line holds
-a time, the run's start time, the peak and a hash of the project root: no path and no project name.
+a time, the run's start time, the peak, the anonymous-memory figure below when the kernel gives one,
+and a hash of the project root: no path and no project name.
 `size` takes each project's highest peak over its last 5 measured runs, then the highest of the
 projects measured in the last 30 days, plus 10%, and prints it with the project it came from (`this
 project` when you run it inside it, else the hash), the runs it rests on and the resulting limit.
 Where the kernel gives no figure (cgroup v1, a kernel before 5.19), nothing is recorded and `size`
-keeps the assumed one. The peak counts file cache the kernel has not yet reclaimed, so it is on the
-high side, which suits a limit. The pool's shares divide whatever limit you set; nothing about them
+keeps the assumed one. The peak counts page cache the kernel has not yet reclaimed, so it is on the
+high side, which suits a limit but can overstate a sandbox's need; `memory.stat`'s `anon` (memory no
+file backs) is read beside it and recorded as `anonMib` (the largest reading: `anon` has no high-water
+mark of its own), and `size` prints it as the lower bound. When the recommendation rests on measured peaks
+and the effective `maxSandboxes` or `maxGates` is above it, doctor and the run's start line warn, naming
+both numbers and the `config.json` key (or the `SANDCASTLE_MAX_*` variable that overrides it); from the assumed
+figures nothing is warned. The pool's shares divide whatever limit you set; nothing about them
 changes. `size` shows the current limits beside the
 recommendation (environment, then `config.json`, then the defaults) and says when they already
 match; it changes nothing, so you copy the numbers into your [personal settings](#personal-settings)
