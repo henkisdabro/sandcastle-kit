@@ -44,7 +44,7 @@ RUN corepack enable
 # about 164 MB of /root/.npm that `npm install -g` leaves in the layer.
 # The kit passes the version it resolved (npm's `latest`, or CODEX_VERSION); this default is
 # the offline fallback, used only when there is no network and no cached value.
-ARG CODEX_VERSION=0.159.2
+ARG CODEX_VERSION=0.160.0
 RUN npm install -g @openai/codex@$CODEX_VERSION && npm cache clean --force
 
 # Align the agent user with the host user, so files written in the bind-mounted
