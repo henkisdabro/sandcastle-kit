@@ -5,7 +5,7 @@
 // for as long as that process lasts. Pure and importing nothing, so the mod (which cannot
 // import the kit's source) and the kit's own tests can both read it; the process check is
 // passed in. status.sh keeps its own bash version of the same rule (`test/run-live-contract.test.ts`
-// holds the two together). Terms are CONTEXT.md's.
+// holds the two together). Terms are GLOSSARY.md's.
 
 /** What the run's process shows in its command line (bin/sandcastle starts it): how a look tells it from a process that got its pid later. */
 export const RUN_COMMAND = "src/cli.ts";

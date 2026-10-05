@@ -620,6 +620,25 @@ Claude Code login or no token at all leaves it without one for now, and with an 
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
+**The plan's usage.** A run does not have to guess how close it is to the plan's allowance. While
+the sandboxes spend a subscription (`CLAUDE_CODE_OAUTH_TOKEN`, no `ANTHROPIC_API_KEY`) and at least
+one of implement, review and repair runs on a Claude model, a **usage** row under the settings shows
+both windows of the plan - the 5-hour one and the week - with each one's bar, percentage and reset
+time, and how long ago the reading was:
+`usage  claude  5h ▓░░░░░░░░░ 14% · resets 18:10   week ▓▓▓▓▓▓▓▓▓░ 93% · resets Wed 06:00   (2m ago)`.
+A window is in the normal colour below 75%, amber from 75% and red from 90%; a reading older than
+15 minutes (no agent has reported since) is greyed, its age beside it. Until the first agent reports
+the row says `usage  claude  waiting for the first agent's reading`. The numbers cost no request: Claude
+Code's output in every sandbox carries `rate_limit_event` lines (about three a pass) with the
+windows' utilisation and reset times, and the run reads what each agent's raw stream
+(`.sandcastle/logs/agent-issue-<id>-<phase>-<id>.jsonl`) gained every 15 seconds, keeps the newest
+reading in the run record (`usage` in `logs/run.json`, rewritten at most every 15 seconds, only when
+a newer one has come) and shows it in the status view, as a `sc_usage` token in Herdr's sidebar and
+on the closing summary. It is the plan's own account of itself, so it needs no setting and no
+credential and is independent of the usage guard (`USAGE_CHECK`), which asks the plan's endpoint
+before each ticket and can stop the queue. With an API key there is no plan to show: no row, and
+the settings row says `API credits`. A record from an older kit, or a run with no Claude model, has no `usage` and draws no row.
+
 | State | Means |
 |---|---|
 | `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project, and the note starts `3x over, usually 5m` (in red) at three times it |
@@ -697,7 +716,8 @@ you"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
-the **Next step**. `sandcastle report` prints it again at any time, with git and the blockers as they
+the **Next step**. Under the header's `Settings:` line, a run that showed the plan's usage says where
+it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going). `sandcastle report` prints it again at any time, with git and the blockers as they
 are now. Then:
 
 - **Push** the base branch yourself when you are happy with it. The kit never pushes.
@@ -769,7 +789,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 
 | Path | What |
 |---|---|
-| `logs/run.json` | The live run's record: stage, versions, each ticket's state. The status view and `sandcastle report` read it |
+| `logs/run.json` | The live run's record: stage, versions, each ticket's state, the plan's usage while it is shown. The status view and `sandcastle report` read it |
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time and a `carried` flag on a ticket whose branch was carried into the run (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`. A landing gate has lines of its own (phase `landing gates`), so the landings in a row, which can set a run's length, are on record. The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
@@ -819,7 +839,10 @@ out its own view:
   reports itself. The workspace shows `♜ 4/9 · 1 needs you` (red when something needs you) and the
   tab bar a line per run. The status view's pane is one agent, `sandcastle` titled `<project> run`:
   *working* while the run goes, then at its end *blocked* when a ticket is held, failed or
-  conflicted, else *idle*.
+  conflicted, else *idle*. While the run spends a subscription on a Claude model, that pane also
+  reports the plan's usage as an `$sc_usage` token (`5h 14% · wk 93% ■`; `▲` from 75%, `■` from 90%,
+  which the plugin's sidebar row colours amber and red, and nothing is sent before an agent has
+  reported one).
 - 🧱 **A pane per sandbox, if you want them.** `herdr: { panes: "all" }` in `.sandcastle/config.ts`
   (or `SANDBOX_PANES=all` for one run; the variable wins) stacks one pane per concurrent sandbox
   on the right of the status view, named after its ticket and following that sandbox's log
@@ -867,7 +890,7 @@ nothing asks. What you get:
 | `prefix+shift+e` | The last run's report (`sandcastle report`) as a popup: `q` closes it, and its bottom line says so. |
 | `prefix+shift+a` | "Sandboxes first" in the Agents panel, and back: whatever needs attention first, then the sandboxes. Herdr forgets it on a restart; the plugin puts it back. |
 | Ctrl-click a ticket | In the status view (the run's tab or `prefix+shift+s`), the ticket numbers are links once the plugin is linked, and the view's note says which key opens them (below). The ticket's card opens in a popup: its number, title, state and how long it has been in it; one line per pass in its last run (implement, review, gates, repair - each attempt -, resolve, landing gates) with its outcome and time; the reason it is held or in conflict, or the last lines of its red gate's log. A digit opens that pass's log: it follows the log live (new lines appear at the bottom as the agent writes them), and `Ctrl-C` closes it, as its bottom line says (`less` reads no other key while it follows; Esc does nothing in it); a log shorter than the popup opens from its top line and does not follow, `q` or `Ctrl-C` closes it, with `F` to follow new lines. Closing the log puts the card back. `t` prints the ticket's tracker link (its GitHub issue, from the `origin` remote, or its ticket file), and `q`, Esc or `Ctrl-C` closes the card. A ticket the last run did not take shows its logs, and says so. |
-| Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`). |
+| Sidebar rows | The run's workspace shows `♜ 4/9 · 1 needs you`, red when something needs you; with sandbox panes on (`panes: "all"`), each sandbox shows its step and time (`review · 12m`); and the run's own agent shows the plan's usage (`5h 14% · wk 93% ■`), amber from 75% and red from 90%. A kit that wrote its block before this row existed needs `sandcastle herdr configure --yes` again to show it |
 | Tab bar | Every live run on the machine, from any tab: `♜ shop 4/9 · 2 working · 1 needs you`. |
 
 **Which click.** The key depends on the terminal Herdr runs in, not on Herdr: Ctrl-click works in
@@ -1133,7 +1156,7 @@ Examples: [`examples/`](examples/).
 | `SANDCASTLE_LINKS=0` or `1` | on inside Herdr with the plugin | The status view's links from each ticket to its latest log (through the [Herdr plugin](#the-herdr-plugin), a click on one opens that ticket's card), and its click hint, which names the key for the terminal Herdr runs in (`SANDCASTLE_CLICK_HINT` below); on inside Herdr once `sandcastle herdr configure` has linked the plugin, off outside Herdr, into a pipe and without the plugin |
 | `SANDCASTLE_CLICK_HINT=auto`, `ctrl` or `cmd` | `herdr.clickHint`, else `auto` | Which key the status view's hint names for a click on a ticket: `auto` senses the terminal the Herdr client runs in ([The Herdr plugin](#the-herdr-plugin)); over the personal setting. A value it does not know gives the hint that names both |
 | `SANDCASTLE_TEST_RED_GATE=1` | off | Test the repair path: each ticket's first gate run counts as red, so a repair pass runs and the gates are re-run. Costs a repair pass per ticket; ignored when `repair.attempts` is 0 |
-| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY`, alone or beside the token (Claude Code spends it first), they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
+| `USAGE_CHECK=1`, `USAGE_STOP` | off, `90` | Read the Claude plan's usage windows before each ticket starts, and start no new ticket once one reaches `USAGE_STOP` percent. Separate from the status view's usage row, which shows the plan's usage from the agents' own readings (see [Run](#-run)) whether or not this is on, with no request and no credential. Applies only when the sandboxes spend a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`): with `ANTHROPIC_API_KEY`, alone or beside the token (Claude Code spends it first), they spend API credits, no plan's usage describes that, and the start line says the guard does not apply instead of reading the host login's unrelated plan. Reads usage with the host's Claude Code login when there is one (macOS: the keychain entry `Claude Code-credentials`, or `Claude Code-credentials-<h>` when `CLAUDE_CONFIG_DIR` is set, with `<h>` the first 8 hex characters of the SHA-256 of its value, a trailing slash removed; Linux: `~/.claude/.credentials.json`, under `CLAUDE_CONFIG_DIR` when that is set), else with `CLAUDE_CODE_OAUTH_TOKEN`. The kit cannot tell whether the login and the token are one account, so the start line and `doctor --verify` say whose plan is read (the login's account, or the token's); a token from another account than the login is guarded by the login's plan, so keep them the same account, or leave the guard off. A `claude setup-token` token is inference-only and the endpoint answers it HTTP 403, so the login is the one that works. The login is read-only, on the host: the kit never refreshes it (a refresh could sign Claude Code out), never writes it anywhere, never puts it in a sandbox's environment or mounts and never prints it. Its access token lasts about 8 hours and Claude Code refreshes it; an expired one is no reading until then. The endpoint is undocumented and rate-limited, so an unknown reading never blocks a run; the start line then says why, and it is asked again before the next ticket. A token the endpoint answers with HTTP 403 cannot use the guard: the start line says it is off for the run, and the endpoint is not asked again. `sandcastle doctor --verify` shows beforehand which credential the guard would use, where it looks for the login (the keychain service's name or the credentials file's path), whose plan that is and the HTTP status the endpoint answers it (never the token), an `info` line that the guard does not apply under an API key, and a `warn` line under a setup token the endpoint refuses with 403 |
 | `SANDCASTLE_MAX_SANDBOXES`, `SANDCASTLE_MAX_GATES` | 6, 2 | Machine-wide limits, over `maxSandboxes` / `maxGates` in your personal settings |
 | `KEEP_AWAKE=0` | on | Let the machine sleep during a run, as its energy settings say. [Sleep](#-sleep) |
 | `SANDCASTLE_ALLOW_BROAD_TOKEN=1` | off | Accept a `GH_TOKEN` that is not fine-grained. Not advised: unattended agents could then push and edit workflows with it. For a throwaway repo, or a GitHub host without fine-grained tokens |

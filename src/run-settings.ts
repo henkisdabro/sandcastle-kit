@@ -1,4 +1,4 @@
-// The run settings (CONTEXT.md): what a run is told at its start that shapes what it does or
+// The run settings (GLOSSARY.md): what a run is told at its start that shapes what it does or
 // spends. One pure resolver reads the environment, the project config and the personal machine
 // settings, so `sandcastle run` and `sandcastle status` cannot disagree about the next run; each
 // later setting is one more field here. The precedence never changes: the environment beats the
