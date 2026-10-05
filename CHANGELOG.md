@@ -16,6 +16,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   Existing tickets need nothing: without it, the implementer tests at the highest existing public
   interface.
 
+### Added
+
+- **`sandcastle doctor` and a run's start line warn when the pool is larger than the measured
+  sandbox peaks fit the VM**: `maxSandboxes` or `maxGates` above what `sandcastle size` recommends
+  from measured peaks, naming both numbers and the `config.json` key (or `SANDCASTLE_MAX_*`) to set.
+  A recommendation from assumed figures keeps doctor's info line.
+- **A ticket red on a test another ticket is already repairing waits for that landing**
+  (`#N: waiting for #M's fix to <test>`), merges the new base and gates again, instead of starting a
+  repair that conflicts at landing. If the other ticket fails or gives up, it repairs as before.
+
 ### Changed
 
 - **The git guard refuses `git stash` in the shared repository**, since its list is shared by every
@@ -34,6 +44,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   command, at the end.
 - **The review checks that each test would fail if the behaviour broke** and survive a refactor
   that kept it, and tidies duplication or misleading names the branch introduced.
+
+- **`sandcastle size` says the measured peak (`memory.peak`) includes page cache** and prints the
+  sandboxes' anonymous memory as the lower bound; `peaks.jsonl` records it as `anonMib`.
+- **The image's Codex is the newest plain release at least 72 hours old**, not npm's `latest` the
+  moment it is published; pre-releases are skipped, and `CODEX_VERSION` still overrides it.
 
 ### Fixed
 
@@ -78,6 +93,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   after a `cd` in the same line, or a `GIT_DIR` assignment, could reach the shared `.git`. A quoted
   path now works, and a variable assignment before `git` (`FOO=1 git push`) no longer hides a command
   from every rule.
+- **A test that goes red on the base mid-run is no longer repaired on every branch it fails on.**
+  When every failing test is in a file the branch did not change, the gates run once on the base
+  tip; red there too, the run prints `base went red mid-run: <test>` once, starts no repair, and the
+  closing summary lists the test once under Needs you.
+- **A host `pnpm test` leaves no `sandcastle-*` temp directories behind**: each run keeps its temp
+  files in one directory it removes on exit, also when interrupted, and fixtures started through
+  `test/cli-spawn.ts` end with the test process instead of lingering with parent pid 1.
+  `sandcastle doctor` no longer leaves a `sandcastle-mods-*` directory on every run.
+- **A passing test file that prints outside `quietly` fails** (a preload, `test/no-stray.ts`), so a
+  green gate log carries only reporter lines.
 
 ## [0.7.0] - 2026-10-04
 
