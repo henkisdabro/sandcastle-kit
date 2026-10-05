@@ -1565,7 +1565,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
-    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId),
+    baseGate: () => gateBase(project, image, planFile, "base-red", false, runId, false),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });

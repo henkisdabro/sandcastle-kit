@@ -237,8 +237,11 @@ export const gitHooksLine = (g: GitHooks) =>
 // the project's hook tests there, against the plan's kept hooks, and probes
 // the repo's git commit hooks.
 // `runId` is the run these gates belong to, which the sandbox's peak is filed under.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string) =>
-  withSlot("sandboxes", `${project.name} ${label}`, async () => {
+// `ownSlot` false runs it in the sandbox slot the caller holds: a ticket's pipeline that waits on
+// the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
+// with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true) => {
+  const gated = async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     try {
@@ -259,7 +262,9 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
         /* never created */
       }
     }
-  });
+  };
+  return ownSlot ? withSlot("sandboxes", `${project.name} ${label}`, gated) : gated();
+};
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}`).join(" ");
 
