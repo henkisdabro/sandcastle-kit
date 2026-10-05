@@ -84,6 +84,27 @@ test("a run killed with SIGTERM stops its command and removes the directory at o
   await until("the command ending", () => !alive(commandPid));
 });
 
+test("a run killed with SIGTERM ends its command's descendants too, and removes the directory", async () => {
+  const outer = outerTmp("terminated-tree");
+  // test/run-shards.sh's shape: a shell that backgrounds its work and waits on it, so the test
+  // processes are grandchildren of in-temp.sh; a TERM to the shell alone left them running.
+  const script = `${MAKE_DIR} console.log("up " + process.pid); setInterval(() => {}, 1000);`;
+  const child = spawn("bash", [IN_TEMP, "bash", "-c", 'echo "shell $$"; "$0" -e "$1" & wait', process.execPath, script], { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, TMPDIR: outer } });
+  let out = "";
+  child.stdout.on("data", (d) => (out += d));
+  await until("the command starting", () => /up \d+\n/.test(out));
+  const shellPid = Number(/shell (\d+)/.exec(out)![1]);
+  const grandchildPid = Number(/up (\d+)/.exec(out)![1]);
+  pids.push(shellPid, grandchildPid);
+  const ended = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+  child.kill("SIGTERM");
+  assert.equal(await ended, 143);
+  assert.deepEqual(readdirSync(outer), []);
+  // in-temp.sh waits for the group to drain before removing the directory, so nothing is left once it exits.
+  assert.equal(alive(shellPid), false, "the shell is gone");
+  assert.equal(alive(grandchildPid), false, "the grandchild is gone");
+});
+
 test("the test scripts and run-shards.sh run through in-temp.sh", () => {
   const scripts = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")).scripts as Record<string, string>;
   for (const name of ["test", "test:shard"]) assert.match(scripts[name]!, /^bash test\/in-temp\.sh /, name);
