@@ -197,16 +197,66 @@ export const backupBranch = (project: Project, branch: string) => {
 
 /**
  * Drop a branch's entry once its ticket has landed. Never throws: a failure leaves the entry
- * (and its objects) for the next drop, which the next run's check does not look at.
+ * (and its objects) for the next drop, or for the next run's start, which `pruneBackup` sweeps.
  * With no agent branch left the backup is pruned (`gc --prune=now`, in the backup only, never the
  * shared `.git`): a deleted ref alone frees nothing, and every run's packs would stay for good.
  */
 export const dropBackup = (project: Project, branch: string) => {
   try {
     if (backupTip(project, branch)) backupGit(project, ["update-ref", "-d", `refs/heads/${branch}`]);
-    if (existsSync(join(backupRepo(project), "HEAD")) && !backupGit(project, ["for-each-ref", "--count=1", "refs/heads/"])) backupGit(project, ["gc", "-q", "--prune=now"]);
+    pruneWhenEmpty(project);
   } catch {
     /* the entry or its objects stay */
+  }
+};
+
+const pruneWhenEmpty = (project: Project) => {
+  if (existsSync(join(backupRepo(project), "HEAD")) && !backupGit(project, ["for-each-ref", "--count=1", "refs/heads/"])) backupGit(project, ["gc", "-q", "--prune=now"]);
+};
+
+/**
+ * Drops the entry of each branch the kit never got to drop, because it did not land or clean it: a
+ * held branch a person merged by hand, or one a person deleted. `dropBackup` runs only when the kit
+ * lands a branch, so without this the backup's entries and objects only grow. An entry goes when its
+ * branch no longer exists in the project, or when its tip is already in the base (every commit it
+ * holds is on the base, so nothing is lost); an entry for an unmerged branch that still exists stays,
+ * and so does one the test cannot decide (a base that does not exist, a tip git cannot compare).
+ * Then `dropBackup`'s own prune runs when no entry is left. Returns the branches dropped. Never
+ * throws: what a failure leaves stays for the next run. Call it only while holding the run lock.
+ */
+export const pruneBackup = (project: Project): string[] => {
+  const dropped: string[] = [];
+  if (!existsSync(join(backupRepo(project), "HEAD"))) return dropped;
+  try {
+    const root = project.root;
+    const base = tipOf(root, `refs/heads/${project.baseBranch}`);
+    for (const line of backupGit(project, ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/"]).split("\n").filter(Boolean)) {
+      const at = line.indexOf(" ");
+      const tip = line.slice(0, at);
+      const branch = line.slice(at + 1).replace(/^refs\/heads\//, "");
+      if (tipOf(root, `refs/heads/${branch}`) && !(base && inBase(root, tip, base))) continue;
+      try {
+        backupGit(project, ["update-ref", "-d", `refs/heads/${branch}`, tip]);
+        dropped.push(branch);
+      } catch {
+        /* the entry stays */
+      }
+    }
+    if (dropped.length) pruneWhenEmpty(project);
+  } catch {
+    /* the entries and their objects stay */
+  }
+  return dropped;
+};
+
+// Exit 1 is "not an ancestor", and 128 a commit the project's `.git` no longer holds (a branch
+// rewritten since the copy): neither is a tip that is in the base, so the entry stays.
+const inBase = (root: string, tip: string, base: string) => {
+  try {
+    sh("git", ["merge-base", "--is-ancestor", tip, base], root);
+    return true;
+  } catch {
+    return false;
   }
 };
 

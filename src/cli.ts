@@ -65,7 +65,8 @@
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
 //   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
-//                    sandbox worktrees and finished agent branches, and list unmerged ones;
+//                    sandbox worktrees and finished agent branches, drop the backup copy
+//                    of a branch that is gone or merged, and list unmerged ones;
 //                    --all deletes those too, without asking
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
@@ -89,7 +90,7 @@ import { loadProject } from "./config.ts";
 import { livePid, recordedExitCode, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning } from "./guard.ts";
+import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -575,16 +576,19 @@ try {
       pinHostGitConfig(project.root);
       lockRun(project);
       const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      // After the branches above went: a deleted branch's backup entry is dropped with it.
+      const backups = pruneBackup(project);
       for (const id of containers) console.log(`removed exited sandbox container ${id}`);
       for (const id of images) console.log(`removed dangling image ${id}`);
       for (const path of worktrees) console.log(`removed worktree ${path}`);
       for (const { branch, unmerged } of deleted) console.log(`deleted ${branch}${unmerged ? " (unmerged)" : ""}`);
+      for (const branch of backups) console.log(`dropped the backup copy of ${branch}`);
       archiveFinishedLogs(project);
       if (kept.length) {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !kept.length) console.log("Nothing to clean.");
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length) console.log("Nothing to clean.");
       break;
     }
     default:
