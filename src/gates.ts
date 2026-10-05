@@ -504,8 +504,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     run.failures,
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
-  // The sandbox's peak, for the run's "base gates" timings line, as a ticket's gate pass carries it.
-  if (green) return run.peakMib !== undefined ? { peakMib: run.peakMib } : undefined;
+  // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
+  // (out of `ms`) and the sandbox's peak.
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
