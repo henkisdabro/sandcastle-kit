@@ -9,6 +9,46 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Tickets may carry a `## Seams` section.** `/sandcastle queue` and `audit` add one where a
+  behaviour change's test boundary is not obvious, naming the interface a test should drive.
+  Existing tickets need nothing: without it, the implementer tests at the highest existing public
+  interface.
+
+### Changed
+
+- **Implementers test at the ticket's seams and run the full gates once.** A bug is first
+  reproduced by a failing test; expected values come from outside the code and mocks only from
+  real boundaries; single test files run while working, and each gate runs once, in its own
+  command, at the end.
+- **The review checks that each test would fail if the behaviour broke** and survive a refactor
+  that kept it, and tidies duplication or misleading names the branch introduced.
+
+### Fixed
+
+- **Quitting the status view in a run's own Herdr tab leaves the pane as your shell** until the run
+  ends or Herdr restarts, instead of getting the view typed back into it every tab-bar tick and the
+  closing report typed there at the end. After a Herdr restart the view comes back as before.
+- **A run that opens no Herdr view no longer acts on an earlier run's stale view record** (outside
+  Herdr, or with `SANDCASTLE_HERDR_VIEW=0`): the tab bar stops typing into that run's old pane ids,
+  and the run's live-runs file goes at exit.
+- **A finished run waiting for its Herdr report no longer makes every Herdr server start the kit on
+  every tab-bar tick.** It waits outside the tab bar's check until Herdr restarts or another run is
+  going, and is forgotten 7 days after the run ended.
+- **A restarted status view and a dead tab's closing report run the kit the run was started from**,
+  so a run from a second checkout no longer comes back with the plugin's checkout.
+- **The sandbox git guard allows `git -C <path> update-ref`, `gc` and `prune` in a scratch
+  repository** outside the project. The shared `.git` and its worktrees stay refused, even after the
+  shell has `cd`'d elsewhere; `git push` stays refused everywhere, and its refusal says to test
+  remote handling with a bare origin under the temp dir and `git fetch`.
+- **The run estimate no longer prices a model with little history as if it were solid**: a model
+  with fewer than five tickets in the window is blended with all tickets' figures, and the line says
+  so.
+- **Two projects building the shared base image at once no longer crash on `docker tag`**: the base
+  build, cleanup and tag run under a machine-wide lock, so the second waits and reuses the image, and
+  a docker failure there is a one-line error naming the image.
+
 ## [0.7.0] - 2026-10-04
 
 ### Upgrading
@@ -29,10 +69,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   and `lean --measure` ask before they start, and `--detach` or a script needs `--api-key` (or
   `SANDCASTLE_API_KEY=1`). To spend your subscription instead, remove the key from the file doctor
   names (`/sandcastle update` checks this).
-- **Tickets may carry a `## Seams` section.** `/sandcastle queue` and `audit` add one where a
-  behaviour change's test boundary is not obvious, naming the interface a test should drive.
-  Existing tickets need nothing: without it, the implementer tests at the highest existing public
-  interface.
 - **With `changelog: true`, agents can now give an `Upgrading:` line.** If your project rules tell
   agents to start each line with `Added:`, `Changed:` or `Fixed:`, add `Upgrading:` there, for what
   an existing project must act on (`/sandcastle update` checks this).
@@ -61,12 +97,6 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
-- **Implementers test at the ticket's seams and run the full gates once.** A bug is first
-  reproduced by a failing test; expected values come from outside the code and mocks only from
-  real boundaries; single test files run while working, and each gate runs once, in its own
-  command, at the end.
-- **The review checks that each test would fail if the behaviour broke** and survive a refactor
-  that kept it, and tidies duplication or misleading names the branch introduced.
 - **The sandbox image has `less`**, which the Herdr log popup pages with, so an agent can check
   the popup's prompt. Every project's image rebuilds once.
 - **Ctrl-clicking a ticket in Herdr's status view opens its card**, not its latest raw log: its state
