@@ -117,10 +117,12 @@ This continues SKILL.md: run its "Before every action" first.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.
-      Under it, the `Settings:` line names the run's settings, and a line after it may name the switch
-      that would have helped (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run
-      again; a usage guard that had no reading, so the run was not guarded): relay both unchanged,
-      and name only the switch the report names.
+      Under it, the `Settings:` line names the run's settings, a `Plan usage at the end:` line
+      (a run on a subscription) gives the plan's 5-hour and weekly usage as the last agent
+      reported it, and a line after them may name the switch that would have helped
+      (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run again; a usage guard
+      that had no reading, so the run was not guarded): relay them unchanged, and name only the
+      switch the report names.
    2. `## ✅ Done` - merged and closed, listed short. Next to the count, say that the tickets are
       closed in the tracker but the code is only on the local base branch until pushed - the pair of
       facts operators most often misread. When it lists `Changelog lines the agents suggested`
