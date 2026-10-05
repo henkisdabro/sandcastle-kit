@@ -18,6 +18,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The git guard refuses `git stash` in the shared repository**, since its list is shared by every
+  agent's worktree and a pop could apply another agent's change; `stash list` and `show` pass, and
+  the prompts give the diff-and-apply way to run a test without a change.
+- **Implementers edit with the Edit tool and file what they leave outside the ticket**, instead of
+  naming it only in a final message no reviewer reads.
+- **The sandbox image stops at once** (`STOPSIGNAL SIGKILL`): every sandbox close waited out
+  `docker stop`'s 10 s. Every project's image rebuilds once.
+- **pnpm 12.8.2, `@types/node` 24.19.1 and Codex 0.160.0 as the image's offline default.**
 - **Implementers test at the ticket's seams and run the full gates once.** A bug is first
   reproduced by a failing test; expected values come from outside the code and mocks only from
   real boundaries; single test files run while working, and each gate runs once, in its own
@@ -43,13 +51,17 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   shell has `cd`'d elsewhere; `git push` stays refused everywhere, and its refusal says to test
   remote handling with a bare origin under the temp dir and `git fetch`.
 - **The run estimate no longer prices a model with little history as if it were solid**: a model
-  with fewer than five tickets in the window is blended with all tickets' figures, and the line says
-  so.
+  with fewer than five tickets in the window is blended with all tickets' figures, its own weighted by
+  its share of five, and the line says so.
 - **Two projects building the shared base image at once no longer crash on `docker tag`**: the base
   build, cleanup and tag run under a machine-wide lock, so the second waits and reuses the image, and
   a docker failure there is a one-line error naming the image.
 - **The git guard's file-write and `rm`/`mv` rules also refuse the project's shared `.git`** after
   the shell has `cd`'d into a scratch repository or out of every repository.
+- **The git guard's scratch-repository allowance needs an absolute `git -C` path**: a relative one
+  after a `cd` in the same line, or a `GIT_DIR` assignment, could reach the shared `.git`. A quoted
+  path now works, and a variable assignment before `git` (`FOO=1 git push`) no longer hides a command
+  from every rule.
 
 ## [0.7.0] - 2026-10-04
 
