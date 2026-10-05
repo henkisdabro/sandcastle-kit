@@ -951,13 +951,17 @@ export const createPipeline = (ctx: PipelineContext) => {
         const key = failureKey(failure);
         // Another ticket is already repairing this failure: its landing is the fix, so wait for it, merge
         // the new base and gate again. A forced red is the same text on every ticket and waits for none.
-        const fixer = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
-        if (fixer) {
+        const fixing = forced || waitedFor.has(key) ? undefined : fixes.fixing(key, issue.id);
+        if (fixing) {
+          const fixer = fixing.by;
           waitedFor.add(key);
-          const tests = failingTests(failure.output);
-          const line = `waiting for ${ref(fixer)}'s fix to ${tests.length ? tests.join(", ") : `the ${failure.name} gate`}`;
-          console.log(`${ref(issue.id)}: ${line}`);
-          run.ticket(issue.id, { note: line });
+          // A fix already on the base is merged without a wait, so no note: it would stay on the ticket's card.
+          if (!fixing.landed) {
+            const tests = failingTests(failure.output);
+            const line = `waiting for ${ref(fixer)}'s fix to ${tests.length ? tests.join(", ") : `the ${failure.name} gate`}`;
+            console.log(`${ref(issue.id)}: ${line}`);
+            run.ticket(issue.id, { note: line });
+          }
           // Not landed (it failed, gave up or was held): nothing to wait for, the repair is this ticket's own.
           if (await fixes.wait(issue.id, fixer)) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.

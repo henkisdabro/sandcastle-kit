@@ -549,12 +549,16 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
       const by = claims.get(key);
       if (by === undefined || by === id || ended.has(by)) claims.set(key, id);
     },
-    /** The other ticket whose repair of `key` is yet to land, when `id` may wait for it. */
-    fixing(key: string, id: string): string | undefined {
+    /**
+     * The other ticket repairing `key`, when `id` may wait for it: `landed` when its fix is on the base
+     * already, so `id` merges the base without waiting (its gate may have finished just after that landing).
+     */
+    fixing(key: string, id: string): { by: string; landed: boolean } | undefined {
       const by = claims.get(key);
-      if (by === undefined || by === id || ended.has(by)) return undefined;
+      if (by === undefined || by === id) return undefined;
+      if (ended.has(by)) return ended.get(by) ? { by, landed: true } : undefined;
       for (let at = waitingOn.get(by); at !== undefined; at = waitingOn.get(at)) if (at === id) return undefined;
-      return by;
+      return { by, landed: false };
     },
     /** Resolves when `on` has ended or been sent back for a second attempt, or a landing is starved of a slot: true when it landed. */
     async wait(id: string, on: string): Promise<boolean> {
