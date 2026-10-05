@@ -21,6 +21,10 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   or `node_modules/.bin/tsx`: those find `node` on PATH, and on a Mac that is often a mise or asdf
   shim, which fails once the test moves `XDG_CONFIG_HOME`. Give `script` and other terminal tools `stdio: ["ignore", ...]`: BSD tools
   refuse the socket Node passes as stdin. The sandbox is Linux, so it cannot catch either.
+- **A new or changed shell script that runs on the host** (anything outside `container/`): run it,
+  or the test that runs it, under `bash32` too - macOS's bash 3.2, built in this sandbox - and
+  `shellcheck -S error` it; both are installed here. Users' Macs run `#!/usr/bin/env bash` scripts
+  under 3.2, which has no associative arrays, `mapfile`, `${x,,}` or `source <(...)`.
 - **Never run** `sandcastle run`, `preflight`, `build`, `lean --measure`, `setup` or `clean` here:
   they need Docker or spend model allowance. `pnpm exec tsc --noEmit`, `bash -n` and `pnpm test`
   are the checks.
