@@ -594,13 +594,42 @@ export const gitIdentityCommand = (root: string) => {
   return `mkdir -p "${dir}" && ${set("user.name", name)} && ${set("user.email", email)}`;
 };
 
+/**
+ * The CPUs each sandbox container may use (`docker run --cpus`), or undefined for no limit. An
+ * agent runs the project's whole suite in its own sandbox as often as it likes, outside `maxGates`,
+ * so several suites at once starved one another and every gate beside them. The VM's CPUs (`docker
+ * info`'s NCPU) are split by the run's concurrency, at least 2 and never more than the VM has; a
+ * gate run in a sandbox gets the same limit. The project's `cpus` wins: a number is the limit,
+ * `false` none. `docker info` failing (or reporting no NCPU) sets none rather than guessing.
+ */
+export const sandboxCpus = (project: Pick<Project, "cpus">, concurrency: number, dockerInfo: () => string | undefined): number | undefined => {
+  if (project.cpus === false) return undefined;
+  if (typeof project.cpus === "number") return project.cpus;
+  let ncpu: number;
+  try {
+    ncpu = Number((JSON.parse(dockerInfo() ?? "{}") as { NCPU?: unknown }).NCPU);
+  } catch {
+    return undefined;
+  }
+  if (!Number.isInteger(ncpu) || ncpu < 1) return undefined;
+  return Math.min(ncpu, Math.max(2, Math.floor(ncpu / Math.max(1, concurrency))));
+};
+
+/** The run's start line for the limit `sandboxCpus` chose. */
+export const cpusLine = (project: Pick<Project, "cpus">, cpus: number | undefined) =>
+  cpus === undefined
+    ? `Sandbox CPUs: no limit${project.cpus === false ? " (cpus: false)" : " (docker info gave no CPU count)"}`
+    : `Sandbox CPUs: ${cpus} each${typeof project.cpus === "number" ? " (cpus in the project config)" : ""}`;
+
 // `leanPlan` is the path of a JSON plan from lean.ts; the hook applies it to
-// each fresh worktree before the agent sees it.
+// each fresh worktree before the agent sees it. A numeric `project.cpus` caps each container: a
+// run sets it from `sandboxCpus` before its first sandbox.
 export const sandboxConfig = (project: Project, image: string, leanPlan: string) => ({
   sandbox: docker({
     imageName: image,
     env: sandboxEnv(project),
     mounts: sandboxMounts(project),
+    ...(typeof project.cpus === "number" ? { cpus: project.cpus } : {}),
   }),
   hooks: {
     host: {
