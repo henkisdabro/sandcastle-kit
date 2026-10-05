@@ -24,7 +24,8 @@ export type Queue<T> = {
 
 /**
  * `rank` orders what is waiting: the highest goes first, and equal ranks go in arrival order.
- * The landing queue ranks a carried branch above a new one, so it still lands first when both wait.
+ * The landing queue ranks a carried branch above a new one, so it still lands first when both wait;
+ * the pipeline queue ranks a requeued ticket above a released one, and a released one above a ticket that has not started.
  */
 export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> => {
   const items: T[] = [];
@@ -77,7 +78,7 @@ export type TicketFiles = { all: string[]; unmergeable: string[] };
 /** What a ticket waits for: the ticket in flight that has `file`, a file git cannot merge. */
 export type FileWait = { with: string; file: string };
 
-/** Mergeable files two tickets that run together both change; landing and the requeue resolve them. */
+/** Mergeable files two tickets that run together both change; a conflict at landing is sent back once and resolved on the second attempt. */
 export type FileShare = { with: string; files: string[] };
 
 const SHOWN = 3;
@@ -87,7 +88,8 @@ const named = (files: string[]) => `${files.slice(0, SHOWN).join(", ")}${files.l
 export const fileWaitNote = (ref: (id: string) => string, w: FileWait) => `waits for ${ref(w.with)}: both change ${w.file} (git cannot merge it)`;
 
 /** One line per pair that starts together and changes the same mergeable files. */
-export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) => `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - landing resolves it`;
+export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) =>
+  `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - if they conflict at landing, the later one is sent back once and its merge resolved`;
 
 /** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
 export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>
@@ -619,6 +621,11 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
 
 export type FixBoard = ReturnType<typeof createFixBoard>;
 
+// What a ticket in the pipeline queue ranks as: the highest starts first, equals in arrival order.
+const FIRST = 0;
+const RELEASED = 1;
+const REQUEUED = 2;
+
 /** One candidate at the start, in start order: `wait` when it starts later, and `file` when that is behind a file git cannot merge. */
 export type Start<T> = { ticket: T; wait?: "file" | "blockers"; file?: FileWait; shares?: FileShare[] };
 
@@ -690,8 +697,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
   // ticket that waits for it as a blocker does too. None when nothing starts now.
   const blockers = plan.blockers;
   const dependants = now.length && blockers ? dependantsInRun([...now, ...parked].map((c) => c.ticket.id), blockers.held, blockers.ticketOf) : [];
-  // A ticket the release frees queues behind the ones already waiting for a sandbox: the ones that
-  // start now, then dependants, then parked.
+  // The order of this list: the ones that start now, then dependants, then parked. Once the run is
+  // going, a dependant that is released starts ahead of every ticket that has not started (`RELEASED`).
   const later: Start<T>[] = [
     ...(plan.later ?? []).map((l) => ({ ticket: l.ticket, wait: l.on })),
     ...dependants.map((h) => ({ ticket: h.ticket, wait: "blockers" as const })),
@@ -734,7 +741,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let working = 0;
       let pushed = 0;
       let dealt = 0;
-      const pipelines = createQueue<T>();
+      // What waits for a sandbox slot. A requeued ticket and a released dependant go before the tickets
+      // that have not started: they have waited already, and every landing that happens before they
+      // start moves the base under them (a requeued one first, as it is the older work).
+      const pipelines = createQueue<{ ticket: T; rank: number }>((q) => q.rank);
       // The sandbox slots the run could use now (the machine pool's demand): the tickets in a
       // pipeline or ready for one, plus one while a green branch waits to land or is landing,
       // never more than the concurrency. A ticket held for a blocker or a file adds nothing until
@@ -790,7 +800,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         byId.set(t.id, t);
         open++;
         inPipeline++;
-        pipelines.push(t);
+        pipelines.push({ ticket: t, rank: after.kind === "blockers" ? RELEASED : FIRST });
         demand();
       };
       /**
@@ -873,7 +883,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         sentBack.set(t.id, { green: g, landed });
         tell({ kind: "requeued", id: t.id, again });
         inPipeline++;
-        pipelines.push(t);
+        pipelines.push({ ticket: t, rank: REQUEUED });
         demand();
         return true;
       };
@@ -952,11 +962,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
 
       if (open <= 0) closeAll();
       inPipeline = now.length;
-      for (const c of now) pipelines.push(c.ticket);
+      for (const c of now) pipelines.push({ ticket: c.ticket, rank: FIRST });
       demand();
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
-      const fanOut = pipelines.run(work.workers, attempt).finally(() => {
+      const fanOut = pipelines.run(work.workers, (q) => attempt(q.ticket)).finally(() => {
         closeAll();
         stage();
       });

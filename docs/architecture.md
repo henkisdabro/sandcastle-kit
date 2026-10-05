@@ -56,6 +56,15 @@ state.
   `blockers.open` port, and each with none open starts through the file hold. Any other ending, a
   run that starts nothing or a dry run releases none, and each held ticket is told what it waits
   for now.
+- **Start order.** The pipeline queue ranks what waits for a sandbox slot: a requeued ticket first,
+  then a released dependant, then every ticket not yet started, each group in the order it arrived.
+  Both have waited already, and every landing before they start moves the base under them; behind the
+  unstarted tickets they became the run's last landings while slots sat idle. A ticket freed from a
+  file it shared keeps its place with the unstarted. The run prints `#N released: its last blocker has
+  landed; it starts at the next free slot` when a dependant is released (the start of one freed from a
+  file reads `starts:`), and the status view's queue position follows the same order (the hold
+  record gives a requeued or released ticket an `order` below every unstarted one's).
+  `test/schedule-start-order.test.ts`.
 - **Endings.** The queues stay open until every ticket has its ending; on each ending its files are
   freed and its dependants released before the open count drops.
 - **The file hold** (the scheduler's own too). A ticket sharing a file git cannot merge with one in
@@ -92,7 +101,8 @@ state.
 - `createLanding`: the one worker that lands each green ticket, a carried branch first.
 - `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`,
   `close`, `run(workers, fn)`). Workers wait while it is open and empty, so an item can be pushed
-  mid-run; a higher `rank` goes first, equals in arrival order.
+  mid-run; a higher `rank` goes first, equals in arrival order (the pipelines' rank is the start
+  order above; the landing worker's puts a carried branch first).
 
 ## `src/upgrading.ts`
 
