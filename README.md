@@ -632,6 +632,7 @@ lines rather than cut anything off.
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
 | `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
+| `paused` | Parked between two phases of a [paused](#-pausing-a-run) run: its sandbox is closed and its branch kept, and the note names the phase it resumes at and the commit (`before review at a1b2c3d`) |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
 

@@ -30,6 +30,9 @@ to land, need you, queued, blocked, merged. The states:
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**, **`no change`**, **`skipped`** (not started
   because the run stopped early).
+- **`paused`** - parked between two phases while a person has the run paused (`sandcastle
+  pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
+  `sandcastle resume` continues it in the same run.
 
 After a run, or for a ticket outside it, the state is inferred from branches and logs: `left
 over` is a branch from an earlier run, for `sandcastle clean`. The live view fits its pane and
