@@ -24,11 +24,13 @@
 // phases and wipe the sandbox from the sidebar.
 //
 // The sidebar also carries the run itself: each sandbox's row is named after
-// its ticket and reports `$sc_phase` and `$sc_elapsed` tokens, and the run's
-// workspace reports `$sandcastle` ("4/9 · 1 needs you"). Herdr shows a token
-// only where a sidebar row names it (`sandcastle herdr configure` adds the
-// rows), and keeps none across a server restart, so everything is re-sent
-// once a minute: the sidebar heals itself after a restart or a live handoff.
+// its ticket and reports `$sc_phase` and `$sc_elapsed` tokens, the run's
+// workspace reports `$sandcastle` ("4/9 · 1 needs you"), and the run's status
+// pane `$sc_usage` (the plan's usage, "5h 14% · wk 93%") once an agent has
+// reported it. Herdr shows a token only where a sidebar row names it
+// (`sandcastle herdr configure` adds the rows), and keeps none across a
+// server restart, so everything is re-sent once a minute: the sidebar heals
+// itself after a restart or a live handoff.
 //
 // All of it is a convenience: outside Herdr, or with SANDCASTLE_HERDR_VIEW=0,
 // or on any herdr error, it does nothing and the run carries on.
@@ -39,9 +41,10 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync,
 import { basename, isAbsolute, join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { GROUPS, type TicketRecord } from "../mod/hooks/run-record.ts";
+import { GROUPS, type PlanUsage, type TicketRecord } from "../mod/hooks/run-record.ts";
 import { viewRecord } from "./live-runs.ts";
 import { KIT } from "./sandbox.ts";
+import { readPlanUsage, usageBand } from "./usage.ts";
 
 export { viewRecord };
 
@@ -338,6 +341,21 @@ export const sandboxTokens = (run: string, phase: string, since: number | undefi
   sc_elapsed: since === undefined ? null : elapsed(now - since),
 });
 
+/** The marks that carry a usage band into the token's text, where Herdr's rules (`contains`) can colour by it: nothing below `USAGE_AMBER` percent, `▲` from it, `■` from `USAGE_RED`. */
+export const USAGE_MARKS = { normal: "", amber: " ▲", red: " ■" } as const;
+
+/**
+ * The status pane's `sc_usage` token: `5h 14% · wk 93%`, and the mark of the worse window's band after it
+ * (`USAGE_MARKS`). Undefined until a reading exists, and for a record whose reading is not well-formed:
+ * the token is then not sent at all.
+ */
+export const usageText = (usage: PlanUsage | undefined): string | undefined => {
+  const w = readPlanUsage(usage)?.windows;
+  if (!w) return undefined;
+  const worst = Math.max(w.fiveHour.percent, w.week.percent);
+  return `5h ${w.fiveHour.percent}% · wk ${w.week.percent}%${USAGE_MARKS[usageBand(worst)]}`;
+};
+
 /** `--token k=v` to set, `--clear-token k` for null: Herdr's token patch, as CLI arguments. */
 export const tokenArgs = (tokens: Record<string, string | null>) =>
   Object.entries(tokens).flatMap(([k, v]) => (v === null ? ["--clear-token", k] : ["--token", `${k}=${v}`]));
@@ -401,6 +419,8 @@ export const openSandboxView = (
   // Not `sandboxPanes()`'s default: the caller resolves the setting, and a view opened with no
   // word on it keeps a pane per sandbox.
   mode: SandboxPanes = "all",
+  // The plan usage the run record holds now, sent as the status pane's `sc_usage` token.
+  usage: () => PlanUsage | undefined = () => undefined,
 ): SandboxView => {
   // Every way out before this run writes its own record retires the earlier one.
   const none = () => {
@@ -617,12 +637,29 @@ export const openSandboxView = (
     herdr([
       "pane", "report-metadata", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${project.name} run`, "--display-agent", "sandcastle",
       ...["working", "blocked", "idle", "done"].flatMap((k) => ["--state-label", `${k}=${a.message}`]),
-      ...tokenArgs(sandboxTokens(project.name, a.message, ended ? undefined : startedAt, Date.now())),
+      ...tokenArgs({ ...sandboxTokens(project.name, a.message, ended ? undefined : startedAt, Date.now()), ...usageTokens() }),
       "--ttl-ms", TTL,
     ]);
   };
+  // The plan's usage, once a reading exists: no token before it, and none cleared after.
+  const usageTokens = (): Record<string, string> => {
+    const text = usageText(usage());
+    return text ? { sc_usage: text } : {};
+  };
+  // With a pane per sandbox the status pane is no reported agent, so its token goes alone and on a
+  // best-effort basis: a Herdr that has no use for it must not turn the whole view off.
+  const reportUsage = () => {
+    const tokens = usageTokens();
+    if (!tokens.sc_usage) return;
+    try {
+      herdr(["pane", "report-metadata", statusPane, "--source", SOURCE, ...tokenArgs(tokens), "--ttl-ms", TTL]);
+    } catch {
+      /* the sidebar's usage is a convenience */
+    }
+  };
   const reportRunAndSpace = () => {
     if (mode === "none") reportRun();
+    else reportUsage();
     reportSpace();
   };
   // Herdr keeps no tokens across a restart, even when it keeps the panes. Re-sent once a

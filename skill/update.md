@@ -16,6 +16,11 @@ apply it once the user agrees.
      does not exist (the plugin was linked by an older kit), run `sandcastle herdr configure --yes`
      once: it leaves that file, without which the status view shows no ticket links or Ctrl-click
      hint. It replaces its own block, so running it again is safe.
+   - If the plugin is linked (doctor lists it `ok`) but the sandcastle block in Herdr's config names
+     no `$sc_usage` row (`grep -c sc_usage` on the file `herdr --help` names after `Config:`
+     finds none: the block was written by an older kit), run `sandcastle herdr configure --yes`
+     once: it replaces its own block, and the sidebar then shows the plan's usage under a run. It is
+     optional, and the block is replaced either way, so running it again is safe.
    - If doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
      shows a live run above the prompt, says when a ticket needs the user, and tells the session
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the

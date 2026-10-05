@@ -26,7 +26,7 @@
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
+import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
@@ -51,7 +51,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
-import { usageLine, usageReadingLost, usageStop } from "./usage.ts";
+import { showsPlanUsage, usageLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -1523,7 +1523,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // concurrent sandbox, reporting each one's phase. Otherwise (or with the
   // view off) the status view opens beside the caller. Inside Herdr a run
   // with no status view does not start: nobody would see it.
-  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project));
+  const view = openSandboxView(project, workers, ref, run.tickets, sandboxPanes(project), run.usage);
   const statusPane = view.status ?? openStatusPane(project);
   if (IN_HERDR && !statusPane) {
     throw new OperatorError("Could not open the status view in Herdr - nothing was started. Check `herdr pane list`, or run `sandcastle status` yourself.");
@@ -1611,6 +1611,24 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   noteReading();
   if (usageNote) console.log(usageNote);
   archiveFinishedLogs(project);
+  // The plan's usage on screen, from the agents' own rate-limit events: only a run that spends a
+  // subscription on a Claude model has one (an API key bills credits no plan describes). Until the
+  // first agent reports, the record says it is waiting for one. After the archive above, which moves
+  // finished branches' logs away: the watch reads the logs that are left.
+  let usageWatch: UsageWatch | undefined;
+  const passModels = [IMPL_MODEL, REVIEW_MODEL, ...[...overrides.values()].flatMap((o) => (o.model ? [o.model] : []))];
+  if (showsPlanUsage({ apiKey: !!spend, oauthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN, models: passModels })) {
+    run.update({ usage: { provider: "claude" } });
+    usageWatch = watchUsage({
+      logs: join(project.root, ".sandcastle/logs"),
+      run: runId,
+      // A record the next turn replaced is not this watch's to write.
+      finished: () => run.finished,
+      write: (reading) => {
+        if (!run.finished) run.update({ usage: reading });
+      },
+    });
+  }
   // Written next to the prompts; the worktree hook applies it to each sandbox.
   const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);
@@ -1961,11 +1979,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
+      usageWatch?.stop();
       // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
       // would have named is lost with its rejection, and the writer's check refuses such a write by itself.
       return stopLanding(error, host.failed !== undefined);
     });
   clearInterval(heartbeat);
+  // The last reading is in the record before the closing summary reads it.
+  usageWatch?.stop();
   // The cause the closing summary names: the most severe, a `.git` change before a limit.
   const headline = stop.headline;
   const stopLine = headline && stopWords(headline);
