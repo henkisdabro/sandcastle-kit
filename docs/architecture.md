@@ -72,7 +72,10 @@ state.
   the very pipelines that wait for it) frees its waiters, which repair as before; so do a merge that
   conflicts and a re-gate that is still red (it waits once per failure). A wait that would close a
   cycle is refused, a forced red (`SANDCASTLE_TEST_RED_GATE`) never waits, and the waiting ticket
-  keeps its sandbox slot. `test/fix-wait.test.ts`.
+  keeps its sandbox slot - so while a landing of the run waits for a slot (`slotWanted`), every
+  waiter stops waiting and repairs, as the slot it holds may be the one that landing needs. A
+  ticket that repaired before it waited keeps those commits under the review after repair.
+  `test/fix-wait.test.ts`.
 - `createStopState`: the stop state, whose `add` only the scheduler holds.
 - `createLanding`: the one worker that lands each green ticket, a carried branch first.
 - `createQueue<T>(rank?)`: the work queue of the pipeline fan-out and of the landing worker (`push`,

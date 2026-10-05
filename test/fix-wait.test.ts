@@ -57,7 +57,7 @@ const until = async (cond: () => boolean) => {
 };
 
 /** Two tickets' pipelines over one repo and one board; `gateOf` says what each ticket's gate runs return, in order. */
-const harness = (gateOf: (id: string) => GateRun[]) => {
+const harness = (gateOf: (id: string) => GateRun[], starved?: () => boolean) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -110,7 +110,7 @@ const harness = (gateOf: (id: string) => GateRun[]) => {
     root, name: "fixture", baseBranch: "main", gates: [{ name: "test", command: "run-tests" }],
     generated: [], setup: [], implement: {}, review: {}, repair: {}, changelog: true,
   } as unknown as Ctx["project"];
-  const fixes = createFixBoard();
+  const fixes = createFixBoard(starved, 10);
   const log = console.log;
   console.log = (...args: unknown[]) => void lines.push(args.join(" "));
   const pipeline = createPipeline({
@@ -240,6 +240,43 @@ test("a ticket still red after the first one's fix landed repairs, and does not 
     assert.equal(o.repairs, 1);
     assert.deepEqual(h.events("2"), ["impl", "review", "gate", "gate", "repair", "gate", "review"]);
     assert.equal(h.lines.filter((l) => l.includes("waiting for")).length, 1);
+  } finally {
+    h.restore();
+  }
+});
+
+test("a ticket that repaired before it waited has those repair commits reviewed once it gates green on the merged base", async () => {
+  const TYPES = red("src/ticket-2.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.");
+  const h = harness((id) => (id === "1" ? [CLOCK, GREEN] : [TYPES, CLOCK, GREEN]));
+  try {
+    h.agents.repair = (id, wt) => commit(wt, id === "1" ? "src/fix.ts" : "src/types.ts", `fix by ${id}\n`);
+    await h.attempt("1");
+    const second = h.attempt("2");
+    await until(() => h.waiting("2"));
+    h.land("1");
+    h.fixes.told(landed("1"));
+    const o = await second;
+    assert.equal(o.status, "green");
+    assert.equal(o.repairs, 1);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "repair", "gate", "gate", "review"], "its own repair is reviewed, though the merge came after it");
+  } finally {
+    h.restore();
+  }
+});
+
+test("a landing left waiting for a sandbox slot frees the tickets waiting for a fix, which repair on their own", async () => {
+  // The waiter holds its slot; the landing it waits for may need that very slot (the run's share shrank).
+  let landingWaits = false;
+  const h = harness(() => [CLOCK, GREEN], () => landingWaits);
+  try {
+    fixing(h);
+    await h.attempt("1");
+    const second = h.attempt("2");
+    await until(() => h.waiting("2"));
+    landingWaits = true;
+    const o = await second;
+    assert.equal(o.repairs, 1);
+    assert.deepEqual(h.events("2"), ["impl", "review", "gate", "repair", "gate", "review"]);
   } finally {
     h.restore();
   }

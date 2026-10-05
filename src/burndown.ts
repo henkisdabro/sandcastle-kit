@@ -966,8 +966,9 @@ export const createPipeline = (ctx: PipelineContext) => {
             if (pull.exitCode !== 0) await sandbox.exec("git merge --abort");
             else if ((await sandbox.exec("git rev-parse HEAD")).stdout.trim() !== before) {
               console.log(`${ref(issue.id)}: ${ref(fixer)} landed - merged ${base} into its branch, gating again`);
-              // The merge is the base's lines, not repair commits: the review after a repair reads from here.
-              preRepair = sh("git", ["rev-parse", branch], project.root);
+              // The merge is the base's lines, not repair commits: the review after a repair reads from here,
+              // unless this ticket repaired before it waited - those commits still get their review.
+              if (!repairs) preRepair = sh("git", ["rev-parse", branch], project.root);
               gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
               continue;
             }
@@ -1589,7 +1590,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const { requeuedAs } = ledger;
   const baseRed: string[] = [];
   // Who is repairing which failure: the scheduler's endings (`tell`) tell a waiting ticket whether the fix landed.
-  const fixes = createFixBoard();
+  // A landing left waiting for a sandbox slot may be waiting for the very slots the waiters hold (the run's
+  // share shrank, a cap): they stop waiting and repair, so no wait outlasts the landing it waits for.
+  const fixes = createFixBoard(() => slotWanted.n > 0);
   const pipeline = createPipeline({
     project,
     tracker,

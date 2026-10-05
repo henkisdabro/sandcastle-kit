@@ -530,9 +530,11 @@ export const onBase = (landed: Landed) => landed.kind === "merged" || landed.kin
  * the scheduler's changes: `wait` answers whether that ticket landed. A ticket that failed, gave up
  * or was held never landed, so the waiter repairs as before - nobody waits on a landing that will
  * not come. A cycle (A waits on B's fix while B waits on A's) is refused at `fixing`, so no two
- * tickets wait on each other. In memory, one per run.
+ * tickets wait on each other. A waiter holds its sandbox slot, and the landing it waits for may need
+ * one: while `starved` says a landing waits for a slot, every waiter stops waiting (asked every
+ * `pause` ms), so the two never wait on each other. In memory, one per run.
  */
-export const createFixBoard = () => {
+export const createFixBoard = (starved?: () => boolean, pause = 1000) => {
   const claims = new Map<string, string>();
   // A ticket that ended: whether it landed.
   const ended = new Map<string, boolean>();
@@ -554,13 +556,19 @@ export const createFixBoard = () => {
       for (let at = waitingOn.get(by); at !== undefined; at = waitingOn.get(at)) if (at === id) return undefined;
       return by;
     },
-    /** Resolves when `on` has ended or been sent back for a second attempt: true when it landed. */
+    /** Resolves when `on` has ended or been sent back for a second attempt, or a landing is starved of a slot: true when it landed. */
     async wait(id: string, on: string): Promise<boolean> {
       if (ended.has(on)) return ended.get(on) === true;
       waitingOn.set(id, on);
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        return await new Promise<boolean>((resume) => resumes.set(on, [...(resumes.get(on) ?? []), resume]));
+        return await new Promise<boolean>((resume) => {
+          resumes.set(on, [...(resumes.get(on) ?? []), resume]);
+          const poll = () => (starved?.() ? resume(false) : (timer = setTimeout(poll, pause)));
+          if (starved) timer = setTimeout(poll, pause);
+        });
       } finally {
+        clearTimeout(timer);
         waitingOn.delete(id);
       }
     },
