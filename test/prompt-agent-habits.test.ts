@@ -1,7 +1,6 @@
-// The implementer is told to run the gates in the foreground with output in a file, to prefer the
-// Edit tool to scripted replacements, and to look in the project rules for the test runner's output
-// format. Dogfood agents grepped TAP lines out of node:test's spec output, polled a background suite
-// with `sleep`, and replaced text with heredocs that no-op silently on a missed match. No model calls.
+// The implementer is told to run the gates in the foreground with output in a file, and to look in
+// the project rules for the test runner's output format. Dogfood agents grepped TAP lines out of
+// node:test's spec output and polled a background suite with `sleep`. No model calls.
 //
 //   pnpm exec tsx --test test/prompt-agent-habits.test.ts
 
@@ -39,10 +38,13 @@ test("every agent that runs the gates runs them in the foreground with the longe
   }
 });
 
-test("the implementer edits with the Edit tool, and a script asserts each replacement matched", () => {
-  const p = read("prompts", "implement.md");
-  assert.match(p, /An insert, or any change to one file, goes through Edit\./);
-  assert.match(p, /assert that each replacement matched/);
+// The Edit-tool rule cost words in every prompt and was not followed: implementers kept editing with
+// heredocs and `sed -i`, and the reviewer and the gates catch a bad replace. It stays out.
+test("no prompt tells the agent which tool to edit files with", () => {
+  for (const name of ["implement.md", "review.md", "repair.md", "resolve.md"]) {
+    const p = read("prompts", name);
+    assert.doesNotMatch(p, /Edit tool|goes through Edit/, name);
+  }
 });
 
 test("this repository's rules name node:test's spec output", () => {

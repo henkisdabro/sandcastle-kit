@@ -72,9 +72,6 @@ ticket names. The project rules below say what else to read.
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
-- **Edit files with the Edit tool.** An insert, or any change to one file, goes through Edit. Keep a
-  script (`sed -i`, a `python3` heredoc) for a mechanical change across many files, and assert that
-  each replacement matched: a string replace that does not match does nothing, and says nothing.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
