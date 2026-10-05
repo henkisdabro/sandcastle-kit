@@ -232,10 +232,15 @@ junction() {
 }
 # A muted key in a 10-column field, then its value.
 kvl() { local k="$1"; printf -v k '%-10s' "$k"; REPLY="${mute}${k}${off}$2"; }
-# A slot gauge, █████░ 5/6; only the count past a dozen slots.
+# A slot gauge, █████░ 5/6; only the count past a dozen slots. Used can pass the limit (7/6: the
+# base check's extra sandbox, pool.ts `withExtraSlot`): then no free cell, as a negative width
+# pads printf to one.
 gauge() {
-  local g=""
-  if [ "$2" -le 12 ] 2>/dev/null; then rep █ "$1"; g="${ylw}${REPLY}"; rep ░ $(( $2 - $1 )); g="${g}${rule}${REPLY}${off} "; fi
+  local g="" free
+  if [ "$2" -le 12 ] 2>/dev/null; then
+    free=$(( $2 - $1 )); [ "$free" -lt 0 ] && free=0
+    rep █ "$1"; g="${ylw}${REPLY}"; rep ░ "$free"; g="${g}${rule}${REPLY}${off} "
+  fi
   REPLY="${g}${head}$1/$2${off}"
 }
 # The frame being built: each line appended and counted, written in one go.

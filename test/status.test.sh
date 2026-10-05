@@ -505,6 +505,19 @@ hasnt 'run output'
 rm -f "$L/run-output.log" "$L/run.json"; if [ -f "$TMP/run.json.kept" ]; then mv "$TMP/run.json.kept" "$L/run.json"; fi
 
 # ---------------------------------------------------------------------------
+SCENARIO="machine pool past its limit"
+# The mid-run base check's sandbox takes an extra slot (pool.ts `withExtraSlot`), outside the
+# numbered six, so the pool reads 7/6: seven full cells and no free one, not a stray free cell.
+S="$TMP/cache/sandcastle-kit/slots"
+mkdir -p "$S"
+for i in 0 1 2 3 4 5; do printf '%s t%s run=aaaa ticket\n' "$LIVE" "$i" >"$S/sandboxes-$i.lock"; done
+printf '%s t6 run=aaaa base check\n' "$LIVE" >"$S/sandboxes-extra-aaaa-0.lock"
+SANDCASTLE_MAX_SANDBOXES=6 render "101 102 103"
+has 'sandboxes +███████ 7/6'
+hasnt 'sandboxes +[█]*░'
+rm -rf "$S"
+
+# ---------------------------------------------------------------------------
 SCENARIO="short pane, one-row header"
 # The logo folds to one row in a short pane. A castle cut down to its battlements
 # read as a broken logo, so the fold draws no castle: the wordmark alone.

@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import type { HookTest, Project } from "./config.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak } from "./peaks.ts";
-import { withSlot } from "./pool.ts";
+import { withExtraSlot, withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
@@ -263,7 +263,8 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       }
     }
   };
-  return ownSlot ? withSlot("sandboxes", `${project.name} ${label}`, gated) : gated();
+  // In the caller's slot the sandbox is still a sandbox: an extra slot, never waited for, shows it to other runs.
+  return ownSlot ? withSlot("sandboxes", `${project.name} ${label}`, gated) : withExtraSlot("sandboxes", `${project.name} ${label}`, gated);
 };
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}`).join(" ");
