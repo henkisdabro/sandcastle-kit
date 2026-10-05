@@ -84,7 +84,7 @@ type View = { tab?: string; adopted?: boolean; status?: string; reported?: boole
 // the tab bar runs whatever kit it names: used only as an absolute path to a checkout that has
 // `bin/sandcastle`, else the caller's. A relative one would run a script from inside the repo.
 const recordedKit = (view: View, kit: string) =>
-  view.kit && isAbsolute(view.kit) && existsSync(join(view.kit, "bin/sandcastle")) ? view.kit : kit;
+  typeof view.kit === "string" && isAbsolute(view.kit) && existsSync(join(view.kit, "bin/sandcastle")) ? view.kit : kit;
 // Pane ids mean something only to the server that made them: another server's `w1:t2-1` may be
 // a bare shell of someone else's. A record without `socket`, or a caller without
 // HERDR_SOCKET_PATH, cannot tell.

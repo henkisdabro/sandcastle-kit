@@ -87,14 +87,14 @@ test("a record without a kit keeps the caller's", () => {
   assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${dead}' && '${CALLER_KIT}/bin/sandcastle' report`]);
 });
 
-test("a record's kit that is relative or has no bin/sandcastle falls back to the caller's", () => {
-  for (const kit of [".", "kit", "../kit", join(tmpdir(), "sandcastle-viewkit-missing")]) {
+test("a record's kit that is relative, has no bin/sandcastle or is not a path falls back to the caller's", () => {
+  for (const kit of [".", "kit", "../kit", join(tmpdir(), "sandcastle-viewkit-missing"), 1]) {
     const restart = project({ ...OWN, kit });
-    assert.equal(restartStatusView(restart, CALLER_KIT), true, kit);
-    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${restart}' && '${CALLER_KIT}/bin/sandcastle' status`], kit);
+    assert.equal(restartStatusView(restart, CALLER_KIT), true, String(kit));
+    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${restart}' && '${CALLER_KIT}/bin/sandcastle' status`], String(kit));
     const dead = project({ ...OWN, kit });
-    assert.equal(tellDeadTab(dead, CALLER_KIT), "reported", kit);
-    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${dead}' && '${CALLER_KIT}/bin/sandcastle' report`], kit);
+    assert.equal(tellDeadTab(dead, CALLER_KIT), "reported", String(kit));
+    assert.deepEqual(typed(), [`pane run w1:t2-1 cd '${dead}' && '${CALLER_KIT}/bin/sandcastle' report`], String(kit));
   }
 });
 
