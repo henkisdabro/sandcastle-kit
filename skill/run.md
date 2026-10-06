@@ -27,7 +27,9 @@ This continues SKILL.md: run its "Before every action" first.
      `CLAUDE_CODE_OAUTH_TOKEN`, and with `ANTHROPIC_API_KEY`, alone or beside it, it says it does not apply; it reads usage
      with the host's Claude Code login, read-only, else that token; a `claude setup-token` token gets
      HTTP 403 and cannot use the guard, and `sandcastle doctor --verify` shows which credential it
-     would use and whose plan that is).
+     would use and whose plan that is). Or `USAGE_PAUSE=90`, which has the run pause itself when a
+     plan window reaches that percent and resume by itself after the window's reset (a pause a person can
+     end with `sandcastle resume`); it reads the agents' own readings, so it needs no credential.
    - **API credits.** If `sandcastle doctor` prints a `warn API credits` line, an
      `ANTHROPIC_API_KEY` (in the personal or the project `.env`) reaches the sandboxes, and Claude
      Code spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: the run bills API credits, not the plan.
