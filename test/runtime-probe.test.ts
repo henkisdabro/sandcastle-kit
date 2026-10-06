@@ -164,3 +164,18 @@ test("macOS makes no docker read for the runtime check; Linux reads info before 
   assert.equal(runtimeProblem({ platform: "linux", uid: 0, reads })?.label, "sandcastle run as a normal user, not root");
   assert.deepEqual(asked, [], "root is refused before the daemon is asked");
 });
+
+// A runtime that starts on demand can take longer than the limit on a cold start: outside Linux the
+// turn goes on with no CPU limit instead of stopping, as it did before the limit existed (#380 promised
+// macOS no change). On Linux, and for any other failure, the error still stops the run.
+test("a silent docker stops a turn on Linux only; elsewhere the turn goes on without its answer", async () => {
+  const { turnDockerInfo } = await import("../src/runtime.ts");
+  const { OperatorError } = await import("../src/errors.ts");
+  const silent = () => {
+    throw new OperatorError("docker did not answer within 10 s - is the runtime running?");
+  };
+  assert.throws(() => turnDockerInfo(silent, "linux"), /did not answer/);
+  assert.equal(turnDockerInfo(silent, "darwin"), undefined);
+  assert.equal(turnDockerInfo(() => ROOTFUL, "darwin"), ROOTFUL);
+  assert.throws(() => turnDockerInfo(() => { throw new Error("a bug"); }, "darwin"), /a bug/);
+});

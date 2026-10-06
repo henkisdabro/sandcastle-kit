@@ -46,6 +46,21 @@ const read = (args: string[]) => () => {
 /** `docker info --format '{{json .}}'`, once per call: a start takes it once and hands it to everything that needs it. Throws an `OperatorError` when docker does not answer in time. */
 export const readDockerInfo = (): string | undefined => read(["info", "--format", "{{json .}}"])() || undefined;
 
+/**
+ * A turn's `docker info` for the CPU limit and the pool warning. A silent docker stops the run on Linux,
+ * where the runtime check needs the answer; elsewhere a runtime that starts on demand (OrbStack, Docker
+ * Desktop) can take longer than the limit on a cold start, and the turn goes on with no CPU limit, as it
+ * did before the limit existed.
+ */
+export const turnDockerInfo = (read: () => string | undefined = readDockerInfo, platform: NodeJS.Platform = process.platform): string | undefined => {
+  try {
+    return read();
+  } catch (error) {
+    if (platform === "linux" || !(error instanceof OperatorError)) throw error;
+    return undefined;
+  }
+};
+
 /** The real reads; `info` is the start's one reading when it already has one. */
 export const realReads = (info: () => string | undefined = readDockerInfo): Reads => ({
   version: read(["--version"]),

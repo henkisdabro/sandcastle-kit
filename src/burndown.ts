@@ -45,7 +45,7 @@ import {
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
-import { readDockerInfo } from "./runtime.ts";
+import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
 import { closingReport, summary } from "./report.ts";
@@ -1527,8 +1527,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
   // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
   // gates, which run one at a time and set the run's end (`gateProject` below opens those).
-  // One `docker info` for both this and the pool warning below; docker not answering stops the run here, before anything is recorded or started.
-  const info = (turn?.docker ?? readDockerInfo)();
+  // One `docker info` for both this and the pool warning below; on Linux docker not answering stops the run here, before anything is recorded or started.
+  const info = turnDockerInfo(turn?.docker ?? readDockerInfo);
   const pool = { concurrency: settings.concurrency.effective, maxGates: limit("gates") };
   const ticketCpus = sandboxCpus(project, "ticket", pool, () => info);
   const gateCpus = sandboxCpus(project, "gate", pool, () => info);
