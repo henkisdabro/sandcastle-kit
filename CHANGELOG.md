@@ -30,6 +30,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Fixed
 
+- **`test/full-check.sh` no longer reads a repo path as a home directory.** Its outbound scan
+  flagged any added line with `/home/` in it, so `site/home/index.html` failed as though it named
+  a user's home. `home` now counts only where a path starts; macOS's `Users` still counts
+  anywhere, so WSL's `/mnt/c/Users` form stays caught.
 - **Website release versions are checked before deployment**, alongside the Herdr manifest,
   site software metadata and README badges. `pnpm version` synchronises current version fields
   from `package.json`; `pnpm version:sync` repeats it after a manual edit, and a regression test
