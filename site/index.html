@@ -46,6 +46,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
         "name": "sandcastle-kit",
+        "softwareVersion": "0.8.0",
         "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
         "url": "https://henkisdabro.github.io/sandcastle-kit/",
         "applicationCategory": "DeveloperApplication",
@@ -70,14 +71,14 @@
       {
         "@type": "FAQPage",
         "mainEntity": [
-          { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. On the kit's own repository, 18 tickets took 1 h 40 min and 28.4M input and 343k output tokens, with Sonnet implementing and Opus reviewing; one ticket ran from 0.4M to 3.3M input tokens. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and USAGE_CHECK=1 stops it starting tickets before then." } },
+          { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or an Anthropic API key through Claude Code; an API key takes precedence and the kit asks before spending it. Codex cross-review uses your ChatGPT plan or OpenAI API key. Runs using the same account share its allowance. The status view shows subscription usage and reset times from agent events, without extra requests. USAGE_CHECK=1 checks Claude plan usage before starting tickets; USAGE_PAUSE=90 opts into pausing at 90% of a provider's plan window and resuming a minute after its reset. Without usage pause, an agent hitting the limit stops the queue." } },
           { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label sets the implementer's model or effort for one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
-          { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed." } },
+          { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch. A completed ticket is closed with a comment; a partly-done ticket stays open with the unmet criterion named. Agents' follow-ups are filed for triage. You push when you are happy with what landed." } },
           { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. Leave the checkout alone until the run ends, and do your own work in another clone." } },
           { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
           { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged." } },
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
-          { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake until it ends (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A ticket whose blocker lands starts in the same run, and with autonomy: \"drain\" one run keeps going until the queue is drained or something stops it, and says what." } },
+          { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
           { "@type": "Question", "name": "Linear, Jira, Windows?", "acceptedAnswer": { "@type": "Answer", "text": "Linear issues can block a ticket today, but the queues are GitHub Issues and Markdown ticket files. The kit runs on macOS and Linux." } }
         ]
@@ -209,7 +210,7 @@
         </blockquote>
         <figcaption>The review agent on <a href="https://github.com/henkisdabro/sandcastle-kit/issues/248">#248</a>, in that run. It rewrote the test so that removing the check fails it. The gates were green either way.</figcaption>
       </figure>
-      <p class="after">Over the 26 runs on this repository so far, a ticket ended merged 110 times, in a conflict 8 times and held for a person 6 times. It is a TypeScript project whose tests take a few minutes; a slower suite or a bigger model costs more.</p>
+      <p class="after">In the 26 runs measured for this example, a ticket ended merged 110 times, in a conflict 8 times and held for a person 6 times. These are historical figures from this TypeScript project, whose tests take a few minutes; a slower suite or a bigger model costs more.</p>
     </section>
 
     <section class="who" aria-labelledby="who-title">
@@ -383,7 +384,7 @@
             <p class="c-wht c-b">Start the run?</p>
           </div>
           <p class="ask-keys"><span class="on">Yes, start</span><span>Not yet</span></p>
-          <p class="term-note">It asks before anything that spends allowance, starts a run, or files or closes a ticket.</p>
+          <p class="term-note">It asks before starting a run or spending allowance. An authorised run closes completed tickets and files follow-ups for triage.</p>
         </div>
         <div class="keys">
           <h3>Before the first run</h3>
@@ -396,6 +397,7 @@
           <ul>
             <li class="on"><b>run</b>asks, then starts the run and writes its summary</li>
             <li><b>status</b>reads a live run, or the last one</li>
+            <li><b>pause / resume</b>holds a run and carries on without losing work</li>
             <li><b>update</b>pulls the latest kit and says what it changes</li>
           </ul>
           <p class="keys-where"><span><code>/sandcastle</code> Claude Code</span><span><code>$sandcastle</code> Codex</span><span>OpenCode too</span></p>
@@ -417,6 +419,7 @@
             <ul>
               <li><b><code>run</code></b> shows the queue and models, asks before starting, and leaves the run working in the background. When it ends, you get the summary: what merged, what needs you, what to push.</li>
               <li><b><code>status</code></b> reads a live run, or the last one, and the log behind any red row.</li>
+              <li><b><code>pause</code> / <code>resume</code></b> holds a live run without losing work, then carries on from each ticket's next phase.</li>
               <li><b><code>update</code></b> pulls the latest kit, rebuilds the project's image and walks you through what the new version changes for it.</li>
             </ul>
           </div>
@@ -429,7 +432,7 @@
       <div class="tiles">
         <div class="tile">
           <h3>Fails early</h3>
-          <p>Checked before a token is spent.</p>
+          <p>Base gates first, then model preflight.</p>
           <ul class="checks">
             <li>your gates, green on <code>main</code></li>
             <li>every model answers a one-line preflight</li>
@@ -450,7 +453,7 @@
           <p>Live runs split the sandbox slots.</p>
           <div class="slots" aria-hidden="true"><i>my-app</i><i>my-app</i><i>my-app</i><i class="b">api</i><i class="b">api</i><i class="b">api</i></div>
           <p class="slots-cap">six sandbox slots, two projects running</p>
-          <p class="slots-note">A run outlives the session that started it: <code>sandcastle wait</code> · <code>stop</code></p>
+          <p class="slots-note">Hold a run without losing work: <code>sandcastle pause</code> · <code>resume</code></p>
         </div>
       </div>
       <details class="more">
@@ -469,12 +472,15 @@
             <ul>
               <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins: each one costs context on every turn.</li>
               <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
+              <li><b>One fix for a shared failure.</b> Tickets red on a test another ticket is repairing wait for its fix. A test already red on the base is reported once, instead of repaired on every branch.</li>
             </ul>
           </div>
           <div class="bound">
             <h3>Shares the machine</h3>
             <ul>
-              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other.</li>
+              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. <code>sandcastle cap 2</code> limits a live run's share.</li>
+              <li><b>CPU and memory counted.</b> Each sandbox has a CPU limit. Landing, base and verify gates take the run's next free gate slot before ticket gates; <code>sandcastle size</code> recommends pool limits from measured memory, and doctor warns when they exceed the VM.</li>
+              <li><b>A pause keeps the work.</b> Passes in flight finish and green branches still land. Parked sandboxes close, slots go back to other runs and the machine can sleep until you resume.</li>
               <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
             </ul>
           </div>
@@ -482,9 +488,31 @@
       </details>
     </section>
 
+    <section class="long" id="plan" aria-labelledby="plan-title">
+      <h2 id="plan-title">Know what a run spends and leaves behind</h2>
+      <div class="tiles">
+        <div class="tile">
+          <h3>Your plan, on screen</h3>
+          <p>See Claude and Codex subscription windows, percentages and reset times in the status view, read from agents' own events without extra requests.</p>
+          <p>Set <code>USAGE_PAUSE=90</code> to pause at 90% and resume a minute after the window resets. It is off by default.</p>
+        </div>
+        <div class="tile">
+          <h3>Nothing quietly unfinished</h3>
+          <p>A partly-done branch can land, but its ticket stays open with the unmet criterion named. The report tells you what needs a decision and what can run again.</p>
+          <p>With <code>changelog: true</code>, it also gathers suggested changes and Upgrading notes for you to review.</p>
+        </div>
+        <div class="tile">
+          <h3>Follow-ups become tickets</h3>
+          <p>Problems agents find outside their ticket are filed for triage, once per title per run. The summary links them, including when a run stops early.</p>
+          <p>Reviews read the ticket's comments as well as its body, so added scope is checked before a ticket closes.</p>
+        </div>
+      </div>
+      <p class="after">Already using the kit? Ask for <code>/sandcastle update</code> in each project, then start a new agent session. <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest">Release notes and upgrade checks</a>.</p>
+    </section>
+
     <section class="watch" id="watch" aria-labelledby="watch-title">
       <h2 id="watch-title">Watch it where you already work</h2>
-      <p class="section-lede"><code>sandcastle status</code> works in any terminal. Two optional extras put the run in front of you.</p>
+      <p class="section-lede"><code>sandcastle status</code> works in any terminal, showing run settings and subscription usage with reset times. Two optional extras put the run in front of you.</p>
       <div class="seats">
         <div class="seat" id="claude-code">
           <h3>In Claude Code</h3>
@@ -528,20 +556,20 @@
             <h3>Over any tab</h3>
             <ul>
               <li><b>The status view on a key.</b> Herdr's prefix key, then <code>Shift+S</code>, opens it over whatever you are doing; <code>q</code> puts you back. Prefix, then <code>Shift+E</code>, shows the last run's report.</li>
-              <li><b>A ticket a click away.</b> Ctrl-click a ticket in the status view to open its card: its state, each pass with its outcome and time, and why it is held or red, with a key for each pass's log.</li>
+              <li><b>A ticket a click away.</b> Use the status view's click hint (Cmd-click in iTerm2, Ctrl-click in Terminal.app and Ghostty) to open a ticket's card: its state, each pass with its outcome and time, and why it is held or red, with a key for each pass's log.</li>
             </ul>
           </div>
           <div class="bound">
             <h3>In the sidebar</h3>
             <ul>
-              <li><b>The run at a glance.</b> The run is one entry in the sidebar, and its workspace reads <code>♜ 4/9 · 1 needs you</code>, red when something needs you. The tab bar lists every live run on the machine.</li>
+              <li><b>The run at a glance.</b> The run is one entry in the sidebar, and its workspace reads <code>♜ 4/9 · 1 needs you</code>, red when something needs you. The tab bar lists every live run on the machine, and the sidebar shows Claude and Codex plan usage when available.</li>
               <li><b>Each sandbox, if you want them.</b> With sandbox panes on (<code>herdr: { panes: "all" }</code> in the project config, or <code>SANDBOX_PANES=all</code> for one run), each one is named after its ticket with its step and time in it: <code>review · 12m</code>.</li>
             </ul>
           </div>
           <div class="bound">
             <h3>Out of your way</h3>
             <ul>
-              <li><b>One tab per run.</b> A run started by your agent runs detached, in a tab that holds only its status view, and outlives the session that started it.</li>
+              <li><b>One tab per run.</b> A run started by your agent runs detached, in a tab that holds only its status view, and outlives the session that started it. The view returns after a Herdr restart, and the tab shows the closing report when the run ends.</li>
               <li><b>Set up when you say.</b> <code>sandcastle herdr configure</code> shows what it adds to Herdr's config and asks first; <code>--remove</code> takes it out again.</li>
             </ul>
           </div>
@@ -585,7 +613,8 @@
           <p class="zone-h">GitHub</p>
           <h3>Nothing pushed</h3>
           <ul>
-            <li>only labels, comments and closed issues</li>
+            <li>labels, comments, completed issues closed</li>
+            <li>follow-up issues filed for triage</li>
           </ul>
         </div>
       </div>
@@ -609,7 +638,7 @@
           <div class="bound">
             <h3>On your machine</h3>
             <ul>
-              <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it only labels, comments on and closes issues.</li>
+              <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it labels and comments on issues, closes completed ones and files agents' follow-ups for triage.</li>
               <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there.</li>
               <li><b>Host hooks stay off.</b> During a run the kit's own git calls on your machine ignore hooks, so a branch that adds one cannot run it as it lands.</li>
             </ul>
@@ -634,14 +663,14 @@
           <div class="cmd" data-copy><code><span class="c-mute">$</span> DRY_RUN=1 sandcastle run</code><button type="button" class="copy">Copy</button></div>
         </li>
       </ol>
-      <p class="req">Needs macOS or Linux, Node 22+, pnpm, git, jq, <code>ps</code> (procps, on Linux), the GitHub CLI signed in (skippable with ticket files) and a container runtime. <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md">Full requirements</a>.</p>
+      <p class="req">Needs macOS or Linux, Node 22+, pnpm, git 2.31+, jq, <code>ps</code> (procps, on Linux) and the GitHub CLI signed in (skippable with ticket files). On Linux, use rootful Docker Engine as a normal user in the <code>docker</code> group; rootless Docker, userns-remapped Docker and Podman are refused. On macOS, use OrbStack or Docker Desktop. <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/docs/INSTALL.md">Full requirements</a>.</p>
     </section>
 
     <section class="faq" aria-labelledby="faq-title">
       <h2 id="faq-title">Questions</h2>
       <details>
         <summary>What does it cost to run?</summary>
-        <p>The kit is free and MIT-licensed. Agents use your Claude subscription or API key through Claude Code. On the kit's own repository, 18 tickets took 1 h 40 min and 28.4M input and 343k output tokens, with Sonnet implementing and Opus reviewing; one ticket ran from 0.4M to 3.3M input tokens. Every run on your machine shares one plan allowance; the first ticket that hits the usage limit stops that run's queue, and <code>USAGE_CHECK=1</code> stops it starting tickets before then.</p>
+        <p>The kit is free and MIT-licensed. Agents use your Claude subscription or an Anthropic API key through Claude Code; an API key takes precedence and the kit asks before spending it. Codex cross-review uses your ChatGPT plan or OpenAI API key. Runs using the same account share its allowance. The status view shows subscription usage and reset times from agent events, without extra requests. <code>USAGE_CHECK=1</code> checks Claude plan usage before starting tickets; <code>USAGE_PAUSE=90</code> opts into pausing at 90% of a provider's plan window and resuming a minute after its reset. Without usage pause, an agent hitting the limit stops the queue.</p>
       </details>
       <details>
         <summary>Which models does it use?</summary>
@@ -649,7 +678,7 @@
       </details>
       <details>
         <summary>Does it push to GitHub?</summary>
-        <p>No. Green branches merge into your local base branch and the issue is closed with a comment saying so. You push when you are happy with what landed.</p>
+        <p>No. Green branches merge into your local base branch. A completed ticket is closed with a comment; a partly-done ticket stays open with the unmet criterion named. Agents' follow-ups are filed for triage. You push when you are happy with what landed.</p>
       </details>
       <details>
         <summary>What about my own work in that repository?</summary>
@@ -669,7 +698,7 @@
       </details>
       <details>
         <summary>Can a run go all night?</summary>
-        <p>Yes. A run keeps the machine awake until it ends (<code>caffeinate</code> on macOS, <code>systemd-inhibit</code> on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A ticket whose blocker lands starts in the same run, and with <code>autonomy: "drain"</code> one run keeps going until the queue is drained or something stops it, and says what.</p>
+        <p>Yes. A run keeps the machine awake while work is in flight (<code>caffeinate</code> on macOS, <code>systemd-inhibit</code> on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and <code>autonomy: "drain"</code> keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice.</p>
       </details>
       <details>
         <summary>Do I need Matt Pocock's skills?</summary>

@@ -8,6 +8,9 @@
     "sandcastle": "bin/sandcastle"
   },
   "scripts": {
+    "version": "node scripts/version.mjs --write",
+    "version:sync": "node scripts/version.mjs --write",
+    "version:check": "node scripts/version.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && bash test/status.test.sh && tsx --import ./test/no-stray.ts --test --test-timeout=300000 test/*.test.ts'",
     "test:shard": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && files=$(tsx test/shard.ts) && tsx --import ./test/no-stray.ts --test --test-timeout=300000 $files'"

@@ -1,8 +1,31 @@
 # Releasing
 
-A release bumps `version` in `package.json`, `herdr/herdr-plugin.toml` and `site/index.html`'s
-`data-version` with its changelog heading (tests check all four agree), then tags `vX.Y.Z`: the
-kit version counts a clone's distance from that tag.
+`package.json` is the source of the current release version. Bump it with
+`pnpm version X.Y.Z --no-git-tag-version`: its `version` hook synchronises
+`herdr/herdr-plugin.toml`, the site's footer and `SoftwareApplication.softwareVersion`, and the
+README's release and minimum Node badges. After a manual edit to `package.json`, run
+`pnpm version:sync` yourself. It leaves dependency versions and historical examples alone.
+
+Move the Unreleased changes under the new changelog heading, then run `pnpm version:check` and
+the normal checks before committing and tagging `vX.Y.Z`. The check refuses a stale field, a
+missing marker or a changelog whose latest release differs from `package.json`. `pnpm test` runs
+it too. A new current-version mention belongs in `scripts/version.mjs`'s field list and its
+regression test, so future bumps update it. Other badges describe capabilities or live CI status;
+check their claims when those capabilities change.
+
+At each release, compare every claim in `site/index.html` and `site/llms.txt` with the last three
+release notes and the README. Update the benefits, requirements and FAQ (including its JSON-LD)
+for changed behaviour; keep historical run figures labelled as examples. Done when version checks
+pass, the visible FAQ agrees with its structured data, and a browser preview has been checked at
+desktop and mobile widths.
+
+Pages always deploys `main`, including on release events and manual runs, so an older release's
+rerun cannot roll the website back. It checks the committed version fields before uploading the
+site; it never replaces them from the nearest git tag. Version-source changes trigger deployment
+alongside site changes. After publishing, check the public footer against `package.json`, rather
+than treating a successful artifact upload as proof that visitors see the current version.
+
+The kit version counts a clone's distance from its `vX.Y.Z` tag.
 
 The release notes are a short, emoji-led summary, never the changelog pasted in. Copy the shape of
 the latest release (`gh release view`) and keep it:

@@ -9,6 +9,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Fixed
+
+- **Website release versions are checked before deployment**, alongside the Herdr manifest,
+  site software metadata and README badges. `pnpm version` synchronises current version fields
+  from `package.json`; `pnpm version:sync` repeats it after a manual edit, and a regression test
+  catches missed updates. Pages deploys `main` even for release events, so an old release cannot
+  restore a stale website. The site now describes pause/resume, subscription usage and opt-in
+  usage pause, CPU and memory controls, partly-done tickets and filed follow-ups, and corrects
+  the cost FAQ, Herdr click hints and Linux requirements against the last three releases.
+
 ## [0.8.0] - 2026-10-06
 
 ### Upgrading

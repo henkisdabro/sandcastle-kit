@@ -235,3 +235,10 @@ Verifying a change to it needs Claude Code 2.1.287 or newer on PATH: `pnpm test`
 ## `site/`
 
 The project website on GitHub Pages: static HTML, CSS and plain scripts (not modules, so it also opens from disk), no build step. `js/status.js` ports the status view's grid to play a made-up run; `js/sand.js` draws the castle, dunes and grains. `.github/workflows/pages.yml` deploys it
+
+`scripts/version.mjs` synchronises the current release fields from `package.json`: the Herdr
+manifest, site's footer and software metadata, and README release and minimum Node badges.
+`pnpm version` runs it through the version hook; `pnpm version:sync` repeats it after a manual edit.
+`pnpm version:check` checks those fields and the latest changelog heading without writing, as the
+test suite and Pages deployment do. Pages deploys `main` on every event, so an older release cannot
+restore its old copy or version; the release procedure's copy review is in `docs/releasing.md`.
