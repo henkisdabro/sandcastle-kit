@@ -125,7 +125,8 @@ read the `mod/` section of `docs/architecture.md`.
 
 Before a branch's work is pushed, `bash test/full-check.sh` repeats the checks on this machine and
 in Linux (agents' sandboxes are Linux, so BSD tools break only here), and scans the new commits
-for secrets, the denylist and home-directory paths.
+for secrets, the denylist and home-directory paths. It takes minutes and prints nothing until every
+leg is done, so start it in the background with its output in a file, and read its `RESULT:` line.
 
 In this repository's sandbox image (`.sandcastle/Dockerfile`), `bash32` is macOS's bash 3.2 built
 from source, and `test/status.test.sh` (part of `pnpm test`) runs a second time under it. Every

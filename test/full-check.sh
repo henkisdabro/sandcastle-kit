@@ -127,11 +127,33 @@ show() {
   [ "$(cat "$logs/leg-$1.status")" = 0 ] || fail=1
 }
 
+# `docker info` with 10 s to answer: a daemon that stopped answering held the whole check, silent,
+# until the caller gave up. macOS has no timeout(1), so the wait is a loop. 0 answered, 1 refused,
+# 2 no answer in time.
+docker_answers() {
+  docker info >/dev/null 2>&1 &
+  local pid=$! i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$i" -ge 100 ]; then
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 2
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  wait "$pid" || return 1
+}
+
 docker_note=""
 if [ -n "${NO_DOCKER:-}" ]; then
   docker_note="skipped (NO_DOCKER)"
-elif ! docker info >/dev/null 2>&1; then
-  docker_note="skipped: Docker is not running"
+else
+  docker_answers
+  case $? in
+    1) docker_note="skipped: Docker is not running" ;;
+    2) docker_note="skipped: Docker did not answer within 10 s (restart it, or NO_DOCKER=1)" ;;
+  esac
 fi
 
 # Every pass that runs at once, the Linux container's too (its VM takes its cores from this
