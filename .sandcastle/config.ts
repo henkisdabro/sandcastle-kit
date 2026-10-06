@@ -40,7 +40,9 @@ export default {
 
   // Models and effort differ from the kit's defaults only when set here, per agent.
   // IMPL_* / REVIEW_* env vars still override them for one run. Repair uses implement's.
-  // review: { model: "claude-opus-5-5", effort: "medium" },
+  // Review at high effort: in three runs at medium, 2 of 24 reviews committed a fix (about 1 in 2 at
+  // high), and one passed a race its implementer's own check had flagged.
+  review: { model: "claude-opus-5-5", effort: "high" },
 
   // A red gate gets this many repair passes, fed its output. 0 turns it off.
   // repair: { attempts: 1 },
