@@ -636,8 +636,9 @@ try {
       pinHostGitConfig(project.root);
       lockRun(project);
       const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
-      // After the branches above went: a deleted branch's backup entry is dropped with it.
-      const backups = pruneBackup(project);
+      // After the branches above went: a merged branch's backup entry is dropped with it, and with
+      // --all an unmerged one's too, as its work was let go with the branch.
+      const backups = pruneBackup(project, { goneToo: args.includes("--all") });
       for (const id of containers) console.log(`removed exited sandbox container ${id}`);
       for (const id of images) console.log(`removed dangling image ${id}`);
       for (const path of worktrees) console.log(`removed worktree ${path}`);

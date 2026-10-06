@@ -71,6 +71,13 @@ test("a dry run's unfiled follow-ups count towards to triage, and not towards ne
   assert.equal(section(out, "## Needs you").filter((l) => /a real run files it for triage/.test(l)).length, 2);
 });
 
+test("a real run's follow-up left unfiled by a stop counts towards need you, to be filed by hand", async () => {
+  const out = await summary({ followUps: [{ title: "the clock drifts", from: "1", phase: "review" }] });
+  assert.match(out, / - 1 need you - 0 need fixing - /);
+  assert.doesNotMatch(out, /to triage/);
+  assert.equal(section(out, "## Needs you").filter((l) => /not filed, as the run stopped before it could - file it by hand/.test(l)).length, 1);
+});
+
 test("a record with no follow-ups has neither count", async () => {
   const out = await summary({});
   assert.match(out, / - 0 need you - 0 need fixing - 0 not started/);

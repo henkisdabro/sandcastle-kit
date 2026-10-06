@@ -1,7 +1,7 @@
 // The tip backup (`.sandcastle/backup.git`, src/guard.ts) is pruned at a run's start and by
-// `sandcastle clean`: a backup ref whose branch was merged into the base by hand, or whose branch
-// was deleted, is dropped, and with no ref left the backup's objects are pruned. A ref for an
-// unmerged branch that still exists is kept. burndown() and `clean` need Docker, so no test drives
+// `sandcastle clean`: a backup ref whose branch was merged into the base by hand is dropped, and with
+// no ref left the backup's objects are pruned. A ref for an unmerged branch is kept, even once the
+// branch is gone - the backup may be its only copy - unless `sandcastle clean --all` let it go. burndown() and `clean` need Docker, so no test drives
 // them: the guard's own `pruneBackup` is run against temp repos, and the two callers are held by
 // their source, as start-output-order.test.ts does.
 //
@@ -89,15 +89,29 @@ test("a held branch merged into the base by hand loses its backup at the next ru
   assert.equal(git(backupRepo(project(root)), "rev-parse", "refs/base"), git(root, "rev-parse", "HEAD~1"), "the base copy stays, so the next fetch is thin");
 });
 
-test("a backup whose branch was deleted by a person is dropped at the next run's start, and the backup is pruned", () => {
+test("a deleted unmerged branch keeps its backup at a run's start, its only copy; clean --all drops it and prunes", () => {
   const root = makeRepo();
   const branch = held(root, "2");
+  const tip = git(root, "rev-parse", branch);
   const before = objects(root);
   git(root, "branch", "-D", branch);
 
-  assert.deepEqual(pruneBackup(project(root)), [branch]);
+  assert.deepEqual(pruneBackup(project(root)), []);
+  assert.deepEqual(refs(root), [branch]);
+  assert.equal(git(backupRepo(project(root)), "rev-parse", `refs/heads/${branch}`), tip, "still restorable from the backup");
+
+  assert.deepEqual(pruneBackup(project(root), { goneToo: true }), [branch]);
   assert.deepEqual(refs(root), []);
   assert.ok(objects(root) < before - 100, `${objects(root)} objects left of ${before}: the backup was not pruned`);
+});
+
+test("a deleted branch whose commits are on the base is dropped at a run's start", () => {
+  const root = makeRepo();
+  const branch = held(root, "8");
+  git(root, "merge", "-q", "--no-ff", "-m", "merge by hand", branch);
+  git(root, "branch", "-D", branch);
+  assert.deepEqual(pruneBackup(project(root)), [branch]);
+  assert.deepEqual(refs(root), []);
 });
 
 test("a backup of an unmerged branch that still exists is kept, beside the dropped one of a merged branch", () => {
@@ -129,13 +143,15 @@ test("a project that never made a backup has nothing to prune and no backup repo
   assert.deepEqual(refs(root), []);
 });
 
-test("a base branch that does not exist drops only the backups of deleted branches", () => {
+test("a base branch that does not exist drops nothing at a run's start, and only deleted branches' backups with clean --all", () => {
   const root = makeRepo();
   const gone = held(root, "6");
   const kept = held(root, "7");
   git(root, "branch", "-D", gone);
   // The ancestor test has nothing to compare with, so a merged branch could not be told from an unmerged one.
-  assert.deepEqual(pruneBackup({ ...project(root), baseBranch: "nowhere" } as Project), [gone]);
+  const nowhere = { ...project(root), baseBranch: "nowhere" } as Project;
+  assert.deepEqual(pruneBackup(nowhere), []);
+  assert.deepEqual(pruneBackup(nowhere, { goneToo: true }), [gone]);
   assert.deepEqual(refs(root), [kept]);
 });
 
@@ -152,6 +168,6 @@ test("a run's start and `sandcastle clean` both prune the backup", () => {
   const clean = cli.indexOf('case "clean": {');
   assert.ok(clean > 0);
   const cleaned = cli.indexOf("cleanProject(project", clean);
-  const pruned = cli.indexOf("pruneBackup(project)", clean);
-  assert.ok(cleaned > 0 && pruned > cleaned, "clean prunes the backup after it deleted the finished branches");
+  const pruned = cli.indexOf("pruneBackup(project, { goneToo: args.includes(\"--all\") })", clean);
+  assert.ok(cleaned > 0 && pruned > cleaned, "clean prunes the backup after it deleted the finished branches, unmerged ones' too with --all");
 });

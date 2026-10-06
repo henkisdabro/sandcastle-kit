@@ -217,14 +217,17 @@ const pruneWhenEmpty = (project: Project) => {
 /**
  * Drops the entry of each branch the kit never got to drop, because it did not land or clean it: a
  * held branch a person merged by hand, or one a person deleted. `dropBackup` runs only when the kit
- * lands a branch, so without this the backup's entries and objects only grow. An entry goes when its
- * branch no longer exists in the project, or when its tip is already in the base (every commit it
- * holds is on the base, so nothing is lost); an entry for an unmerged branch that still exists stays,
- * and so does one the test cannot decide (a base that does not exist, a tip git cannot compare).
+ * lands a branch, so without this the backup's entries and objects only grow. An entry goes only when
+ * its tip is already in the base (every commit it holds is on the base, so nothing is lost), whether
+ * or not its branch still exists. An unmerged branch's entry stays even once the branch is gone: a
+ * branch a killed run's sandbox deleted, or one a person deleted by mistake, has no other copy, and
+ * the backup is there for exactly that. So does one the test cannot decide (a base that does not
+ * exist, a tip git cannot compare). `goneToo` (`sandcastle clean --all`, which deletes unmerged
+ * branches knowing their work is lost) also drops the entry of every branch that no longer exists.
  * Then `dropBackup`'s own prune runs when no entry is left. Returns the branches dropped. Never
  * throws: what a failure leaves stays for the next run. Call it only while holding the run lock.
  */
-export const pruneBackup = (project: Project): string[] => {
+export const pruneBackup = (project: Project, { goneToo = false }: { goneToo?: boolean } = {}): string[] => {
   const dropped: string[] = [];
   if (!existsSync(join(backupRepo(project), "HEAD"))) return dropped;
   try {
@@ -234,7 +237,7 @@ export const pruneBackup = (project: Project): string[] => {
       const at = line.indexOf(" ");
       const tip = line.slice(0, at);
       const branch = line.slice(at + 1).replace(/^refs\/heads\//, "");
-      if (tipOf(root, `refs/heads/${branch}`) && !(base && inBase(root, tip, base))) continue;
+      if (!(base && inBase(root, tip, base)) && !(goneToo && !tipOf(root, `refs/heads/${branch}`))) continue;
       try {
         backupGit(project, ["update-ref", "-d", `refs/heads/${branch}`, tip]);
         dropped.push(branch);
@@ -345,7 +348,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   }
   if (before.base && !now.base) {
     throw new OperatorError(
-      `STOPPED ${when}: ${base} was deleted while sandboxes ran. It may be a person's doing, so the run merged nothing. ` +
+      `STOPPED ${when}: ${base} was deleted while sandboxes ran. It may be a person's doing, so the run lands nothing more. ` +
         `Put it back with \`git -C ${root} update-ref refs/heads/${base} ${before.base}\` (it fails if ${base} exists by then), then \`sandcastle run\` again.`,
     );
   }
@@ -364,7 +367,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     throw new OperatorError(
       `STOPPED ${when}: ${base} moved while sandboxes ran (${commits.join("; ") || `${before.base.slice(0, 7)} -> ${now.base.slice(0, 7)}, not a fast-forward`}` +
         `${files.length ? `; changes ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` and ${files.length - 5} more` : ""}` : ""}). ` +
-        `A run cannot tell a person's commit from a sandbox's, so it merged nothing. Check the commits are yours - a sandbox can ` +
+        `A run cannot tell a person's commit from a sandbox's, so it lands nothing more. Check the commits are yours - a sandbox can ` +
         `set any name - with \`git show --stat ${before.base.slice(0, 9)}..${now.base.slice(0, 9)}\`; if they are, \`sandcastle run\` again and each branch starts from where it stopped. ` +
         `If they are not, \`git -C ${root} update-ref refs/heads/${base} ${before.base} ${now.base}\` puts ${base} back (it fails if ${base} moved again).`,
     );

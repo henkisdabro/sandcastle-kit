@@ -382,7 +382,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const settingsName = settingsProblem?.match(/^SANDCASTLE_MAX_\w+/)?.[0];
   check(
     !settingsProblem,
-    `machine-wide settings (${settingsFile}, SANDCASTLE_MAX_*)`,
+    // The path alone read as a file that is there: name the defaults when it is not.
+    `machine-wide settings (${existsSync(settingsFile) ? settingsFile : `defaults: no ${settingsFile}`}, SANDCASTLE_MAX_*)`,
     `${settingsProblem} ` +
       (settingsName
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`

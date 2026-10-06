@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -131,6 +131,15 @@ test("a malformed config.json says so in a sentence", () => {
   const file = join(tmp, "config/sandcastle-kit/config.json");
   writeFileSync(file, '{ "notify": ["x", }');
   assert.match(doctor({}), /is not valid JSON: .*\. Fix the file, or delete it/);
+  writeFileSync(file, "{}");
+});
+
+test("the machine-wide settings line names the file when there is one, and the defaults when there is none", () => {
+  const file = join(tmp, "config/sandcastle-kit/config.json");
+  writeFileSync(file, "{}");
+  assert.match(doctor({}), /ok +machine-wide settings \(\/\S+config\.json, SANDCASTLE_MAX_\*\)/);
+  rmSync(file);
+  assert.match(doctor({}), /ok +machine-wide settings \(defaults: no \/\S+config\.json, SANDCASTLE_MAX_\*\)/);
   writeFileSync(file, "{}");
 });
 

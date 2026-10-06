@@ -506,8 +506,10 @@ export const render = (f: Facts, plain = false): string => {
   // hand, so it needs them), and not filed yet - a dry run's, which a real run would file, or those of a run that
   // ended before its filing. The last are counted to triage with the filed ones: they are what a real run leaves there.
   const followUps = f.followUps ?? [];
-  const filingFailed = followUps.filter((u) => !u.id && u.failed).length;
-  const toTriage = (f.filed ?? []).length + followUps.filter((u) => u.id || !u.failed).length;
+  // Unfiled in a real run (a failed filing, or a stop after which the kit writes nothing more to the tracker) is
+  // a person's to file; unfiled in a dry run is what a real run would leave for triage.
+  const filingFailed = followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).length;
+  const toTriage = (f.filed ?? []).length + followUps.filter((u) => u.id || (!u.failed && f.dryRun)).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   // The image the verify ran on, from the record (a file in a repository: a value of the wrong type is no image). The
   // run's image is built before any ticket lands, so a Dockerfile a merged ticket changed is not in it: the verify
@@ -587,7 +589,7 @@ export const render = (f: Facts, plain = false): string => {
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {
     const kept = f.standing.includes(`agent/issue-${id}`) ? ` (branch agent/issue-${id} kept)` : "";
-    done.push(`Not landed, as the tracker now says: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
+    done.push(`Not landed, as the tracker said during the run: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
   }
   // Changelog lines the agents suggested (`changelog: true`), for the tickets that landed: the
   // maintainer writes the entries from them. A line starting with none of the three words is a Changed.
@@ -663,7 +665,9 @@ export const render = (f: Facts, plain = false): string => {
           ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
           : u.failed
             ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
-            : `- ${u.title} - ${from}: a real run files it for triage`;
+            : f.dryRun
+              ? `- ${u.title} - ${from}: a real run files it for triage`
+              : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
       }),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],

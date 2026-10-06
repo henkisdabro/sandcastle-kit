@@ -151,7 +151,7 @@ test("a ticket withdrawn during the run is reported as done by someone's decisio
     standing: ["agent/issue-13"],
   }));
   assert.match(body(out, "## ✅ Done"), /#14 d - ticket closed - not started$/m);
-  assert.match(body(out, "## ✅ Done"), /Not landed, as the tracker now says: #13 c - taken out of the queue during the run \(branch agent\/issue-13 kept\)/);
+  assert.match(body(out, "## ✅ Done"), /Not landed, as the tracker said during the run: #13 c - taken out of the queue during the run \(branch agent\/issue-13 kept\)/);
   assert.match(body(out, "## ❌ Needs fixing"), /^none$/m);
   assert.match(out, /- 1 attempted - 0 merged - 0 need you -/);
   assert.doesNotMatch(body(out, "## 👉 Next step"), /#1[34]/);
