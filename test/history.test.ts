@@ -1,7 +1,7 @@
 // Each finished run appends its final run.json, as one line, to
 // .sandcastle/logs/history.jsonl - run.json itself is overwritten by the next run.
 //
-//   pnpm exec tsx --test test/history.test.ts
+//   node --test test/history.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

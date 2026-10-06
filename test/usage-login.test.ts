@@ -3,7 +3,7 @@
 // never in a sandbox's environment or mounts. Injected readers and a stubbed fetch; no real
 // keychain, network or model calls.
 //
-//   pnpm exec tsx --test test/usage-login.test.ts
+//   node --test test/usage-login.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

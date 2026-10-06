@@ -1,7 +1,7 @@
 // Codex is resolved as the newest plain release at least 72 hours old, from npm's packument `time`.
 // An injected fetcher and a temp XDG_CACHE_HOME: no network, no Docker.
 //
-//   pnpm exec tsx --test test/versions-codex-cooldown.test.ts
+//   node --test test/versions-codex-cooldown.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

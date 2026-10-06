@@ -4,7 +4,7 @@
 // `sleep` that reports the tty's flags mid-loop and a wrapper that reports them
 // again once the view has exited. No Docker, no network, no model calls.
 //
-//   pnpm exec tsx --test test/status-tty.test.ts
+//   node --test test/status-tty.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

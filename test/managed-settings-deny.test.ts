@@ -4,7 +4,7 @@
 // (--dangerously-skip-permissions); a deny rule is checked before that mode, and managed settings
 // sit above project settings, so a branch cannot lift it.
 //
-//   pnpm exec tsx --test test/managed-settings-deny.test.ts
+//   node --test test/managed-settings-deny.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

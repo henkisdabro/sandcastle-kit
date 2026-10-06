@@ -2,7 +2,7 @@
 // FIX to relink PATH (which would hijack the installed kit); nothing on PATH, or a non-kit, keeps
 // the FIX. No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-path-checkout.test.ts
+//   node --test test/doctor-path-checkout.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";

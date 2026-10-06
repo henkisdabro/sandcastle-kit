@@ -2,7 +2,7 @@
 // source files a ticket's Touches line missed stay readable, and the closing report separates the
 // ticket's title from the note.
 //
-//   pnpm exec tsx --test test/overrun-docs-count.test.ts
+//   node --test test/overrun-docs-count.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

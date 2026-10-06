@@ -2,7 +2,7 @@
 // repo's highest number moves). A fake `gh` first on PATH answers from env vars,
 // so no network is needed.
 //
-//   pnpm exec tsx --test test/dry-run-snapshot.test.ts
+//   node --test test/dry-run-snapshot.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

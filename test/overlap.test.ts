@@ -7,7 +7,7 @@
 // Paths come from os.tmpdir() and node:path, and git runs as `git` with arguments as an array, so
 // the test runs the same on Linux and macOS.
 //
-//   pnpm exec tsx --test test/overlap.test.ts
+//   node --test test/overlap.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

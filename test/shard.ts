@@ -2,7 +2,7 @@
 // every shard takes about as long. node's own --test-shard deals the files out in turn: that put
 // the four slowest in one shard of four, which ran twice as long as the rest and set the run's time.
 //
-//   TEST_SHARD=2/4 pnpm exec tsx test/shard.ts
+//   TEST_SHARD=2/4 node test/shard.ts
 //
 // A file missing from WEIGHTS counts as one second, so a new file is still run, and stale weights
 // only cost balance, never coverage.

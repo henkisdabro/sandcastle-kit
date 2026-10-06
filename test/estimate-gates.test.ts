@@ -3,7 +3,7 @@
 // the sandboxes. The larger of that and the sandbox-bound figure sets the time. Made-up timings; no
 // tracker, Docker or network.
 //
-//   pnpm exec tsx --test test/estimate-gates.test.ts
+//   node --test test/estimate-gates.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

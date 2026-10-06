@@ -3,7 +3,7 @@
 // its top line (with Ctrl-C closing it too, once F has started following), and the pager is always the restricted one, with the terminal's own standout for
 // its prompt line. A fake `less` on PATH records what it was given; no Herdr, no terminal.
 //
-//   pnpm exec tsx --test test/herdr-log-popup.test.ts
+//   node --test test/herdr-log-popup.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

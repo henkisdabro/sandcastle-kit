@@ -1,9 +1,9 @@
 // test/run-shards.sh, which test/full-check.sh runs each pass of the suite through: the shards run
 // side by side, their counts are summed, a failing shard's tests are shown, and the exit status
-// says whether any failed. Run against a copy of the script beside a fake `pnpm` (no suite, no
+// says whether any failed. Run against a copy of the script beside a fake `node` (no suite, no
 // Docker); and full-check.sh starts its legs before it waits on any of them.
 //
-//   pnpm exec tsx --test test/run-shards.test.ts
+//   node --test test/run-shards.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -16,7 +16,7 @@ import { KIT } from "./cli-spawn.ts";
 const root = mkdtempSync(join(tmpdir(), "run-shards-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-// A kit checkout with only the helpers, and a `pnpm` that answers its two calls: the shard's file
+// A kit checkout with only the helpers, and a `node` that answers its two calls: the shard's file
 // list (a file named by FAKE_<i>, else a passing one) and the test run over those files.
 mkdirSync(join(root, "test"));
 mkdirSync(join(root, "bin"));
@@ -24,7 +24,7 @@ copyFileSync(join(KIT, "test/run-shards.sh"), join(root, "test/run-shards.sh"));
 copyFileSync(join(KIT, "test/shard-count.sh"), join(root, "test/shard-count.sh"));
 copyFileSync(join(KIT, "test/in-temp.sh"), join(root, "test/in-temp.sh"));
 writeFileSync(
-  join(root, "bin/pnpm"),
+  join(root, "bin/node"),
   `#!/usr/bin/env bash
 case "$*" in
   *shard.ts) v="FAKE_\${TEST_SHARD%/*}"; echo "test/\${!v:-ok}.test.ts" ;;
@@ -37,7 +37,7 @@ case "$*" in
 esac
 `,
 );
-chmodSync(join(root, "bin/pnpm"), 0o755);
+chmodSync(join(root, "bin/node"), 0o755);
 
 function run(shards: string, env: Record<string, string> = {}) {
   const logs = mkdtempSync(join(root, "logs-"));
@@ -99,7 +99,7 @@ test("full-check.sh starts every leg before it waits on one, and runs no suite i
   assert.ok(starts.length >= 4, "the types, tests, agent and scan legs start");
   assert.ok(wait > Math.max(...starts), "the one wait comes after the last start");
   assert.ok(code.some((l) => l.includes("test/run-shards.sh")));
-  assert.ok(!code.some((l) => /pnpm (run )?test\b|tsx --test/.test(l) && !l.includes("printf")), "no serial suite run");
+  assert.ok(!code.some((l) => /pnpm (run )?test\b|node --test/.test(l) && !l.includes("printf")), "no serial suite run");
 });
 
 test("full-check.sh counts the Linux container's pass among those sharing the cores", () => {

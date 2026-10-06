@@ -151,7 +151,7 @@ const readLog = (file: string) => {
   }
 };
 
-/** How this process was started, less its arguments: node's own flags (the tsx loader) and the CLI's path. */
+/** How this process was started, less its arguments: node's own flags (the launcher's preload among them) and the CLI's path. */
 const cliEntry = () => [...process.execArgv, fileURLToPath(new URL("./cli.ts", import.meta.url))];
 
 export type Detached = {

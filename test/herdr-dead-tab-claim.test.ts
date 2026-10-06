@@ -2,7 +2,7 @@
 // of two callers that read the same record at once. The fake `herdr` logs every call; no Herdr, no
 // network.
 //
-//   pnpm exec tsx --test test/herdr-dead-tab-claim.test.ts
+//   node --test test/herdr-dead-tab-claim.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -21,7 +21,7 @@ case "$1 $2" in
     printf '{"result":{"pane":{"pane_id":"%s","tab_id":"w1:t2"}}}\\n' "$3"
     if [ -n "$FAKE_BARRIER" ]; then
       echo "$$" >> "$FAKE_BARRIER"
-      # 30 s, not 5: each caller is its own tsx start-up, and under load the second came too late.
+      # 30 s, not 5: each caller is its own node start-up, and under load the second came too late.
       for _ in $(seq 1 600); do [ "$(wc -l < "$FAKE_BARRIER")" -ge 2 ] && break; sleep 0.05; done
     fi ;;
   "pane process-info")

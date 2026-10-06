@@ -3,7 +3,7 @@
 // `sandcastle wait` and `stop` - on a pid that was recycled. No real process stands in for the
 // run here except where a reader asks the system itself.
 //
-//   pnpm exec tsx --test test/run-live.test.ts
+//   node --test test/run-live.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -22,7 +22,7 @@ const { livePid, waitForRun } = await import("../src/detach.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 const { kitLikeProcess } = await import("./kit-process.ts");
 
-const KIT_LINE = `node --import /kit/node_modules/tsx/dist/loader.mjs /kit/${RUN_COMMAND} run 12`;
+const KIT_LINE = `node --no-maglev --no-concurrent-sparkplug --import /kit/src/node-check.mjs /kit/${RUN_COMMAND} run 12`;
 /** A process table: the command line of each pid in it, nothing for the rest. */
 const table = (processes: Record<number, string>): Probe => (pid) => processes[pid];
 

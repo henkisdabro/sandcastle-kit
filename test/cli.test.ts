@@ -1,7 +1,7 @@
 // The CLI's one catch: a refusal the operator acts on prints a message and exits 1, with no stack
 // trace; the commands run in a throwaway repo, no Docker and no model calls.
 //
-//   pnpm exec tsx --test test/cli.test.ts
+//   node --test test/cli.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

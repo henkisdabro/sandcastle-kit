@@ -3,7 +3,7 @@
 // first on PATH logs its calls) and on ticket files (a temp git repo) - and forgetting a
 // recorded green head. No Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/requeue.test.ts
+//   node --test test/requeue.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

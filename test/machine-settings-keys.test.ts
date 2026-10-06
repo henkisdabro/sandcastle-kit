@@ -1,7 +1,7 @@
 // The personal config.json refuses an unknown key and names the nearest real one, as the
 // project config does; doctor reports it, even where an environment variable sets the limits.
 //
-//   pnpm exec tsx --test test/machine-settings-keys.test.ts
+//   node --test test/machine-settings-keys.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

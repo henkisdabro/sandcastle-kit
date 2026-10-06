@@ -2,7 +2,7 @@
 // true) pass, any other value is reported with its fix. The mod only reads the file, so doctor is
 // where a typo is told. No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-idle-mark.test.ts
+//   node --test test/doctor-idle-mark.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sandcastle-idle-mark-"));
 const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 
-// This node and tsx directly, never bin/sandcastle: see test/settings.test.ts. Shims and a bare
+// This node directly, never bin/sandcastle: see test/settings.test.ts. Shims and a bare
 // PATH, as test/doctor-mod.test.ts has them: the machine's own claude, docker and gh would make
 // the run slow and reach the network.
 const doctor = (settings: string | undefined) => {

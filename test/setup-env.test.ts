@@ -1,7 +1,7 @@
 // The credentials writer `sandcastle setup` uses when a credential is replaced
 // (setup() itself needs a TTY): a made-up .env in a temp dir.
 //
-//   pnpm exec tsx --test test/setup-env.test.ts
+//   node --test test/setup-env.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";

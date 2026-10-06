@@ -1,6 +1,6 @@
 // queue.md ("Writing a ticket body") defines the Touches: line that src/touches.ts reads.
 //
-//   pnpm exec tsx --test test/skill-audit-touches.test.ts
+//   node --test test/skill-audit-touches.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

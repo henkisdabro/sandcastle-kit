@@ -2,7 +2,7 @@
 // piped into the script in a temp repo with a linked worktree, and the read-only mount of
 // container/ at /etc/claude-code. bash and jq are the same requirements the image has.
 //
-//   pnpm exec tsx --test test/git-guard.test.ts
+//   node --test test/git-guard.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

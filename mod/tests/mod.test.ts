@@ -48,7 +48,7 @@ const world = (on: Parameters<TestBody>[1], start: { project?: boolean; store?: 
     only: undefined as string | undefined,
     pid: true,
     // What `ps` prints for the run's process, as bin/sandcastle starts it.
-    command: "node --import /kit/node_modules/tsx/dist/loader.mjs /kit/src/cli.ts run",
+    command: "node --no-maglev --no-concurrent-sparkplug --import /kit/src/node-check.mjs /kit/src/cli.ts run",
     reads: 0,
     toasts: [] as string[],
     statuses: [] as (string | undefined)[],

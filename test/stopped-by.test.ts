@@ -2,7 +2,7 @@
 // its summary heading, its notify line and its "Runnable now" section say so. No Docker, network
 // or model call.
 //
-//   pnpm exec tsx --test test/stopped-by.test.ts
+//   node --test test/stopped-by.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -91,7 +91,7 @@ setInterval(() => {}, 1000);
     await new Promise<void>((resolve, reject) => {
       const child = startNode([fixture], { env, stdio: ["ignore", "pipe", "inherit"] });
       let sent = false;
-      // Started with the signal, not the spawn: under load tsx's start-up alone took most of 15 s.
+      // Started with the signal, not the spawn: under load node's start-up alone took most of 15 s.
       let timer: NodeJS.Timeout | undefined;
       child.stdout!.on("data", (d) => {
         if (!sent && String(d).includes("ready")) {

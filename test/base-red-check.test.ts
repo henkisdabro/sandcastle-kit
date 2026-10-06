@@ -2,7 +2,7 @@
 // of test/base-red-harness.ts: an id that names only a file, a landing between reading the base's tip and
 // gating it, and a base with more failing tests than a summary shows. No Docker, model, gh or network.
 //
-//   pnpm exec tsx --test test/base-red-check.test.ts
+//   node --test test/base-red-check.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

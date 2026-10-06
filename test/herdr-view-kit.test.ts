@@ -6,7 +6,7 @@
 // record, and a relative kit would run a script from inside the repo). The fake `herdr` logs
 // every call; no Herdr, no network.
 //
-//   pnpm exec tsx --test test/herdr-view-kit.test.ts
+//   node --test test/herdr-view-kit.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";

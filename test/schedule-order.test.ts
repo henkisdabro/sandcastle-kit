@@ -16,7 +16,7 @@
 // with `SCHEDULE_RUNS=<count>` plays `count` seeds from it. The default seeds are fixed, so the
 // gates never turn red on a draw. No git, no Docker, no network, no timers.
 //
-//   SCHEDULE_SEED=42 pnpm exec tsx --test test/schedule-order.test.ts
+//   SCHEDULE_SEED=42 node --test test/schedule-order.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -346,7 +346,7 @@ const playSeed = async (seed: number) => {
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
     const made = r ? `\nrun: ${JSON.stringify(r.s)}\nendings: ${JSON.stringify(Object.fromEntries([...r.endings].map(([id, e]) => [id, e.kind])))}` : "";
-    throw new Error(`seed ${seed} (replay: SCHEDULE_SEED=${seed} pnpm exec tsx --test test/schedule-order.test.ts): ${why}${made}`, { cause: error });
+    throw new Error(`seed ${seed} (replay: SCHEDULE_SEED=${seed} node --test test/schedule-order.test.ts): ${why}${made}`, { cause: error });
   }
   return r;
 };

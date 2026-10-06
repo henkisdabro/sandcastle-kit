@@ -5,7 +5,7 @@
 // start with a 10 s limit, its answer is shared, and no answer stops the run naming docker. A fake
 // `docker` on PATH logs each call and answers (or sleeps); no Docker, no model call, no network.
 //
-//   pnpm exec tsx --test test/runtime-probe.test.ts
+//   node --test test/runtime-probe.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

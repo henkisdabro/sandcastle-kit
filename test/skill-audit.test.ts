@@ -3,7 +3,7 @@
 // section, the brief's read-only promises and the seven queue categories - and that audit.md
 // quotes no real-looking blocker (the kit would read one as a dependency).
 //
-//   pnpm exec tsx --test test/skill-audit.test.ts
+//   node --test test/skill-audit.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

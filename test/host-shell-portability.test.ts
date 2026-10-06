@@ -7,7 +7,7 @@
 // comment on the same line: `# portability-ok: <reason>`.
 // Reads the git index of this checkout (or walks it); no Docker, gh, model calls or network.
 //
-//   pnpm exec tsx --test test/host-shell-portability.test.ts
+//   node --test test/host-shell-portability.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

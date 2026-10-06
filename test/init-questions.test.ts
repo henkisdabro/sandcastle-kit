@@ -3,14 +3,14 @@
 // the closing message, and the skill's init step that asks them without gaining a numbered step
 // (update.md refers to steps 4 and 6 by number). Temp dirs only: no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/init-questions.test.ts
+//   node --test test/init-questions.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 // Importing init.ts must not read the real user config.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
@@ -18,6 +18,7 @@ process.env.XDG_DATA_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 
 const { init } = await import("../src/init.ts");
+const { importConfig } = await import("../src/config.ts");
 
 const kit = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Normalise line endings so the test reads the same checked out on either platform.
@@ -46,7 +47,7 @@ test("config.ts holds the commented generated example and no generated key", asy
   const { root } = project(t);
   const path = join(root, ".sandcastle/config.ts");
   assert.ok(read(path).includes("// generated: [{ paths:"));
-  const config = (await import(pathToFileURL(path).href)).default;
+  const config = await importConfig(path);
   assert.ok(!("generated" in config));
 });
 

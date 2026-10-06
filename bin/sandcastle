@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resolves the kit through any symlink (it is linked into ~/.local/bin), then
-# runs the CLI with the kit's own tsx and node_modules.
+# runs the CLI on Node's own type stripping, with the kit's node_modules.
 set -euo pipefail
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
@@ -9,21 +9,23 @@ while [ -L "$src" ]; do
   [[ $src != /* ]] && src="$dir/$src"
 done
 KIT="$(cd -P "$(dirname "$src")/.." && pwd)"
-# tsx caches compiled files in the temp directory; full, it dies with a Node stack trace before the
-# kit's own code can say what is wrong.
+# Commands write temp files from many places; a full or read-only temp directory then ends in a
+# Node stack trace from whichever write came first, where this says what is wrong and the fix.
 tmp="${TMPDIR:-/tmp}"
 if probe=$(mktemp -d "${tmp%/}/sandcastle-probe.XXXXXX" 2>/dev/null); then rmdir "$probe"; else
   echo "sandcastle: cannot write to the temp directory ($tmp) - its disk is full, or it is read-only. Free some space there, or point TMPDIR at a directory with room, then try again." >&2
   exit 1
 fi
-# One node process with tsx's loader, not the tsx binary: that runs the CLI in a child and, on
-# SIGTERM, SIGKILLs it unless it answers within ~60 ms - a run busy in a git or docker call did
-# not, and died without its exit handler (no recorded end, no notify, sandboxes left working).
+# One node process that runs the TypeScript itself (Node 22.18 and later strip the types;
+# src/node-check.mjs refuses an older Node with the fix), never a wrapper that runs the CLI in a
+# child: tsx's binary did, and on SIGTERM SIGKILLed it unless it answered within ~60 ms - a run
+# busy in a git or docker call did not, and died without its exit handler (no recorded end, no
+# notify, sandboxes left working).
 # `herdr` (the Herdr plugin's verbs) loads only its own module: Herdr's tab bar runs
 # `sandcastle herdr line` every 10 seconds, and the whole CLI takes three times as long.
 # Concurrent Maglev and Sparkplug are off: on Node 24 a background compile can wait for a GC while
 # `process.exit` joins the platform workers, and the process then never ends (nodejs/node#66171).
 # Drop both flags once a Node release that `engines` covers carries the fix. A detached run
 # inherits them through `process.execArgv`.
-if [ "${1:-}" = herdr ]; then exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/herdr-plugin.ts" "$@"; fi
-exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/src/cli.ts" "$@"
+if [ "${1:-}" = herdr ]; then exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/src/herdr-plugin.ts" "$@"; fi
+exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/src/cli.ts" "$@"

@@ -3,7 +3,7 @@
 // default protected paths, configured prefixes and the install-script check on
 // package.json; DEFAULT_PROTECTED stays private, so it is tested through here.
 //
-//   pnpm exec tsx --test test/protected.test.ts
+//   node --test test/protected.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

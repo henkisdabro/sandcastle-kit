@@ -1,7 +1,7 @@
 // The git guard's branch rule looks at one command only: a later command in the same line (a
 // `git merge --no-ff`, whose `-ff` looks like `-f`) must not make `git branch` a refused delete.
 //
-//   pnpm exec tsx --test test/git-guard-branch-scope.test.ts
+//   node --test test/git-guard-branch-scope.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

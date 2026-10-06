@@ -3,7 +3,7 @@
 // keeps no other process from a numbered slot, and goes when its holder ends or is killed.
 // Holders are child processes that look like the kit to `ps`, as in test/pool-wait-order.test.ts.
 //
-//   pnpm exec tsx --test test/pool-extra-slot.test.ts
+//   node --test test/pool-extra-slot.test.ts
 
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";

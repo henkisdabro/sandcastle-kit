@@ -3,7 +3,7 @@
 // run has finished. The header counts them on their own, as "to triage". A fake `gh` first on
 // PATH (plain sh, the same on macOS and Linux) answers from a fixture; no network.
 //
-//   pnpm exec tsx --test test/report-opened-issues.test.ts
+//   node --test test/report-opened-issues.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

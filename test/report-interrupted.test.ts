@@ -3,7 +3,7 @@
 // ended early, name each ticket it cut short or never started, and say that the next run picks
 // them up - they keep their queue label and the next run resumes their branches.
 //
-//   pnpm exec tsx --test test/report-interrupted.test.ts
+//   node --test test/report-interrupted.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

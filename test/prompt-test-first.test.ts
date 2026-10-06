@@ -3,7 +3,7 @@
 // test that recomputes its expected value, mocks the repo's own code, or reruns the whole suite
 // on every step. No model calls.
 //
-//   pnpm exec tsx --test test/prompt-test-first.test.ts
+//   node --test test/prompt-test-first.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

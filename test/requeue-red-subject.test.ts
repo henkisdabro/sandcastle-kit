@@ -4,7 +4,7 @@
 // show it (the output only finds the test file). Temp repos and a host worktree for the sandbox: no Docker, no gh, no network. The fake
 // sandbox strips the `timeout -k` wrapper macOS lacks.
 //
-//   pnpm exec tsx --test test/requeue-red-subject.test.ts
+//   node --test test/requeue-red-subject.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -4,7 +4,7 @@
 // SANDCASTLE_API_KEY=1 lets it go ahead. Made-up keys in temp files and a temp git repo whose queue is
 // empty, so a run that goes ahead ends before Docker; no network, no model calls.
 //
-//   pnpm exec tsx --test test/api-key-spend.test.ts
+//   node --test test/api-key-spend.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

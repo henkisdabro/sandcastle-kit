@@ -1,7 +1,7 @@
 // The README says a run's gates prove Linux only, in "How it works" (where gates and
 // landing are described) and in "Set up a project" (where gates are configured).
 //
-//   pnpm exec tsx --test test/readme-gates-linux-only.test.ts
+//   node --test test/readme-gates-linux-only.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -7,7 +7,7 @@
 // source), the pipeline over a temp repo with a worktree for the sandbox and scripted agents, the commands
 // through the real CLI in a throwaway repo with a stand-in for the live run. No Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/pause-resume.test.ts
+//   node --test test/pause-resume.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

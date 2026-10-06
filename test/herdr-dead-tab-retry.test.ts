@@ -3,7 +3,7 @@
 // run's file stays awaiting for the next reader instead of being deleted, which lost the report.
 // The 7-day expiry still ends it. Fake herdr that fails on demand; no Herdr, no network.
 //
-//   pnpm exec tsx --test test/herdr-dead-tab-retry.test.ts
+//   node --test test/herdr-dead-tab-retry.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

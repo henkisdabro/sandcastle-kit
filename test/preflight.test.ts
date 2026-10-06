@@ -1,7 +1,7 @@
 // What a failed preflight tells the operator: one reply line when every model said the same,
 // and the credential's key and file (never its value) when the reply looks like a rejection.
 //
-//   pnpm exec tsx --test test/preflight.test.ts
+//   node --test test/preflight.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

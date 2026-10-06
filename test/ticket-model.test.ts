@@ -2,7 +2,7 @@
 // hands the labels over (src/tracker.ts) and preflight names the ticket behind an override model
 // (src/run.ts). Fake `gh` and `docker` (POSIX sh) first on PATH: no Docker, model or network.
 //
-//   pnpm exec tsx --test test/ticket-model.test.ts
+//   node --test test/ticket-model.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

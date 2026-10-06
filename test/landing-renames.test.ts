@@ -2,7 +2,7 @@
 // either side added must still be named, not hidden behind that side's path.
 // A temp git repo, no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/landing-renames.test.ts
+//   node --test test/landing-renames.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

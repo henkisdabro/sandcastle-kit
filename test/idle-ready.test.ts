@@ -2,7 +2,7 @@
 // is read again, and what the line says of a cached read. No Claude Code needed; the hooks that
 // read and share it are tested in mod/tests/ready.test.ts.
 //
-//   pnpm exec tsx --test test/idle-ready.test.ts
+//   node --test test/idle-ready.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

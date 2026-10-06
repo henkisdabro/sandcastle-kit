@@ -3,7 +3,7 @@
 // and the run saw it as another run asking for a share. Run with a cache directory it is handed,
 // the file must leave that directory as it found it (its own temp cache took the slots instead).
 //
-//   pnpm exec tsx --test test/landing-cache-isolated.test.ts
+//   node --test test/landing-cache-isolated.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";

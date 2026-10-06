@@ -8,7 +8,7 @@
 // landing ends in a refusal (nothing was merged in its sandbox): the container's start is the
 // test, not the landing.
 //
-//   pnpm exec tsx --test test/sandbox-cpus-commands.test.ts
+//   node --test test/sandbox-cpus-commands.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

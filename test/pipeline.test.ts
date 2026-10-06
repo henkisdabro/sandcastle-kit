@@ -4,7 +4,7 @@
 // the gate run skipped on a base that has not moved, the land-only resolution and its review - and what
 // a green head carries to a later run are held by what the pipeline does, not by its source text.
 //
-//   pnpm exec tsx --test test/pipeline.test.ts
+//   node --test test/pipeline.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

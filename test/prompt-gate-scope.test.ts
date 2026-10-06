@@ -4,7 +4,7 @@
 // runs what, and the implementer says which spec it followed when a comment amended the ticket's.
 // No model calls.
 //
-//   pnpm exec tsx --test test/prompt-gate-scope.test.ts
+//   node --test test/prompt-gate-scope.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

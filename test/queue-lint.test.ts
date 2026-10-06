@@ -2,9 +2,9 @@
 // only order overlapping work against real ones, wide tickets, hot files, a lockfile two tickets
 // share, the blocker problems and a rough turn count. Ticket files in a temp repo (files tracker);
 // no Docker, gh, model calls or network. The CLI case starts the kit with the running node and the
-// kit's own tsx loader, so it does not depend on a `node` shim on PATH (macOS version managers).
+// launcher's preload, so it does not depend on a `node` shim on PATH (macOS version managers).
 //
-//   pnpm exec tsx --test test/queue-lint.test.ts
+//   node --test test/queue-lint.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

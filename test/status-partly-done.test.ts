@@ -3,7 +3,7 @@
 // in its note instead of showing a count that disagrees with the summary unexplained.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   pnpm exec tsx --test test/status-partly-done.test.ts
+//   node --test test/status-partly-done.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

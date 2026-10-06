@@ -3,7 +3,7 @@
 // fact in the ticket's `requeued` line, which stays on a merged ticket (and is null when the second
 // attempt never began). Under Done; nothing is said when no ticket was sent back.
 //
-//   pnpm exec tsx --test test/report-second-attempt.test.ts
+//   node --test test/report-second-attempt.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

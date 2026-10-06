@@ -2,7 +2,7 @@
 // warning, never a hold. landOne returns it with the merge, and the ledger records it. Temp repos and a
 // fake tracker: no Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/touches-overrun.test.ts
+//   node --test test/touches-overrun.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

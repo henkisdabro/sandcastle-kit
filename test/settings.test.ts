@@ -2,7 +2,7 @@
 // message naming it, never NaN (no workers, an endless slot wait) or a raw
 // JSON stack, and importing pool.ts stays safe so doctor can report it.
 //
-//   pnpm exec tsx --test test/settings.test.ts
+//   node --test test/settings.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -85,7 +85,7 @@ test("doctor reports a malformed config.json as a FIX line instead of crashing",
   const config = temp();
   mkdirSync(join(config, "sandcastle-kit"));
   writeFileSync(join(config, "sandcastle-kit", "config.json"), "{ not json");
-  // This node, not bin/sandcastle: its tsx finds `node` on PATH, and a mise or
+  // This node, not bin/sandcastle: it finds `node` on PATH, and a mise or
   // asdf shim there reads its own config from XDG_CONFIG_HOME, which this test
   // points at a temp dir - the shim then exits before the kit runs. Both agent versions pinned:
   // doctor resolves them, and unpinned that is a fetch of the release channel and npm.

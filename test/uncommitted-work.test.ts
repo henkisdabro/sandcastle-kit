@@ -2,7 +2,7 @@
 // ends with no commits and a kept worktree. It must read as uncommitted work - not as
 // "nothing to change", and not as a hand-back to redo.
 //
-//   pnpm exec tsx --test test/uncommitted-work.test.ts
+//   node --test test/uncommitted-work.test.ts
 
 import assert from "node:assert/strict";
 import { join } from "node:path";

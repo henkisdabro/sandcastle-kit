@@ -2,7 +2,7 @@
 // its own issues); only a checkout of the kit with no config is left out, as an unconfigured
 // project would print a false FIX. No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-kit-project.test.ts
+//   node --test test/doctor-kit-project.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 // to the modifier that opens a ticket's log there; the clients picked from made-up `ps` output and
 // session lists; the override's precedence; a bad setting. No Herdr, no Docker, no network.
 //
-//   pnpm exec tsx --test test/herdr-click-hint.test.ts
+//   node --test test/herdr-click-hint.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

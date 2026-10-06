@@ -4,7 +4,7 @@
 // any other ending makes it "not in this run" - with no call to the blockers port. No git, no
 // Docker, no network.
 //
-//   pnpm exec tsx --test test/schedule-outside-note.test.ts
+//   node --test test/schedule-outside-note.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

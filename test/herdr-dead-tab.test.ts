@@ -4,7 +4,7 @@
 // are left alone. A dead run whose status view still runs keeps its live-runs file, so a restart
 // some ticks after the kill is still reported. The fake `herdr` logs every call; no Herdr, no network.
 //
-//   pnpm exec tsx --test test/herdr-dead-tab.test.ts
+//   node --test test/herdr-dead-tab.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

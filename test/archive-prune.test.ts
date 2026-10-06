@@ -2,7 +2,7 @@
 // raw .jsonl streams over 2 days old go, while the readable .log of that age stays. Temp dirs
 // only; no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/archive-prune.test.ts
+//   node --test test/archive-prune.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

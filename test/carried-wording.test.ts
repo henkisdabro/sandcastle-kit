@@ -2,7 +2,7 @@
 // ticket (the requeue-once state, the ledger's `requeuedAs`, is what burndown.ts asks),
 // "an earlier run" for a branch kept from an earlier `sandcastle run`. No Docker, no git, no network.
 //
-//   pnpm exec tsx --test test/carried-wording.test.ts
+//   node --test test/carried-wording.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

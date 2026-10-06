@@ -2,7 +2,7 @@
 // base before any agent started: it must say so, not report six tickets as
 // attempted. A normal finished run's headline must stay as it was.
 //
-//   pnpm exec tsx --test test/report-base-red.test.ts
+//   node --test test/report-base-red.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

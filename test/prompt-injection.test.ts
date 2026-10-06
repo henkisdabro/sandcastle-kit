@@ -2,7 +2,7 @@
 // ticket's "maintenance steps" - a hook in the shared .git, a git setting - because the prompt
 // said only "never edit .git by hand", which the ticket's own text outweighed. No model calls.
 //
-//   pnpm exec tsx --test test/prompt-injection.test.ts
+//   node --test test/prompt-injection.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

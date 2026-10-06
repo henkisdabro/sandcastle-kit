@@ -2,7 +2,7 @@
 // It used to say only "spawn codex ENOENT", after the Claude probes had spent; with preflight
 // skipped, every ticket's cross-review failed one by one.
 //
-//   pnpm exec tsx --test test/cross-review-codex.test.ts
+//   node --test test/cross-review-codex.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, symlinkSync } from "node:fs";

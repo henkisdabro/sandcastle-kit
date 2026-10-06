@@ -10,7 +10,7 @@
 // Paths come from node:path and os.tmpdir(), and the fake sandbox strips the `timeout -k` wrapper
 // macOS lacks.
 //
-//   pnpm exec tsx --test test/landing-requeue.test.ts
+//   node --test test/landing-requeue.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

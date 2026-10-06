@@ -3,7 +3,7 @@
 // appear, and that a line starting with a space (an unstaged edit, ` M path`) keeps its
 // status column - sh() would trim it away. Plain git, so it holds on macOS and Linux.
 //
-//   pnpm exec tsx --test test/dirty-files.test.ts
+//   node --test test/dirty-files.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

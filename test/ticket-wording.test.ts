@@ -5,11 +5,11 @@
 // tickets; `ISSUES` still works, and `TICKETS` wins when both are set.
 //
 // Made-up facts, a temp repo with ticket files and the kit started as a child process through
-// node and the kit's own tsx loader (not bin/sandcastle or the tsx binary, which find `node` on
+// node and the launcher's preload (not bin/sandcastle, which finds `node` on
 // PATH: a mise or asdf shim on a Mac). No Docker, gh, model calls or network; paths come from
 // node:path and os.tmpdir(), so macOS and Linux behave alike.
 //
-//   pnpm exec tsx --test test/ticket-wording.test.ts
+//   node --test test/ticket-wording.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

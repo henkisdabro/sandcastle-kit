@@ -5,7 +5,7 @@
 // The shim is a POSIX sh script (macOS and Linux both have `sh`) and the paths come from
 // os.tmpdir() and node:path, so the test runs the same on both.
 //
-//   pnpm exec tsx --test test/touches-tree.test.ts
+//   node --test test/touches-tree.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

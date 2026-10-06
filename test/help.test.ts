@@ -2,7 +2,7 @@
 // `--all` deletes unmerged agent branches without asking (the old "listed first" read as a prompt).
 // No repository, Docker or model calls needed.
 //
-//   pnpm exec tsx --test test/help.test.ts
+//   node --test test/help.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

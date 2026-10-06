@@ -1,7 +1,7 @@
 // The landing preview (src/preview.ts) against a temp git repo. The Runner runs the real
 // PREVIEW_SCRIPT on the host, so no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/preview.test.ts
+//   node --test test/preview.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

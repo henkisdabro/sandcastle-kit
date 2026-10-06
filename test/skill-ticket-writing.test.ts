@@ -2,7 +2,7 @@
 // audit.md: Touches names files an agent may edit, existing ones as they are, a new file marked
 // in prose; a run opens no PR.
 //
-//   pnpm exec tsx --test test/skill-ticket-writing.test.ts
+//   node --test test/skill-ticket-writing.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -6,7 +6,7 @@
 // red; if the first ticket's fix never lands, it repairs. A ticket whose branch already holds the first
 // one's landing (it started after) repairs at once: a merge would bring it nothing.
 //
-//   pnpm exec tsx --test test/fix-wait.test.ts
+//   node --test test/fix-wait.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

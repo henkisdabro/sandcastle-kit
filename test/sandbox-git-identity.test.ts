@@ -4,7 +4,7 @@
 // `sandboxConfig`'s ready hook, which every sandbox goes through; there is no Docker here, so the
 // test runs the hook's command in a clean HOME instead of a real sandbox.
 //
-//   pnpm exec tsx --test test/sandbox-git-identity.test.ts
+//   node --test test/sandbox-git-identity.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

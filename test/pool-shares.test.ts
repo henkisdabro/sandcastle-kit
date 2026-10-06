@@ -8,7 +8,7 @@
 // registration's going with its process needs one (a short-lived child). The wait order between
 // real processes is test/pool-wait-order.test.ts.
 //
-//   pnpm exec tsx --test test/pool-shares.test.ts
+//   node --test test/pool-shares.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

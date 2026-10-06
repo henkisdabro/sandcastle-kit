@@ -2,7 +2,7 @@
 // implementer's <unmet> line as a per-ticket argument that is empty when there is none, so the
 // rendered prompt carries no placeholder text. Review, rereview and remerge all render review.md.
 //
-//   pnpm exec tsx --test test/review-prompt-unmet.test.ts
+//   node --test test/review-prompt-unmet.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

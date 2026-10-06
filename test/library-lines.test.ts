@@ -2,7 +2,7 @@
 // branch (agent branches are never pushed, so it read as a network fault), and, for a kept worktree,
 // a `git worktree remove --force` that bypasses `sandcastle clean`. Both are reworded.
 //
-//   pnpm exec tsx --test test/library-lines.test.ts
+//   node --test test/library-lines.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -4,7 +4,7 @@
 // waits on files, not on a clock. Wait must keep waiting for the live pid in run.json and then
 // exit with the recorded code, not 0.
 //
-//   pnpm exec tsx --test test/detach-gap.test.ts
+//   node --test test/detach-gap.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -97,7 +97,7 @@ test("wait started in the gap (lock gone, no exitCode, pid alive) waits for the 
   const done = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
   let early = false;
   child.on("exit", () => (early = true));
-  // Long enough for tsx and loadProject to finish and wait to poll; a wait that returns here read no code.
+  // Long enough for node and loadProject to finish and wait to poll; a wait that returns here read no code.
   await Promise.race([done, new Promise((r) => setTimeout(r, 4000))]);
   assert.equal(early, false, "wait returned while the run was still alive in the gap");
 

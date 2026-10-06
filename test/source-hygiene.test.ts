@@ -7,7 +7,7 @@
 //   Write them as escapes.
 // Reads the git index of this checkout (or walks it); no Docker, gh, model calls or network.
 //
-//   pnpm exec tsx --test test/source-hygiene.test.ts
+//   node --test test/source-hygiene.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -1,7 +1,7 @@
 // The per-gate result lines `sandcastle gates` and a run's base check print
 // (src/gates.ts): each gate's command next to its verdict.
 //
-//   pnpm exec tsx --test test/gate-commands.test.ts
+//   node --test test/gate-commands.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

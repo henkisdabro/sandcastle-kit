@@ -1,8 +1,8 @@
 // Every command given `--help` or `-h` asks for help and gets its own entry. Checked in process:
 // spawning the CLI once per command and flag cost a third of the test gate, each spawn starting
-// tsx. test/command-help.test.ts keeps the spawned tests that show nothing runs.
+// node. test/command-help.test.ts keeps the spawned tests that show nothing runs.
 //
-//   pnpm exec tsx --test test/command-help-inprocess.test.ts
+//   node --test test/command-help-inprocess.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

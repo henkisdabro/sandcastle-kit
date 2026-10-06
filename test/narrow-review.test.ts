@@ -2,7 +2,7 @@
 // the base merge (narrowReviewBase), and the narrow prompt that shows a merge's resolution.
 // Temp git repos and temp directories; no Docker, model or network.
 //
-//   pnpm exec tsx --test test/narrow-review.test.ts
+//   node --test test/narrow-review.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

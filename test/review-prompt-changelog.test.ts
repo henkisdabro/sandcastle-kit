@@ -4,7 +4,7 @@
 // review never sees them. The pipeline (`createPipeline`, src/burndown.ts) runs over a temp repo with a
 // scripted agent, on the prompts `renderPrompts` really writes. No Docker, model, gh or network.
 //
-//   pnpm exec tsx --test test/review-prompt-changelog.test.ts
+//   node --test test/review-prompt-changelog.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

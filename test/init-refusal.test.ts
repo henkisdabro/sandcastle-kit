@@ -2,7 +2,7 @@
 // or update, and writes nothing before refusing. A throwaway repo, so no Docker
 // and no network. (test/init.test.ts covers stack detection and scaffolding.)
 //
-//   pnpm exec tsx --test test/init-refusal.test.ts
+//   node --test test/init-refusal.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

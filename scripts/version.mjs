@@ -6,8 +6,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('package.json needs a plain release version');
-const node = /^>=(\d+)$/.exec(pkg.engines.node)?.[1];
-if (!node) throw new Error('package.json needs a minimum Node major (>=N)');
+const node = /^>=(\d+(?:\.\d+)?)$/.exec(pkg.engines.node)?.[1];
+if (!node) throw new Error('package.json needs a minimum Node version (>=N or >=N.M)');
 
 const mode = process.argv[2];
 if (mode !== '--write' && mode !== '--check') throw new Error('Use --write or --check');

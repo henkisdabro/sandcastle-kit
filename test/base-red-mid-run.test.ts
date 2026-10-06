@@ -3,7 +3,7 @@
 // failure the base has too, the base's gate runs once for all of them, and the closing summary names the
 // test once.
 //
-//   pnpm exec tsx --test test/base-red-mid-run.test.ts
+//   node --test test/base-red-mid-run.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

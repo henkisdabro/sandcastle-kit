@@ -3,7 +3,7 @@
 // execFileSync's default buffer and the landing failed with ENOBUFS on a merge that was fine.
 // A temp git repo, no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/landing-check-large.test.ts
+//   node --test test/landing-check-large.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

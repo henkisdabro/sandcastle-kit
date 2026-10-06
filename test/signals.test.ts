@@ -5,7 +5,7 @@
 // deadlock on Node 24 (nodejs/node#66171). One real process per case,
 // no Docker, no network, no model.
 //
-//   pnpm exec tsx --test test/signals.test.ts
+//   node --test test/signals.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -54,7 +54,7 @@ test("a detached run is started with the launcher's node flags", () => {
   assert.deepEqual(JSON.parse(res.stdout).slice(0, NODE_FLAGS.length), NODE_FLAGS, "process.execArgv, which src/detach.ts cliEntry passes on, carries the V8 flags");
 });
 
-// One process, not the tsx binary: that forks a child and may not forward SIGHUP.
+// One process, never a wrapper that forks a child (tsx's binary did) and may not forward SIGHUP.
 const run = (sig: NodeJS.Signals, env: Record<string, string> = {}) =>
   new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
     for (const f of [marker, library, exitCalled]) rmSync(f, { force: true });

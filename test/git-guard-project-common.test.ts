@@ -2,7 +2,7 @@
 // the shell's cwd moves with a `cd`, so inside a scratch repository the cwd's own common dir is the
 // scratch's, and from a dir in no repository there is none. CLAUDE_PROJECT_DIR names the project.
 //
-//   pnpm exec tsx --test test/git-guard-project-common.test.ts
+//   node --test test/git-guard-project-common.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

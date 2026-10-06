@@ -5,7 +5,7 @@
 // The mod's own tests (`claude plugin test mod`) need Claude Code 2.1.287 or newer, so the rules
 // they rely on are held here, where the macOS and Linux CI legs both run them.
 //
-//   pnpm exec tsx --test test/live-runs.test.ts
+//   node --test test/live-runs.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

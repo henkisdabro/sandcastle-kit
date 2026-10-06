@@ -2,7 +2,7 @@
 // Opus tickets, not from the Sonnet ones that fill the window. Made-up timings; no tracker, Docker
 // or network.
 //
-//   pnpm exec tsx --test test/estimate-model.test.ts
+//   node --test test/estimate-model.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

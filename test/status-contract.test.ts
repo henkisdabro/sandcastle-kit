@@ -6,7 +6,7 @@
 // outcome_state has a case for every outcome kind and none beside, and no fixture records a ticket
 // state the kit never writes. No session, no model calls.
 //
-//   pnpm exec tsx --test test/status-contract.test.ts
+//   node --test test/status-contract.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

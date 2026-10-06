@@ -5,7 +5,7 @@
 // src/burndown.ts, `fileShareLine`). One pipeline slot, fake attempts and landings; no git, no Docker,
 // no network.
 //
-//   pnpm exec tsx --test test/schedule-start-order.test.ts
+//   node --test test/schedule-start-order.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -2,7 +2,7 @@
 // .jsonl beside its readable .log, archived with it and never shown by the
 // status view as a log. Temp dirs only; no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/raw-log.test.ts
+//   node --test test/raw-log.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

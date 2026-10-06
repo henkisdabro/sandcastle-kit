@@ -3,7 +3,7 @@
 // src/lint.ts, the code `queue --lint` prints its blocker depth from. Made-up timings and tickets
 // (GitHub-style `#n` refs in the bodies); no tracker, Docker or network.
 //
-//   pnpm exec tsx --test test/estimate-chain.test.ts
+//   node --test test/estimate-chain.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

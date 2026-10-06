@@ -17,8 +17,8 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   repo, a fake `gh` on `PATH` and made-up fixtures - never Docker, a model call or the network.
 - **A test that starts the kit as a child process** uses `runKit`, `runNode`, `startKit` or
   `startNode` from `test/cli-spawn.ts` (`process.execPath` with the launcher's V8 flags and a time
-  limit; `test/cli-spawn.test.ts` refuses a test file that names a tsx entry), never `bin/sandcastle`
-  or `node_modules/.bin/tsx`: those find `node` on PATH, and on a Mac that is often a mise or asdf
+  limit; `test/cli-spawn.test.ts` refuses a test file that names the launcher's preload), never
+  `bin/sandcastle`: it finds `node` on PATH, and on a Mac that is often a mise or asdf
   shim, which fails once the test moves `XDG_CONFIG_HOME`. Give `script` and other terminal tools `stdio: ["ignore", ...]`: BSD tools
   refuse the socket Node passes as stdin. The sandbox is Linux, so it cannot catch either.
 - **A new or changed shell script that runs on the host** (anything outside `container/`): run it,

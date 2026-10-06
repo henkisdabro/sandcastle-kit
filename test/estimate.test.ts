@@ -2,7 +2,7 @@
 // the median-to-80th-percentile range of this project's earlier tickets in timings.jsonl, noise ignored,
 // and nothing at all without history.
 //
-//   pnpm exec tsx --test test/estimate.test.ts
+//   node --test test/estimate.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 // Ticket files in a temp repo (files tracker) and a made-up run record; no Docker, gh, model
 // calls or network. Paths come from node:path and os.tmpdir(), so macOS and Linux behave alike.
 //
-//   pnpm exec tsx --test test/autonomy-waiting.test.ts
+//   node --test test/autonomy-waiting.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
