@@ -27,6 +27,9 @@ how to resume.
    - `The run (pid <n>) is already paused, since <time>.` - nothing changed; say since when, and go
      on to step 2.
    - `Pausing the run (pid <n>): ...` - go on to step 2.
+   - `The run (pid <n>) paused itself at <time> for its plan's usage (...). The pause is yours now:
+     ...` - the run had paused itself for `USAGE_PAUSE` and would have resumed after the window's
+     reset; the user's pause now holds it until `sandcastle resume`. Say both, and go on to step 2.
 2. Run `sandcastle status 0`. The run reads the pause within a second or two; if the run cell does
    not read `PAUSED since <time>` yet, run it again before telling the user it is paused.
 3. Tell the user, in a few lines:
@@ -41,9 +44,14 @@ how to resume.
      from its next phase in the same run, with one closing summary at the end. The run stays
      live while paused, so no new `sandcastle run` can start in the project, and `sandcastle wait`
      keeps waiting.
+   - **Leave the run's branches alone.** The pause frees the machine, not the repository: a commit,
+     merge or pull on the base branch or an `agent/*` branch in this checkout stops the run at its
+     next landing. Work done meanwhile goes in another clone or a worktree.
    - **How to resume.** Ask for it in plain words ("carry on", "resume the run"), or run
-     `sandcastle resume`. A pause has no timer: "until tomorrow" means the run stays paused until
-     someone resumes it, so say that, and offer to resume when the user comes back.
+     `sandcastle resume`. A pause the user takes has no timer: "until tomorrow" means the run stays
+     paused until someone resumes it, so say that, and offer to resume when the user comes back. A
+     pause the run took for its plan's usage (`USAGE_PAUSE`, the run cell naming the window) resumes
+     by itself a minute after that window's reset, unless the user pauses it too.
 
 ## resume - carry a paused run on
 

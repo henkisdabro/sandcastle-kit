@@ -141,7 +141,9 @@ your final message, which no reviewer and no tracker reads. Put each one on a li
 
 with a short ticket title, then the one line that shows it is real (a file and line, a command and
 what it printed). The orchestrator files each as a new ticket for triage, naming this ticket, so do not
-file it yourself. A note about this change for the reviewer goes in the commit body instead.
+file it yourself. A note about this change for the reviewer goes in the commit body instead. Never a
+`<followup>` for code this branch adds, or a limitation it chose and documented: fix it on the branch,
+or name the criterion left undone in an `<unmet>` line.
 
 **If the ticket turns out to be already fixed, false, or latent:** commit nothing. {{KIT_NOCHANGE}}
 Then output `<promise>COMPLETE</promise>`.
