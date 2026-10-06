@@ -7,10 +7,13 @@ kit version counts a clone's distance from that tag.
 The release notes are a short, emoji-led summary, never the changelog pasted in. Copy the shape of
 the latest release (`gh release view`) and keep it:
 
-- Title: `🏰 sandcastle-kit vX.Y.Z - <tagline>`, a short lowercase phrase saying what the release
-  is about.
-- Body opens with `## 🏰 vX.Y.Z - <tagline>`, then one bold sentence and a short paragraph on
-  where the release came from.
+- Title: the bare `vX.Y.Z`. A shared link's card is built from the title and the body's first
+  lines (`Release <title> · <repo>`, then the heading, then the start of the first paragraph, cut at
+  about 200 characters), so the tagline goes in the body alone, not three times over.
+- Body opens with `# 🏰 sandcastle-kit - <tagline>`, the tagline a short lowercase phrase saying
+  what the release is about, and no version (the card already shows it twice). Then one short bold
+  sentence of about 100 characters, so the card's excerpt ends on it, and a short paragraph on where
+  the release came from.
 - Then `### ✨ New`, `### 🐛 Fixed` (a `### 🔒 Security` section before it when there is any),
   `### ⬆️ Upgrading` (starting with `/sandcastle update`), `### 🙏 Built on Sandcastle` (the
   thanks to Matt Pocock), and `**Full diff:**` with the compare link.
