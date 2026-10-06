@@ -9,21 +9,28 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-06
+
 ### Upgrading
 
 - **Tickets may carry a `## Seams` section.** `/sandcastle queue` and `audit` add one where a
   behaviour change's test boundary is not obvious, naming the interface a test should drive.
   Existing tickets need nothing: without it, the implementer tests at the highest existing public
   interface.
-- **Runs cap each sandbox's CPUs by default**, gate sandboxes included. A project whose gates need
-  more than their share sets `cpus` in `.sandcastle/config.ts` (a number, or `false` for no limit).
+- **Runs cap each sandbox's CPUs by default**, gate sandboxes included, and so do `sandcastle gates`
+  and `sandcastle land`. A project whose gates need more than their share sets `cpus` in
+  `.sandcastle/config.ts` (a number, or `false` for no limit).
 - **A run files its agents' follow-ups itself**: on GitHub as issues with the `needs-triage` role's
   label, with ticket files as new committed files with that status, next to the source ticket. Map
   the role in `docs/agents/triage-labels.md` to use another label.
-- **Do not act on `sandcastle size`'s recommendation yet**: until #370 lands it reads the
-  at-rest memory figures in earlier runs' `peaks.jsonl` lines as a gate's, prices a gate at about
-  0 GiB and recommends a pool larger than the VM fits; the pool warning is quiet for the same
-  reason. Keep the limits you have.
+- **Run `sandcastle size` again after your first run on this version** and act on its
+  recommendation then. Earlier versions priced a gate from memory read at rest (about 0 GiB) and
+  recommended a pool larger than the VM fits; older `peaks.jsonl` lines' anonymous figures are now
+  ignored, so the first run's readings are what it prices from.
+- **Herdr users run `sandcastle herdr configure --yes` once more**, so the sidebar block gains the
+  `$sc_usage` row with the plan's usage (`/sandcastle update` has a step for it).
+- **A run can pause itself before a plan window runs out** - opt in with `USAGE_PAUSE=90` or
+  `usagePause: 90` in `.sandcastle/config.ts`. Off by default; nothing changes until you set it.
 - **On Linux, `sandcastle doctor` and `sandcastle run` refuse Podman behind `docker` and rootless
   or userns-remapped Docker, and on any OS a run as root**, where the agent could not write its
   worktree. Linux needs rootful Docker Engine and a normal user in the `docker` group.
@@ -37,14 +44,45 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A ticket red on a test another ticket is already repairing waits for that landing**
   (`#N: waiting for #M's fix to <test>`), merges the new base and gates again, instead of starting a
   repair that conflicts at landing. If the other ticket fails or gives up, it repairs as before.
-- **Each sandbox gets a CPU limit** (`docker run --cpus`), by default the VM's CPUs divided by the
-  run's concurrency and at least 2, so agents' own full-suite runs, which `maxGates` does not limit,
-  no longer slow every gate beside them. The project config's `cpus` overrides it (a number, cut to
-  the VM's CPUs, or `false`), and the run's start lines show the limit.
+- **Each sandbox gets a CPU limit** (`docker run --cpus`), so agents' own full-suite runs, which
+  `maxGates` does not limit, no longer slow every gate beside them. A ticket's sandbox gets the VM's
+  CPUs divided by the run's concurrency, at least 2; the landing, base and verify gate sandboxes get
+  the VM's CPUs divided by `maxGates`, so the one-at-a-time landing gate that sets the run's end is
+  not starved. The project config's `cpus` overrides both (a number, cut to the VM's CPUs, or
+  `false`; below 0.01 is refused as the config loads), the run's start line names both limits
+  (`Sandbox CPUs: 2 each, 6 for landing and base gates`), and `sandcastle gates` and `sandcastle
+  land` apply the same limits.
+- **`sandcastle pause` and `sandcastle resume` hold a live run without losing work**: no new ticket
+  or agent pass starts, the passes in flight finish and their sandboxes close (branches kept), green
+  branches still land, and the run gives its sandbox slots to other runs and lets the machine sleep
+  until `resume` continues each paused ticket from its next phase in the same run. The status view
+  reads `PAUSED since 15:40 - finishing #12 review, #14 landing`, Herdr's sidebar and tab bar say
+  `paused`, and a run stopped while paused lists its parked tickets under Runnable now. The skill
+  gets `pause` and `resume` actions, so "pause the run" or "carry on" works through your agent; a
+  hold is never turned into `sandcastle stop`, and a stop is confirmed first.
+- **The status view shows the plan's 5-hour and weekly usage** (bar, percentage, reset time and
+  the reading's age; amber from 75%, red from 90%) while a run spends a subscription on a Claude
+  model, read from the agents' own rate-limit events at no cost in requests. With `CROSS_REVIEW=1`
+  and Codex signed in with a ChatGPT plan, Codex's windows get a line of their own beside Claude's.
+  Herdr's sidebar gets an `sc_usage` token (`claude wk 93% · codex wk 16%`), and the closing summary
+  a `Plan usage at the end:` line.
+- **Opt-in usage pause**: with `USAGE_PAUSE=<percent>` (or `usagePause` in the project config) a
+  run pauses itself when a 5-hour or weekly window of a provider it uses reaches the threshold, and
+  resumes a minute after that window's reset. An agent that hits the limit anyway parks its ticket
+  until the reset instead of stopping the queue. The PAUSED cell names the cause (`PAUSED - weekly
+  usage 95%, resumes Wed 06:01`), the start line says the setting, and a person's `resume` or
+  `pause` overrides it, across a multi-turn run's turns too.
+- **The `Merged <base> re-gated` line names the image the verify ran on**, and says when a merged
+  ticket changed a Dockerfile, so the verify ran on the run's starting image.
+- **The closing summary names the tickets that landed on a second attempt** after being sent back
+  at landing.
 - **Agents name each problem they find outside their ticket in a `<followup>title - evidence</followup>`
   line, and the kit files it as a ticket for triage**, once per title per run, its body naming the
-  source ticket and phase. The closing summary lists them under Needs you as "filed for triage"; a
-  dry run files none and lists what it would have filed.
+  source ticket and phase. Each is recorded in the run record as it arrives, so a run that stops
+  early still files them as it stops. The closing summary lists them under Needs you as "filed for
+  triage", and its header counts one whose filing failed (or that a stop left unfiled) under `need
+  you`, to file by hand; a dry run files none and counts what it would have filed under `to
+  triage`. Implementers name no follow-up for their own branch's code.
 - **A test keeps the kit's host shell scripts free of bash 4 constructs and GNU-only flags**, and
   parses them under bash 3.2 where one is installed, so a script that would break on a Mac's stock
   bash is caught on Linux.
@@ -74,11 +112,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   command, at the end.
 - **The review checks that each test would fail if the behaviour broke** and survive a refactor
   that kept it, and tidies duplication or misleading names the branch introduced.
-
+- **Agents no longer run the project's full suite right before the kit gates the same commit.** The
+  conflict resolver runs the typecheck gate and the tests covering the conflicted files; a reviewer
+  runs the full suite once, and only if its own commits changed code. With `changelog: true` the
+  full review's prompt quotes the implementer's changelog lines, so the reviewer keeps the ones that
+  hold and corrects the rest, and an implementer's record says which spec it followed when a comment
+  amends the ticket's.
 - **`sandcastle size` says the measured peak (`memory.peak`) includes page cache** and prints the
-  sandboxes' anonymous memory as the lower bound. `peaks.jsonl` records it as `anonMib`, read while
-  the gates run (not after their test workers exit), and a ticket's sandbox also records `agentMib`
-  (its peak before the first gate) and `agentAnonMib` (anonymous memory while its agents work).
+  sandboxes' anonymous memory as the lower bound. `peaks.jsonl` records it as `anonMib`, read as
+  each gate or agent pass starts and every 10 s while it runs (never after it ends), and a ticket's
+  sandbox also records `agentMib` (its peak before the first gate) and `agentAnonMib` (anonymous
+  memory while its agents work). Lines from older versions are told apart and their anonymous
+  figures ignored.
+- **Within a run, a landing's gates (and the base and verify gates) take a freed machine-wide gates
+  slot before that run's ticket gates**, so the one landing worker no longer queues behind them;
+  across runs the longest wait still goes first.
+- **With `USAGE_CHECK=1`, the check before each ticket uses the run's own agents' newest reading**
+  when it is under 10 minutes old, and asks the usage endpoint only before the first reading or once
+  the newest is older.
+- **The README and skill say that committing on a run's branches during a pause stops it**, and
+  the skill knows a usage pause resumes by itself.
 - **The image's Codex is the newest plain release at least 72 hours old**, not npm's `latest` the
   moment it is published; pre-releases are skipped, and `CODEX_VERSION` still overrides it.
 
@@ -158,7 +211,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`sandcastle size` counts the sandboxes where branches are merged and gated**, often a run's
   largest; their peaks were never recorded. It prices gate sandboxes at a gate figure and the rest
   at an agent baseline, so it no longer recommends 1 sandbox for a VM that runs 4, limits gates by
-  memory and never above the sandboxes, and names each figure and the runs behind it.
+  memory and never above the sandboxes, and names each figure and the runs behind it. A gate is no
+  longer priced at about 0 GiB from memory read at rest (which also silenced the pool warning), and
+  a VM smaller than one gate sandbox is said to fit none instead of getting a negative capacity.
 - **The `base gates` line in `.sandcastle/logs/timings.jsonl` has per-gate times and the slot
   wait**, like verify's.
 - **Sandboxes run `tini` as PID 1**, so a killed child process is reaped instead of lingering as a
@@ -173,6 +228,36 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   gauge no longer draws a stray free cell then.
 - **`sandcastle doctor` on Linux no longer reports `podman-docker` as a failed "Docker running"**;
   it names the Podman refusal and #359.
+- **A ticket released when its last blocker lands, or requeued after a conflict or red at landing,
+  starts at the next free slot**, ahead of every ticket not yet started, instead of last; this cuts
+  the idle slots at the end of a large run. The release line says so (`#N released: its last
+  blocker has landed; it starts at the next free slot`), and the same-file start line says what
+  happens if the two conflict at landing.
+- **A ticket whose branch already holds another ticket's landed fix repairs at once**, instead of
+  merging the base and gating again first.
+- **A suite run in a sandbox is no longer moved to the background after 2 minutes**, which ended
+  the agent without its completion mark and cost a second implement session: the sandbox's managed
+  settings set the Bash default and maximum timeout to 15 minutes.
+- **The backup repository `.sandcastle/backup.git` no longer grows for good**: at a run's start and
+  in `sandcastle clean`, the copy of a branch whose commits are all on the base is dropped, and the
+  repository pruned once none is left. A deleted branch with unmerged commits keeps its copy until
+  `sandcastle clean --all`.
+- **A hung container runtime no longer stalls a run's start for minutes in silence**: the start
+  reads `docker info` once, with a 10 s limit shared by the runtime check, the CPU limit and the pool
+  warning, and a detached run's child reuses its parent's reading. On Linux no answer stops the run
+  (`docker did not answer within 10 s - is the runtime running?`); elsewhere, where a cold start can
+  be slow, the run goes on with no CPU limit.
+- **A run stopped by the guard says it lands nothing more**, and the closing summary of a stopped
+  run reports the tickets as the tracker said during the run.
+- **The per-ticket line says `repair made no change`** for a repair pass that committed nothing,
+  instead of `repaired=1`.
+- **`sandcastle doctor` names the defaults it uses when there is no personal `config.json`.**
+- **A status pane moved out of the previous run's Herdr tab is closed** when the next run replaces
+  the view.
+- **A pause lets the machine sleep across a multi-turn run's turns**: keep-awake is one inhibitor
+  for the whole run.
+- **A flaky frame comparison in `test/status.test.sh` under load is fixed**, as are timing-bound
+  tests that failed on a loaded machine.
 
 ## [0.7.0] - 2026-10-04
 
@@ -1723,7 +1808,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.4.2...v0.5.0
