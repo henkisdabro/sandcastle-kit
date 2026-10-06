@@ -34,6 +34,12 @@ to land, need you, queued, blocked, merged. The states:
   pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
   `sandcastle resume` continues it in the same run.
 
+A paused run is still live, and its run cell reads `PAUSED since 15:40 - finishing #12 review, #14
+landing` (then `PAUSED since 15:40` once nothing is in flight). When the snapshot shows it, name
+the pause in what you tell the user: since when, which tickets are still finishing (green
+branches keep landing), and that `sandcastle resume` (the resume action, pause.md) carries it on.
+Do not call a paused run hung, finished or stuck.
+
 A live run that spends a subscription on a Claude model also has a `usage` row in the header: the
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent
 last reported them (`usage  claude  5h ... 14% · resets 18:10   week ... 93% · resets Wed 06:00   (2m ago)`).
