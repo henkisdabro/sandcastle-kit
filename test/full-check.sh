@@ -84,6 +84,13 @@ leg_linux() {
     || { echo "FAIL"; tail -60 "$logs/linux.log"; return 1; }
 }
 
+# The lines of a file that name a real home directory. `home` must start a path, or a repo path
+# such as `site/home/index.html` reads as one; macOS's `Users` may sit mid-path, as it does in
+# WSL's `/mnt/c/Users` form. The placeholder homes the docs and tests use are fine.
+home_paths() {
+  grep -nE '(/Users|(^|[^A-Za-z0-9_.-])/home)/[a-z]' "$1" | grep -vE '/home/(user|node|agent)\b' || true
+}
+
 # The outbound scan needs no tests, only git: it is quick, and runs beside everything else.
 leg_scan() {
   local rc=0
@@ -111,9 +118,8 @@ leg_scan() {
   else
     echo "denylist: none at $deny"
   fi
-  # The placeholder homes the docs and tests use are fine; a real one is not.
   local homes
-  homes=$(grep -nE '/(Users|home)/[a-z]' "$logs/added.txt" | grep -vE '/home/(user|node|agent)\b' || true)
+  homes=$(home_paths "$logs/added.txt")
   if [ -n "$homes" ]; then rc=1; echo "home paths: FAIL"; echo "$homes" | head -20; else echo "home paths: ok"; fi
   return "$rc"
 }
