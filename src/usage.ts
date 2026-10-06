@@ -686,7 +686,13 @@ export type UsagePausePorts = {
   /** Takes the pause, or - while the standing one is the run's own - moves it to this window when that resets later. A person's pause is left as it is. */
   hold(pause: UsagePaused, now: number): void;
   now?: () => number;
+  /** The windows a person resumed the run through. A test gives its own; a run keeps one for the process (`RESUMED`). */
+  resumed?: Set<string>;
 };
+
+// One for the process, not for a turn: each turn of a multi-turn run (autonomy 2, 3, drain) builds its own
+// usage pause, and a person's early resume of a window must not be undone by the next turn's first reading.
+const RESUMED = new Set<string>();
 
 export type UsagePauseControl = {
   /** The pause source the schedule reads: the control file's, which also resumes the run once a usage pause's time has come. */
@@ -707,7 +713,7 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
   const clock = ports.now ?? Date.now;
   const seconds = () => Math.floor(clock() / 1000);
   // The windows a person resumed the run through, and the usage pause last seen in force and the readings last known.
-  const resumed = new Set<string>();
+  const resumed = ports.resumed ?? RESUMED;
   let seen: UsagePaused | undefined;
   let latest: PlanUsage[] = [];
   // Looks at the control file and remembers what became of the usage pause. Read before every decision as well as by the

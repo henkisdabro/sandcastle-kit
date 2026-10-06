@@ -131,6 +131,8 @@ const KEEP_AWAKE_SETTLE_MS = 250;
 
 // The latest inhibitor this process started, if it is still held, and whether a pause let it go.
 let inhibitor: ChildProcess | undefined;
+// The inhibitor still settling (its first KEEP_AWAKE_SETTLE_MS), so a release in that window ends it too.
+let settling: ChildProcess | undefined;
 let released = false;
 
 export const keepAwake = async (): Promise<string> => {
@@ -143,7 +145,11 @@ export const keepAwake = async (): Promise<string> => {
       ? ["caffeinate", ["-i", "-w", pid]]
       : ["systemd-inhibit", ["--what=idle:sleep", "--who=sandcastle", "--why=sandcastle run", "tail", `--pid=${pid}`, "-f", "/dev/null"]];
   if (spawnSync(cmd, ["-h"], { stdio: "ignore" }).error) return `off - ${cmd} not found`;
+  // Each turn of a multi-turn run asks again: one inhibitor already holding is the answer, or a later
+  // release would end only the newest and the machine would never sleep while paused.
+  if (inhibitor && inhibitor.exitCode === null && inhibitor.signalCode === null) return `on (${cmd})`;
   const child = spawn(cmd, args, { stdio: "ignore" });
+  settling = child;
   const ended = new Promise<boolean>((resolve) => {
     child.on("error", () => resolve(true));
     child.on("exit", () => resolve(true));
@@ -153,6 +159,7 @@ export const keepAwake = async (): Promise<string> => {
   const settled = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), KEEP_AWAKE_SETTLE_MS); });
   const failed = await Promise.race([ended, settled]);
   clearTimeout(timer);
+  if (settling === child) settling = undefined;
   if (!failed) {
     inhibitor = child;
     released = false;
@@ -165,6 +172,11 @@ export const keepAwake = async (): Promise<string> => {
  * is held (keep-awake was off, or already released).
  */
 export const releaseAwake = () => {
+  if (settling) {
+    settling.kill();
+    settling = undefined;
+    released = true;
+  }
   if (!inhibitor) return;
   inhibitor.kill();
   inhibitor = undefined;

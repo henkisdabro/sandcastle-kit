@@ -89,12 +89,16 @@ const world = (threshold = 90) => {
   const root = mkdtempSync(join(TMP, "world"));
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
   const clock = { seconds: T0 };
-  const pause = createUsagePause(threshold, {
-    standing: (now) => readPause(root, PID, now),
-    hold: (p, now) => holdForUsage(root, PID, p, now),
-    now: () => clock.seconds * 1000,
-  });
-  return { root, clock, pause };
+  // Each world its own: a run keeps one for the process, which would carry one test's resume into the next.
+  const resumed = new Set<string>();
+  const turn = () =>
+    createUsagePause(threshold, {
+      standing: (now) => readPause(root, PID, now),
+      hold: (p, now) => holdForUsage(root, PID, p, now),
+      now: () => clock.seconds * 1000,
+      resumed,
+    });
+  return { root, clock, pause: turn(), turn };
 };
 const demands = (told: Change[]) => told.flatMap((c) => (c.kind === "demand" ? [c.n] : []));
 const pauses = (told: Change[]) => told.flatMap((c) => (c.kind === "paused" ? [c] : []));
@@ -256,6 +260,22 @@ test("a person's resume before the time ends the pause, and the windows then ove
   assert.equal(readPause(root, PID, T0 + 120), undefined);
   // A window is remembered by its reset time: the 5-hour one that has rolled over is a new window, and pauses at the threshold.
   assert.equal(pause.reading([reading([92, FIVE_RESET + 5 * HOUR], [96, WEEK_RESET], T0 + 120)])?.window, "fiveHour");
+});
+
+test("a person's resume of a usage pause holds into the next turn of a multi-turn run", () => {
+  const { root, clock, pause, turn } = world(90);
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  writeFileSync(join(root, ".sandcastle/logs/run.lock"), `${PID} token project\n`);
+  assert.ok(pause.reading([reading([14, FIVE_RESET], [93, WEEK_RESET])]));
+  assert.ok(pause.source.read(), "paused, as the schedule's poll sees it");
+  clock.seconds = T0 + 60;
+  assert.equal(resumeRun(root, everyPidIsTheKit).kind, "resumed");
+  // The resume is noticed in this turn; then the turn ends and the run's next turn builds its own usage pause.
+  assert.equal(pause.source.read(), undefined);
+  const next = turn();
+  // Its first reading is the same window, still over the threshold: the person said to carry on.
+  assert.equal(next.reading([reading([15, FIVE_RESET], [93, WEEK_RESET], T0 + 120)]), undefined);
+  assert.equal(readPause(root, PID, T0 + 120), undefined);
 });
 
 test("a reading that comes before the run has noticed a person's resume does not write the pause again", () => {

@@ -495,8 +495,19 @@ test("a paused run with nothing in flight lets the machine sleep, and the resume
     await holdAwake();
     await sleep(50);
     assert.equal(pids().length, 2, "a resume that finds the machine already held starts no second inhibitor");
-    // Nothing was released, so nothing is held again by a later resume.
-    process.kill(pids()[1]!, "SIGTERM");
+    // A later turn of a multi-turn run asks again: the inhibitor holding is the answer, not a second one.
+    assert.match(await keepAwake(), /^on \(/);
+    await sleep(50);
+    assert.equal(pids().length, 2, "a turn's keepAwake while one inhibitor holds starts no second");
+    // And a pause releases the one that holds, so the machine can sleep.
+    releaseAwake();
+    await until(() => !alive(pids()[1]!), "the inhibitor to end on the second pause");
+    // A pause that comes while a resume's inhibitor is still settling ends that one too.
+    const settlingAwake = holdAwake();
+    await until(() => pids().length === 3, "the resume's inhibitor to start");
+    releaseAwake();
+    await settlingAwake;
+    await until(() => !alive(pids()[2]!), "the settling inhibitor to end on the pause");
   } finally {
     process.env.PATH = saved.PATH;
     if (saved.KEEP_AWAKE === undefined) delete process.env.KEEP_AWAKE;
