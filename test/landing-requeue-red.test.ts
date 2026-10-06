@@ -5,7 +5,7 @@
 // is made with git the way the pipeline's sandbox makes it, and read the way burndown.ts reads it
 // (`git rev-list --parents`). The fake sandbox strips the `timeout -k` wrapper macOS lacks.
 //
-//   pnpm exec tsx --test test/landing-requeue-red.test.ts
+//   node --test test/landing-requeue-red.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

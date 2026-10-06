@@ -1,7 +1,7 @@
 // A dry run gates each green branch on its own, so "would merge" for several says nothing about
 // whether they merge together; the summary points at `sandcastle preview`, which checks that.
 //
-//   pnpm exec tsx --test test/report-dry-run-preview.test.ts
+//   node --test test/report-dry-run-preview.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

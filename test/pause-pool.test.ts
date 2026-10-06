@@ -3,7 +3,7 @@
 // as 0, so its share goes to the others. On the resume the demand comes back and the tickets lease their
 // slots again within the run's share. This process is one run and the other is files (test/pool-sim.ts).
 //
-//   pnpm exec tsx --test test/pause-pool.test.ts
+//   node --test test/pause-pool.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";

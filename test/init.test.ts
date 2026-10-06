@@ -3,7 +3,7 @@
 // written, and what the fallback says when nothing is recognised. Nothing is
 // built, so no Docker and no network.
 //
-//   pnpm exec tsx --test test/init.test.ts
+//   node --test test/init.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

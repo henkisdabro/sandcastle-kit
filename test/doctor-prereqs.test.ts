@@ -3,7 +3,7 @@
 // than 2.31 passed, no git identity passed (git then refused the merges at landing, or guessed an author), and a missing
 // GH_TOKEN was reported as "is a fine-grained token". No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-prereqs.test.ts
+//   node --test test/doctor-prereqs.test.ts
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

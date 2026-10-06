@@ -1,7 +1,7 @@
 // The lean check (src/lean.ts) in a throwaway git repo: a settings.json that
 // defines hooks but is not tracked is flagged, since sandboxes never get it.
 //
-//   pnpm exec tsx --test test/lean.test.ts
+//   node --test test/lean.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

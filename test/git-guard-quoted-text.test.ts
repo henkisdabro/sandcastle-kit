@@ -2,7 +2,7 @@
 // body, a comment body) is refused like the command itself. The refusal then says how to carry
 // such text: in a file. A real command gets the same refusal, so nothing it refuses is let through.
 //
-//   pnpm exec tsx --test test/git-guard-quoted-text.test.ts
+//   node --test test/git-guard-quoted-text.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -1,7 +1,7 @@
 // The gates wait line names the project, as the landing one does:
 // "<project> #N gates: waiting for a machine-wide gates slot (...)".
 //
-//   pnpm exec tsx --test test/gates-label.test.ts
+//   node --test test/gates-label.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

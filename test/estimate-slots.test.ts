@@ -2,7 +2,7 @@
 // ticket (src/run.ts `estimate`): a sixth ticket on five slots starts when the first slot frees, so it is not a
 // whole extra round, and no run is shorter than its longest ticket.
 //
-//   pnpm exec tsx --test test/estimate-slots.test.ts
+//   node --test test/estimate-slots.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

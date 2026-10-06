@@ -2,7 +2,7 @@
 // when the branch adds a file: the new module's row in the layout table is expected. On a branch that
 // adds nothing, or for any other file, it still is. Temp git repos: no Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/touches-overrun-agent-docs.test.ts
+//   node --test test/touches-overrun-agent-docs.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

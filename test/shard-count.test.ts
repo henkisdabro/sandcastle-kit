@@ -3,7 +3,7 @@
 // oversubscribe it (five macOS tests timed out when two passes of 6 shards and the Linux
 // container's ran at once on 15 cores). No Docker.
 //
-//   pnpm exec tsx --test test/shard-count.test.ts
+//   node --test test/shard-count.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

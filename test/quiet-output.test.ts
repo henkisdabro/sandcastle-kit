@@ -6,7 +6,7 @@
 // outside `quietly`. What it cannot see is a child process writing to an inherited file descriptor;
 // the files below run here with piped output for that.
 //
-//   pnpm exec tsx --test test/quiet-output.test.ts
+//   node --test test/quiet-output.test.ts
 
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";

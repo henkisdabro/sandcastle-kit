@@ -2,7 +2,7 @@
 // session: it keeps the skill it loaded at its start, so the user starts a new one. INSTALL once said
 // Claude Code picks the change up in an open session, and offered an unverified `/reload-skills`.
 //
-//   pnpm exec tsx --test test/install-skill-session.test.ts
+//   node --test test/install-skill-session.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

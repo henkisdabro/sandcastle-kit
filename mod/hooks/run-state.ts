@@ -3,7 +3,7 @@
 // view's vocabulary (status.sh, `style_of`). The record's types, the ticket states and the
 // tables from state to group and word live in run-record.ts.
 
-import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } from "./run-record";
+import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } from "./run-record.ts";
 
 /** A ticket as read from a file that may be a stranger's: its state is any short text until `isTicketState` says otherwise. */
 export type Ticket = { state?: string; note?: string; title?: string; order?: number };
@@ -71,7 +71,7 @@ const text = (v: unknown, max: number) =>
 const whole = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined);
 const MAX_TICKETS = 200;
 
-export { RUN_COMMAND } from "./run-live";
+export { RUN_COMMAND } from "./run-live.ts";
 
 // A ticket as the kit writes it (src/tracker.ts, `refOf`): `#12` for a number, the id itself
 // for a ticket file.

@@ -1,7 +1,7 @@
 // NO_COLOR: the closing summary's plain headings and the status view's colour. No Docker,
 // no network, no model: a fake `sandcastle` and a `docker` that finds nothing stand in.
 //
-//   pnpm exec tsx --test test/no-color.test.ts
+//   node --test test/no-color.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

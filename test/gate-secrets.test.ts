@@ -3,7 +3,7 @@
 // gate log, the terminal and the repair agent's prompt. A fake sandbox that runs the command for
 // real; made-up token values; no Docker or network.
 //
-//   pnpm exec tsx --test test/gate-secrets.test.ts
+//   node --test test/gate-secrets.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

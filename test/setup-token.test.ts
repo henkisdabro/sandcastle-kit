@@ -1,7 +1,7 @@
 // The live GitHub token check `sandcastle setup` uses for both a saved and a
 // pasted token: a made-up fetch stands in for GitHub, so no network is touched.
 //
-//   pnpm exec tsx --test test/setup-token.test.ts
+//   node --test test/setup-token.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

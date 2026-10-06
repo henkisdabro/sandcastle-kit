@@ -3,7 +3,7 @@
 // changes no label and a ticket-file requeue has no search, so neither says it. The docs carry
 // the same advice. A fake `gh` on PATH, no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/requeue-label-lag.test.ts
+//   node --test test/requeue-label-lag.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -1,7 +1,7 @@
 // tsc must see every test file: a hand-picked include let type errors pile up in the ones left out.
 // `mod/` stays out because its `claude-code` imports resolve only inside Claude Code.
 //
-//   pnpm exec tsx --test test/tsconfig-include.test.ts
+//   node --test test/tsconfig-include.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

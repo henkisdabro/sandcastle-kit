@@ -4,7 +4,7 @@
 // 10-second clock is node:test's mock timers, and a ticket's pipeline runs over a temp repo as in
 // test/pipeline.test.ts. No Docker, model, gh or network.
 //
-//   pnpm exec tsx --test test/peaks-sampling.test.ts
+//   node --test test/peaks-sampling.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

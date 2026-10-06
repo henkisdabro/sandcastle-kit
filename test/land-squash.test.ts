@@ -2,7 +2,7 @@
 // view of a branch that landing deleted. Temp git repos, a fake `sandcastle` and `docker` on PATH;
 // no Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/land-squash.test.ts
+//   node --test test/land-squash.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -4,6 +4,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { registerHooks } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
@@ -236,6 +237,34 @@ const checkShape = (config: ProjectConfig) => {
   }
 };
 
+// Node gives a syntax error's place only in the head of its stack - the file and line, the source
+// line, then a caret under the column - so the message alone left the operator searching the file.
+const syntaxErrorPlace = (error: unknown): string | undefined => {
+  if (!(error instanceof SyntaxError)) return undefined;
+  const [head, , caret] = (error.stack ?? "").split("\n");
+  const line = head?.match(/\/\.sandcastle\/config\.ts:(\d+)$/)?.[1];
+  const column = caret?.indexOf("^") ?? -1;
+  return line && column >= 0 ? `${CONFIG_PATH}:${line}:${column + 1}` : undefined;
+};
+
+// Node takes a `.ts` file's module type from the nearest package.json, so a project whose
+// package.json says "type": "commonjs" failed on its config's `export default`. The config is
+// always an ES module, whatever the project around it says.
+let configIsEsm = false;
+const loadConfigAsEsm = () => {
+  if (configIsEsm) return;
+  configIsEsm = true;
+  registerHooks({
+    load: (url, context, nextLoad) => nextLoad(url, url.startsWith("file:") && new URL(url).pathname.endsWith(`/${CONFIG_PATH}`) ? { ...context, format: "module-typescript" } : context),
+  });
+};
+
+/** A config file's default export, imported as the kit imports every project's: always an ES module. */
+export const importConfig = async (file: string): Promise<ProjectConfig> => {
+  loadConfigAsEsm();
+  return (await import(pathToFileURL(file).href)).default as ProjectConfig;
+};
+
 export const loadProject = async (root = process.cwd()): Promise<Project> => {
   const file = join(root, CONFIG_PATH);
   if (!existsSync(file)) {
@@ -244,10 +273,11 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
   // A syntax error reached the operator as a Node stack trace from the loader.
   let config: ProjectConfig;
   try {
-    config = (await import(pathToFileURL(file).href)).default as ProjectConfig;
+    config = await importConfig(file);
   } catch (error) {
-    const said = String((error as Error).message ?? error).split("\n").filter((l) => l && !/^Transform failed/.test(l)).slice(0, 2).join(" ");
-    throw new OperatorError(`${CONFIG_PATH} does not load: ${said.replace(/\S*\/\.sandcastle\/config\.ts/g, CONFIG_PATH)}`);
+    const said = String((error as Error).message ?? error).split("\n").filter(Boolean).slice(0, 2).join(" ");
+    const place = syntaxErrorPlace(error);
+    throw new OperatorError(`${CONFIG_PATH} does not load: ${place ? `${place}: ERROR: ` : ""}${said.replace(/\S*\/\.sandcastle\/config\.ts/g, CONFIG_PATH)}`);
   }
   if (!config?.name || !config.gates?.length) {
     throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and at least one gate in \`gates\`.`);

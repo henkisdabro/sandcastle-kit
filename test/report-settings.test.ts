@@ -2,7 +2,7 @@
 // facts call for: autonomy 0 that left tickets it could run again, a usage guard with no reading.
 // A record without a settings group (an older kit's) is unknown, and says nothing.
 //
-//   pnpm exec tsx --test test/report-settings.test.ts
+//   node --test test/report-settings.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

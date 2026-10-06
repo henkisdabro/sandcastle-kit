@@ -4,7 +4,7 @@
 // sections, the AGENTS.md row - the rules pause.md must keep, the lines it quotes from the kit's
 // own output, and the pointers status.md and run.md hold to a paused run.
 //
-//   pnpm exec tsx --test test/skill-pause.test.ts
+//   node --test test/skill-pause.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

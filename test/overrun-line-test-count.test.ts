@@ -1,7 +1,7 @@
 // The overrun line lists the source files a ticket's Touches line missed in full and folds test
 // paths into a count: a refactor edits many tests, and listing them buries the real overruns.
 //
-//   pnpm exec tsx --test test/overrun-line-test-count.test.ts
+//   node --test test/overrun-line-test-count.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

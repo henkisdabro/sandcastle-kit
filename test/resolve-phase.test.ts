@@ -3,7 +3,7 @@
 // short pass neither shares the implementer's log nor pulls the typical implement time down. The
 // pipeline running it is driven in test/pipeline.test.ts.
 //
-//   pnpm exec tsx --test test/resolve-phase.test.ts
+//   node --test test/resolve-phase.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

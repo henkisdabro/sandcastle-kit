@@ -2,7 +2,7 @@
 // their queue label, so it must say the next run resumes the branch and not
 // send the operator to a "requeue" step that does not exist.
 //
-//   pnpm exec tsx --test test/report-next-step.test.ts
+//   node --test test/report-next-step.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

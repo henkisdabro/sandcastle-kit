@@ -31,7 +31,8 @@ read a module's section there before changing it.
 
 | Path | What |
 |---|---|
-| `bin/sandcastle` | Shell entry: runs `src/cli.ts` with the kit's own tsx loader; `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone |
+| `bin/sandcastle` | Shell entry: runs `src/cli.ts` on Node's own type stripping, after `src/node-check.mjs`; `sandcastle herdr ...` runs `src/herdr-plugin.ts` alone |
+| `src/node-check.mjs` | Preloaded by `bin/sandcastle` ahead of the CLI: plain JavaScript that refuses, with the fix, a Node that cannot strip TypeScript types (older than 22.18, or stripping turned off) |
 | `src/cli.ts` | Every command (`sandcastle help` lists them) and the autonomy loop around `burndown()`; the help text is the file's header comment (read by `src/help.ts`), held by `test/help.test.ts` and `test/command-help*.test.ts` |
 | `src/help.ts` | The help text (the header comment of `src/cli.ts`), `helpFor(command)` and `wantsHelp`: a `--help` or `-h` anywhere in a command's arguments prints its help before anything runs; the Herdr plugin's entry shares it |
 | `src/init.ts` | `sandcastle init`: stack detection, config and Dockerfile scaffolding |
@@ -141,7 +142,8 @@ directory, never in a real project.
 
 ## Conventions
 
-- TypeScript run by `tsx`, ESM, `.ts` import extensions, strict mode. No build step.
+- TypeScript run by Node's own type stripping (Node 22.18+), ESM, `.ts` import extensions, strict mode,
+  erasable syntax only (no enums, namespaces or parameter properties; `tsc` refuses them). No build step.
 - A test that reads a function out of `status.sh` uses `eval "$(sed ...)"`, never `source <(sed ...)`:
   macOS CI's bash is 3.2, which cannot source a process substitution (`test/bash32-source.test.ts` holds it).
 - Comments explain *why* - the failure a line prevents - not what the code does.

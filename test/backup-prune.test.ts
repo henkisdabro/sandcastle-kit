@@ -5,7 +5,7 @@
 // them: the guard's own `pruneBackup` is run against temp repos, and the two callers are held by
 // their source, as start-output-order.test.ts does.
 //
-//   pnpm exec tsx --test test/backup-prune.test.ts
+//   node --test test/backup-prune.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

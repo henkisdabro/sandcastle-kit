@@ -1,24 +1,24 @@
-// How a test starts the kit as a child process: node itself (`process.execPath`, never `bin/sandcastle`
-// or `.bin/tsx`, which find `node` on PATH - a mise or asdf shim on a Mac) with the V8 flags the
+// How a test starts the kit as a child process: node itself (`process.execPath`, never `bin/sandcastle`,
+// which finds `node` on PATH - a mise or asdf shim on a Mac) with the V8 flags the
 // launcher passes and a time limit. Without the flags a child can hit the Node 24 exit deadlock
 // (nodejs/node#66171) and sit at 0% CPU in `process.exit` for ever; without the limit one such
 // child hangs `pnpm test`, every gate run in a sandbox and `full-check.sh`. A test file that
-// names a tsx entry itself is refused by test/cli-spawn.test.ts.
+// names the launcher's preload itself is refused by test/cli-spawn.test.ts.
 //
 // A child also dies with the test process: `startNode` kills it when the test process exits, and
 // test/parent-watch.ts (preloaded into every child) ends it when the test process was killed and
 // could run no handler.
 //
 // The flags are read from bin/sandcastle, so dropping them there (its comment says when) is the
-// one edit. One node process with tsx's loader, as the launcher runs the CLI: tsx's own binary
-// forks a child that these flags would not reach.
+// one edit. One node process with the launcher's preload (src/node-check.mjs), as the launcher
+// runs the CLI.
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KIT = fileURLToPath(new URL("..", import.meta.url));
-export const LOADER = join(KIT, "node_modules/tsx/dist/loader.mjs");
+export const LOADER = join(KIT, "src/node-check.mjs");
 const PARENT_WATCH = join(KIT, "test/parent-watch.ts");
 
 /** The kit's entries: the CLI, and the Herdr plugin's own module (`sandcastle herdr ...`). */
@@ -32,10 +32,10 @@ export const flagsOf = (line: string) => line.slice(line.indexOf("exec node ") +
 /** The node flags the launcher passes (`exec node <flags> --import ...`). */
 export const NODE_FLAGS = flagsOf(launcherLines.at(-1)!);
 
-/** Long enough for a slow machine to start tsx and run a command; short enough to fail a deadlock. */
+/** Long enough for a slow machine to start node and run a command; short enough to fail a deadlock. */
 export const TIMEOUT_MS = 60_000;
 
-/** node's arguments to run `rest` (a script and its arguments, `-e` and code, or `--test` and a file) under the kit's loader. */
+/** node's arguments to run `rest` (a script and its arguments, `-e` and code, or `--test` and a file) as the launcher runs the CLI. */
 export const kitArgs = (...rest: string[]) => [...NODE_FLAGS, "--import", LOADER, "--import", PARENT_WATCH, ...rest];
 
 /** `options.env` (the test process's own by default) saying whose child this is, for test/parent-watch.ts. */
@@ -45,7 +45,7 @@ const withParent = <T extends { env?: NodeJS.ProcessEnv }>(options: T): T => ({ 
 const named = (rest: string[]) => `node ${rest.map((a, i) => (i === 0 && a.includes("/") ? basename(a) : a)).join(" ")}`.slice(0, 160);
 
 /**
- * Runs node under the kit's loader and flags (`rest`: a script and its arguments, `-e` and code, or
+ * Runs node with the launcher's preload and flags (`rest`: a script and its arguments, `-e` and code, or
  * `--test` and a file) to its end, and returns what spawnSync does. One that has not ended by
  * `timeoutMs` is killed with SIGKILL (a handler for a catchable signal could be what hangs) and the
  * test fails with the command named.

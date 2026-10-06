@@ -2,7 +2,7 @@
 // resolution a hold left on it) still lands land-only; a commit of its own since green runs in full.
 // Temp git repos; no Docker, model or network.
 //
-//   pnpm exec tsx --test test/land-only-merge.test.ts
+//   node --test test/land-only-merge.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

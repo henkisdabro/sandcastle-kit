@@ -65,7 +65,7 @@ const world = (on: Parameters<TestBody>[1], store: Record<string, unknown> = {})
     }
     // The settings script prints nothing; `ps` knows the run's process only while `pid` is set.
     const ps = e.argv[0] === "ps";
-    return { value: { exitCode: ps && !w.pid ? 1 : 0, stdout: ps && w.pid ? "node --import /kit/node_modules/tsx/dist/loader.mjs /kit/src/cli.ts run\n" : "", ...RESULT } };
+    return { value: { exitCode: ps && !w.pid ? 1 : 0, stdout: ps && w.pid ? "node --no-maglev --no-concurrent-sparkplug --import /kit/src/node-check.mjs /kit/src/cli.ts run\n" : "", ...RESULT } };
   });
   on("command.register", ($, e) => ({ value: { command: e.name } }));
   on("store.get", ($, e) => ({ value: w.store.get(e.key) }));

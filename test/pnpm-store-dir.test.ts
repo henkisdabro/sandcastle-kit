@@ -3,7 +3,7 @@
 // The kit mounts the store-dir, the parent, so the sandbox's `<mount>/vN` is the host's own store.
 // A fake `pnpm` on PATH stands in for the host's: no real pnpm, Docker or network.
 //
-//   pnpm exec tsx --test test/pnpm-store-dir.test.ts
+//   node --test test/pnpm-store-dir.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

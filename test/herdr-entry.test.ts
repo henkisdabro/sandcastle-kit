@@ -3,7 +3,7 @@
 // file or LESSSECURE change is involved. The popup itself cannot be gated, so a person presses
 // the keys in a real popup. A fake `less` records its arguments; no Herdr, no terminal.
 //
-//   pnpm exec tsx --test test/herdr-entry.test.ts
+//   node --test test/herdr-entry.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

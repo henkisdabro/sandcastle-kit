@@ -2,7 +2,7 @@
 // fact in a separate `requeued` field (null once the second attempt is not going to run).
 // The report reads the field: "requeued" is not a ticket state.
 //
-//   pnpm exec tsx --test test/report-requeued.test.ts
+//   node --test test/report-requeued.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

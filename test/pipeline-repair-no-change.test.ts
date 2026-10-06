@@ -4,7 +4,7 @@
 // The count crosses a requeue, as the repair count does. Through test/base-red-harness.ts: a temp repo, a
 // scripted agent and scripted gate runs; no Docker, model, gh or network.
 //
-//   pnpm exec tsx --test test/pipeline-repair-no-change.test.ts
+//   node --test test/pipeline-repair-no-change.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

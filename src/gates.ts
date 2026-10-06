@@ -458,8 +458,10 @@ export const noteBaseResult = (root: string, key: string, green: boolean) => {
 
 /** Red on the base before any agent ran. Carries each gate's verdict so the run record, and the closing summary, can name the red ones. */
 export class BaseRedError extends OperatorError {
-  constructor(message: string, readonly baseGates: { gate: string; ok: boolean }[]) {
+  readonly baseGates: { gate: string; ok: boolean }[];
+  constructor(message: string, baseGates: { gate: string; ok: boolean }[]) {
     super(message);
+    this.baseGates = baseGates;
   }
 }
 

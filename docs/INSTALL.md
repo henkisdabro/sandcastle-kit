@@ -15,7 +15,7 @@ the same by hand.
 |---|---|---|
 | 💻 | **macOS or Linux** | Windows is not supported natively. WSL 2 with Docker Engine may work but is untested. |
 | 🐳 | **A Docker-compatible container runtime** | The kit calls the `docker` command, so any runtime that provides it works - see the table below. |
-| 🟩 | **Node.js 22+** | 24 LTS recommended. |
+| 🟩 | **Node.js 22.18+** | 24 LTS recommended. The kit runs its TypeScript on Node's own type stripping, which 22.18 is the first Node 22 to turn on. |
 | 📦 | **pnpm** | Installs the kit's dependencies. |
 | 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.38 or newer is recommended: older git lands with a weaker check of each landing merge. |
 | 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |

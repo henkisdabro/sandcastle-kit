@@ -2,7 +2,7 @@
 // above every command (help included), and a typo answered with "Not inside a git repository".
 // The help prints clean, and an unknown command is named as one, with the nearest real command.
 //
-//   pnpm exec tsx --test test/cli-first-contact.test.ts
+//   node --test test/cli-first-contact.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

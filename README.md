@@ -15,7 +15,7 @@ gated and merged while you are away from the keyboard.
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-implement%20%2B%20review-d97757?style=flat-square&logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-cross--review-10a37f?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
 [![Docker](https://img.shields.io/badge/sandbox-Docker%20%7C%20OrbStack-2496ed?style=flat-square&logo=docker&logoColor=white)](docs/INSTALL.md#-requirements)
-[![Node](https://img.shields.io/badge/node-22%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-22.18%2B-5fa04e?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![pnpm](https://img.shields.io/badge/pnpm-f69220?style=flat-square&logo=pnpm&logoColor=white)](https://pnpm.io)
 
@@ -99,7 +99,7 @@ New to GitHub or to agents? These are the only terms you need.
 
 ## ⚡ Quick start
 
-**You need:** macOS or Linux, Node 22+, pnpm, git, jq, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
+**You need:** macOS or Linux, Node 22.18+, pnpm, git, jq, `ps` (procps, on Linux), the GitHub CLI signed in (`gh auth login`;
 skippable if your tickets are files in the repo), and a container runtime - [OrbStack](https://orbstack.dev) on macOS ([Podman](https://podman.io) is untested there),
 rootful [Docker Engine](https://docs.docker.com/engine/install/) on Linux, run as a normal user in the docker group
 (rootless Docker and Podman on Linux are not supported yet).

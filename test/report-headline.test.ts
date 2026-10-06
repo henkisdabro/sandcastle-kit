@@ -1,7 +1,7 @@
 // The closing summary's headline counts match its sections: "need you" is the
 // Needs you section, "need fixing" is the Needs fixing section.
 //
-//   pnpm exec tsx --test test/report-headline.test.ts
+//   node --test test/report-headline.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

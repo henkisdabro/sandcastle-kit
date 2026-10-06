@@ -2,7 +2,7 @@
 // resolves only once the queue is closed and empty, and the worker count is respected. The
 // scheduler that runs the queues is test/schedule-run.test.ts.
 //
-//   pnpm exec tsx --test test/schedule.test.ts
+//   node --test test/schedule.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

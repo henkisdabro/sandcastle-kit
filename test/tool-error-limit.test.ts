@@ -2,7 +2,7 @@
 // limit" (a test, a file, an API's own limit). Neither the run's limit check nor the status view
 // reads it as a spent plan allowance. Temp dirs only; no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/tool-error-limit.test.ts
+//   node --test test/tool-error-limit.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

@@ -4,7 +4,7 @@
 // (plain sh, the same on macOS and Linux) logs its arguments and answers from
 // fixtures, so no network is needed. Dates are compared in TypeScript.
 //
-//   pnpm exec tsx --test test/triage-label.test.ts
+//   node --test test/triage-label.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

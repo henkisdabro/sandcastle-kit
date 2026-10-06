@@ -4,7 +4,7 @@
 // one. The record's panes are now closed by id after the tab, the status pane only while it is still
 // the recorded terminal (Herdr reuses pane ids across a restart). A fake `herdr` on PATH; no Herdr.
 //
-//   pnpm exec tsx --test test/herdr-view-replace.test.ts
+//   node --test test/herdr-view-replace.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

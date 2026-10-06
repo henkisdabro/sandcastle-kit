@@ -3,7 +3,7 @@
 // page keeps telling people to paste the old one, or when an FAQ answer is edited on the page but
 // not in the structured data search engines read.
 //
-//   pnpm exec tsx --test test/site.test.ts
+//   node --test test/site.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -5,7 +5,7 @@
 // closing summary does. A ticket that landed with "closes" and was relabelled after still reads queued.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   pnpm exec tsx --test test/status-partly-done-ended.test.ts
+//   node --test test/status-partly-done-ended.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

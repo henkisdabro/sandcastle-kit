@@ -5,7 +5,7 @@
 // that wait apart from its time, as a slot wait is, so it does not inflate later usual times. Made-up
 // timings, a temp repo, scripted agents and gate runs, a moved clock; no tracker, Docker or network.
 //
-//   pnpm exec tsx --test test/estimate-whole-run.test.ts
+//   node --test test/estimate-whole-run.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

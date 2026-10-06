@@ -4,7 +4,7 @@
 // the background; an agent that cannot see the suite finish refuses to claim the gates green, ends
 // without COMPLETE, and costs the run a second implement session.
 //
-//   pnpm exec tsx --test test/managed-settings-env.test.ts
+//   node --test test/managed-settings-env.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -4,7 +4,7 @@
 // to the calls the README promises - a mod runs inside Claude Code with the user's permissions,
 // so a new call is a change a reviewer must see. No session and no model calls.
 //
-//   pnpm exec tsx --test test/mod.test.ts
+//   node --test test/mod.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -147,7 +147,7 @@ test("a long title is cut between characters, and ticket-file ids stay apart", (
 });
 
 test("the run's process is told from a later owner of its pid by the command the kit starts it with", () => {
-  assert.ok(read("bin", "sandcastle").includes(`exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/node_modules/tsx/dist/loader.mjs" "$KIT/${RUN_COMMAND}"`), "bin/sandcastle starts src/cli.ts");
+  assert.ok(read("bin", "sandcastle").includes(`exec node --no-maglev --no-concurrent-sparkplug --import "$KIT/src/node-check.mjs" "$KIT/${RUN_COMMAND}"`), "bin/sandcastle starts src/cli.ts");
 });
 
 test("the band is the castle's three rows, the run beside its walls, each row cut to its width", () => {

@@ -1,7 +1,7 @@
 // A branch held for its conflict resolution's stray edits says so under Needs you, in the note's own
 // words, and not as "changes <files>", which is how a protected-path hold reads.
 //
-//   pnpm exec tsx --test test/report-stray-hold.test.ts
+//   node --test test/report-stray-hold.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

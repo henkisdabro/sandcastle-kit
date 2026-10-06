@@ -1,7 +1,7 @@
 // The readable agent log shows a failed tool result as one `! ...` line, and calls the library's
 // "Context window" line what it is. Temp dirs only; no Docker, no model calls, no network.
 //
-//   pnpm exec tsx --test test/tool-error-log.test.ts
+//   node --test test/tool-error-log.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

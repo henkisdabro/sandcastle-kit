@@ -3,7 +3,7 @@
 // by a dead run blocks nobody; a slot names its run. Runs are child processes that look like the
 // kit to `ps`, as in test/lock.test.ts.
 //
-//   pnpm exec tsx --test test/pool-wait-order.test.ts
+//   node --test test/pool-wait-order.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

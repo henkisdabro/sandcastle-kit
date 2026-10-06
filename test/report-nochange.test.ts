@@ -2,7 +2,7 @@
 // agent's word alone), so the closing summary must say so and name the step - not file it under
 // Done with nothing to do, while every later run pays for it again.
 //
-//   pnpm exec tsx --test test/report-nochange.test.ts
+//   node --test test/report-nochange.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

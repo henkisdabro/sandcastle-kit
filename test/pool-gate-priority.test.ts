@@ -6,7 +6,7 @@
 // the slot logic runs in process with a short poll, so no test waits on a real one. The gates pool
 // there has one slot, so one waiter's holding it is every other waiter's wait.
 //
-//   pnpm exec tsx --test test/pool-gate-priority.test.ts
+//   node --test test/pool-gate-priority.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

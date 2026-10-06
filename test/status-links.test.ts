@@ -4,7 +4,7 @@
 // it. The pipe cases are in test/status.test.sh; only a pty from `script` reaches the marker
 // check; a live view reads the marker again on each redraw. No Docker, no network, no model calls.
 //
-//   pnpm exec tsx --test test/status-links.test.ts
+//   node --test test/status-links.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

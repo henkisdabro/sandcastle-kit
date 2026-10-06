@@ -8,6 +8,10 @@ apply it once the user agrees.
    local changes, stop and tell the user - never discard them. Otherwise
    `git -C <kit> pull --ff-only && pnpm -C <kit> install`, then `sandcastle doctor`. This skill is
    a link into the kit, so the pull may have changed it: re-read SKILL.md and this file before going on.
+   - If `sandcastle` stops with `cannot run the kit's TypeScript`, the user's Node is older than
+     22.18 (or has type stripping turned off in `NODE_OPTIONS`). Tell them, propose Node 24 LTS
+     through whatever installed their Node (doctor's FIX names the usual ones), and go on once
+     `sandcastle doctor` runs.
    - If doctor lists `opt  Herdr plugin and sidebar rows`, recommend the kit's Herdr plugin: run
      `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
      the user that block, and once they agree run it again with `--yes`. It edits Herdr's own
@@ -113,6 +117,10 @@ apply it once the user agrees.
        rules file names `Added:`, `Changed:` or `Fixed:` but not `Upgrading:`, propose adding a
        sentence there: a change an existing project must act on gets a line starting `Upgrading:`.
        Without it, agents following those rules never suggest one.
+   15. **Config syntax Node cannot strip.** If `sandcastle gates` (or any command) says
+       `.sandcastle/config.ts does not load` and names an `enum`, a `namespace` or a parameter
+       property, propose replacing it: an object of constants for an enum, a plain field for a
+       parameter property. Node runs the config with type annotations removed and nothing else.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: kit version before and after, what changed

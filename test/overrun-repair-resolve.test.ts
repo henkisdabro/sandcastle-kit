@@ -2,7 +2,7 @@
 // resolution changed, and a note whose overrun is only test and docs files is not printed (the run
 // record keeps the paths). Temp repos and made-up records: no Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/overrun-repair-resolve.test.ts
+//   node --test test/overrun-repair-resolve.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -2,7 +2,7 @@
 // merged base now leave their failures in .sandcastle/logs/verify-gates.log, as the base gates do
 // in base-gates.log, and a green run removes a log an earlier red run left. Temp dirs only.
 //
-//   pnpm exec tsx --test test/verify-log.test.ts
+//   node --test test/verify-log.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

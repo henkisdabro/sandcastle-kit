@@ -2,7 +2,7 @@
 // than adding a second: the review prompt asks for the branch's whole set, and the ticket keeps the
 // latest pass's set. No Docker, model or network.
 //
-//   pnpm exec tsx --test test/changelog-latest-pass.test.ts
+//   node --test test/changelog-latest-pass.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

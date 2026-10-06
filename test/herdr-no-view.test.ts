@@ -4,7 +4,7 @@
 // restart may have given to someone's shell) and the run's live-runs file is kept at exit.
 // A fake `herdr` logs every call; the exit is a real child process. No Herdr, no network.
 //
-//   pnpm exec tsx --test test/herdr-no-view.test.ts
+//   node --test test/herdr-no-view.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

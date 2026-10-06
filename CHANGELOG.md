@@ -9,6 +9,25 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **The kit needs Node 22.18 or newer.** It now runs its TypeScript on Node's own type stripping
+  instead of tsx. `sandcastle` on an older Node says so and stops; install Node 24 LTS (or any
+  22.18+), then `pnpm -C <kit> install`, which removes tsx. Update between runs: a detached run
+  started before the update starts its next turn with the old loader.
+- **A project's `.sandcastle/config.ts` loads on Node's type stripping too.** A config that uses
+  only type annotations, `satisfies`, `as` and `import type` (as `sandcastle init` writes it)
+  needs nothing. An `enum`, a `namespace` or a constructor parameter property no longer loads:
+  `sandcastle` names the file and the place; replace it with a plain object or field.
+
+### Changed
+
+- **Commands start about twice as fast.** The kit runs on Node's own type stripping, not tsx's
+  loader: `sandcastle help` and the Herdr tab bar's `sandcastle herdr line`, which runs every 10
+  seconds, took about 0.4 s against 0.8-1.2 s. A project whose `package.json` says
+  `"type": "commonjs"` still has its config loaded as an ES module. The kit has one dependency
+  fewer, and tsx's cache in the temp directory is gone.
+
 ### Fixed
 
 - **Website release versions are checked before deployment**, alongside the Herdr manifest,

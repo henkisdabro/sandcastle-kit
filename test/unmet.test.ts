@@ -4,7 +4,7 @@
 // summary lists it under Needs you, and that both prompts ask for it. Temp repos and a fake
 // tracker: no Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/unmet.test.ts
+//   node --test test/unmet.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -2,7 +2,7 @@
 // "Blocked by" or "Depends on" phrase, and which it leaves alone. Pure: no
 // network, no gh.
 //
-//   pnpm exec tsx --test test/blockers.test.ts
+//   node --test test/blockers.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

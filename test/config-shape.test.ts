@@ -2,7 +2,7 @@
 // takes: a syntax error reached the operator as a loader stack trace, and an unknown key (a typo
 // such as `concurency`) or a wrong type (`concurrency: "two"`) was ignored, so the run used a default.
 //
-//   pnpm exec tsx --test test/config-shape.test.ts
+//   node --test test/config-shape.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

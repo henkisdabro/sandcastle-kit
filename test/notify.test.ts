@@ -2,7 +2,7 @@
 // non-zero exit, signal - with the summary in the environment, and a notifier that fails
 // never changes the run's result. One real process per case; no Docker, network or model.
 //
-//   pnpm exec tsx --test test/notify.test.ts
+//   node --test test/notify.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,8 +14,8 @@ import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { runNode, startNode } from "./cli-spawn.ts";
 
 const KIT = join(import.meta.dirname, "..");
-// runNode and startNode run the loader in one process, as bin/sandcastle runs the CLI: the tsx
-// binary's child is SIGKILLed on a slow answer to SIGTERM, and the notifier with it.
+// runNode and startNode run the CLI in one process, as bin/sandcastle does: a wrapper's child (tsx's
+// binary had one) is SIGKILLed on a slow answer to SIGTERM, and the notifier with it.
 const dir = mkdtempSync(join(tmpdir(), "sandcastle-notify-"));
 const cache = join(dir, "cache");
 const href = (f: string) => JSON.stringify(pathToFileURL(join(KIT, f)).href);

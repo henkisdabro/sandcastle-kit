@@ -4,7 +4,7 @@
 // temp directories; no git, Docker, model or network. The pipeline that writes and reads them is
 // driven in test/pipeline.test.ts.
 //
-//   pnpm exec tsx --test test/changelog-carried.test.ts
+//   node --test test/changelog-carried.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

@@ -1,6 +1,6 @@
 // The closing summary says why a ticket is still blocked, not just "waits for #N".
 //
-//   pnpm exec tsx --test test/report-blocked-why.test.ts
+//   node --test test/report-blocked-why.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

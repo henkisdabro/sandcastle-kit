@@ -3,7 +3,7 @@
 // a squash landing and a dry run. What the run record says of each is the ledger's (src/ledger.ts),
 // recorded as the scheduler tells the ending. No Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/landing.test.ts
+//   node --test test/landing.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

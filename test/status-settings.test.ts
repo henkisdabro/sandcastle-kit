@@ -2,7 +2,7 @@
 // record's settings group or, between runs, the next run's settings the CLI passes in. A made-up
 // project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   pnpm exec tsx --test test/status-settings.test.ts
+//   node --test test/status-settings.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

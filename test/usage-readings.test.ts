@@ -2,7 +2,7 @@
 // parses to a reading, the run takes the newest reading across its agents' logs while it is live,
 // and the run record holds it as `usage`. Temp directories only; no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/usage-readings.test.ts
+//   node --test test/usage-readings.test.ts
 
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";

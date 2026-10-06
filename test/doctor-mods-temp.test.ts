@@ -2,7 +2,7 @@
 // removes that directory afterwards: every doctor run once left a `sandcastle-mods-*` directory in
 // the temp directory. A `claude` shim on PATH, no Docker, no network, no real Claude Code.
 //
-//   pnpm exec tsx --test test/doctor-mods-temp.test.ts
+//   node --test test/doctor-mods-temp.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -50,6 +50,6 @@ test("doctor leaves no directory behind in TMPDIR when it asks Claude Code about
     },
   });
   assert.ok(existsSync(asked), "doctor asked Claude Code about mods");
-  // tsx keeps its own cache (`tsx-<uid>`) there; only the kit's own directories count.
+  // Other tools keep their own files there; only the kit's own directories count.
   assert.deepEqual(readdirSync(temp).filter((f) => f.startsWith("sandcastle-")), [], "no sandcastle directory left in TMPDIR");
 });

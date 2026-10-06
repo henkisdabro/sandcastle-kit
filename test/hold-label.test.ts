@@ -2,7 +2,7 @@
 // and description survive, and ignores only "already exists". A fake `gh`
 // first on PATH logs its arguments, so no network is needed.
 //
-//   pnpm exec tsx --test test/hold-label.test.ts
+//   node --test test/hold-label.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

@@ -4,7 +4,7 @@
 // the start lines) against a fake `docker` that answers `info` with a made-up VM; no Docker, no
 // model, no network.
 //
-//   pnpm exec tsx --test test/sandbox-cpus-start-line.test.ts
+//   node --test test/sandbox-cpus-start-line.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

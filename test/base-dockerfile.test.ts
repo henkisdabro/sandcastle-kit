@@ -2,7 +2,7 @@
 // layer that fills it, the build checks the git `sandcastle preview` needs, and the
 // full trixie base stays, with the reasons written down.
 //
-//   pnpm exec tsx --test test/base-dockerfile.test.ts
+//   node --test test/base-dockerfile.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

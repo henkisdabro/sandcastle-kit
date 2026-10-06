@@ -4,7 +4,7 @@
 // a caller on another one makes no herdr call, types nothing and leaves the run's file. A record
 // with no `socket`, or a caller with no HERDR_SOCKET_PATH, acts as it always did. Fake herdr.
 //
-//   pnpm exec tsx --test test/herdr-dead-tab-socket.test.ts
+//   node --test test/herdr-dead-tab-socket.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

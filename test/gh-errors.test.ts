@@ -1,7 +1,7 @@
 // A gh failure (signed out, no such issue) is a one-line refusal from the CLI, never a stack
 // trace. A fake gh on PATH; a throwaway repo; no Docker, network or model calls.
 //
-//   pnpm exec tsx --test test/gh-errors.test.ts
+//   node --test test/gh-errors.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

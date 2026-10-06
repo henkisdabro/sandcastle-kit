@@ -1,8 +1,8 @@
-// A full disk is a message that says so, not a Node stack trace: in the temp directory, where tsx
-// died before the kit's code ran, and under the project, where any write can hit it. No Docker,
+// A full disk is a message that says so, not a Node stack trace: in the temp directory, which the
+// launcher checks before the kit's code runs, and under the project, where any write can hit it. No Docker,
 // network or model calls; ENOSPC is simulated (a temp directory that cannot be written, a patched fs).
 //
-//   pnpm exec tsx --test test/disk-full.test.ts
+//   node --test test/disk-full.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -22,7 +22,7 @@ const repo = () => {
 };
 const noStack = (s: string) => assert.ok(!s.split("\n").some((l) => /^\s+at /.test(l)), `stack trace in:\n${s}`);
 
-test("a temp directory that cannot be written: the launcher says so before tsx starts", () => {
+test("a temp directory that cannot be written: the launcher says so before node starts", () => {
   // A path that does not exist fails as a full disk does, and does so for root too (the Linux check runs as root).
   const r = spawnSync(join(kit, "bin/sandcastle"), ["help"], { cwd: repo(), encoding: "utf8", env: { ...process.env, TMPDIR: "/nonexistent/sandcastle-tmp" } });
   assert.equal(r.status, 1);
@@ -32,7 +32,7 @@ test("a temp directory that cannot be written: the launcher says so before tsx s
 
 test("ENOSPC under the project: the disk is full, and what frees space", () => {
   const root = repo();
-  // The project's .sandcastle cannot be made, as on a full disk; tsx's own cache still can.
+  // The project's .sandcastle cannot be made, as on a full disk; the temp directory still can.
   const preload = join(root, "full.mjs");
   writeFileSync(
     preload,

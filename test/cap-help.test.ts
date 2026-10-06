@@ -1,7 +1,7 @@
 // `sandcastle help` and `sandcastle cap --help` cover the cap command: what it takes, that the run
 // keeps its slots, that the cap ends with the run. Spawned outside any repository: help needs none.
 //
-//   pnpm exec tsx --test test/cap-help.test.ts
+//   node --test test/cap-help.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

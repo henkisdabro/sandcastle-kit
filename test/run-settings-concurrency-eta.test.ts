@@ -2,7 +2,7 @@
 // maths keep reading the record's top-level `concurrency` (the sandboxes at once, after the ticket
 // count), so a record that gains the group draws its tickets and its end time as before.
 //
-//   pnpm exec tsx --test test/run-settings-concurrency-eta.test.ts
+//   node --test test/run-settings-concurrency-eta.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

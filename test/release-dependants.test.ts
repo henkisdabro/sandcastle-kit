@@ -8,7 +8,7 @@
 // The shim is a POSIX sh script and every path comes from os.tmpdir() and node:path, so the test
 // runs the same on Linux and macOS (no GNU-only flag anywhere; PATH is joined with path.delimiter).
 //
-//   pnpm exec tsx --test test/release-dependants.test.ts
+//   node --test test/release-dependants.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

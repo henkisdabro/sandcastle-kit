@@ -1,7 +1,7 @@
 // Gate times print with one decimal under 10 s (src/gates.ts), against a
 // made-up sandbox: its exec answers at once, so no Docker is needed.
 //
-//   pnpm exec tsx --test test/gate-timing.test.ts
+//   node --test test/gate-timing.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

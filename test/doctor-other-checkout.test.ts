@@ -3,7 +3,7 @@
 // ordinary project, and the kit's own checkout, get no such line; the kit's own checkout is checked
 // as a project, as it has a project config. No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-other-checkout.test.ts
+//   node --test test/doctor-other-checkout.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

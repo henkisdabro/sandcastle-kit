@@ -3,7 +3,7 @@
 // same `ps` flags as the mod, and the same answers when it is run on a live, a recycled and a
 // gone pid. No Docker, no model calls.
 //
-//   pnpm exec tsx --test test/run-live-contract.test.ts
+//   node --test test/run-live-contract.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

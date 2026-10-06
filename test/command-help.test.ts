@@ -3,7 +3,7 @@
 // merged `agent/issue-1` branch, which must still be there afterwards. No Docker, model calls or
 // network.
 //
-//   pnpm exec tsx --test test/command-help.test.ts
+//   node --test test/command-help.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
-// runKit, not bin/sandcastle or the tsx binary: those find `node` on PATH.
+// runKit, not bin/sandcastle: it finds `node` on PATH.
 const cli = (file: string, args: string[], cwd: string, config: string) =>
   runKit(args, {
     script: join(kit, file),

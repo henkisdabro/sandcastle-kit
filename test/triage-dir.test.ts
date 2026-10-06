@@ -2,7 +2,7 @@
 // their results; otherwise they show as untracked and a run's clean-tree check refuses to start.
 // A throwaway repo, no Docker and no model calls.
 //
-//   pnpm exec tsx --test test/triage-dir.test.ts
+//   node --test test/triage-dir.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

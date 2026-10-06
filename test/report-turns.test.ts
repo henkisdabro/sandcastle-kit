@@ -3,7 +3,7 @@
 // conflict resolution the kit held is `held` from its first write. Made-up run records and a temp
 // git repo; no Docker, model or network.
 //
-//   pnpm exec tsx --test test/report-turns.test.ts
+//   node --test test/report-turns.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

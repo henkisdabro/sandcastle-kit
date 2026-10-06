@@ -5,7 +5,7 @@
 // wrote then. Each test drives `createSchedule` with burndown's attempt report (`attempted`) and the
 // real ledger over memory. No Docker, no gh, no network.
 //
-//   pnpm exec tsx --test test/handed-back.test.ts
+//   node --test test/handed-back.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

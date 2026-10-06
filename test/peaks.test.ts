@@ -2,7 +2,7 @@
 // sandbox is a fake `exec` answering for the kernel's `memory.peak`, the cache directory a temp
 // XDG_CACHE_HOME, so no Docker, model call or network is needed.
 //
-//   pnpm exec tsx --test test/peaks.test.ts
+//   node --test test/peaks.test.ts
 
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 // operator to guess where work comes from. A throwaway repo and a fake `gh`;
 // no Docker, no model call, no network.
 //
-//   pnpm exec tsx --test test/next-step.test.ts
+//   node --test test/next-step.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -63,7 +63,7 @@ esac
   );
   chmodSync(join(bin, "gh"), 0o755);
   const run = (...args: string[]) =>
-    // runKit starts this node, not the tsx binary: that finds `node` on PATH, and a mise or asdf shim there
+    // runKit starts this node, not bin/sandcastle: that finds `node` on PATH, and a mise or asdf shim there
     // reads its config from the XDG_CONFIG_HOME this file points at a temp dir, then exits.
     runKit(["queue", ...args], {
       cwd: root,

@@ -3,7 +3,7 @@
 // On macOS `ps` is part of the system and doctor says nothing about it. The platform is set in the
 // child by a preload, so both cases run on either host. No Docker, no network.
 //
-//   pnpm exec tsx --test test/doctor-ps.test.ts
+//   node --test test/doctor-ps.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

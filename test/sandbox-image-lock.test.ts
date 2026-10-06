@@ -5,7 +5,7 @@
 // no state but the cache directory, and fails as docker does when a tag names an image that is not
 // there. No Docker or network.
 //
-//   pnpm exec tsx --test test/sandbox-image-lock.test.ts
+//   node --test test/sandbox-image-lock.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, type ChildProcess } from "node:child_process";

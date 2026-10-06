@@ -1,7 +1,7 @@
 // The command-shaped fixes in `sandcastle doctor`: shell quoting, the .gitignore fix and the
 // queue-label check against a fake `gh`. No Docker, no network, no real gh.
 //
-//   pnpm exec tsx --test test/doctor-fix.test.ts
+//   node --test test/doctor-fix.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

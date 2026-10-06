@@ -1,7 +1,7 @@
 // The sidebar counts a ticket whose work was left uncommitted as needing a person, as the
 // status view (status.sh `style_of`) and the Claude Code mod do (src/herdr.ts).
 //
-//   pnpm exec tsx --test test/herdr-counts.test.ts
+//   node --test test/herdr-counts.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

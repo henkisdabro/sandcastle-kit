@@ -5,7 +5,7 @@
 // read by the plugin's startup hook and by the tab bar while live runs keep it ticking, and a
 // record whose run ended more than AWAIT_REPORT_DAYS ago is gone. Fake herdr; no Herdr, no network.
 //
-//   pnpm exec tsx --test test/herdr-awaiting.test.ts
+//   node --test test/herdr-awaiting.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, utimesSync, writeFileSync } from "node:fs";

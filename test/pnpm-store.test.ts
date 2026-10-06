@@ -3,7 +3,7 @@
 // literal path (`~/Library/pnpm/store/v11`) was valid on one OS only. A fake `pnpm` on PATH stands
 // in for the host's, so no real pnpm, Docker or network is involved.
 //
-//   pnpm exec tsx --test test/pnpm-store.test.ts
+//   node --test test/pnpm-store.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -1,7 +1,7 @@
 // The reviewer's <ungated> note is kept whole up to a generous cap, cut at a word with "…" past
 // it, and the closing report then points at the review log. No repo, Docker, model or network.
 //
-//   pnpm exec tsx --test test/ungated-length.test.ts
+//   node --test test/ungated-length.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

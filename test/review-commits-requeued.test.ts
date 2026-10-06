@@ -2,7 +2,7 @@
 // `reviewCommits`, as `commits` keeps them in the branch total. No Docker, model or network. The land-only
 // re-run itself is driven in test/pipeline.test.ts.
 //
-//   pnpm exec tsx --test test/review-commits-requeued.test.ts
+//   node --test test/review-commits-requeued.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

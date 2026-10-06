@@ -3,7 +3,7 @@
 // and ends when told to - so no Docker and no model calls; `wait`, `stop` and the refusals run
 // through the real CLI in a throwaway git repo.
 //
-//   pnpm exec tsx --test test/detach.test.ts
+//   node --test test/detach.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

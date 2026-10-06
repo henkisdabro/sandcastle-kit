@@ -2,7 +2,7 @@
 // the project rules for the test runner's output format. Dogfood agents grepped TAP lines out of
 // node:test's spec output and polled a background suite with `sleep`. No model calls.
 //
-//   pnpm exec tsx --test test/prompt-agent-habits.test.ts
+//   node --test test/prompt-agent-habits.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

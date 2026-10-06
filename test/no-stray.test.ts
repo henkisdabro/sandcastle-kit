@@ -2,7 +2,7 @@
 // (test/no-stray.ts), so a gate log stays free of stray lines. Each case runs one made-up test file
 // the way package.json's `test` script runs the real ones.
 //
-//   pnpm exec tsx --test test/no-stray.test.ts
+//   node --test test/no-stray.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -61,5 +61,5 @@ test("both test scripts in package.json preload the guard", () => {
 });
 
 test("test/full-check.sh's shards preload the guard as pnpm test does", () => {
-  assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /tsx --import \.\/test\/no-stray\.ts --test /);
+  assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /node --import \.\/test\/no-stray\.ts --test /);
 });

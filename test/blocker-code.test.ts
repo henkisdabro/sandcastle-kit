@@ -1,7 +1,7 @@
 // stripCode and parseRefs (src/blockers.ts): a blocker phrase inside fenced or inline code is an
 // example, not a dependency. Pure: no network, no gh.
 //
-//   pnpm exec tsx --test test/blocker-code.test.ts
+//   node --test test/blocker-code.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

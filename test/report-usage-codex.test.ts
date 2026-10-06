@@ -2,7 +2,7 @@
 // end:` line it always gave, and Codex's reading, which only the status view and the sidebar show, adds
 // nothing to it and takes nothing from it. Facts only: a temp repository, no Docker, no network.
 //
-//   pnpm exec tsx --test test/report-usage-codex.test.ts
+//   node --test test/report-usage-codex.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

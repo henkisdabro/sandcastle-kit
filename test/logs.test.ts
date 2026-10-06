@@ -1,7 +1,7 @@
 // The log marks (src/run.ts): the path a run's log is written to, the local
 // timestamp and the separator line appended at each phase start.
 //
-//   pnpm exec tsx --test test/logs.test.ts
+//   node --test test/logs.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

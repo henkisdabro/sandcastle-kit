@@ -4,7 +4,7 @@
 // worktree whose `exec` answers for the kernel's `memory.peak`, the cache directory a temp
 // XDG_CACHE_HOME - no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/peaks-landing.test.ts
+//   node --test test/peaks-landing.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

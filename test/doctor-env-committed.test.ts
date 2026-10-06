@@ -2,7 +2,7 @@
 // ignored at all is a FIX: doctor checked its file mode but not that its tokens were in git.
 // A temp repo; doctor's machine checks may fail around it; no network needed for these lines.
 //
-//   pnpm exec tsx --test test/doctor-env-committed.test.ts
+//   node --test test/doctor-env-committed.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

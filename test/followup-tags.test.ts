@@ -5,7 +5,7 @@
 // A dry run files none. A temp repo, scripted agent passes, a fake `gh` first on PATH (plain sh, the
 // same on macOS and Linux) and ticket files; no Docker, model or network.
 //
-//   pnpm exec tsx --test test/followup-tags.test.ts
+//   node --test test/followup-tags.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

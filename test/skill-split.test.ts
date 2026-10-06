@@ -3,7 +3,7 @@
 // status.md, pause.md, update.md), each named in SKILL.md's prose (Codex and OpenCode do not fill $action, so they find the file from
 // the text). This pins the split: nothing left behind, nothing lost, every pointer in place.
 //
-//   pnpm exec tsx --test test/skill-split.test.ts
+//   node --test test/skill-split.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

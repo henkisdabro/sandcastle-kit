@@ -2,7 +2,7 @@
 // on lines of its own: one named in inline code, a fenced block or mid-sentence is prose. No repo,
 // Docker, model or network.
 //
-//   pnpm exec tsx --test test/own-line-tags.test.ts
+//   node --test test/own-line-tags.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

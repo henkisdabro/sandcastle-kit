@@ -2,7 +2,7 @@
 // one agent on that pane - working while tickets work, blocked or idle at the end. `all` keeps a
 // pane per sandbox. Against a fake `herdr` on PATH that records its calls: no Herdr, no Docker.
 //
-//   pnpm exec tsx --test test/herdr-panes.test.ts
+//   node --test test/herdr-panes.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

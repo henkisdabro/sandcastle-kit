@@ -4,7 +4,7 @@
 // triage`. Each test starts from a run record on disk, read by `gather` as `sandcastle report` does.
 // No gh, Docker or network: a Markdown-files tracker.
 //
-//   pnpm exec tsx --test test/report-follow-up-counts.test.ts
+//   node --test test/report-follow-up-counts.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

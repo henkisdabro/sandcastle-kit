@@ -3,7 +3,7 @@
 // many backups and drops leave a bounded pack count - while a vanished branch is still restored
 // from it. Temp repos only: no Docker, no network.
 //
-//   pnpm exec tsx --test test/backup-size.test.ts
+//   node --test test/backup-size.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

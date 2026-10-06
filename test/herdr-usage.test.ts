@@ -2,7 +2,7 @@
 // with a mark once a window is amber or red) while the run record holds a reading, and none before one.
 // Against a fake `herdr` on PATH that records its calls: no Herdr, no Docker.
 //
-//   pnpm exec tsx --test test/herdr-usage.test.ts
+//   node --test test/herdr-usage.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

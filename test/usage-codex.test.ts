@@ -5,7 +5,7 @@
 // session the real one writes, in the shape Codex 0.160.0 wrote for a pass against a local stand-in server;
 // temp directories only, no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/usage-codex.test.ts
+//   node --test test/usage-codex.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

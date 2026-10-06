@@ -2,7 +2,7 @@
 // tip and the gated head, changing nothing beyond a plain merge except under `generated`.
 // A temp git repo, no Docker, no model, no network.
 //
-//   pnpm exec tsx --test test/landing-check.test.ts
+//   node --test test/landing-check.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

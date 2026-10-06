@@ -1,7 +1,7 @@
 // `sandcastle init` writes the repo's base branch when it is not main, and the
 // wrong-branch refusal says how to fix it. Throwaway repos, no network.
 //
-//   pnpm exec tsx --test test/base-branch.test.ts
+//   node --test test/base-branch.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

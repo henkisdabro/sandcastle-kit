@@ -3,7 +3,7 @@
 // a time limit, so a stuck child fails the test with its command named instead of hanging
 // `pnpm test`, every gate run in a sandbox and `full-check.sh`. No Docker, model calls or network.
 //
-//   pnpm exec tsx --test test/cli-spawn.test.ts
+//   node --test test/cli-spawn.test.ts
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -56,12 +56,12 @@ test("a started child that does not end is killed after its limit", async () => 
   assert.match(said.join(""), /node stuck-started\.mts did not end in 1\.5s; killed/);
 });
 
-// A tsx entry named in a test file is a spawn without the flags and the limit. test/mod.test.ts
-// and test/run-live.test.ts only quote the launcher's command line.
-const ENTRIES = [["dist", "cli.mjs"].join("/"), ["dist", "loader.mjs"].join("/"), [".bin", "tsx"].join("/")];
+// The launcher's preload named in a test file is a spawn of the kit without the flags and the limit.
+// test/mod.test.ts and test/run-live.test.ts only quote the launcher's command line.
+const ENTRIES = [["node-check", "mjs"].join(".")];
 const QUOTING = new Set(["cli-spawn.ts", "cli-spawn.test.ts", "mod.test.ts", "run-live.test.ts"]);
 
-test("no test file starts a tsx entry of its own", () => {
+test("no test file starts the kit with the launcher's preload of its own", () => {
   const offenders = readdirSync(join(KIT, "test"))
     .filter((f) => /\.(ts|sh)$/.test(f) && !QUOTING.has(f))
     .filter((f) => ENTRIES.some((e) => readFileSync(join(KIT, "test", f), "utf8").includes(e)));

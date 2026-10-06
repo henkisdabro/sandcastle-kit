@@ -255,8 +255,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   const needsGh = project?.tracker.kind !== "files";
   // The commands that install things differ: Homebrew and `open -a` on macOS, the distribution's tools elsewhere.
   const mac = process.platform === "darwin";
-  const node = Number(process.versions.node.split(".")[0]);
-  check(node >= 22, `Node ${process.versions.node}`, `Install Node 22 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
+  // 22.18 is the first Node 22 that strips the kit's TypeScript types by default (src/node-check.mjs).
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  check(major > 22 || (major === 22 && minor >= 18), `Node ${process.versions.node}`, `Install Node 22.18 or newer (24 LTS recommended): \`nvm install 24\`, \`mise use -g node@24\` or ${mac ? "`brew install node`" : "your distribution's package"}`);
   check(existsSync(join(KIT, "node_modules/@ai-hero/sandcastle")), "kit dependencies installed", `\`pnpm -C ${shellQuote(KIT)} install\``);
   // Not installed and not started need different fixes: "start OrbStack" to someone with no runtime sent them looking for an app they never had.
   const dockerInstalled = run("docker", ["--version"]) !== undefined;
