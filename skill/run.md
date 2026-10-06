@@ -82,7 +82,9 @@ This continues SKILL.md: run its "Before every action" first.
    ends with a note saying so - skip this step: the mod submits a prompt when the run's process
    is gone, and that prompt is your cue for step 4. It follows the run this session started
    wherever its project lives (a second clone, a package of a monorepo), by the session id the
-   run records; a run that `--detach` refused gets no prompt, so step 2's check still matters.
+   run records; a run that `--detach` refused gets no prompt, so step 2's check still matters. A
+   paused run (pause.md) is still live, so the mod sends no end prompt until the run ends: silence
+   during a pause is not a sign it has stopped.
 
    With no such note, the detached run is not your own process, so your harness never tells you
    it finished. Right after starting it, run `sandcastle wait` as a background command your
@@ -95,7 +97,7 @@ This continues SKILL.md: run its "Before every action" first.
    user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
-   when the user asks, and `sandcastle wait` keeps waiting through a pause.
+   when the user asks (pause.md), and `sandcastle wait` keeps waiting through a pause.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
    summary" below before writing it.

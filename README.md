@@ -735,6 +735,8 @@ sandcastle pause                      # hold the live run at the next safe junct
 sandcastle resume                     # continue it, in the same run
 ```
 
+Your agent does both on request ("pause the run", "carry on"; the skill's `pause` and `resume` actions).
+
 A **soft pause**, from any terminal (the run may be attached or detached):
 
 - **No new work starts.** No new ticket, and no new agent pass for a ticket in flight (implement,
@@ -1564,6 +1566,7 @@ exact command under every `FIX`. Any failure later starts there too, then [Troub
 | "find work for the agents", "audit this repo", "we have no issues yet" | `/sandcastle audit`: read-only review agents per lens, findings de-duplicated and triaged by the queue criteria, filed with the user's yes. Costs interactive allowance, no sandbox. | Every finding is filed, merged or dropped with a reason |
 | "our tickets are in files / Linear", "we use Matt Pocock's skills" | [Trackers](#-trackers-github-or-ticket-files). Read `docs/agents/issue-tracker.md` if it exists; set `tracker` in `config.ts` only when the detected one is wrong. Linear is a blocker source, not a queue. | `sandcastle queue` lists the tickets the user expects |
 | "start a run", "burn down the queue" | [Run](#-run), detached: `sandcastle run --detach`, then `sandcastle wait` as a background command ([Detached runs](#-detached-runs)); a run takes hours. | `sandcastle wait` has returned, and you have read the closing summary |
+| "pause the run", "hold it", "carry on" | `sandcastle pause`, then `sandcastle status 0`; `sandcastle resume` to carry on ([Pausing a run](#-pausing-a-run)). A hold is a pause, never `sandcastle stop`, which ends the passes in flight mid-way: ask first. | The status view reads `PAUSED`, or no longer does after the resume |
 | "is it working?", "how did the run go?" | `sandcastle status 0` while it runs; `sandcastle report` after. Logs are in `.sandcastle/logs/`. | You can name each ticket's phase, or have relayed the summary |
 | "land this branch", "try that ticket again" | [After a run](#-after-a-run): `sandcastle preview`, `sandcastle land <n>`, `sandcastle requeue <n> --note "..."`. Each changes the base branch or the tracker: ask first. | The ticket is closed with the kit's merge, or queued with the note |
 | "update sandcastle" | `/sandcastle update`, or [Updating](docs/INSTALL.md#-updating). `CHANGELOG.md` says what changed. | The kit is pulled and `sandcastle doctor` is green in the project |

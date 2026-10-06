@@ -88,7 +88,7 @@ read a module's section there before changing it.
 | `test/shard.ts` | CI's shards: the test files of `TEST_SHARD=i/n`, packed by measured weight (`pnpm test:shard`); a file it has no weight for still runs |
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`ls test/` first: a test file a ticket names may not exist). The `skill*` tests read the skill files and this table's `skill/` row |
-| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router, loaded for every action) and one file per action: init.md, audit.md, queue.md (with the ticket-body rules audit.md shares), run.md (start to closing summary, models and effort), status.md and update.md. Before editing it, read its portability rules in `docs/architecture.md` |
+| `skill/` | The sandcastle agent skill, shared by Claude Code, Codex and OpenCode: SKILL.md (the router, loaded for every action) and one file per action: init.md, audit.md, queue.md (with the ticket-body rules audit.md shares), run.md (start to closing summary, models and effort), status.md, pause.md (pause and resume a run, and why a hold is a pause and not a stop) and update.md. Before editing it, read its portability rules in `docs/architecture.md` |
 | `mod/` | The optional Claude Code mod: `hooks/register.tsx` (the hooks), `hooks/run-record.ts` (the run record's types, imported by `src/` too), `hooks/run-live.ts` (the one "is this run live" rule, imported by `src/` too), `hooks/run-state.ts` (the drawing). Runs inside Claude Code, imports nothing from `src/` |
 | `templates/` | What `sandcastle init` copies into a project |
 | `examples/` | Invented example project configs |

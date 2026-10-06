@@ -1,6 +1,6 @@
 // The skill is split across files so SKILL.md, which loads whole for every action, stays a short
 // router: each action's steps live in a file of its own (init.md, audit.md, queue.md, run.md,
-// status.md, update.md), each named in SKILL.md's prose (Codex and OpenCode do not fill $action, so they find the file from
+// status.md, pause.md, update.md), each named in SKILL.md's prose (Codex and OpenCode do not fill $action, so they find the file from
 // the text). This pins the split: nothing left behind, nothing lost, every pointer in place.
 //
 //   pnpm exec tsx --test test/skill-split.test.ts
@@ -31,7 +31,7 @@ test("run.md and update.md exist and are not empty", () => {
 });
 
 test("SKILL.md names every action file in prose, and each exists", () => {
-  for (const file of ["init.md", "audit.md", "queue.md", "run.md", "status.md", "update.md"]) {
+  for (const file of ["init.md", "audit.md", "queue.md", "run.md", "status.md", "pause.md", "update.md"]) {
     assert.ok(skill.includes(file), `SKILL.md does not name ${file}`);
     assert.ok(read(file).trim().length > 0, `${file} is empty`);
   }
@@ -69,7 +69,7 @@ test("update.md names init.md wherever it points at an init step", () => {
 });
 
 test("SKILL.md still has the action sections", () => {
-  for (const name of ["init", "queue", "run", "status", "update"]) {
+  for (const name of ["init", "queue", "run", "status", "pause", "resume", "update"]) {
     assert.match(skill, new RegExp(`^## ${name}\\b`, "m"), `no ## ${name} heading`);
   }
 });
