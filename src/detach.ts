@@ -1,14 +1,17 @@
 // A run that outlives the command that started it: `sandcastle run --detach`, then
-// `sandcastle wait` and `sandcastle stop`.
+// `sandcastle wait` and `sandcastle stop`; and the two controls of a live run that are not an end,
+// `sandcastle pause` and `sandcastle resume`.
 //
 // An agent that starts a run needs it to survive the agent's own session and a harness's
 // background-command time cap, so the run is its own process, in its own session, writing to a
 // log. It has no terminal, so nothing in it may ask a question (autonomy level 1 is refused) and
 // it never adopts the tab its starter is in (herdr.ts). `wait` and `stop` find it through the
-// run lock, the same file that keeps a second run out.
+// run lock, the same file that keeps a second run out. `pause` and `resume` write and remove a
+// control file the run reads (`readPause`), which names the run's pid: one left by a run that died
+// is another run's, and pauses nothing.
 
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +46,54 @@ const unfinishedPid = (root: string, probe: Probe): number | undefined => {
   } catch {
     return undefined;
   }
+};
+
+/** The pause's control file, in the project's gitignored `.sandcastle/.run/`: present while a person has the run paused. */
+export const PAUSE_FILE = ".sandcastle/.run/paused";
+
+const pauseFile = (root: string) => join(root, PAUSE_FILE);
+
+/**
+ * The pause asked for the run with this pid (`since` in seconds since the epoch), or undefined: no
+ * file, one that cannot be read, or one written for another run - a run that died while paused must
+ * not leave the next one paused. Never throws: the run reads it every second.
+ */
+export const readPause = (root: string, pid: number): { since: number } | undefined => {
+  try {
+    const found = JSON.parse(readFileSync(pauseFile(root), "utf8")) as { pid?: unknown; since?: unknown };
+    return found.pid === pid && typeof found.since === "number" && Number.isFinite(found.since) ? { since: found.since } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `sandcastle pause` did: nothing for lack of a run, nothing for a run already paused, or paused it. */
+export type Paused = { kind: "no run" } | { kind: "already"; pid: number; since: number } | { kind: "paused"; pid: number; since: number };
+
+/** Pauses the project's live run: writes the control file the run reads. Written whole and renamed in, as the run reads it every second. */
+export const pauseRun = (root: string, probe: Probe = commandOf, now = () => Math.floor(Date.now() / 1000)): Paused => {
+  const pid = livePid(root, probe);
+  if (pid === undefined) return { kind: "no run" };
+  const standing = readPause(root, pid);
+  if (standing) return { kind: "already", pid, since: standing.since };
+  const since = now();
+  mkdirSync(dirname(pauseFile(root)), { recursive: true });
+  const tmp = `${pauseFile(root)}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ pid, since }) + "\n");
+  renameSync(tmp, pauseFile(root));
+  return { kind: "paused", pid, since };
+};
+
+/** What `sandcastle resume` did: nothing for lack of a run, nothing for a run not paused, or resumed it. */
+export type Resumed = { kind: "no run" } | { kind: "not paused"; pid: number } | { kind: "resumed"; pid: number; since: number };
+
+/** Resumes the project's live run: removes the control file, and one left by a run that died with it. */
+export const resumeRun = (root: string, probe: Probe = commandOf): Resumed => {
+  const pid = livePid(root, probe);
+  if (pid === undefined) return { kind: "no run" };
+  const standing = readPause(root, pid);
+  rmSync(pauseFile(root), { force: true });
+  return standing ? { kind: "resumed", pid, since: standing.since } : { kind: "not paused", pid };
 };
 
 /** The exit code the run wrote to run.json at its end; 0 when there is none (no run, or one killed outright). */

@@ -30,6 +30,9 @@ to land, need you, queued, blocked, merged. The states:
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - or `(not in this run)`), **`merged`**, **`no change`**, **`skipped`** (not started
   because the run stopped early).
+- **`paused`** - parked between two phases while a person has the run paused (`sandcastle
+  pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
+  `sandcastle resume` continues it in the same run.
 
 A live run that spends a subscription on a Claude model also has a `usage` row in the header: the
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent

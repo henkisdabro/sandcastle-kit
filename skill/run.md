@@ -92,7 +92,10 @@ This continues SKILL.md: run its "Before every action" first.
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
    `sandcastle wait` again. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
-   user asks, and `sandcastle wait` then shows how it ended.
+   user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
+   (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
+   agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
+   when the user asks, and `sandcastle wait` keeps waiting through a pause.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
    summary" below before writing it.

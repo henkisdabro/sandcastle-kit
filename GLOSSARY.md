@@ -49,6 +49,14 @@ or still waiting - exactly one per ticket the run took in. Its ticket state and 
 recorded from it.
 _Avoid_: last word, result, outcome (the status view's line for it)
 
+**Pause**:
+A person's soft hold on a live run (`sandcastle pause`), lifted by `sandcastle resume`: no new ticket
+or agent pass starts, the passes in flight finish, and at that juncture the ticket's sandbox closes
+with its branch kept (the ticket state `paused`); green branches still land. The run stays alive
+and asks for no sandbox slot while nothing is in flight. Not an ending: the run goes on from the
+next phase of each paused ticket, in the same run.
+_Avoid_: stop (which ends every sandbox mid-pass), suspend, freeze
+
 ### What the views say
 
 **Group**:
@@ -90,7 +98,8 @@ _Avoid_: lock (the file that records it), worker
 
 **Demand**:
 How many sandbox slots a live run could use now: the tickets in a sandbox or ready to start,
-plus a landing that waits, never more than its concurrency. Blocked tickets add nothing until their blocker lands.
+plus a landing that waits, never more than its concurrency. Blocked tickets add nothing until their blocker lands,
+and a paused run's parked tickets add nothing: it asks for none once nothing is in flight.
 _Avoid_: want, need, queue length (which counts blocked tickets)
 
 **Share**:

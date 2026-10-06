@@ -460,10 +460,10 @@ run_alive() {
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
 WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
-TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0
+TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; RUN_PAUSED=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; RUN_PAUSED=0
   local f=logs/run.json pid
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
@@ -476,6 +476,8 @@ load_run() {
   pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
+  # A person has the run paused (`sandcastle pause`): no ticket starts until `sandcastle resume`.
+  [ "$(jq -r 'if (.paused | type) == "object" then 1 else 0 end' "$f" 2>/dev/null)" = 1 ] && RUN_PAUSED=1
   # This run's demand and share of the machine pool, live values the run rewrites; an older kit's record has neither.
   # The cap (`sandcastle cap`) is a person's, and absent when there is none.
   read -r POOL_DEMAND POOL_SHARE POOL_CAP < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")' "$f" 2>/dev/null)
@@ -627,7 +629,7 @@ style_of() {
     setup|impl|resolve|review|codex|gates|repair|landing) glyph='●'; colour="$ylw"; prio=0; grp=working;;
     stalled|orphaned|stopped|"gate red"|conflict|held|uncommitted|crashed|"not landed") glyph='!'; colour="$hot"; prio=1; grp="needs you";;
     ready|finished) glyph='>'; colour="$cyn"; prio=2; grp=ready;;
-    queued|requeued) glyph='○'; colour="$blu"; prio=3; grp=queued;;
+    queued|requeued|paused) glyph='○'; colour="$blu"; prio=3; grp=queued;;
     blocked) glyph='~'; colour="$blu"; prio=4; grp=blocked;;
     merged) glyph='+'; colour="$grn"; prio=5; grp=merged;;
     "left over"|withdrawn) glyph='-'; colour="$gry"; prio=6; grp="left over";;
@@ -664,15 +666,50 @@ cpu_cols() {
   elif [ "$S_HOT" = "1" ]; then cpu_col="$hot"; fi
 }
 
+# The run cell of a run a person has paused: `PAUSED since 15:40 - finishing #12 review, #14 landing`
+# while tickets are still finishing a pass or a landing, then `PAUSED since 15:40`. In a pane too narrow
+# for the whole line the tickets still finishing take the cell's second row. No end time: a paused run has none.
+# $1: when it was paused (epoch seconds or milliseconds, or an ISO time); $2: "id=state ..."; $3: when the run started.
+paused_cell() {
+  local when="$1" fin="$2" began="$3" at pair id st word list="" plain sep="" room
+  case "$when" in
+    *[!0-9]*) at=$(utc_to_epoch "${when%%.*}");;
+    *) at="$when"; [ "${#at}" -ge 13 ] && at=$(( at / 1000 ));;
+  esac
+  if [ "$(epoch_fmt "$at" +%F)" = "$(date +%F)" ]; then when=$(epoch_fmt "$at" '+%H:%M'); else when=$(epoch_fmt "$at" '+%d %b %H:%M'); fi
+  # What each ticket is doing, in the table's words; a green branch waiting for the landing worker is about to land.
+  for pair in $fin; do
+    id="${pair%%=*}"; st="${pair#*=}"
+    case "$st" in implement) word=impl;; cross-review) word=codex;; ready) word=landing;; *) word="$st";; esac
+    list="${list}${sep}$(disp "$id")${word:+ $word}"; sep=", "
+  done
+  plain="PAUSED since ${when}"
+  # The cell's text room: its share of the pane (half below 170 columns, a fifth from there) less the bars,
+  # the cell's padding and the row's label.
+  if [ "$cols" -ge 170 ]; then room=$(( (cols - 5) / 5 - 12 )); else room=$(( (cols - 3) / 2 - 12 )); fi
+  if [ -n "$list" ] && [ $(( ${#plain} + 13 + ${#list} )) -le "$room" ]; then
+    kvl state "${bold}${ylw}PAUSED${off} ${mute}since ${when} - finishing${off} ${head}${list}${off}"; RUNC[0]="$REPLY"
+    kvl since "${mute}${began}${off}"
+  else
+    kvl state "${bold}${ylw}PAUSED${off} ${mute}since ${when}${off}"; RUNC[0]="$REPLY"
+    if [ -n "$list" ]; then kvl finishing "${head}${list}${off}"; else kvl since "${mute}${began}${off}"; fi
+  fi
+  RUNC[1]="$REPLY"
+}
+
 # The run's state, its times and its tokens, as the run cell's three rows (RUNC).
 run_cell() {
-  local f=logs/run.json orch pid started finished code models stage dry tokens t0 eta
+  local f=logs/run.json orch pid started finished code models stage dry tokens paused_at finishing t0 eta
   RUNC=("" "" "")
   [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
-  # empty finishedAt would shift every later field.
-  IFS="$US" read -r orch pid started finished code models stage dry tokens < <(jq -r \
-    '[.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end), (.tokens // "")] | join("\u001f")' "$f")
+  # empty finishedAt would shift every later field. A paused run (`sandcastle pause`) adds when it
+  # was paused (empty when it is not) and the tickets it still finishes, as "id=state id=state".
+  IFS="$US" read -r orch pid started finished code models stage dry tokens paused_at finishing < <(jq -r \
+    '. as $r | (if (.paused | type) == "object" then .paused else null end) as $p
+      | [.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end), (.tokens // ""),
+      (if $p then ($p.since // 0 | tostring) else "" end),
+      (if $p and ($p.finishing | type) == "array" then [$p.finishing[] | tostring as $i | "\($i)=\(($r.tickets[$i].state // "") | tostring)"] | join(" ") else "" end)] | join("\u001f")' "$f")
   t0=$(utc_to_epoch "${started%%.*}")
   # The date only when it is not today: the run cell has to fit 80 columns.
   if [ "$(epoch_fmt "$t0" +%F)" = "$(date +%F)" ]; then started=$(epoch_fmt "$t0" '+%H:%M'); else started=$(epoch_fmt "$t0" '+%d %b %H:%M'); fi
@@ -682,6 +719,8 @@ run_cell() {
   if [ -n "$finished" ]; then
     kvl state "${mute}ended (exit ${code})${off}"; RUNC[0]="$REPLY"
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
+  elif run_alive "$pid" && [ -n "$paused_at" ]; then
+    paused_cell "$paused_at" "$finishing" "$started"
   elif run_alive "$pid"; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
@@ -1002,6 +1041,7 @@ render() {
         pos=$(printf '%s\n' "$TICKETS" | awk -F"$US" -v o="${order:-0}" '$2=="queued" && $5+0 < o+0 {c++} END{print c+1}')
         key=$(( 1000000 - ${order:-0} )); age="-"
         if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi
+        [ "$RUN_PAUSED" = 1 ] && activity="waits for the resume"
         # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
