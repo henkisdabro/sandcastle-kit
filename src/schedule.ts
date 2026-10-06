@@ -6,6 +6,7 @@
 // landing worker (`createLanding`), and inside `createSchedule` the requeue-once rule, the file hold
 // and the release of dependants (`createDependants`).
 
+import type { UsagePaused } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
 import type { Landed } from "./landing.ts";
 
@@ -518,9 +519,11 @@ export type Change<G, O, B = unknown> =
   /**
    * A person paused the run (`since`, seconds since the epoch): `finishing` are the tickets still
    * doing something - an agent pass, a gate run, a landing - told again whenever they change, until
-   * the last one has reached a juncture or landed. Nothing is in flight when it is empty.
+   * the last one has reached a juncture or landed. Nothing is in flight when it is empty. `usage`
+   * is set while the pause is the run's own, for its plan's usage, not a person's; it is told again
+   * when that changes (a window that resets later, a person taking the pause over).
    */
-  | { kind: "paused"; since: number; finishing: string[] }
+  | { kind: "paused"; since: number; finishing: string[]; usage?: UsagePaused }
   /** The pause was lifted: the parked tickets continue and the run asks for its slots again. */
   | { kind: "resumed" }
   | HoldChange
@@ -667,8 +670,12 @@ export type Plan<T extends { id: string }, B = unknown> = {
  * ticket is at a juncture. A source never throws: one that cannot be read answers as it did last.
  */
 export type PauseSource = {
-  /** The pause in force - `since` in seconds since the epoch - or undefined when the run is not paused. */
-  read(): { since: number } | undefined;
+  /**
+   * The pause in force - `since` in seconds since the epoch - or undefined when the run is not paused.
+   * `usage` says the run took it for its plan's usage and resumes by itself: the source answers
+   * undefined once that time has come, which is how the schedule resumes.
+   */
+  read(): { since: number; usage?: UsagePaused } | undefined;
   /** How often the pause is read between junctures, in milliseconds. 1000 when not given. */
   pollMs?: number;
 };
@@ -789,6 +796,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let demanded: number | undefined;
       // The pause (`work.pause`, read by `sync`): the one a person asked for, told as it begins and ends.
       let pausedSince: number | undefined;
+      let pausedFor: UsagePaused | undefined;
       // The tickets that hold no sandbox because of the pause, by the phase they wait at ("start": not begun).
       const parked = new Map<string, string>();
       // Tickets inside an attempt, and green branches queued for landing or landing: what a pause lets finish.
@@ -809,10 +817,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const tellPaused = () => {
         if (pausedSince === undefined) return;
         const finishing = [...new Set([...[...running].filter((id) => !parked.has(id)), ...greens])];
-        const key = JSON.stringify(finishing);
+        const key = JSON.stringify([finishing, pausedFor]);
         if (key === toldFinishing) return;
         toldFinishing = key;
-        tell({ kind: "paused", since: pausedSince, finishing });
+        tell({ kind: "paused", since: pausedSince, finishing, ...(pausedFor ? { usage: pausedFor } : {}) });
       };
       const stage = () => {
         demand();
@@ -822,7 +830,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
       // parked ticket from the demand before any of them asks for a slot again, and wakes them.
       const sync = () => {
-        let now: { since: number } | undefined;
+        let now: { since: number; usage?: UsagePaused } | undefined;
         try {
           now = work.pause?.read();
         } catch {
@@ -830,11 +838,17 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         }
         if (now && pausedSince === undefined) {
           pausedSince = now.since;
+          pausedFor = now.usage;
           toldFinishing = undefined;
           tellPaused();
           demand();
+        } else if (now && JSON.stringify(now.usage) !== JSON.stringify(pausedFor)) {
+          // Still paused, for another reason or until another time: a later window's reset, a person taking the pause over.
+          pausedFor = now.usage;
+          tellPaused();
         } else if (!now && pausedSince !== undefined) {
           pausedSince = undefined;
+          pausedFor = undefined;
           parked.clear();
           toldFinishing = undefined;
           tell({ kind: "resumed" });

@@ -9,12 +9,12 @@ import { autonomyLevel, type Level, turnCap } from "./autonomy.ts";
 import { DEFAULT_CONCURRENCY } from "./config.ts";
 import { pipelineWorkers } from "./landing.ts";
 import { poolLimit, wholeNumber } from "./pool.ts";
-import { parseUsageStop } from "./usage.ts";
+import { parseUsagePause, parseUsageStop } from "./usage.ts";
 
 export type SettingsSources = {
   env: Record<string, string | undefined>;
   /** The project's `.sandcastle/config.ts`, as far as settings are concerned. */
-  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown } };
+  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown };
   /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;
   /** Whether the credentials files put `ANTHROPIC_API_KEY` in the sandboxes (`projectApiKeySpend`); read by the caller, so this stays pure. */
@@ -35,6 +35,8 @@ export type ResolvedSettings = {
   usageGuard: boolean;
   /** The guard's stop threshold in percent; only when it is on. */
   usageStop?: number;
+  /** The plan usage in percent at which the run pauses itself and resumes after the window's reset (`USAGE_PAUSE`, or the project's `usagePause`); absent when it is off. Not in the run record's settings group: the record says when a run is paused for it. */
+  usagePause?: number;
   /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
   apiKey?: true;
 };
@@ -43,6 +45,7 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
   const pool = poolLimit("sandboxes", env, machine);
   const asked = wholeNumber("CONCURRENCY", env.CONCURRENCY ?? project.concurrency ?? DEFAULT_CONCURRENCY, 1);
   const usageGuard = env.USAGE_CHECK === "1";
+  const usagePause = parseUsagePause(env.USAGE_PAUSE, project.usagePause);
   return {
     autonomy: autonomyLevel(env.AUTONOMY_LEVEL, project.autonomy),
     crossReview: crossReviewSetting(env),
@@ -52,6 +55,7 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
     concurrency: { asked, effective: Math.min(pipelineWorkers(asked, Infinity, pool, env.DRY_RUN !== "1"), pool) },
     usageGuard,
     ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
+    ...(usagePause === undefined ? {} : { usagePause }),
     ...(apiKey ? { apiKey: true as const } : {}),
   };
 };

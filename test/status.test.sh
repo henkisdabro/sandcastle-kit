@@ -264,6 +264,62 @@ hasnt 'PAUSED'
 row '#123' queued 'next to start'
 
 # ---------------------------------------------------------------------------
+SCENARIO="run paused for plan usage"
+# USAGE_PAUSE: the run paused itself when a window reached the threshold. The cell names the cause and when it
+# resumes in place of when it paused: `PAUSED - weekly usage 95%, resumes Wed 06:01`, with the tickets still
+# finishing on the row below. A pane too narrow for that keeps the cause on the first row and moves the
+# resume time to the second. Two days ahead is never today, so the reset's weekday is drawn.
+resumes_at=$((now + 172800))
+back=$(date -d "@$resumes_at" '+%a %H:%M' 2>/dev/null || date -r "$resumes_at" '+%a %H:%M')
+usage_paused() { # window percent provider finishing-json
+  cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running", "concurrency": 3,
+  "paused": { "since": $since_at, "finishing": $4, "cause": "usage", "provider": "$3", "window": "$1", "percent": $2, "resumesAt": $resumes_at },
+  "issues": ["120","121","123"],
+  "tickets": {
+    "120": { "state": "review", "since": $((now - 120)), "started": $((now - 900)) },
+    "121": { "state": "ready", "since": $((now - 60)), "note": "gates green" },
+    "123": { "state": "queued", "order": 4, "since": $now }
+  } }
+EOF
+}
+usage_paused week 95 claude '["120", "121"]'
+render "120 121 123"
+has 'PAUSED - weekly usage 95%'
+has "resumes +$back"
+hasnt 'PAUSED since'
+row '#123' queued 'waits for the resume'
+# A wide pane has room for the whole line, and the tickets finishing take the row below it.
+COLS_WAS="$COLS"; COLS=160
+render "120 121 123"
+has "PAUSED - weekly usage 95%, resumes $back"
+has 'finishing +#120 review, #121 landing'
+hasnt 'PAUSED since'
+# Nothing in flight: the row below says when the run started, as an unpaused run's does.
+usage_paused week 95 claude '[]'
+render "120 121 123"
+has "PAUSED - weekly usage 95%, resumes $back"
+hasnt 'finishing'
+# The 5-hour window, and Codex's windows, are named; a reset later today shows the time alone.
+usage_paused fiveHour 93 claude '[]'
+render "120 121 123"
+has "PAUSED - 5-hour usage 93%, resumes $back"
+usage_paused week 100 codex '[]'
+render "120 121 123"
+has "PAUSED - Codex weekly usage 100%, resumes $back"
+COLS="$COLS_WAS"
+# At 80 columns the longest wording does not fit its row, so it keeps only what it can: usage and its percent.
+usage_paused week 100 codex '[]'
+render "120 121 123"
+has 'PAUSED - usage 100%'
+has "resumes +$back"
+# A record whose cause is not stated with numbers is read as a person's pause, never as a blank or broken cell.
+sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
+render "120 121 123"
+has 'PAUSED since [0-9]{2}:[0-9]{2}'
+hasnt 'usage'
+
+# ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
 # A commit refused by a hook leaves the finished work in a kept worktree: not "no change", and among Needs you.
 git_ branch agent/issue-113 main; log 113 impl 'done'

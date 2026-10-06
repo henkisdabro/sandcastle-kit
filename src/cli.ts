@@ -22,9 +22,13 @@
 //   pause            hold the live run at the next safe juncture, losing no work: no new
 //                    ticket or agent pass starts, passes in flight finish and their sandboxes
 //                    close (branches kept), green branches still land, and the run gives its
-//                    sandbox slots to other runs. The process stays alive; `stop` still works
+//                    sandbox slots to other runs. The process stays alive; `stop` still works.
+//                    A pause the run took itself for its plan's usage (USAGE_PAUSE) becomes
+//                    yours: it stays until `resume`, whatever its window does
 //   resume           continue a paused run: each paused ticket goes on from its next phase,
-//                    in the same run, with one closing summary
+//                    in the same run, with one closing summary; before its time it also ends
+//                    a pause for plan usage, which then does not pause again for the windows
+//                    that are over the threshold now
 //   cap [N | off] [--project NAME]
 //                    cap the live run's share of the machine's sandbox slots at N (at most
 //                    its concurrency), or lift the cap; bare, print its demand, share and
@@ -80,7 +84,7 @@
 //                    and keys to Herdr's config (shows them and asks first); --remove
 //                    takes all of it out. Works from anywhere
 //
-// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, SANDCASTLE_API_KEY:
+// Models, effort, TICKETS (ISSUES is the older name), CONCURRENCY, DRY_RUN, CROSS_REVIEW, SKIP_PREFLIGHT, SKIP_BASE_GATES, USAGE_CHECK, USAGE_PAUSE, SANDCASTLE_API_KEY:
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
@@ -108,7 +112,7 @@ import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sa
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
-import { checkUsageSettings } from "./usage.ts";
+import { checkUsageSettings, resumeClock, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -416,6 +420,12 @@ try {
       const paused = pauseRun(root);
       if (paused.kind === "no run") console.log("No run is live.");
       else if (paused.kind === "already") console.log(`The run (pid ${paused.pid}) is already paused, since ${clock(paused.since)}. \`sandcastle resume\` continues it.`);
+      else if (paused.kind === "taken over") {
+        console.log(
+          `The run (pid ${paused.pid}) paused itself at ${clock(paused.since)} for its plan's usage (${usagePauseWords(paused.usage)}, it would resume at ${resumeClock(paused.usage.resumesAt)}). ` +
+            "The pause is yours now: it stays until `sandcastle resume`, whatever the window does.",
+        );
+      }
       else {
         console.log(
           `Pausing the run (pid ${paused.pid}): no new ticket or agent pass starts, the passes in flight finish and their sandboxes close, and green branches still land. ` +
@@ -429,7 +439,12 @@ try {
       const resumed = resumeRun(root);
       if (resumed.kind === "no run") console.log("No run is live.");
       else if (resumed.kind === "not paused") console.log(`The run (pid ${resumed.pid}) is not paused.`);
-      else console.log(`Resuming the run (pid ${resumed.pid}, paused since ${clock(resumed.since)}): each paused ticket goes on from its next phase.`);
+      else {
+        console.log(`Resuming the run (pid ${resumed.pid}, paused since ${clock(resumed.since)}): each paused ticket goes on from its next phase.`);
+        if (resumed.usage) {
+          console.log(`It was paused for its plan's usage (${usagePauseWords(resumed.usage)}, until ${resumeClock(resumed.usage.resumesAt)}): it does not pause again for a window that is over the threshold now until that window resets.`);
+        }
+      }
       break;
     }
     case "report": {

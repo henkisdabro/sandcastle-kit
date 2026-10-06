@@ -230,6 +230,13 @@ export type PlanUsage = {
   at?: number;
 };
 
+/**
+ * Why a run is paused when no person asked for it: a plan window reached `USAGE_PAUSE` (or an agent hit the
+ * limit anyway), and the run resumes by itself at `resumesAt` - seconds since the epoch, a minute after the
+ * window's reset. `percent` is the window's usage when the run paused; `window` and `provider` say whose.
+ */
+export type UsagePaused = { cause: "usage"; provider: PlanUsage["provider"]; window: "fiveHour" | "week"; percent: number; resumesAt: number };
+
 /** The whole run record: the run's own fields and its tickets, by ticket id. Every field is optional - the file is read while the run is still filling it. */
 export type RunRecord = {
   /** The project's name. */
@@ -256,9 +263,10 @@ export type RunRecord = {
    * Present while a person has paused the run (`sandcastle pause`): no agent pass starts, the
    * passes in flight finish and green branches still land. `since` is seconds since the epoch;
    * `finishing` the tickets still doing something (a pass, a gate run, a landing). Absent when the
-   * run is not paused: a paused run is live all the same, its process is running.
+   * run is not paused: a paused run is live all the same, its process is running. A pause the run
+   * took for its plan's usage (`USAGE_PAUSE`) says so: `cause: "usage"`, the window and when it resumes.
    */
-  paused?: { since: number; finishing: string[] };
+  paused?: { since: number; finishing: string[] } & Partial<UsagePaused>;
   /**
    * The plan's usage, one entry per provider the run shows, each its newest reading across the run's agent logs
    * (`src/usage.ts`): Claude's while the run spends a subscription on a Claude model, Codex's while cross-review

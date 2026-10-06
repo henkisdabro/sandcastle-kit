@@ -24,7 +24,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { PlanUsage, PlanWindow } from "../mod/hooks/run-record.ts";
+import type { PlanUsage, PlanWindow, UsagePaused } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
@@ -200,6 +200,9 @@ let lastReading: "got" | "none" | undefined;
 /** True when the guard's last attempt got no reading (a 403, a rate limit, no token or an expired login): it is not guarding right now. */
 export const usageReadingLost = () => lastReading === "none";
 
+// What the endpoint calls each window, which the stop line names them by whichever reading it is made from.
+const ENDPOINT_KIND = { fiveHour: "five_hour", week: "seven_day" } as const;
+
 const describe = (windows: Window[]) => windows.map((w) => `${w.kind} ${Math.round(w.percent)}%`).join(" · ");
 
 /** One line for the run's start, or undefined when the check is off. */
@@ -227,9 +230,25 @@ export const usageLine = async (env: Record<string, string>, readers: LoginReade
   return `Plan usage: unknown right now (${windows.why}); the run goes ahead, and checks again before each ticket starts.${whose}`;
 };
 
-/** Why no further issue should start, or undefined to carry on. */
-export const usageStop = async (env: Record<string, string>, readers: LoginReaders = hostLoginReaders) => {
+/** How young the newest agent reading must be for the guard to use it in place of the endpoint (seconds): the endpoint's own reading is cached as long. */
+export const AGENT_READING_FRESH_SECONDS = 10 * 60;
+
+/**
+ * Why no further issue should start, or undefined to carry on. The newest reading of the run's own Claude
+ * agents (`agent`: `usage` in the run record) is used when it is younger than ten minutes, and then the
+ * endpoint is not asked and no credential is read; before the first reading, and once the newest is older, the
+ * endpoint answers as it always did. A window whose reset has passed since the reading counts as spent no more.
+ */
+export const usageStop = async (env: Record<string, string>, readers: LoginReaders = hostLoginReaders, agent?: () => PlanUsage | undefined, now = Date.now) => {
   if (!USAGE_CHECK) return undefined;
+  const seconds = Math.floor(now() / 1000);
+  const newest = agent?.();
+  if (newest?.windows && newest.at !== undefined && seconds - newest.at < AGENT_READING_FRESH_SECONDS) {
+    lastReading = "got";
+    const stop = usageStopPercent();
+    const over = openWindows([newest], seconds).filter((w) => w.percent >= stop);
+    return over.length ? `plan usage ${over.map((w) => `${ENDPOINT_KIND[w.window]} ${w.percent}%`).join(" · ")} reached USAGE_STOP=${stop}%` : undefined;
+  }
   const credential = usageToken(env, process.platform, readers);
   if (!credential || !("token" in credential)) {
     lastReading = "none";
@@ -559,4 +578,177 @@ export const watchUsage = ({
     clearInterval(timer);
   };
   return { poll, stop };
+};
+
+// ---------------------------------------------------------------------------
+// USAGE_PAUSE: wait out a plan window instead of running into it.
+//
+// With `USAGE_PAUSE=<percent>` (or `usagePause` in the project config) the run takes the soft pause of
+// `sandcastle pause` itself when a window of a provider it uses reaches the threshold, or when an agent hits the
+// limit anyway, and resumes by itself a minute after that window's reset. It reads the same agent readings the
+// status view shows (`watchUsage`), so it needs no request and no credential. The pause is the control file
+// `sandcastle pause` writes (src/detach.ts), with the cause in it: that is what lets a person's `sandcastle
+// resume` end it early, and a person's `sandcastle pause` take it over so the timer never undoes it.
+// ---------------------------------------------------------------------------
+
+/** The pause threshold a USAGE_PAUSE value, else the project's `usagePause`, gives: undefined when neither is set (the pause is off); a value outside 1 to 100 is refused. */
+export const parseUsagePause = (value: string | undefined, config?: unknown): number | undefined => {
+  if (value) {
+    const percent = Number(value);
+    if (!(percent >= 1 && percent <= 100)) throw new OperatorError(`USAGE_PAUSE=${value} - expected 1 to 100.`);
+    return percent;
+  }
+  if (config === undefined) return undefined;
+  if (!(typeof config === "number" && config >= 1 && config <= 100)) throw new OperatorError(`usagePause=${JSON.stringify(config)} in the project config - expected 1 to 100.`);
+  return config;
+};
+
+/** The start line for the pause: what it waits for, and what it cannot do when the run shows no plan usage (an API key, no Claude model). */
+export const usagePauseLine = (percent: number, providers: UsageProvider[]) =>
+  providers.length
+    ? `Usage pause: at ${percent}%, resumes at the window's reset`
+    : `Usage pause: at ${percent}%, but this run reads no plan usage (it needs a subscription token and a Claude model, or Codex cross-review on a ChatGPT plan), so it never pauses for it`;
+
+/** What a usage pause says it waits for, in the status view's words: `weekly usage 95%`, `5-hour usage 93%`, with `Codex` first for Codex's windows. */
+export const usagePauseWords = (p: Pick<UsagePaused, "provider" | "window" | "percent">) =>
+  `${p.provider === "codex" ? "Codex " : ""}${p.window === "week" ? "weekly" : "5-hour"} usage ${p.percent}%`;
+
+/** The time a usage pause resumes at: the time of day when it is today, else with the weekday (`Wed 06:01`), as the status view shows it. */
+export const resumeClock = (seconds: number, now = new Date()) => {
+  const at = new Date(seconds * 1000);
+  const time = at.toTimeString().slice(0, 5);
+  return at.toDateString() === now.toDateString() ? time : `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][at.getDay()]} ${time}`;
+};
+
+/** The run resumes this long after a window's reset, so the window is surely open again when the next pass starts. */
+export const USAGE_RESUME_GRACE_SECONDS = 60;
+
+/** The windows of a provider's reading, and what `UsagePaused` records of one. */
+type OpenWindow = { provider: UsageProvider; window: UsagePaused["window"]; percent: number; resetsAt: number };
+
+/** The windows of these readings that have not reset yet: a stale reading says nothing of a window that has been open again since. */
+const openWindows = (usage: PlanUsage[], now: number, provider?: UsageProvider): OpenWindow[] =>
+  usage.flatMap((u) =>
+    !u.windows || (provider && u.provider !== provider)
+      ? []
+      : (["fiveHour", "week"] as const).flatMap((window) => {
+          const { percent, resetsAt } = u.windows![window];
+          return resetsAt + USAGE_RESUME_GRACE_SECONDS > now ? [{ provider: u.provider, window, percent, resetsAt }] : [];
+        }),
+  );
+
+const pausedFor = (w: OpenWindow, percent = w.percent): UsagePaused => ({ cause: "usage", provider: w.provider, window: w.window, percent, resumesAt: w.resetsAt + USAGE_RESUME_GRACE_SECONDS });
+
+/** The window a pause would wait out, named so a person's resume can be remembered against it. */
+const windowKey = (w: { provider: UsageProvider; window: UsagePaused["window"]; resetsAt: number }) => `${w.provider}:${w.window}:${w.resetsAt}`;
+
+/**
+ * The pause the readings call for at `threshold` percent: of the windows at or above it that have not reset
+ * yet, the one that resets last - a run resumed at an earlier reset would only pause again - resumed a minute
+ * after it. Undefined when no window is. `skip` leaves out the windows a person resumed through.
+ */
+export const usagePauseFor = (usage: PlanUsage[], threshold: number, now: number, skip: (w: OpenWindow) => boolean = () => false): UsagePaused | undefined => {
+  const over = openWindows(usage, now).filter((w) => w.percent >= threshold && !skip(w));
+  const last = over.reduce<OpenWindow | undefined>((a, b) => (a && a.resetsAt >= b.resetsAt ? a : b), undefined);
+  return last && pausedFor(last);
+};
+
+/**
+ * The pause for an agent that hit the limit: the open window nearest to spent (the later reset when two tie,
+ * as both must reset), at 100% - the agent said so, whatever the last reading was. Undefined when no reading
+ * names a window that is still to reset, so there is no telling when to resume. `provider`: whose agent it was.
+ * `atLeast`: no window below it is taken for the one that was spent - a limit message with every window well
+ * short of it is some other limit (one model's own cap, say), and days of waiting for the wrong window is worse than the old stop.
+ */
+export const usageLimitPauseFor = (usage: PlanUsage[], now: number, provider?: UsageProvider, atLeast = 0): UsagePaused | undefined => {
+  const open = openWindows(usage, now, provider).filter((w) => w.percent >= atLeast);
+  const worst = open.reduce<OpenWindow | undefined>((a, b) => (a && (a.percent > b.percent || (a.percent === b.percent && a.resetsAt >= b.resetsAt)) ? a : b), undefined);
+  return worst && pausedFor(worst, 100);
+};
+
+/** A `UsagePaused` read from a record or a control file, or undefined when it is not one: those are files, so only well-formed values pass. */
+export const readUsagePaused = (value: unknown): UsagePaused | undefined => {
+  const u = value as Partial<Record<keyof UsagePaused, unknown>> | null | undefined;
+  const provider = USAGE_PROVIDERS.find((p) => p === u?.provider);
+  const window = u?.window === "fiveHour" || u?.window === "week" ? u.window : undefined;
+  return u?.cause === "usage" && provider && window && typeof u.percent === "number" && Number.isFinite(u.percent) && typeof u.resumesAt === "number" && Number.isFinite(u.resumesAt)
+    ? { cause: "usage", provider, window, percent: u.percent, resumesAt: u.resumesAt }
+    : undefined;
+};
+
+/** The pause in force, as the control file says (`readPause`, `src/detach.ts`): a person's has no `usage`. */
+export type StandingPause = { since: number; usage?: UsagePaused };
+
+/** What the pause needs of the run's control file and clock; the run passes the real ones (`readPause` and `holdForUsage`, `src/detach.ts`), a test its own. */
+export type UsagePausePorts = {
+  /** The standing pause at `now` (seconds since the epoch); a usage pause past its time is none. */
+  standing(now: number): StandingPause | undefined;
+  /** Takes the pause, or - while the standing one is the run's own - moves it to this window when that resets later. A person's pause is left as it is. */
+  hold(pause: UsagePaused, now: number): void;
+  now?: () => number;
+};
+
+export type UsagePauseControl = {
+  /** The pause source the schedule reads: the control file's, which also resumes the run once a usage pause's time has come. */
+  source: { read(): StandingPause | undefined };
+  /** A new reading arrived (`usage`: the newest of each provider): pauses the run when a window is at the threshold. Returns the pause asked for. */
+  reading(usage: PlanUsage[]): UsagePaused | undefined;
+  /** An agent of `provider` hit the limit: pauses the run until the window resets, true; false when no reading says when that is, and the limit stops the run as before. */
+  limit(usage: PlanUsage[], provider?: UsageProvider): boolean;
+};
+
+/**
+ * The run's usage pause at `threshold` percent. The control file is the one state: a person's `sandcastle
+ * resume` removes it - a resume before its time, which the run remembers against the windows then at the
+ * threshold, so the next reading does not undo it - and a person's `sandcastle pause` replaces it with one that
+ * has no time to resume at, which nothing here ever lifts.
+ */
+export const createUsagePause = (threshold: number, ports: UsagePausePorts): UsagePauseControl => {
+  const clock = ports.now ?? Date.now;
+  const seconds = () => Math.floor(clock() / 1000);
+  // The windows a person resumed the run through, and the usage pause last seen in force and the readings last known.
+  const resumed = new Set<string>();
+  let seen: UsagePaused | undefined;
+  let latest: PlanUsage[] = [];
+  // Looks at the control file and remembers what became of the usage pause. Read before every decision as well as by the
+  // schedule's poll: a reading that came in the second after a person's resume must not write the pause again before it was noticed.
+  const observe = (): StandingPause | undefined => {
+    const now = seconds();
+    const found = ports.standing(now);
+    // A person who took the pause over leaves it as the run's own for this: it is still the usage pause that ends.
+    if (found?.usage) seen = found.usage;
+    else if (!found && seen) {
+      // The pause is gone. Past its time it ended itself; before it, a person ended it.
+      if (now < seen.resumesAt) {
+        for (const w of openWindows(latest, now)) if (w.percent >= threshold) resumed.add(windowKey(w));
+        resumed.add(windowKey({ ...seen, resetsAt: seen.resumesAt - USAGE_RESUME_GRACE_SECONDS }));
+      }
+      seen = undefined;
+    }
+    return found;
+  };
+  return {
+    source: { read: observe },
+    reading: (usage) => {
+      observe();
+      latest = usage;
+      const now = seconds();
+      const pause = usagePauseFor(usage, threshold, now, (w) => resumed.has(windowKey(w)));
+      if (pause) ports.hold(pause, now);
+      return pause;
+    },
+    limit: (usage, provider) => {
+      const standing = observe();
+      latest = usage;
+      const now = seconds();
+      // A person's pause: the ticket parks at its juncture and runs its pass again after the resume, and nothing here changes it.
+      if (standing && !standing.usage) return true;
+      // The run's own, which a limit that resets later than the standing window's moves on; or none yet. A window must be
+      // near its end to be the one the agent hit: below the threshold the reading would have paused already, and below 90% the
+      // limit is not the plan's windows' (`USAGE_RED`).
+      const pause = usageLimitPauseFor(usage, now, provider, Math.min(threshold, USAGE_RED));
+      if (pause) ports.hold(pause, now);
+      return pause !== undefined || standing !== undefined;
+    },
+  };
 };

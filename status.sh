@@ -669,9 +669,14 @@ cpu_cols() {
 # The run cell of a run a person has paused: `PAUSED since 15:40 - finishing #12 review, #14 landing`
 # while tickets are still finishing a pass or a landing, then `PAUSED since 15:40`. In a pane too narrow
 # for the whole line the tickets still finishing take the cell's second row. No end time: a paused run has none.
+# A run that paused itself for its plan's usage (USAGE_PAUSE) says what it waits for and when it resumes in
+# place of when it paused: `PAUSED - weekly usage 95%, resumes Wed 06:01`, the tickets still finishing on the
+# second row; in a pane too narrow for that, `resumes Wed 06:01` takes the second row.
 # $1: when it was paused (epoch seconds or milliseconds, or an ISO time); $2: "id=state ..."; $3: when the run started.
+# $4-$7, only for a usage pause: its window (fiveHour or week), the window's percent, when the run resumes
+# (epoch seconds) and whose plan it is (claude or codex).
 paused_cell() {
-  local when="$1" fin="$2" began="$3" at pair id st word list="" plain sep="" room
+  local when="$1" fin="$2" began="$3" uwin="${4:-}" upct="${5:-}" ures="${6:-}" uprov="${7:-}" at pair id st word list="" plain sep="" room what back
   case "$when" in
     *[!0-9]*) at=$(utc_to_epoch "${when%%.*}");;
     *) at="$when"; [ "${#at}" -ge 13 ] && at=$(( at / 1000 ));;
@@ -687,6 +692,24 @@ paused_cell() {
   # The cell's text room: its share of the pane (half below 170 columns, a fifth from there) less the bars,
   # the cell's padding and the row's label.
   if [ "$cols" -ge 170 ]; then room=$(( (cols - 5) / 5 - 12 )); else room=$(( (cols - 3) / 2 - 12 )); fi
+  if [ -n "$uwin" ]; then
+    what="weekly"; [ "$uwin" = fiveHour ] && what="5-hour"
+    [ "$uprov" = codex ] && what="Codex ${what}"
+    what="${what} usage ${upct}%"
+    # The reset's day only when it is not today, with the weekday as the usage row has it.
+    if [ "$(epoch_fmt "$ures" +%F)" = "$(date +%F)" ]; then back=$(epoch_fmt "$ures" '+%H:%M'); else back=$(epoch_fmt "$ures" '+%a %H:%M'); fi
+    # Shorter and shorter until the state fits its row: the whole line, then the window, then only that it is usage.
+    if [ $(( 9 + ${#what} + 10 + ${#back} )) -le "$room" ]; then
+      kvl state "${bold}${ylw}PAUSED${off} ${mute}- ${what}, resumes ${back}${off}"; RUNC[0]="$REPLY"
+      if [ -n "$list" ]; then kvl finishing "${head}${list}${off}"; else kvl since "${mute}${began}${off}"; fi
+    else
+      [ $(( 9 + ${#what} )) -gt "$room" ] && what="usage ${upct}%"
+      kvl state "${bold}${ylw}PAUSED${off} ${mute}- ${what}${off}"; RUNC[0]="$REPLY"
+      kvl resumes "${mute}${back}${off}"
+    fi
+    RUNC[1]="$REPLY"
+    return 0
+  fi
   if [ -n "$list" ] && [ $(( ${#plain} + 13 + ${#list} )) -le "$room" ]; then
     kvl state "${bold}${ylw}PAUSED${off} ${mute}since ${when} - finishing${off} ${head}${list}${off}"; RUNC[0]="$REPLY"
     kvl since "${mute}${began}${off}"
@@ -699,17 +722,23 @@ paused_cell() {
 
 # The run's state, its times and its tokens, as the run cell's three rows (RUNC).
 run_cell() {
-  local f=logs/run.json orch pid started finished code models stage dry tokens paused_at finishing t0 eta
+  local f=logs/run.json orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov t0 eta
   RUNC=("" "" "")
   [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
   # empty finishedAt would shift every later field. A paused run (`sandcastle pause`) adds when it
-  # was paused (empty when it is not) and the tickets it still finishes, as "id=state id=state".
-  IFS="$US" read -r orch pid started finished code models stage dry tokens paused_at finishing < <(jq -r \
+  # was paused (empty when it is not) and the tickets it still finishes, as "id=state id=state"; one that
+  # paused itself for its plan's usage adds the window, its percent, when it resumes and whose plan it is
+  # (empty for a person's pause, and for a cause the record does not state with numbers).
+  IFS="$US" read -r orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov < <(jq -r \
     '. as $r | (if (.paused | type) == "object" then .paused else null end) as $p
       | [.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end), (.tokens // ""),
       (if $p then ($p.since // 0 | tostring) else "" end),
-      (if $p and ($p.finishing | type) == "array" then [$p.finishing[] | tostring as $i | "\($i)=\(($r.tickets[$i].state // "") | tostring)"] | join(" ") else "" end)] | join("\u001f")' "$f")
+      (if $p and ($p.finishing | type) == "array" then [$p.finishing[] | tostring as $i | "\($i)=\(($r.tickets[$i].state // "") | tostring)"] | join(" ") else "" end)]
+      + (if $p and $p.cause == "usage" and ($p.window == "fiveHour" or $p.window == "week") and ($p.percent | type) == "number" and ($p.resumesAt | type) == "number"
+         then [$p.window, ([([$p.percent | floor, 100] | min), 0] | max | tostring), ($p.resumesAt | floor | tostring), (if $p.provider == "codex" then "codex" else "claude" end)]
+         else ["", "", "", ""] end)
+      | join("\u001f")' "$f")
   t0=$(utc_to_epoch "${started%%.*}")
   # The date only when it is not today: the run cell has to fit 80 columns.
   if [ "$(epoch_fmt "$t0" +%F)" = "$(date +%F)" ]; then started=$(epoch_fmt "$t0" '+%H:%M'); else started=$(epoch_fmt "$t0" '+%d %b %H:%M'); fi
@@ -720,7 +749,7 @@ run_cell() {
     kvl state "${mute}ended (exit ${code})${off}"; RUNC[0]="$REPLY"
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
   elif run_alive "$pid" && [ -n "$paused_at" ]; then
-    paused_cell "$paused_at" "$finishing" "$started"
+    paused_cell "$paused_at" "$finishing" "$started" "$p_win" "$p_pct" "$p_res" "$p_prov"
   elif run_alive "$pid"; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
