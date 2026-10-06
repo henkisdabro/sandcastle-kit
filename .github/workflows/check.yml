@@ -52,11 +52,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - if: matrix.part == 'status'
-        run: |
-          pnpm exec tsc --noEmit
-          bash test/status.test.sh
+        run: pnpm exec tsc --noEmit
+      - if: matrix.part == 'status' && runner.os == 'Linux'
+        run: bash test/status.test.sh
+      # macOS draws the view under its own bash 3.2 as well. Every frame starts processes, slow to
+      # start on macOS, so one run after the other took about four minutes, the slowest job by a
+      # minute and a half; side by side they share the runner's cores.
       - if: matrix.part == 'status' && runner.os == 'macOS'
-        run: STATUS_BASH=/bin/bash bash test/status.test.sh
+        run: |
+          set +e
+          bash test/status.test.sh >"$RUNNER_TEMP/bash.log" 2>&1 & current=$!
+          STATUS_BASH=/bin/bash bash test/status.test.sh >"$RUNNER_TEMP/bash32.log" 2>&1 & old=$!
+          wait "$current"; rc_current=$?
+          wait "$old"; rc_old=$?
+          echo "== $(bash -c 'echo bash $BASH_VERSION')"; cat "$RUNNER_TEMP/bash.log"
+          echo "== /bin/bash $(/bin/bash -c 'echo $BASH_VERSION')"; cat "$RUNNER_TEMP/bash32.log"
+          [ "$rc_current" = 0 ] && [ "$rc_old" = 0 ]
       - if: matrix.part != 'status'
         run: pnpm test:shard
         env:

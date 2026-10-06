@@ -35,12 +35,18 @@ leg_types() {
   pnpm exec tsc --noEmit >"$logs/tsc.log" 2>&1 && echo "tsc: ok" || { echo "tsc: FAIL"; cat "$logs/tsc.log"; return 1; }
 }
 
-# The suite as `pnpm test` runs it: the status view's checks, then every test file once.
+# The status view's checks, a leg of their own: run ahead of the test files in one leg, as
+# `pnpm test` orders them, they held the shards back and set the whole check's wall time.
+leg_view() {
+  bash test/status.test.sh >"$logs/status-view.log" 2>&1 && echo "status view: ok" \
+    || { echo "status view: FAIL"; tail -20 "$logs/status-view.log"; return 1; }
+}
+
+# Every test file once.
 leg_tests() {
-  local rc=0
-  bash test/status.test.sh >"$logs/status-view.log" 2>&1 || { rc=1; echo "status view: FAIL"; tail -20 "$logs/status-view.log"; }
   printf 'pnpm test: '
-  bash test/run-shards.sh "$logs/test" >"$logs/test.out" 2>&1 || rc=1
+  bash test/run-shards.sh "$logs/test" >"$logs/test.out" 2>&1
+  local rc=$?
   cat "$logs/test.out"
   return "$rc"
 }
@@ -174,6 +180,7 @@ export FULL_CHECK_SHARDS="$shards"
 [ -n "$docker_note" ] || start linux leg_linux
 start scan leg_scan
 start types leg_types
+start view leg_view
 start tests leg_tests
 start agent leg_agent
 [ "$(uname -s)" != Darwin ] || start bash32 leg_bash32
@@ -181,6 +188,7 @@ wait
 
 echo "== $(uname -s)"
 show types
+show view
 show tests
 show agent
 [ "$(uname -s)" != Darwin ] || show bash32
