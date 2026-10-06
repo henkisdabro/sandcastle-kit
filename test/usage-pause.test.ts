@@ -258,6 +258,22 @@ test("a person's resume before the time ends the pause, and the windows then ove
   assert.equal(pause.reading([reading([92, FIVE_RESET + 5 * HOUR], [96, WEEK_RESET], T0 + 120)])?.window, "fiveHour");
 });
 
+test("a reading that comes before the run has noticed a person's resume does not write the pause again", () => {
+  const { root, clock, pause } = world(90);
+  const probe = everyPidIsTheKit;
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  writeFileSync(join(root, ".sandcastle/logs/run.lock"), `${PID} token project\n`);
+  const usage = [reading([14, FIVE_RESET], [95, WEEK_RESET])];
+  assert.ok(pause.reading(usage));
+  assert.ok(pause.source.read(), "the schedule has seen the pause");
+  clock.seconds = T0 + 30;
+  assert.equal(resumeRun(root, probe).kind, "resumed");
+  // The next reading is in before the schedule's poll has looked at the file: the resume stands.
+  assert.equal(pause.reading([reading([14, FIVE_RESET], [96, WEEK_RESET], T0 + 30)]), undefined);
+  assert.equal(readPause(root, PID, T0 + 30), undefined);
+  assert.equal(pause.source.read(), undefined);
+});
+
 test("a pause that ended by its own time is not mistaken for a person's resume", () => {
   const { root, clock, pause } = world(90);
   assert.ok(pause.reading([reading([10, FIVE_RESET], [95, WEEK_RESET])]));
@@ -468,17 +484,20 @@ test("without USAGE_PAUSE, or with no reading to say when the window resets, a p
   assert.equal(readPause(root, PID, T0), undefined, "nothing was paused");
 });
 
-test("a pass that fails for another reason than the limit is not waited out, whatever an earlier line of its log said", async () => {
+test("a pass that fails for another reason than the limit is not waited out, whatever a log an earlier run left for another pass says", async () => {
   const { pause, root } = world(90);
   const asked: string[] = [];
   const f = fixture(
     (kind, _call, _path, log) => {
       if (kind !== "impl") return;
+      // This pass's own log ends in something else, and an earlier line of it is nothing to go by either.
       writeFileSync(log, OTHER_FAILURE);
       throw new Error("idle timeout");
     },
     (phase) => (asked.push(phase), pause.limit([reading([100, FIVE_RESET], [100, WEEK_RESET])], "claude")),
   );
+  // The review pass of an earlier run of this ticket left the plan's limit message as the last line of its log.
+  writeFileSync(join(f.root, ".sandcastle/logs/agent-issue-7-review-7.log"), `${LIMIT_WORDS}\n`);
   await quietly(() => assert.rejects(f.pipeline(f.issue, NO_PAUSE), /idle timeout/));
   assert.deepEqual(asked, [], "the run was not asked to pause");
   assert.equal(readPause(root, PID, T0), undefined);
@@ -496,6 +515,9 @@ test("an agent that hits the limit pauses for the window nearest to spent, at 10
   const both = [reading([100, FIVE_RESET], [10, WEEK_RESET], T0, "codex"), reading([10, FIVE_RESET + HOUR], [96, WEEK_RESET + HOUR], T0, "claude")];
   assert.equal(usageLimitPauseFor(both, T0, "claude")?.provider, "claude");
   assert.equal(usageLimitPauseFor(both, T0, "codex")?.provider, "codex");
+  // A limit with no window near its end is some other limit (one model's own cap): none of the plan's windows is taken for it.
+  assert.equal(usageLimitPauseFor([reading([60, FIVE_RESET], [70, WEEK_RESET])], T0, "claude", 90), undefined);
+  assert.equal(usageLimitPauseFor([reading([60, FIVE_RESET], [90, WEEK_RESET])], T0, "claude", 90)?.window, "week");
   // No reading, an entry still waiting for its first, or only windows that have reset: nothing to resume at.
   assert.equal(usageLimitPauseFor([], T0), undefined);
   assert.equal(usageLimitPauseFor([{ provider: "claude" }], T0), undefined);

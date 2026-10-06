@@ -215,6 +215,16 @@ const hitLimit = (root: string, issue: string) => {
     .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
 };
 
+// Whether this pass's own readable log ends saying the allowance is spent: not another pass's of the ticket, whose log an
+// earlier run may have left that way, so a pass that failed for another reason is never taken for the limit.
+const passHitLimit = (logging: { type?: string; path?: string } | undefined) => {
+  try {
+    return logging?.type === "file" && typeof logging.path === "string" && logSaysLimit(readFileSync(logging.path, "utf8"));
+  } catch {
+    return false;
+  }
+};
+
 // The reviewer's `<ungated>...</ungated>` line: what a person should check because no gate
 // exercises the change. Same rules as `tags()` in the pipeline - the last tag wins, an empty
 // one or the echoed placeholder "..." does not count - and the text is one line, cut to
@@ -748,7 +758,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
           const parks = parkCount;
-          const pausing = at && ctx.limitPause && phase !== "cross-review" && hitLimit(project.root, issue.id) && ctx.limitPause(phase);
+          const pausing = at && ctx.limitPause && phase !== "cross-review" && passHitLimit(opts.logging) && ctx.limitPause(phase);
           if (pausing) {
             console.log(`${ref(issue.id)}: the ${phase} pass hit the plan's usage limit - the run pauses until the window resets, and the pass runs again then.`);
             await juncture(phase as TicketState, true);
@@ -1952,7 +1962,20 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     followUps,
     took,
     waited,
-    ...(usagePause ? { limitPause: (phase: string) => usagePause.limit([...planUsage], phase === "cross-review" ? "codex" : "claude") } : {}),
+    ...(usagePause
+      ? {
+          limitPause: (phase: string) => {
+            try {
+              // The pass's last readings are in its log already: the newest of them says which window ran out, not the one up to 15 s old.
+              usageWatch?.poll(true);
+              return usagePause.limit([...planUsage], phase === "cross-review" ? "codex" : "claude");
+            } catch {
+              // A pause that cannot be written leaves the limit to stop the run, as it does without the setting.
+              return false;
+            }
+          },
+        }
+      : {}),
     keptWorktrees,
     tampered,
   });
@@ -1960,6 +1983,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
   const attempt = async (issue: Issue, { last, juncture, paused }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
+    // A pause the latest reading has just asked for is read before the guard decides: the guard's stop is for a run that is
+    // not waiting out the window (it would otherwise win a race of a second against the schedule's own poll).
+    while (usagePause && paused()) await juncture("start", { suspend: async () => {}, resume: async () => {} });
     const line = await usageStop(env, undefined, () => planUsage.find((u) => u.provider === "claude"));
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };

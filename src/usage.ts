@@ -657,9 +657,11 @@ export const usagePauseFor = (usage: PlanUsage[], threshold: number, now: number
  * The pause for an agent that hit the limit: the open window nearest to spent (the later reset when two tie,
  * as both must reset), at 100% - the agent said so, whatever the last reading was. Undefined when no reading
  * names a window that is still to reset, so there is no telling when to resume. `provider`: whose agent it was.
+ * `atLeast`: no window below it is taken for the one that was spent - a limit message with every window well
+ * short of it is some other limit (one model's own cap, say), and days of waiting for the wrong window is worse than the old stop.
  */
-export const usageLimitPauseFor = (usage: PlanUsage[], now: number, provider?: UsageProvider): UsagePaused | undefined => {
-  const open = openWindows(usage, now, provider);
+export const usageLimitPauseFor = (usage: PlanUsage[], now: number, provider?: UsageProvider, atLeast = 0): UsagePaused | undefined => {
+  const open = openWindows(usage, now, provider).filter((w) => w.percent >= atLeast);
   const worst = open.reduce<OpenWindow | undefined>((a, b) => (a && (a.percent > b.percent || (a.percent === b.percent && a.resetsAt >= b.resetsAt)) ? a : b), undefined);
   return worst && pausedFor(worst, 100);
 };
@@ -708,25 +710,27 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
   const resumed = new Set<string>();
   let seen: UsagePaused | undefined;
   let latest: PlanUsage[] = [];
+  // Looks at the control file and remembers what became of the usage pause. Read before every decision as well as by the
+  // schedule's poll: a reading that came in the second after a person's resume must not write the pause again before it was noticed.
+  const observe = (): StandingPause | undefined => {
+    const now = seconds();
+    const found = ports.standing(now);
+    // A person who took the pause over leaves it as the run's own for this: it is still the usage pause that ends.
+    if (found?.usage) seen = found.usage;
+    else if (!found && seen) {
+      // The pause is gone. Past its time it ended itself; before it, a person ended it.
+      if (now < seen.resumesAt) {
+        for (const w of openWindows(latest, now)) if (w.percent >= threshold) resumed.add(windowKey(w));
+        resumed.add(windowKey({ ...seen, resetsAt: seen.resumesAt - USAGE_RESUME_GRACE_SECONDS }));
+      }
+      seen = undefined;
+    }
+    return found;
+  };
   return {
-    source: {
-      read: () => {
-        const now = seconds();
-        const found = ports.standing(now);
-        // A person who took the pause over leaves it as the run's own for this: it is still the usage pause that ends.
-        if (found?.usage) seen = found.usage;
-        else if (!found && seen) {
-          // The pause is gone. Past its time it ended itself; before it, a person ended it.
-          if (now < seen.resumesAt) {
-            for (const w of openWindows(latest, now)) if (w.percent >= threshold) resumed.add(windowKey(w));
-            resumed.add(windowKey({ ...seen, resetsAt: seen.resumesAt - USAGE_RESUME_GRACE_SECONDS }));
-          }
-          seen = undefined;
-        }
-        return found;
-      },
-    },
+    source: { read: observe },
     reading: (usage) => {
+      observe();
       latest = usage;
       const now = seconds();
       const pause = usagePauseFor(usage, threshold, now, (w) => resumed.has(windowKey(w)));
@@ -734,13 +738,15 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
       return pause;
     },
     limit: (usage, provider) => {
+      const standing = observe();
       latest = usage;
       const now = seconds();
-      const standing = ports.standing(now);
       // A person's pause: the ticket parks at its juncture and runs its pass again after the resume, and nothing here changes it.
       if (standing && !standing.usage) return true;
-      // The run's own, which a limit that resets later than the standing window's moves on; or none yet.
-      const pause = usageLimitPauseFor(usage, now, provider);
+      // The run's own, which a limit that resets later than the standing window's moves on; or none yet. A window must be
+      // near its end to be the one the agent hit: below the threshold the reading would have paused already, and below 90% the
+      // limit is not the plan's windows' (`USAGE_RED`).
+      const pause = usageLimitPauseFor(usage, now, provider, Math.min(threshold, USAGE_RED));
       if (pause) ports.hold(pause, now);
       return pause !== undefined || standing !== undefined;
     },
