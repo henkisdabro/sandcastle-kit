@@ -251,11 +251,15 @@ export const usageStop = async (env: Record<string, string>, readers: LoginReade
 // reads what its agents' logs gained since the last look, keeps the newest reading in the run record
 // (`usage`) and the status view, the Herdr sidebar and the closing summary show it. It needs no
 // credential and never asks the endpoint, so it is separate from the guard (`USAGE_CHECK`) and does
-// not depend on it. Another provider's readings (Codex) are one more reader beside `usageFromEvent`.
+// not depend on it. Codex's readings (cross-review, on a ChatGPT plan) are the second reader, beside
+// `usageFromEvent`: `USAGE_READERS` is keyed by provider, so a later provider adds one function there.
 // ---------------------------------------------------------------------------
 
-/** One reading of a provider's plan: what the record's `usage` holds once an agent has reported. */
+/** One reading of a provider's plan: what the record's `usage` holds an entry of once an agent has reported. */
 export type UsageReading = Required<PlanUsage>;
+
+/** A provider whose plan usage a run can show: Claude (the implement, review and repair passes) and Codex (the cross-review). */
+export type UsageProvider = PlanUsage["provider"];
 
 /** The bands the readers colour by: normal below `USAGE_AMBER` percent, amber from it, red from `USAGE_RED`. status.sh holds the same two numbers (it cannot import them). */
 export const USAGE_AMBER = 75;
@@ -293,20 +297,85 @@ export const usageFromEvent = (line: string, at: number): UsageReading | undefin
   return fiveHour && week ? { provider: "claude", windows: { fiveHour, week }, at } : undefined;
 };
 
-/** A run record's `usage`, checked: the record is a file in a repository, so only well-formed numbers pass. `windows` and `at` are dropped together when either is wrong. */
+// Codex's own windows. `used_percent` is already a percentage (42.0 is 42%), `window_minutes` says which
+// window it is - the 5-hour one is 300, the week 10080 - and `resets_at` is seconds since the epoch.
+const CODEX_FIVE_HOUR_MINUTES = 300;
+const CODEX_WEEK_MINUTES = 10080;
+
+const codexWindowOf = (value: unknown): (PlanWindow & { minutes: number }) | undefined => {
+  const w = value as { used_percent?: unknown; window_minutes?: unknown; resets_at?: unknown } | null | undefined;
+  if (typeof w?.used_percent !== "number" || typeof w.window_minutes !== "number" || typeof w.resets_at !== "number") return undefined;
+  if (!Number.isFinite(w.used_percent) || !(w.resets_at > 0) || !Number.isFinite(w.resets_at)) return undefined;
+  return { percent: Math.min(100, Math.max(0, Math.round(w.used_percent))), resetsAt: w.resets_at, minutes: w.window_minutes };
+};
+
+/**
+ * The reading a Codex `rate_limits` object holds, or undefined without both windows. The windows are told
+ * apart by their length (`window_minutes`: 300 and 10080), never by position: `primary` is the 5-hour one
+ * today, but nothing promises that for every plan. `at` is when the kit read it, in seconds since the epoch.
+ */
+export const usageFromRateLimits = (limits: unknown, at: number): UsageReading | undefined => {
+  const l = limits as { primary?: unknown; secondary?: unknown } | null | undefined;
+  const windows = [l?.primary, l?.secondary].flatMap((w) => codexWindowOf(w) ?? []);
+  const five = windows.find((w) => w.minutes === CODEX_FIVE_HOUR_MINUTES);
+  const week = windows.find((w) => w.minutes === CODEX_WEEK_MINUTES);
+  return five && week ? { provider: "codex", windows: { fiveHour: { percent: five.percent, resetsAt: five.resetsAt }, week: { percent: week.percent, resetsAt: week.resetsAt } }, at } : undefined;
+};
+
+/**
+ * The reading a Codex session line holds: a `token_count` event, which carries the account's `rate_limits`
+ * after each model reply. `codex exec --json` does not print them; the cross-review pass's command does,
+ * from the session file in the sandbox (`CODEX_RATE_LIMITS_READOUT`), as its last stdout line.
+ */
+export const usageFromCodexEvent = (line: string, at: number): UsageReading | undefined => {
+  if (!line.includes('"rate_limits"')) return undefined;
+  let event: { type?: unknown; payload?: { type?: unknown; rate_limits?: unknown } | null } | null;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  return event?.type === "event_msg" && event.payload?.type === "token_count" ? usageFromRateLimits(event.payload.rate_limits, at) : undefined;
+};
+
+/**
+ * What a cross-review pass runs after `codex exec` ends (sh, in the sandbox): the last `rate_limits` the
+ * pass's session recorded, printed as one line so the raw stream - and with it the pass's `.jsonl` sidecar,
+ * which `watchUsage` reads - carries it. Codex writes each session to `~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl`
+ * inside the container, which is removed with the sandbox, and the kit runs it with `captureSessions: false` so
+ * none is copied to the host's `~/.codex`: this is the only way out. The newest rollout is this pass's (the
+ * sandbox is one ticket's, and its passes run one after another). The patterns match unescaped JSON only: a
+ * file the reviewer read shows up in the rollout as an escaped string, which they do not match.
+ */
+export const CODEX_RATE_LIMITS_READOUT =
+  'f=$(ls -t "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*.jsonl 2>/dev/null | head -n 1); ' +
+  `[ -z "$f" ] || grep -F '"rate_limits":{' "$f" | grep -F '"type":"token_count"' | tail -n 1`;
+
+/** One reader per provider: a line of the agent's raw stream to a reading, or undefined. A later provider adds one function here. */
+const USAGE_READERS: Record<UsageProvider, (line: string, at: number) => UsageReading | undefined> = {
+  claude: usageFromEvent,
+  codex: usageFromCodexEvent,
+};
+export const USAGE_PROVIDERS = Object.keys(USAGE_READERS) as UsageProvider[];
+
+/** A run record's `usage` entry, checked: the record is a file in a repository, so only well-formed numbers pass. `windows` and `at` are dropped together when either is wrong. */
 export const readPlanUsage = (value: unknown): PlanUsage | undefined => {
   const u = value as { provider?: unknown; windows?: { fiveHour?: unknown; week?: unknown } | null; at?: unknown } | null | undefined;
-  if (u?.provider !== "claude") return undefined;
+  const provider = USAGE_PROVIDERS.find((p) => p === u?.provider);
+  if (!provider) return undefined;
   const pct = (w: unknown) => {
     const x = w as { percent?: unknown; resetsAt?: unknown } | null | undefined;
     return typeof x?.percent === "number" && Number.isFinite(x.percent) && typeof x.resetsAt === "number" && Number.isFinite(x.resetsAt)
       ? { percent: Math.min(100, Math.max(0, Math.round(x.percent))), resetsAt: x.resetsAt }
       : undefined;
   };
-  const fiveHour = pct(u.windows?.fiveHour);
-  const week = pct(u.windows?.week);
-  return fiveHour && week && typeof u.at === "number" && Number.isFinite(u.at) ? { provider: "claude", windows: { fiveHour, week }, at: u.at } : { provider: "claude" };
+  const fiveHour = pct(u?.windows?.fiveHour);
+  const week = pct(u?.windows?.week);
+  return fiveHour && week && typeof u?.at === "number" && Number.isFinite(u.at) ? { provider, windows: { fiveHour, week }, at: u.at } : { provider };
 };
+
+/** A run record's whole `usage`, checked: a list with one entry per provider, or the one object an older kit wrote. Entries that are no reading of a known provider are left out. */
+export const readPlanUsages = (value: unknown): PlanUsage[] => (Array.isArray(value) ? value : [value]).flatMap((entry) => readPlanUsage(entry) ?? []);
 
 // A Claude Code model is an id `claude-...` or one of the aliases Claude Code takes (`sonnet`, `opus[1m]`).
 const CLAUDE_MODEL = /^(claude-|(sonnet|opus|opusplan|haiku|fable)(\[[\w.-]*\])?$)/i;
@@ -320,6 +389,38 @@ export const isClaudeModel = (model: string) => CLAUDE_MODEL.test(model);
  */
 export const showsPlanUsage = ({ apiKey, oauthToken, models }: { apiKey: boolean; oauthToken: boolean; models: string[] }) =>
   !apiKey && oauthToken && models.some(isClaudeModel);
+
+/** How Codex is signed in, from the text of its `auth.json` (never printed): `plan` for a ChatGPT sign-in, whose 5-hour and weekly limits the cross-review spends, `api key` for an API key, undefined for anything else or a file that cannot be read. */
+export const codexSignIn = (text: string | undefined): "plan" | "api key" | undefined => {
+  try {
+    const auth = JSON.parse(text ?? "") as { auth_mode?: unknown; OPENAI_API_KEY?: unknown; tokens?: { access_token?: unknown } | null } | null;
+    if (auth?.auth_mode === "chatgpt") return "plan";
+    if (auth?.auth_mode === "apikey") return "api key";
+    if (auth?.auth_mode != null) return undefined;
+    // An older Codex wrote no mode: an API key is the key, a ChatGPT sign-in its tokens.
+    if (typeof auth?.OPENAI_API_KEY === "string" && auth.OPENAI_API_KEY) return "api key";
+    return typeof auth?.tokens?.access_token === "string" && auth.tokens.access_token ? "plan" : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The text of the host's Codex login, the file the sandboxes get a read-only copy of (`sandboxMounts`), or undefined when there is none. */
+export const readCodexAuth = (file = join(homedir(), ".codex", "auth.json")) => {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whether the run shows Codex's usage: cross-review runs (`CROSS_REVIEW=1`), Codex is signed in with a
+ * ChatGPT plan (`auth`, the text of `~/.codex/auth.json`) and no `CODEX_API_KEY` is in the sandboxes'
+ * environment (`apiKey`), which Codex spends in place of its login. An API key has no plan to show.
+ */
+export const showsCodexUsage = ({ crossReview, apiKey, auth }: { crossReview: boolean; apiKey: boolean; auth: string | undefined }) =>
+  crossReview && !apiKey && codexSignIn(auth) === "plan";
 
 export type UsageWatch = {
   /** Reads what the logs gained since the last look and writes the record when a newer reading came (not more often than the interval, unless `final`). */
@@ -337,8 +438,8 @@ const TICK_SLACK_MS = 1000;
 
 /**
  * Watches this run's agent logs (`agent-issue-*.jsonl` in `logs`) for rate-limit events: every
- * `interval` it reads only what each file gained since the last look, and the newest reading - the
- * latest-written file's last event - goes to `write` when one came, at most once an interval. A file counts
+ * `interval` it reads only what each file gained since the last look, and for each of `providers` the newest
+ * reading - the latest-written file's last event - goes to `write` when one came, at most once an interval. A file counts
  * from the run's own marker line (`{"sandcastle":"run","run":<run>}`, which `agentLogging` writes
  * first) to the next one, so an earlier run's lines in the same file are not this run's reading. A failure
  * to read or to write is no reading: a full disk must not stop a run.
@@ -347,6 +448,7 @@ export const watchUsage = ({
   logs,
   run,
   write,
+  providers = USAGE_PROVIDERS,
   now = Date.now,
   interval = USAGE_INTERVAL_MS,
   finished = () => false,
@@ -354,17 +456,19 @@ export const watchUsage = ({
   logs: string;
   run: string;
   write: (reading: UsageReading) => void;
+  /** Whose readings the run shows; a line of another provider is not read. */
+  providers?: UsageProvider[];
   now?: () => number;
   interval?: number;
   finished?: () => boolean;
 }): UsageWatch => {
   const tails = new Map<string, Tail>();
   let lastWrite = -Infinity;
-  let pending: UsageReading | undefined;
+  const pending = new Map<UsageProvider, UsageReading>();
   let stopped = false;
 
-  // The last reading in what `file` gained, or undefined.
-  const gained = (name: string, at: number): { mtime: number; reading: UsageReading } | undefined => {
+  // The last reading of each provider in what `file` gained, and the file's modification time.
+  const gained = (name: string, at: number): { mtime: number; readings: Map<UsageProvider, UsageReading> } | undefined => {
     const file = join(logs, name);
     const st = statSync(file);
     let tail = tails.get(name);
@@ -374,7 +478,7 @@ export const watchUsage = ({
       tails.set(name, tail);
     }
     if (st.size === tail.offset) return undefined;
-    let reading: UsageReading | undefined;
+    const readings = new Map<UsageProvider, UsageReading>();
     const fd = openSync(file, "r");
     try {
       const buffer = Buffer.alloc(Math.min(st.size - tail.offset, 1 << 20));
@@ -399,13 +503,18 @@ export const watchUsage = ({
             } catch {
               tail.mine = false;
             }
-          } else if (tail.mine) reading = usageFromEvent(line, at) ?? reading;
+          } else if (tail.mine) {
+            for (const provider of providers) {
+              const reading = USAGE_READERS[provider](line, at);
+              if (reading) readings.set(provider, reading);
+            }
+          }
         }
       }
     } finally {
       closeSync(fd);
     }
-    return reading && { mtime: st.mtimeMs, reading };
+    return readings.size ? { mtime: st.mtimeMs, readings } : undefined;
   };
 
   const poll = (final = false) => {
@@ -425,17 +534,19 @@ export const watchUsage = ({
           }
         })
         .sort((a, b) => a.mtime - b.mtime);
-      if (found.length) pending = found[found.length - 1].reading;
+      for (const g of found) for (const [provider, reading] of g.readings) pending.set(provider, reading);
     } catch {
       /* no logs directory yet */
     }
-    if (!pending || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
+    if (!pending.size || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
     try {
-      write(pending);
+      for (const [provider, reading] of [...pending]) {
+        write(reading);
+        pending.delete(provider);
+      }
       lastWrite = now();
-      pending = undefined;
     } catch {
-      /* the record could not be written: the reading is tried again at the next look */
+      /* the record could not be written: what is left is tried again at the next look */
     }
   };
 

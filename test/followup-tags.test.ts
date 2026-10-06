@@ -295,5 +295,6 @@ test("the closing summary lists the filed follow-ups under Needs you as filed fo
 test("a dry run's summary lists its follow-ups as not filed", async () => {
   const out = await summary({ dryRun: true, followUps: [{ title: "full-check.sh has no time limit", from: "7", phase: "review" }] });
   assert.match(needsYou(out), /- full-check\.sh has no time limit - from #7 \(review\): a real run files it for triage/);
-  assert.doesNotMatch(out, /to triage - /);
+  // Unfiled, but what a real run would leave for triage: the maintainer decided it counts there (test/report-follow-up-counts.test.ts).
+  assert.match(out, / - 0 need you - 0 need fixing - 1 to triage - /);
 });

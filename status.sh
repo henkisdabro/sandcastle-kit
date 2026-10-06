@@ -841,19 +841,24 @@ settings_row() {
   return 0
 }
 
-# The plan's usage: a live run's record holds the newest reading across its agents' own rate-limit
-# events (`usage`, written by src/usage.ts), and the row shows both windows beside the reading's age.
-# Only a live run that spends a subscription on a Claude model has one: the record says nothing
-# (no row) for any other run, and a record whose settings say API credits is none either, whatever
-# else it holds. Before the first agent reports, the row says it is waiting. The fields come
-# out of the record as "provider US 5h percent US 5h resets US week percent US week resets US at"
-# and are checked here, a record being a file in a repository.
+# The plan's usage: a live run's record holds the newest reading of each provider across its agents'
+# own rate-limit events (`usage`, written by src/usage.ts: a list with an entry per provider, or the one
+# object an older kit wrote), and the row shows both windows of each beside the reading's age. Claude's
+# entry is there only for a live run that spends a subscription on a Claude model, Codex's only while
+# cross-review runs on a ChatGPT plan: the record says nothing (no line) for any other run, a record whose
+# settings say API credits has no Claude line whatever else it holds, and one whose settings say
+# cross-review is off has no Codex line. Before a provider's first reading, its line says it is waiting.
+# The fields come out of the record one provider a line, as "provider US 5h percent US 5h resets US week
+# percent US week resets US at", and are checked here, a record being a file in a repository.
 read_usage() {
   USAGE_FIELDS=""
   [ "$RUN_LIVE" = 1 ] || return 0
   USAGE_FIELDS=$(jq -r 'def num(f): try (f | if type == "number" then tostring else "" end) catch "";
-    if ((.settings | type) == "object" and .settings.apiKey == true) or ((.usage | type) != "object") or .usage.provider != "claude" then empty
-    else (.usage // {}) | [.provider, num(.windows.fiveHour.percent), num(.windows.fiveHour.resetsAt), num(.windows.week.percent), num(.windows.week.resetsAt), num(.at)] | join("\u001f") end' logs/run.json 2>/dev/null)
+    (if (.settings | type) == "object" then .settings else {} end) as $s
+    | ((.usage // []) | if type == "array" then . elif type == "object" then [.] else [] end)
+    | .[] | select(type == "object")
+    | select((.provider == "claude" and $s.apiKey != true) or (.provider == "codex" and $s.crossReview != false))
+    | [.provider, num(.windows.fiveHour.percent), num(.windows.fiveHour.resetsAt), num(.windows.week.percent), num(.windows.week.resetsAt), num(.at)] | join("\u001f")' logs/run.json 2>/dev/null)
 }
 # One window as "5h ▓░░░░░░░░░ 14% · resets 18:10", the bar and the percentage in the band's
 # colour: the normal one below 75%, amber from 75%, red from 90% (src/usage.ts holds the same two
@@ -872,33 +877,43 @@ usage_window() {
 }
 # A whole number from $1 into REPLY: a fraction loses its decimals, anything else is empty.
 whole_number() { if [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then REPLY="${1%%.*}"; else REPLY=""; fi; }
-# The usage row into the header's rows (SETTINGS_ROWS, which settings_row filled), wrapped at
-# whole items from the pane's width in $cols: "claude  5h ...   week ...   (2m ago)".
+# The usage rows into the header's rows (SETTINGS_ROWS, which settings_row filled), a line for each
+# provider in use, each wrapped at whole items from the pane's width in $cols:
+# "claude  5h ...   week ...   (2m ago)", then "codex   5h ...   week ...   (2m ago)".
 usage_row() {
-  local prov p5 r5 pw rw at age w5 ww i WRAP_SEP="   "
+  local line prov p5 r5 pw rw at age w5 ww name who n=0 i WRAP_SEP="   "
   local -a items=()
   read_usage
   [ -n "$USAGE_FIELDS" ] || return 0
-  IFS="$US" read -r prov p5 r5 pw rw at <<<"$USAGE_FIELDS"
-  whole_number "$p5"; p5="$REPLY"; whole_number "$r5"; r5="$REPLY"
-  whole_number "$pw"; pw="$REPLY"; whole_number "$rw"; rw="$REPLY"
-  whole_number "$at"; at="$REPLY"
-  if [ -n "$p5" ] && [ -n "$r5" ] && [ -n "$pw" ] && [ -n "$rw" ] && [ -n "$at" ]; then
-    # A percentage past 100 stops there.
-    [ "$p5" -gt 100 ] && p5=100
-    [ "$pw" -gt 100 ] && pw=100
-    age=$(( $(date +%s) - at )); [ "$age" -lt 0 ] && age=0
-    # A reading older than 15 minutes (USAGE_STALE_SECONDS) is greyed, its age beside it.
-    USAGE_GREY=0; [ "$age" -gt 900 ] && USAGE_GREY=1
-    usage_window 5h "$p5" "$r5" +%H:%M; w5="$REPLY"
-    usage_window week "$pw" "$rw" '+%a %H:%M'; ww="$REPLY"
-    items=("${mute}claude${off}  ${w5}" "$ww" "${mute}($(ago "$age") ago)${off}")
-  else
-    items=("${mute}claude${off}  ${gry}waiting for the first agent's reading${off}")
-  fi
-  wrap_items $(( cols - 14 )) "${items[@]}"
-  kvl usage "${WRAPPED[0]}"; SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="$REPLY"
-  for (( i=1; i<${#WRAPPED[@]}; i++ )); do SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="          ${WRAPPED[i]}"; done
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    IFS="$US" read -r prov p5 r5 pw rw at <<<"$line"
+    whole_number "$p5"; p5="$REPLY"; whole_number "$r5"; r5="$REPLY"
+    whole_number "$pw"; pw="$REPLY"; whole_number "$rw"; rw="$REPLY"
+    whole_number "$at"; at="$REPLY"
+    # The names are one width, so the bars of the lines below one another start in one column.
+    printf -v name '%-6s' "$prov"
+    if [ -n "$p5" ] && [ -n "$r5" ] && [ -n "$pw" ] && [ -n "$rw" ] && [ -n "$at" ]; then
+      # A percentage past 100 stops there.
+      [ "$p5" -gt 100 ] && p5=100
+      [ "$pw" -gt 100 ] && pw=100
+      age=$(( $(date +%s) - at )); [ "$age" -lt 0 ] && age=0
+      # A reading older than 15 minutes (USAGE_STALE_SECONDS) is greyed, its age beside it.
+      USAGE_GREY=0; [ "$age" -gt 900 ] && USAGE_GREY=1
+      usage_window 5h "$p5" "$r5" +%H:%M; w5="$REPLY"
+      usage_window week "$pw" "$rw" '+%a %H:%M'; ww="$REPLY"
+      items=("${mute}${name}${off}  ${w5}" "$ww" "${mute}($(ago "$age") ago)${off}")
+    else
+      # Claude's reading comes from any agent's stream, Codex's from the cross-review pass's.
+      who="agent's"; [ "$prov" = codex ] && who="cross-review's"
+      items=("${mute}${name}${off}  ${gry}waiting for the first ${who} reading${off}")
+    fi
+    wrap_items $(( cols - 14 )) "${items[@]}"
+    if [ "$n" -eq 0 ]; then kvl usage "${WRAPPED[0]}"; else REPLY="          ${WRAPPED[0]}"; fi
+    SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="$REPLY"
+    for (( i=1; i<${#WRAPPED[@]}; i++ )); do SETTINGS_ROWS[${#SETTINGS_ROWS[@]}]="          ${WRAPPED[i]}"; done
+    n=$(( n + 1 ))
+  done <<<"$USAGE_FIELDS"
   return 0
 }
 
