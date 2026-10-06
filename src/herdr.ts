@@ -461,22 +461,32 @@ export const openSandboxView = (
 
   // A previous run's view is replaced, not stacked. Only ids from our own
   // record are closed, and never the pane this run is typed in: a tab the
-  // kit made goes whole, an adopted tab keeps its run pane.
+  // kit made goes whole, an adopted tab keeps its run pane. A pane a person
+  // moved out of that tab outlives the tab, or the tab is already gone and
+  // its close fails: either way the record's panes are closed by id after it,
+  // the status pane only while it is still the recorded terminal (Herdr
+  // reuses pane ids across a restart).
   if (existsSync(record)) {
     try {
-      const old = JSON.parse(readFileSync(record, "utf8")) as { tab?: string; panes?: string[]; status?: string; adopted?: boolean };
+      const old = JSON.parse(readFileSync(record, "utf8")) as { tab?: string; panes?: string[]; status?: string; adopted?: boolean; terminal_id?: string };
       if (old.tab && !old.adopted && old.tab !== myTab) {
-        herdr(["tab", "close", old.tab]);
-      } else {
-        for (const pane of [...(old.panes ?? []), ...(old.status ? [old.status] : [])]) {
-          if (pane === mine) continue;
-          try {
-            herdr(["pane", "close", pane]);
-          } catch {
-            /* already closed */
-          }
+        try {
+          herdr(["tab", "close", old.tab]);
+        } catch {
+          /* gone already: its panes may live on in another tab */
         }
       }
+      const close = (pane: string, terminal?: string) => {
+        if (pane === mine) return;
+        try {
+          if (terminal && paneOf(pane).terminal_id !== terminal) return;
+          herdr(["pane", "close", pane]);
+        } catch {
+          /* already closed */
+        }
+      };
+      for (const pane of old.panes ?? []) close(pane);
+      if (old.status) close(old.status, old.terminal_id);
     } catch {
       /* already closed */
     }
