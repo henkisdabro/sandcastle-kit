@@ -684,6 +684,12 @@ has 's a n d c a s t l e'
 has '█████'
 
 # ---------------------------------------------------------------------------
+# The usage scenarios' lines are written for an 80-column pane, where a row wraps its windows; a
+# wider COLS from the caller (full-check runs this file at 200) would draw them on one line.
+COLS_WAS="$COLS"; COLS=80
+# The readings' ages ("2m ago") count from `now`, set when this file started minutes ago: a slow
+# machine drew "3m ago". Each usage scenario takes `now` afresh before it builds its readings.
+now=$(date +%s)
 SCENARIO="live run, the plan's usage"
 # The newest reading across the agents' own rate-limit events is the record's `usage` (src/usage.ts):
 # both windows with a bar, the percentage and the reset time, and the reading's age. Only a live run
@@ -785,6 +791,7 @@ reading() { # provider percent5 percentWeek age-seconds
   printf '{ "provider": "%s", "at": %s, "windows": { "fiveHour": { "percent": %s, "resetsAt": %s }, "week": { "percent": %s, "resetsAt": %s } } }' \
     "$1" "$((now - $4))" "$2" "$r5" "$3" "$rw"
 }
+now=$(date +%s)
 claude_reading=$(reading claude 14 93 120); codex_reading=$(reading codex 100 16 120)
 usage_list "[$claude_reading, $codex_reading]"
 COLS=160 render "105"
@@ -837,6 +844,7 @@ usage_list "[$claude_reading, 3, \"codex\", { \"provider\": \"other\", \"windows
 COLS=160 render "105"
 count 'week ▓' 1
 hasnt 'codex|other'
+COLS="$COLS_WAS"
 
 if [ "$fails" -gt 0 ]; then echo "$fails check(s) failed. Last frame:"; cat "$TMP/frame"; exit 1; fi
 echo "status view: all checks passed"

@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
 
@@ -73,7 +73,9 @@ const started = (root: string, command: string[], ncpu: number, machine?: string
     encoding: "utf8",
     env: {
       ...process.env,
-      PATH: [bin, process.env.PATH].join(delimiter),
+      // The running node before the inherited PATH: with XDG_CONFIG_HOME moved, a version manager's
+      // `node` shim there cannot find its config, and the lean-apply host hook fails on a Mac.
+      PATH: [bin, dirname(process.execPath), process.env.PATH].join(delimiter),
       XDG_CONFIG_HOME: home,
       XDG_CACHE_HOME: join(dir, "cache"),
       FAKE_NCPU: String(ncpu),
