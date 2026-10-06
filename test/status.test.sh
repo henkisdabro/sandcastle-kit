@@ -218,6 +218,8 @@ branch 121 1; log 121 impl 'done'
 branch 122 1; log 122 impl 'done'
 since_at=$((now - 600))
 when=$(date -d "@$since_at" +%H:%M 2>/dev/null || date -r "$since_at" +%H:%M)
+# Within ten minutes after midnight the pause was yesterday, and the cell gives its date first.
+when="([0-9]{2} [A-Za-z]{3} )?$when"
 cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running", "concurrency": 3,
   "typical": { "implement": 600, "gates": 60, "issue": 900 },
