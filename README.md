@@ -595,7 +595,7 @@ machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
-every five minutes while agents work (it also names a ticket that has waited for a sandbox slot longer than a typical issue takes), and the status view flags a sandbox whose log has been quiet
+every five minutes while anything is in flight - tickets working (a gates step says when it waits for a gates slot, and counts its time from the first gate), landings, and sent-back tickets waiting to resolve a conflict; it also names a ticket that has waited for a sandbox slot longer than a typical issue takes - and the status view flags a sandbox whose log has been quiet
 for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
 `.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
 `USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket, with
