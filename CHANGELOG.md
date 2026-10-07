@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-07
+
 ### Added
 
 - **The run names a ticket that waits long for a sandbox slot.** The heartbeat line names one

@@ -46,7 +46,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
         "name": "sandcastle-kit",
-        "softwareVersion": "0.9.0",
+        "softwareVersion": "0.10.0",
         "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
         "url": "https://henkisdabro.github.io/sandcastle-kit/",
         "applicationCategory": "DeveloperApplication",
@@ -74,7 +74,7 @@
           { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or an Anthropic API key through Claude Code; an API key takes precedence and the kit asks before spending it. Codex cross-review uses your ChatGPT plan or OpenAI API key. Runs using the same account share its allowance. The status view shows subscription usage and reset times from agent events, without extra requests. Between runs, sandcastle usage shows a recent saved reading or requests a fresh one. USAGE_CHECK=1 checks Claude plan usage before starting tickets; USAGE_PAUSE=90 opts into pausing at 90% of a provider's plan window and resuming a minute after its reset. Without usage pause, an agent hitting the limit stops the queue." } },
           { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label sets the implementer's model or effort for one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
           { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch. A completed ticket is closed with a comment; a partly-done ticket stays open with the unmet criterion named. Agents' follow-ups are filed for triage. You push when you are happy with what landed." } },
-          { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree." } },
+          { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. A worktree shares the repository's git config, so do not give a branch an upstream there mid-run (git push -u, gh pr create): that stops the run too." } },
           { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
           { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged." } },
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
@@ -682,7 +682,7 @@
       </details>
       <details>
         <summary>What about my own work in that repository?</summary>
-        <p>A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree.</p>
+        <p>A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. A worktree shares the repository's git config, so do not give a branch an upstream there mid-run (git push -u, gh pr create): that stops the run too.</p>
       </details>
       <details>
         <summary>What if a branch is green but wrong?</summary>
@@ -719,7 +719,7 @@
   <footer class="foot">
     <p class="foot-credit">Built by <a href="https://www.henriksoderlund.com/?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=footer-author-link" rel="author">Henrik Söderlund</a></p>
     <p><a href="https://www.henriksoderlund.com/expertise?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=more-work-link#showcase-projects">More AI and automation work →</a></p>
-    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.9.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
+    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.10.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
   </footer>
 
   <script src="js/status.js" defer></script>
