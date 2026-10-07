@@ -11,7 +11,9 @@
 # The legs run side by side, not one after another, and the tests in each are CI's weighted shards
 # (test/shard.ts, run by test/run-shards.sh): every file still runs once per pass.
 # Prints one summary line per step and RESULT: PASS or FAIL; a failure's output is shown, the rest
-# kept in a temp directory.
+# kept in a temp directory. The log directory is named first, and each leg's name, ok or FAIL and
+# seconds go to stderr as it finishes, ahead of the summary: a check takes minutes, and a hung leg
+# must not look like a slow one.
 #
 # Shards per pass: the cores shared out between the suite passes running at once (macOS, the
 # agent identity and, with Docker, Linux), about two cores a shard, 1 to 6 (test/shard-count.sh).
@@ -23,6 +25,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 base="${1:-origin/main}"
 logs=$(mktemp -d)
+echo "logs: $logs" >&2
 fail=0
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
 
@@ -130,8 +133,16 @@ leg_scan() {
   return "$rc"
 }
 
+# The status is written before the progress line, so a line on screen means the leg is recorded.
+# SECONDS is bash's own whole-second counter, which a macOS /bin/bash 3.2 has too (no date +%s%N).
 start() { # name function: the function's output and status go to $logs/leg-name.{out,status}
-  ( "$2" >"$logs/leg-$1.out" 2>&1; echo $? >"$logs/leg-$1.status" ) &
+  (
+    began=$SECONDS
+    "$2" >"$logs/leg-$1.out" 2>&1
+    rc=$?
+    echo "$rc" >"$logs/leg-$1.status"
+    printf '%s: %s (%ss)\n' "$1" "$([ "$rc" = 0 ] && echo ok || echo FAIL)" "$((SECONDS - began))" >&2
+  ) &
 }
 # The legs' summary lines in order, and each one's failure in the overall status.
 show() {
