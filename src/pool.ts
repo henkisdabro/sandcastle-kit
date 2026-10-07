@@ -25,9 +25,11 @@
 // Within one run, a waiter that asks for priority (`withSlot`'s last argument: a landing's sandbox, and the
 // gates a landing, the base check and the verify make, which the run's end waits on) goes before the run's
 // other waiters for the same pool, and counts from the run's oldest wait, so the run is picked as before; the
-// run's other waiters go in the order they began waiting (the earliest first, ties in the order they asked), so
-// a ticket is not passed by later ones of its run for as long as the run's share leaves it one slot, and `slotTurn`
-// (landing.ts) keeps the run's next pipeline from asking for a sandbox slot while a landing waits for one.
+// run's other waiters go in the order they began waiting (the earliest first, ties in the order they asked), and
+// `slotTurn` (landing.ts) keeps the run's next pipeline from asking for a sandbox slot while a landing waits for one.
+// Which ticket a pipeline's slot serves is the run's start queue's to say, not the pool's: a worker leases its slot
+// first and then takes the head of the queue (slot first, src/schedule.ts), so a requeued or released ticket gets the
+// next slot the run is granted.
 //
 // Shares (docs/adr/0001): live runs split the sandbox slots equally between them, up to each
 // run's demand. A run registers (`joinPool`: `runs/<id>.run`, written whole and renamed in) with
@@ -595,6 +597,8 @@ const priorityAhead = (wait: OwnWait) => !wait.priority && [...waiting].some((w)
 /**
  * This run has a wait for `pool` that began before `wait`, and neither asked for priority: `wait` leaves the
  * slot to it. Each waiter polls on its own timer, so without this whichever asks at the moment a slot frees takes it.
+ * A pipeline worker's wait names no ticket (it takes the head of the start queue once served), so this orders the
+ * workers and a ticket resuming after a pause, never one ticket's rank against another's.
  */
 const earlierAhead = (wait: OwnWait) =>
   !wait.priority && [...waiting].some((w) => w.pool === wait.pool && !w.priority && (w.since < wait.since || (w.since === wait.since && w.order < wait.order)));

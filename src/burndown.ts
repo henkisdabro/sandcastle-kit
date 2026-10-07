@@ -632,9 +632,10 @@ const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${
 
 /**
  * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
- * it says one), the sent-back tickets waiting to resolve, then the tickets that have waited for a sandbox slot for
- * longer than a typical issue takes (`typicalMs`; with no history nothing is named, as the estimate says nothing
- * then). No line when none of these is in flight.
+ * it says one), the sent-back tickets waiting to resolve, then the run's wait for a sandbox slot (`slotWait`, when
+ * its oldest open wait began; `createSlotWaits`) once it is longer than a typical issue takes (`typicalMs`; with
+ * no history nothing is said, as the estimate says nothing then). The wait is the run's, not a ticket's: a worker
+ * leases its slot before it takes a ticket. No line when none of these is in flight.
  */
 export const heartbeatLine = (o: {
   now: number;
@@ -642,16 +643,56 @@ export const heartbeatLine = (o: {
   working: { ref: string; phase: string; since: number }[];
   landing?: { ref: string; phase?: string; since: number }[];
   resolving?: { ref: string; since: number }[];
-  slotWaits: { ref: string; since: number }[];
+  slotWait?: number;
   typicalMs?: number;
 }): string | undefined => {
-  const stalled = o.typicalMs === undefined ? [] : o.slotWaits.filter((w) => o.now - w.since > o.typicalMs!);
+  const stalled = o.typicalMs !== undefined && o.slotWait !== undefined && o.now - o.slotWait > o.typicalMs;
   const parts: string[] = [];
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
-  if (stalled.length) parts.push(`waiting for a sandbox slot: ${stalled.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
+};
+
+/**
+ * The run's waits for a machine-wide sandbox slot: a pipeline worker's for the next ticket (slot first,
+ * `Work.slot` in src/schedule.ts) and a ticket's own as a pause ends. None of them is a ticket's in the queue, so
+ * what they say is the run's: `share` is told each time "a wait is held back by the run's share" turns true or
+ * false (the run record's `waitsForShare`), and `since` is when the oldest wait still open began (the heartbeat).
+ * Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`, and `end`s as it is served or given up.
+ */
+export const createSlotWaits = (share: (held: boolean) => void, now: () => number = Date.now) => {
+  const open = new Map<object, { since: number; share: boolean }>();
+  let told = false;
+  const tell = () => {
+    const held = [...open.values()].some((w) => w.share);
+    if (held === told) return;
+    told = held;
+    share(held);
+  };
+  return {
+    begin() {
+      const key = {};
+      open.set(key, { since: now(), share: false });
+      return {
+        onWait(why: WaitReason) {
+          const wait = open.get(key);
+          if (!wait) return;
+          wait.share = why === "share";
+          tell();
+        },
+        end() {
+          open.delete(key);
+          tell();
+        },
+      };
+    },
+    get since(): number | undefined {
+      const all = [...open.values()].map((w) => w.since);
+      return all.length ? Math.min(...all) : undefined;
+    },
+  };
 };
 
 /**
@@ -770,32 +811,13 @@ export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, 
   return typeof prior?.started === "number" ? { attemptStarted: at } : { started: at, attemptStarted: at };
 };
 
-/** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
-export const SLOT_WAIT_SHOWN = 3 * 60_000;
-
-/** The summary line's time for a ticket: its work, and a wait of `SLOT_WAIT_SHOWN` or more for a machine-wide sandbox slot (not in that work). */
-export const ticketTime = (workMs: number | undefined, slotWaitMs: number | undefined): string => {
-  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
-  if (slotWaitMs === undefined || slotWaitMs < SLOT_WAIT_SHOWN) return work && ` ${work}`;
-  const m = Math.round(slotWaitMs / 60_000);
-  const long = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ""}`;
-  return `${work && ` ${work},`} waited ${long} for a slot`;
-};
-
 /**
- * An attempt's start: its sandbox slot, taken again after each pause that ended a wait for one (`take` answers
- * false; `park` waits out the pause). Returns the time spent waiting for the slot, the time parked left out:
- * the slot is taken before the ticket's first step, so no step's timer would hold the wait.
+ * The summary line's time for a ticket: its work. A wait for a machine-wide sandbox slot is no ticket's: a worker
+ * leases its slot before it takes a ticket (slot first), so the wait is the run's (`createSlotWaits`).
  */
-export const takeStartSlot = async (take: () => Promise<boolean>, park: () => Promise<void>, now: () => number = Date.now): Promise<number> => {
-  let waitMs = 0;
-  for (;;) {
-    const asked = now();
-    const got = await take();
-    waitMs += now() - asked;
-    if (got) return waitMs;
-    await park();
-  }
+export const ticketTime = (workMs: number | undefined): string => {
+  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
+  return work && ` ${work}`;
 };
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
@@ -974,10 +996,10 @@ export const createPipeline = (ctx: PipelineContext) => {
   };
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
-  // `at.slotWaitMs`: how long the attempt waited for its machine-wide sandbox slot, which it took before this
-  // pipeline began: the first `setup` step records it as its `waitMs`. `at.resolveWaitMs`: a sent-back ticket's wait for
-  // the tickets ahead of its resolve, which came before the attempt too, and goes into the same `waitMs`.
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; slotWaitMs?: number; resolveWaitMs?: number }): Promise<Outcome> => {
+  // `at.resolveWaitMs`: a sent-back ticket's wait for the tickets ahead of its resolve, which came before the attempt:
+  // the first `setup` step records it as its `waitMs`. No wait for a sandbox slot is a ticket's: its worker held the
+  // slot before it took the ticket (slot first).
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; resolveWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -1000,7 +1022,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       open(branch),
       requeuedAs.get(issue.id),
       undefined,
-      at?.resolveWaitMs ? (at.slotWaitMs ?? 0) + at.resolveWaitMs : at?.slotWaitMs,
+      at?.resolveWaitMs,
     ).catch(async (error) => {
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
@@ -1998,8 +2020,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
-  // Each issue's waits for a machine-wide sandbox slot at the start of an attempt: outside `took`, named in the summary.
-  const slotWaited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Each issue's step, and when it started, go to run.json's tickets: the
@@ -2193,10 +2213,18 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }, priority);
   };
 
+  // The run's waits for a sandbox slot. One held back by the run's share, not only by a full pool, is the run
+  // record's `waitsForShare`, which the status view's next-to-start rows say.
+  const slotWaits = createSlotWaits((held) => {
+    try {
+      run.update({ waitsForShare: held || undefined });
+    } catch {
+      /* the record's note only: a throw here would end the wait it describes */
+    }
+  });
   // A run is silent for as long as its agents are, which for a review can be
-  // half an hour. One line every five minutes says it is alive and where, and names a ticket
-  // that has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
-  const slotWaits = new Map<string, number>();
+  // half an hour. One line every five minutes says it is alive and where, and says when the run
+  // has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
   const heartbeat = setInterval(() => {
     const line = heartbeatLine({
       now: Date.now(),
@@ -2204,7 +2232,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
       landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
       resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
-      slotWaits: [...slotWaits].map(([n, since]) => ({ ref: ref(n), since })),
+      slotWait: slotWaits.since,
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
     if (line) console.log(line);
@@ -2357,10 +2385,34 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     tampered,
   });
 
-  // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
-  // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
-  const attempt = async (issue: Issue, { last, juncture, paused, resolveWaitMs }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number }): Promise<Attempted<Outcome, Outcome>> => {
-    await pausing.waitOutPause(usagePause !== undefined, paused, juncture);
+  // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
+  // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
+  const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
+    await slotTurn(slotWanted);
+    const wait = slotWaits.begin();
+    try {
+      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp);
+    } finally {
+      wait.end();
+    }
+  };
+  // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
+  // the tracker's word before it, then its pipeline.
+  const attempt = async (issue: Issue, { last, juncture, paused, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+    // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
+    // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
+    let lease: SlotLease | undefined = slot;
+    const take = async () => {
+      lease = await sandboxSlot(ref(issue.id), paused);
+      return lease !== undefined;
+    };
+    const give = () => {
+      lease?.release();
+      lease = undefined;
+    };
+    // At its start the ticket gives the slot back for a pause and takes one only once it goes on (below).
+    const start: Park = { suspend: async () => give(), resume: async () => {} };
+    await pausing.waitOutPause(usagePause !== undefined, paused, (phase) => juncture(phase, start));
     const line = await usageStop(env, undefined, () => planUsage.find((u) => u.provider === "claude"));
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
@@ -2373,31 +2425,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
-    // A ticket that waits for the run's share, not only for a slot, says so; the note goes with its next state.
-    let shareNote = false;
-    const waitNote = (why: WaitReason) =>
-      bookkeep(issue.id, () => {
-        if (why === "share") run.ticket(issue.id, { note: "waits for the run's share" });
-        else if (shareNote) run.ticket(issue.id, { note: null });
-        shareNote = why === "share";
-      });
-    // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
-    // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
-    let lease: SlotLease | undefined;
-    const take = async () => {
-      await slotTurn(slotWanted);
-      slotWaits.set(issue.id, Date.now());
-      try {
-        lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
-      } finally {
-        slotWaits.delete(issue.id);
-      }
-      return lease !== undefined;
-    };
-    const give = () => {
-      lease?.release();
-      lease = undefined;
-    };
     const parkable = (park?: Park): Park => ({
       suspend: async () => {
         await park?.suspend();
@@ -2411,12 +2438,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     });
     const result = await (async () => {
       try {
-        // The start's wait for its slot. A slot taken again on a resume is in the time parked, so it is not counted here.
-        const slotWaitMs = await takeStartSlot(take, () => juncture("start", { suspend: async () => {}, resume: async () => {} }));
-        slotWaited.set(issue.id, (slotWaited.get(issue.id) ?? 0) + slotWaitMs);
-        // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
-        await juncture("start", parkable());
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, resolveWaitMs, slotWaitMs });
+        // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
+        // was gone too when the run was paused as the attempt began.
+        for (await juncture("start", start); !lease; await juncture("start", start)) await take();
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, resolveWaitMs });
       } finally {
         give();
       }
@@ -2579,7 +2604,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
+    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       usageWatch?.stop();
@@ -2674,7 +2699,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const o = r.value;
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
-    const time = ticketTime(took.get(o.issue), slotWaited.get(o.issue));
+    const time = ticketTime(took.get(o.issue));
     const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }

@@ -90,9 +90,9 @@ test("a requeued ticket whose resolve waited for nothing is told no wait", async
   assert.deepEqual(attempts.map((a) => [a.n, a.resolveWaitMs]), [[1, undefined], [2, undefined]]);
 });
 
-test("the resolve wait goes onto the setup line's waitMs beside the slot wait, out of its ms", () => {
-  assert.deepEqual(withQueued({ ms: 4_000 }, 5 * 60_000 + 2 * 60_000), { ms: 4_000, waitMs: 7 * 60_000 });
+test("the resolve wait goes onto the setup line's waitMs, out of its ms", () => {
+  assert.deepEqual(withQueued({ ms: 4_000 }, 7 * 60_000), { ms: 4_000, waitMs: 7 * 60_000 });
   const source = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(source, /at\?\.resolveWaitMs \? \(at\.slotWaitMs \?\? 0\) \+ at\.resolveWaitMs : at\?\.slotWaitMs,/);
-  assert.match(source, /pipeline\(issue, \{[^}]*resolveWaitMs, slotWaitMs \}\)/);
+  assert.match(source, /\n      at\?\.resolveWaitMs,\n/);
+  assert.match(source, /pipeline\(issue, \{[^}]*resolveWaitMs \}\)/);
 });

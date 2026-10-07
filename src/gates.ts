@@ -383,9 +383,9 @@ export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitM
 };
 
 /**
- * A step's times with a wait that came before it began added to `waitMs`: a ticket takes its machine-wide
- * sandbox slot before its `setup` step starts, so `elapsed` never held that wait, and a ticket that stood two
- * hours for a slot once had `waitMs: null` on its setup line and nothing anywhere to show the stall.
+ * A step's times with a wait that came before it began added to `waitMs`: a sent-back ticket waits for the
+ * tickets ahead of its resolve before its `setup` step starts, so `elapsed` never held that wait, and a wait
+ * left off the setup line showed nowhere at all.
  */
 export const withQueued = (times: { ms: number; waitMs?: number }, queued: number | undefined): { ms: number; waitMs?: number } => {
   const q = typeof queued === "number" && queued > 0 ? Math.round(queued) : 0;

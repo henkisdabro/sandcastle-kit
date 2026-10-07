@@ -292,6 +292,12 @@ export type RunRecord = {
   share?: number;
   /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
   cap?: number;
+  /**
+   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, not
+   * only a full pool: the status view's next-to-start rows say `waits for the run's share`. The wait is the run's, not a
+   * ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting ticket's note.
+   */
+  waitsForShare?: boolean;
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */

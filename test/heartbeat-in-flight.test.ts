@@ -16,7 +16,7 @@ const { heartbeatLine } = await import("../src/burndown.ts");
 
 const MIN = 60_000;
 const now = 10 * 60 * MIN;
-const base = { now, clock: "17:57", working: [], slotWaits: [] };
+const base = { now, clock: "17:57", working: [] };
 
 test("a landing in flight is a heartbeat line, with the step it says and how long it has been at it", () => {
   const line = heartbeatLine({ ...base, landing: [{ ref: "#431", phase: "gates: waiting for a gates slot", since: now - 4 * MIN }, { ref: "#437", since: now - 90_000 }] });
