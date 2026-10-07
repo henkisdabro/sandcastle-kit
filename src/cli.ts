@@ -114,7 +114,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { changelogSince, closingReport, gather, operatorSteps, summary } from "./report.ts";
+import { changelogSince, closingReport, type Facts, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
@@ -133,11 +133,21 @@ import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 import { realReaders, sizeLines } from "./size.ts";
 
+/** The run record's end-of-run verify, or undefined when there is no readable record. */
+const recordedVerify = (root: string): Pick<Facts, "verify"> | undefined => {
+  try {
+    return { verify: JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).verify };
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * The project as the sandbox of `sandcastle gates` or `sandcastle land` sees it: both open gate-only
  * sandboxes, so `cpus` is the gate share a run's landing and base gates get (`sandboxCpus`), cut to the VM's CPUs.
  * Outside a run nothing divides by a concurrency. Read when first needed: `docker info` answers once per sandbox.
  */
+
 const gateOnly = (project: Project): Project => ({ ...project, cpus: sandboxCpus(project, "gate", { concurrency: 1, maxGates: limit("gates") }, readDockerInfo) });
 
 const [command = "help", ...args] = process.argv.slice(2);
@@ -378,7 +388,9 @@ try {
         if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()))) console.log(line);
       }
       // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
-      const redExit = redBaseExit(lastFacts ?? (ranTurn ? await gather(project) : undefined));
+      // Level 0 gathered no facts: the run record's verify is enough, where gather() would read the tracker again
+      // after the summary has printed, and a throw there would turn a finished run into a crash.
+      const redExit = redBaseExit(lastFacts ?? (ranTurn ? recordedVerify(project.root) : undefined));
       if (redExit) process.exitCode = redExit;
       break;
     }

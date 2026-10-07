@@ -56,7 +56,7 @@ test("a run that ends on a red base exits 1 and run.json records exitCode 1", ()
 
 test("the run command sets the exit code from the last turn's facts after the loop, at any level", () => {
   const cli = readFileSync(join(KIT, "src/cli.ts"), "utf8");
-  assert.match(cli, /const redExit = redBaseExit\(lastFacts \?\? \(ranTurn \? await gather\(project\) : undefined\)\);\n\s+if \(redExit\) process\.exitCode = redExit;/);
+  assert.match(cli, /const redExit = redBaseExit\(lastFacts \?\? \(ranTurn \? recordedVerify\(project\.root\) : undefined\)\);\n\s+if \(redExit\) process\.exitCode = redExit;/);
   // After the drain's closing lines, so they still print with the loop's other output.
   assert.ok(cli.indexOf("const redExit") > cli.indexOf("lateQueueLines(tracker, known"));
 });
