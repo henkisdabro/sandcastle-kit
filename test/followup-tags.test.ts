@@ -128,6 +128,7 @@ const recording = () => {
   };
 };
 const direct = async (fn: () => string) => fn();
+const anyPath = () => true;
 
 const IMPL =
   "Done.\n\n" +
@@ -142,7 +143,7 @@ const REVIEW =
 test("two sessions' follow-ups become two tickets for triage, each naming its source ticket and phase, a duplicate title filed once", async () => {
   const followUps = await pipelineSaying("7", { impl: IMPL, review: REVIEW });
   const { made, tracker } = recording();
-  const filed = await fileFollowUps(tracker, followUps, { dryRun: false, write: direct });
+  const filed = await fileFollowUps(tracker, followUps, { dryRun: false, write: direct, exists: anyPath });
   assert.deepEqual(made.map((m) => m.title), ["run-shards.sh leaves its background shards running on TERM", "full-check.sh Linux leg has no time limit"]);
   assert.match(made[0].body, /test\/run-shards\.sh:40 traps INT only/);
   assert.match(made[0].body, /implement agent working on #7/);
@@ -157,7 +158,7 @@ test("two sessions' follow-ups become two tickets for triage, each naming its so
 test("a dry run files no follow-up and returns them for the summary to list", async () => {
   const followUps = await pipelineSaying("8", { impl: IMPL });
   const { made, tracker } = recording();
-  const listed = await fileFollowUps(tracker, followUps, { dryRun: true, write: direct });
+  const listed = await fileFollowUps(tracker, followUps, { dryRun: true, write: direct, exists: anyPath });
   assert.equal(made.length, 0);
   assert.deepEqual(listed, [{ title: "run-shards.sh leaves its background shards running on TERM", from: "8", phase: "implement" }]);
 });
@@ -184,7 +185,7 @@ test("a filing that fails is kept with its reason, and the rest are still filed"
   const filed = await fileFollowUps(tracker, [
     { title: "first", evidence: "a", from: "1", phase: "review" },
     { title: "second", evidence: "b", from: "1", phase: "repair" },
-  ], { dryRun: false, write: direct });
+  ], { dryRun: false, write: direct, exists: anyPath });
   assert.deepEqual(filed, [
     { title: "first", from: "1", phase: "review", failed: "gh issue create failed: HTTP 502" },
     { title: "second", from: "1", phase: "repair", id: "12" },
@@ -197,10 +198,10 @@ test("a later turn of the same run files no title an earlier turn filed, and ret
   const { made, tracker } = recording();
   const flaky = { ...tracker, create: (title: string, body: string, near?: string) => (title === "second" && down ? assert.fail("HTTP 502") : tracker.create(title, body, near)) };
   const named = (title: string) => ({ title, evidence: "e", from: "3", phase: "implement" });
-  await fileFollowUps(flaky, [named("first"), named("second")], { dryRun: false, write: direct, seen });
+  await fileFollowUps(flaky, [named("first"), named("second")], { dryRun: false, write: direct, exists: anyPath, seen });
   down = false;
   // The re-run of a partly done ticket names both again.
-  const again = await fileFollowUps(flaky, [named("First"), named("second")], { dryRun: false, write: direct, seen });
+  const again = await fileFollowUps(flaky, [named("First"), named("second")], { dryRun: false, write: direct, exists: anyPath, seen });
   assert.deepEqual(made.map((m) => m.title), ["first", "second"]);
   assert.deepEqual(again.map((f) => f.title), ["second"]);
 });
@@ -210,7 +211,7 @@ test("with ticket files, a follow-up is a committed ticket file beside its sourc
   commit(root, ".scratch/checkout/issues/03-pay.md", "# Pay\n\nStatus: ready-for-agent\n\nBody.\n");
   const project = { root, name: "fixture", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker({ kind: "files", dir: ".scratch" }) } as unknown as Project;
   const tracker = makeTracker(project);
-  const filed = await fileFollowUps(tracker, [{ title: "Refund rounds down", evidence: "src/pay.ts:12 truncates", from: "checkout-03", phase: "review" }], { dryRun: false, write: direct });
+  const filed = await fileFollowUps(tracker, [{ title: "Refund rounds down", evidence: "src/pay.ts:12 truncates", from: "checkout-03", phase: "review" }], { dryRun: false, write: direct, exists: anyPath });
   assert.deepEqual(filed.map((f) => f.id), ["checkout-04"]);
   const file = join(root, ".scratch/checkout/issues/04-refund-rounds-down.md");
   assert.ok(existsSync(file));
@@ -240,7 +241,7 @@ test("with GitHub, a follow-up is a gh issue carrying the triage label, filed wi
   try {
     const tracker = makeTracker({ root: TMP, name: "fixture", baseBranch: "main", label: "ready-for-agent", tracker: fakeTracker() } as unknown as Project);
     const one = { evidence: "e", from: "7", phase: "implement" };
-    const filed = await fileFollowUps(tracker, [{ title: "unlabelled", ...one }, { title: "labelled", ...one }], { dryRun: false, write: direct });
+    const filed = await fileFollowUps(tracker, [{ title: "unlabelled", ...one }, { title: "labelled", ...one }], { dryRun: false, write: direct, exists: anyPath });
     assert.deepEqual(filed.map((f) => f.id), ["57", "57"]);
     const calls = readFileSync(log, "utf8").trim().split("\n");
     assert.deepEqual(calls, ["issue create unlabelled labelled", "issue create unlabelled bare", "issue create labelled labelled"]);
@@ -280,7 +281,7 @@ const summary = async (record: object, issues: object[] = []) => {
     process.env.PATH = path;
   }
 };
-const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("##", out.indexOf("## Needs you") + 3));
+const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("\n## ", out.indexOf("## Needs you") + 3));
 
 test("the closing summary lists the filed follow-ups under Needs you as filed for triage, each once", async () => {
   const out = await summary(

@@ -59,6 +59,7 @@ const repo = () => {
 };
 
 const direct = async (fn: () => string) => fn();
+const anyPath = () => true;
 
 const IMPL = "Done.\n\n<followup>run-shards.sh leaves its background shards running on TERM - test/run-shards.sh:40 traps INT only</followup>\n<promise>COMPLETE</promise>\n";
 // The implementer's problem again, reworded, and a second one.
@@ -82,7 +83,7 @@ const run = (o: { dryRun?: boolean; seen?: Set<string>; create?: () => string } 
     JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).followUps ?? [];
   const made: string[] = [];
   const tracker = { ref: (id: string) => `#${id}`, comment: () => {}, create: o.create ?? ((title: string) => String(made.push(title) + 100)) };
-  const book = createFollowUpBook(record, { tracker, dryRun: o.dryRun ?? false, write: direct, seen: o.seen ?? new Set() });
+  const book = createFollowUpBook(record, { tracker, dryRun: o.dryRun ?? false, write: direct, exists: anyPath, seen: o.seen ?? new Set() });
   const prompts = Object.fromEntries(
     ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((kind) => {
       write(root, `.sandcastle/.run/${kind}.md`, "{{ISSUE_NUMBER}}\n");
@@ -148,7 +149,7 @@ const run = (o: { dryRun?: boolean; seen?: Set<string>; create?: () => string } 
 };
 
 const summary = async (project: Project) => render(await gather(project, () => undefined), true);
-const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("##", out.indexOf("## Needs you") + 3));
+const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("\n## ", out.indexOf("## Needs you") + 3));
 
 test("a follow-up is in the run record, unfiled, as soon as the agent's pass has ended - before the run files anything", async () => {
   const { pipelineSaying, recorded, made } = run();

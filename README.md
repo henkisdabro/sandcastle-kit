@@ -342,7 +342,8 @@ merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base 
 that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
-the sources when the merged base is gated again at the end of the run.
+the sources: the landing's gates run on that commit, and the merged base is gated again at the end of the run unless
+those gates already ran on its tip.
 
 ### 🧩 A criterion left undone
 
@@ -365,8 +366,8 @@ An agent that finds a problem outside its ticket - implementer, reviewer or repa
 for it and files nothing itself: it ends its final message with a `<followup>title - one line of
 evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
 project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
-body naming the source ticket and the phase; a title already filed in the run is filed once, and a follow-up that names the same `path:line` as one already filed for the same source ticket is a comment on that issue, not a second one. A ticket
-file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
+body naming the source ticket and the phase; a title already filed in the run is filed once, and a follow-up that names the same `path:line` in its title as one already filed for the same source ticket is a comment on that issue, not a second one (so is one whose place is only in its evidence, or a file with no line, when the titles also share two significant words). A ticket
+file goes beside its source ticket's. The closing summary lists each under Needs you, in its `To triage` group, as `filed for
 triage`. A dry run files none and lists them instead. A run that stops before its end (a crash, or a
 safety stop) keeps what its agents named in the run record as they arrive, and files them as it
 stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
@@ -595,7 +596,7 @@ machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
-every five minutes while agents work (it also names a ticket that has waited for a sandbox slot longer than a typical issue takes), and the status view flags a sandbox whose log has been quiet
+every five minutes while anything is in flight - tickets working (a gates step says when it waits for a gates slot, and counts its time from the first gate), landings, and sent-back tickets waiting to resolve a conflict; it also says when the run has waited for a sandbox slot longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
 for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
 `.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
 `USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket, with
@@ -691,7 +692,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push" until the merge is on `origin`'s base branch); `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing |
+| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
 | `paused` | Parked between two phases of a [paused](#-pausing-a-run) run: its sandbox is closed and its branch kept, and the note names the phase it resumes at and the commit (`before review at a1b2c3d`) |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
@@ -702,7 +703,8 @@ the kit's own writes are the only moves it accepts. So a dependant of a ticket i
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
-locally and not yet pushed, and the merged base branch is gated once more. A dry run lands nothing
+locally and not yet pushed, and the merged base branch is gated once more - unless the last landing's own gates
+already ran on that very commit, which the closing summary then says. A dry run lands nothing
 and ends by checking that its tickets and the tracker are unchanged.
 
 > [!TIP]
@@ -830,8 +832,8 @@ a pause the run took itself, so the pause is a wait for the next window, not a s
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
 undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
-the run, counted in the header as "to triage" - as are a dry run's follow-ups, which a real run would
-file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
+the run, under a `### To triage` sub-heading after the rest and counted in the header as "to triage" - as
+are a dry run's follow-ups, which a real run would file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
 you"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
@@ -917,7 +919,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 |---|---|
 | `logs/run.json` | The live run's record: stage, versions, each ticket's state, the plan's usage while it is shown. The status view and `sandcastle report` read it |
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next; a run killed without its exit handler is added by the next run's start. Each carries the run's `load` (the sandboxes it ran at once and its ticket count), by which the estimate picks the runs that price its gate times. `sandcastle report --changelog` reads it |
-| `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time and a `carried` flag on a ticket whose branch was carried into the run (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`; so is a ticket's wait for a machine-wide sandbox slot, on its first `setup` line (the closing summary's per-ticket line says `8m, waited 2h for a slot` for a wait of three minutes or more). A landing gate has lines of its own (phase `landing gates`), so the landings in a row, which can set a run's length, are on record. The estimate and the status view's "usual time" come from it |
+| `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time and a `carried` flag on a ticket whose branch was carried into the run (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`; a ticket has no wait for a machine-wide sandbox slot, since a pipeline takes its slot before it takes the ticket first in line, so the slot goes to that ticket's rank. A landing gate has lines of its own (phase `landing gates`), so the landings in a row, which can set a run's length, are on record. So has every landing that came to its merge (phase `landing`, `result` the way it ended: merged, conflict, red): its `waitMs` is the wait for a machine-wide sandbox slot (left out, as no wait, for a fast-forward, which takes none, and for a conflict git found on the host first), and a requeued ticket's second `setup` line adds to its `waitMs` how long its resolve waited for the tickets ahead of it. The estimate and the status view's "usual time" come from it, all but the `landing` lines, which hold the landing gates' time again |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
@@ -925,7 +927,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
-| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, and only its own record skips both), and the update record `kit-updated` |
+| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit and whose gates proved it, so the verify does not run again on a base tip a landing's gates just proved; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, unless the record before it covered both and nothing they read changed in between: a diff touching no hook directory, kept hook script, package manifest, lockfile or protected path), and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
 
@@ -1425,9 +1427,12 @@ and the kit narrows what can cross it:
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
-  says so). Worktrees share `.git/config`, so a branch given an upstream in one (`git worktree add`
-  from a remote branch, `git push -u`, `git branch -u`, `gh pr create` from a local branch) stops
-  the run too: use `--no-track`, or `git push origin HEAD:<branch>`.
+  says so). Worktrees share `.git/config`, which is compared by key: an upstream
+  (`branch.<name>.remote` and `.merge`) that another worktree gives its own branch (`git worktree add`
+  from a remote branch, `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run
+  prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
+  values, except for keys that run a program): a remote, a hook path, an `include`, `rebase` or
+  `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
   `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare
@@ -1500,10 +1505,13 @@ below its share wants one; with no one wanting one, a free slot is taken as usua
 a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
 that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
 fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
-and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
-wait. The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
-Herdr tab bar shows each live run's share, and a ticket held back by its share says `waits for the
-run's share`. A run started by an older kit knows no shares and
+and still goes before a new ticket within it: while the share is 2 or more, the run's tickets hold
+one slot fewer than the share, which is kept for landing (a run alone keeps one of the machine's
+slots the same way); at a share of 1 the slot is a ticket's, and a landing waits for it to free.
+Gate slots have no shares: they go to the longest wait.
+The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
+Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
+tickets next to start say `waits for the run's share`. A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent; with `USAGE_PAUSE` it
@@ -1611,7 +1619,7 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `withdrawn`, `held`, or `not landed: ... moved after its gates passed` | The ticket was closed, unqueued or labelled `ready-for-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
 | `conflict resolution changed <files>, which merged cleanly` | The short resolver prompt of a re-run's base merge edited files git had merged without a conflict, so the kit held the ticket for a person (see [Re-runs](#-re-runs)); nothing was landed. Diff the branch against the base for the named files and check that no line another ticket landed there was lost. If the edits are sound, `sandcastle land <n>` lands the branch; if not, fix it on the branch first, or `sandcastle requeue <n>` with a note to try again. |
-| A branch conflicts at landing | The run sends it back once, in the same run: once the green branches that share its files have landed, its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued (unless a ticket that landed after the resolve began caused it: then it goes back once more): its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
+| A branch conflicts at landing | The run sends it back once, in the same run (a branch whose pipeline finds it no longer merges, before its review or its gates, skips them and goes back the same way): once the green branches that share its files have landed, its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued (unless a ticket that landed after the resolve began caused it: then it goes back once more): its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |
 | `usually 5m` in the status view, TIME in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
 | `3x over, usually 5m`, note and TIME in red | The step has run over three times its usual time. Nothing stops an agent pass that keeps producing output short of its idle timeout, so read its log (a test command that hangs and restarts burns tokens the whole while). |

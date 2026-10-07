@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, greenProofOfBase, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -42,13 +42,13 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { strayChanges, strayNote } from "./resolution.ts";
+import { mergeTree, mergeTreeSupported, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
-import { closingReport, summary } from "./report.ts";
+import { closingReport, summary, verifySkippedLine } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
@@ -57,10 +57,10 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -75,7 +75,12 @@ type Outcome = {
   branch: string;
   // "green", never "shipped": the pane titles said shipped while nothing had
   // landed, and the status table said queued - a run read as going in circles.
-  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held";
+  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held" | "conflict";
+  /**
+   * What its branch no longer merged onto the base with (`conflict`), found on the host before its review or its
+   * gates: the pipeline stopped there, and the scheduler sends it back to resolve the merge (`conflictBefore`).
+   */
+  conflict?: Conflict;
   /** Why the kit held a finished branch for a person (`held`): nothing was handed back by an agent. */
   heldNote?: string;
   /** The agent handed the ticket back through the tracker's hold label (`nochange`), read as the pipeline ended (`handBack`). */
@@ -165,6 +170,8 @@ export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, 
   if (result.status === "rejected") return { kind: "crashed", error: result.reason, causes: [...tampered, ...(limited ? [{ kind: "plan limit" as const, ticket: issue }] : [])] };
   const value = result.value;
   if (value.status === "green" || value.status === "merged-earlier") return check ? { kind: "stopped", cause: tampered[0] } : { kind: "green", green: value };
+  // Never pushed on as green: the gates vouched for no commit of it. The requeue-once rule decides what comes next.
+  if (value.status === "conflict" && value.conflict) return { kind: "conflict", outcome: value, conflict: value.conflict, ...(check && { causes: tampered }) };
   return { kind: "pipeline", outcome: value, ...(check && { causes: tampered }) };
 };
 
@@ -187,7 +194,7 @@ export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get
 // What an issue's pane and sidebar entry say when its pipeline ends - the
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
-  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
+  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human", conflict: "merge conflict" })[o.status];
 
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
@@ -393,28 +400,88 @@ const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
 // One problem named by two agents, or twice by one, is one ticket.
 const titleKey = (title: string) => title.replace(/\s+/g, " ").trim().toLowerCase();
-// A `path:line` an agent names, in the title first, else the evidence: the other way two passes of one
-// ticket (implement, review) say the same finding in different words. The first one named is the finding's
-// place; a path is `dir/file.ext` or `file.ext`, so a `host:8080` or a bare `word:3` is not one.
-const PLACE = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+):(\d+)/;
-// Per source ticket: the same place named for another ticket is a different finding.
-const placeKey = (f: FollowUp): string | undefined => {
-  const at = PLACE.exec(f.title) ?? PLACE.exec(f.evidence);
-  return at ? `${f.from}\0${at[1].replace(/^\.\//, "")}:${Number(at[2])}` : undefined;
+// A `path:line` an agent names: the other way two passes of one ticket (implement, review) say the same
+// finding in different words. A path is `dir/file.ext` or `file.ext`; whether it is a place is up to the
+// base tree (`exists`), so `api.example.com:443` is not one and a root-level `status.sh:40` is.
+const PLACE = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+):(\d+)/g;
+// A path with no line behind it (`in site/js/status.js`, `(status.sh)`).
+const FILE_ONLY = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+)(?![\w@/-]|:\d|\.\w)/g;
+// Words that say nothing of what a finding is about: two titles share a finding by what remains.
+const STOPWORDS = new Set(
+  ("about after again also because before being between could does doing done each either else from have here into just like make more most much must never only other over same should since some still such than that their them then there these they this those through under until very were what when where which while will with without would your").split(" "),
+);
+// The significant words of a title: 4 letters or more, no stopword, and not the path itself.
+const significantWords = (title: string, path: string): Set<string> =>
+  new Set(
+    title.replace(path, " ").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+  );
+/** Where a finding is: the source ticket's file, and its line when the agent gave one. */
+type Seat = { from: string; path: string; line?: number; firm: boolean; words: Set<string> };
+/** What `placeSeat` asks of the base tree: is this path a file there? A host such as `api.example.com` is not. */
+export type PathExists = (path: string) => boolean;
+const cleanPath = (p: string) => p.replace(/^(?:\.\/)+/, "");
+// The first match of `re` in `text` whose path is a file of the base tree.
+const firstFile = (re: RegExp, text: string, exists: PathExists) => {
+  for (const m of text.matchAll(re)) {
+    const path = cleanPath(m[1]);
+    if (exists(path)) return { path, line: m[2] === undefined ? undefined : Number(m[2]), whole: m[1] };
+  }
+  return undefined;
 };
+// A place in the title is used as it is (`firm`). One found only in the evidence, or a file with no line in the
+// title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
+// another finding is about, and two titles that name a file say little by it. A file the title names comes before
+// a line the evidence cites in another file, which would otherwise hide it from a close title naming the same file;
+// the evidence may still give that file's line.
+const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
+  const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
+    from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
+  });
+  const inTitle = firstFile(PLACE, f.title, exists);
+  if (inTitle) return seat(inTitle, true);
+  const fileOnly = firstFile(FILE_ONLY, f.title, exists);
+  if (fileOnly) {
+    const line = [...f.evidence.matchAll(PLACE)].find((m) => cleanPath(m[1]) === fileOnly.path)?.[2];
+    return seat({ ...fileOnly, line: line === undefined ? undefined : Number(line) }, false);
+  }
+  const inEvidence = firstFile(PLACE, f.evidence, exists);
+  return inEvidence ? seat(inEvidence, false) : undefined;
+};
+/** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
+export const onBase = (root: string, base: string): PathExists => (path) => {
+  try {
+    return sh("git", ["cat-file", "-t", `${base}:${path}`], root) === "blob";
+  } catch {
+    return false;
+  }
+};
+const WORDS_SHARED = 2;
+// Per source ticket: the same place named for another ticket is a different finding. Two findings at one line
+// are one when either names it in its title; otherwise (or with no line on one side) their titles must overlap.
+const sameFinding = (a: Seat, b: Seat): boolean => {
+  if (a.from !== b.from || a.path !== b.path) return false;
+  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= WORDS_SHARED;
+  if (a.line !== undefined && b.line !== undefined) return a.line === b.line && (a.firm || b.firm || overlap);
+  return overlap;
+};
+/** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
+export type Places = Map<string, { id: string; seat: Seat }[]>;
+const placesKey = (s: Seat) => `${s.from}\0${s.path}`;
+const placeOf = (places: Places, seat: Seat | undefined) => (seat ? places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat)) : undefined);
+const addPlace = (places: Places, seat: Seat, id: string) => places.set(placesKey(seat), [...(places.get(placesKey(seat)) ?? []), { id, seat }]);
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
   `Named again by the ${f.phase} agent working on ${ref(f.from)}, at the same place, as "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
 // The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
 // requeued) hears its agents name the same problem again, and that is still one ticket.
 const filedThisRun = new Set<string>();
-// The issue each place was filed as, by every turn of this run (`placeKey`): the same finding in other words is a comment on it.
-const placesThisRun = new Map<string, string>();
+// The issue each place was filed as, by every turn of this run (`placeSeat`): the same finding in other words is a comment on it.
+const placesThisRun: Places = new Map();
 
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A follow-up naming the
- * same `path:line` as one already filed for the same source ticket, whatever its title, is not filed:
+ * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
  * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
@@ -424,17 +491,17 @@ const placesThisRun = new Map<string, string>();
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref" | "comment">,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Map<string, string> },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
-  const places = o.places ?? new Map<string, string>();
+  const places = o.places ?? new Map();
   const out: FiledFollowUp[] = [];
   for (const f of followUps) {
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
     const at = { title: f.title, from: f.from, phase: f.phase };
-    const place = placeKey(f);
-    const first = place && !o.dryRun ? places.get(place) : undefined;
+    const place = placeSeat(f, o.exists);
+    const first = o.dryRun ? undefined : placeOf(places, place)?.id;
     if (first !== undefined) {
       try {
         await o.write(() => {
@@ -459,7 +526,7 @@ export const fileFollowUps = async (
       const id = await o.write(() => tracker.create(f.title, body, f.from));
       out.push({ ...at, id });
       seen.add(key);
-      if (place) places.set(place, id);
+      if (place) addPlace(places, place, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -473,7 +540,7 @@ export const fileFollowUps = async (
  * a safety stop) never reaches the filing after the landings, and its lines were then in memory only -
  * not in the closing summary, and unknown to the next run. A title is listed once, and not at all when
  * an earlier turn of the run filed it (`seen`). A line naming the `path:line` of one already heard for
- * the same source ticket (`placeKey`) is not listed: it is held until that one is filed, and then
+ * the same source ticket (`placeSeat`) is not listed: it is held until that one is filed, and then
  * commented on its issue. Held, it is retried by each `file` until it is commented; one whose first
  * failed to file stays held, and a dry run lists and comments none.
  *
@@ -495,15 +562,16 @@ export const createFollowUpBook = (
     dryRun: boolean;
     write: (fn: () => string) => Promise<string>;
     seen?: Set<string>;
-    places?: Map<string, string>;
+    places?: Places;
+    exists: PathExists;
   },
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
-  const places = o.places ?? new Map<string, string>();
+  const places = o.places ?? new Map();
   const heard: FollowUp[] = [];
   // The same finding as a listed one, in other words: comments on its issue once there is one.
   let repeats: FollowUp[] = [];
-  const listedPlaces = new Set<string>();
+  const listedPlaces: Places = new Map();
   // By title, in the order the lines arrived: what the run record's `followUps` holds.
   const listed = new Map<string, FiledFollowUp>();
   const keep = () => run.update({ followUps: [...listed.values()] });
@@ -512,12 +580,12 @@ export const createFollowUpBook = (
       const key = titleKey(f.title);
       if (seen.has(key)) return;
       if (!listed.has(key)) {
-        const place = placeKey(f);
-        if (place && (listedPlaces.has(place) || places.has(place))) {
+        const place = placeSeat(f, o.exists);
+        if (place && (placeOf(listedPlaces, place) || placeOf(places, place))) {
           repeats.push(f);
           return;
         }
-        if (place) listedPlaces.add(place);
+        if (place) addPlace(listedPlaces, place, "");
       }
       heard.push(f);
       if (listed.has(key)) return;
@@ -536,6 +604,7 @@ export const createFollowUpBook = (
         write: refuse ? async () => { throw new Error(unsafe); } : o.write,
         seen,
         places,
+        exists: o.exists,
       });
       if (settled.length) {
         for (const s of settled) listed.set(titleKey(s.title), s);
@@ -543,9 +612,9 @@ export const createFollowUpBook = (
       }
       if (!o.dryRun && !refuse) {
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
-        const ready = repeats.filter((f) => places.has(placeKey(f)!));
+        const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists)));
         // A comment that fails is not recorded: it stays held, and the next `file` tries it again.
-        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places });
+        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists });
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
       }
       if (!settled.length) return [];
@@ -624,16 +693,68 @@ export const typicalIssueMs = (typical: Record<string, number>): number | undefi
 const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
 
 /**
- * The run's heartbeat: the tickets working and their step, then the tickets that have waited for a
- * sandbox slot for longer than a typical issue takes (`typicalMs`; with no history nothing is named, as
- * the estimate says nothing then). No line when nothing works and no such ticket waits.
+ * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
+ * it says one), the sent-back tickets waiting to resolve, then the run's wait for a sandbox slot (`slotWait`, when
+ * its oldest open wait began; `createSlotWaits`) once it is longer than a typical issue takes (`typicalMs`; with
+ * no history nothing is said, as the estimate says nothing then). The wait is the run's, not a ticket's: a worker
+ * leases its slot before it takes a ticket. No line when none of these is in flight.
  */
-export const heartbeatLine = (o: { now: number; clock: string; working: { ref: string; phase: string; since: number }[]; slotWaits: { ref: string; since: number }[]; typicalMs?: number }): string | undefined => {
-  const stalled = o.typicalMs === undefined ? [] : o.slotWaits.filter((w) => o.now - w.since > o.typicalMs!);
+export const heartbeatLine = (o: {
+  now: number;
+  clock: string;
+  working: { ref: string; phase: string; since: number }[];
+  landing?: { ref: string; phase?: string; since: number }[];
+  resolving?: { ref: string; since: number }[];
+  slotWait?: number;
+  typicalMs?: number;
+}): string | undefined => {
+  const stalled = o.typicalMs !== undefined && o.slotWait !== undefined && o.now - o.slotWait > o.typicalMs;
   const parts: string[] = [];
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
-  if (stalled.length) parts.push(`waiting for a sandbox slot: ${stalled.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (stalled) parts.push(`waiting for a sandbox slot: ${minutes(o.now - o.slotWait!)}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
+};
+
+/**
+ * The run's waits for a machine-wide sandbox slot: a pipeline worker's for the next ticket (slot first,
+ * `Work.slot` in src/schedule.ts) and a ticket's own as a pause ends. None of them is a ticket's in the queue, so
+ * what they say is the run's: `share` is told each time "a wait is held back by the run's share" turns true or
+ * false (the run record's `waitsForShare`), and `since` is when the oldest wait still open began (the heartbeat).
+ * Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`, and `end`s as it is served or given up.
+ */
+export const createSlotWaits = (share: (held: boolean) => void, now: () => number = Date.now) => {
+  const open = new Map<object, { since: number; share: boolean }>();
+  let told = false;
+  const tell = () => {
+    const held = [...open.values()].some((w) => w.share);
+    if (held === told) return;
+    told = held;
+    share(held);
+  };
+  return {
+    begin() {
+      const key = {};
+      open.set(key, { since: now(), share: false });
+      return {
+        onWait(why: WaitReason) {
+          const wait = open.get(key);
+          if (!wait) return;
+          wait.share = why === "share";
+          tell();
+        },
+        end() {
+          open.delete(key);
+          tell();
+        },
+      };
+    },
+    get since(): number | undefined {
+      const all = [...open.values()].map((w) => w.since);
+      return all.length ? Math.min(...all) : undefined;
+    },
+  };
 };
 
 /**
@@ -708,8 +829,9 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
           waitsFor(run, c.id, c.freed, c.wait?.with);
           return;
         case "resolve waits": {
-          const note = `waits to resolve its conflict until ${c.for.map(o.ref).join(", ")} ${c.for.length > 1 ? "have" : "has"} landed`;
-          o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
+          const note = resolveWaitNote(o.ref, c);
+          // Said once: a list that changes later updates the record's note, not the log.
+          if (c.first) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
           run.ticket(c.id, { note });
           return;
         }
@@ -719,6 +841,17 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
       }
     },
   };
+};
+
+/**
+ * A resolve wait's note: the branches queued to land have landed, and a ticket still in its pipeline "lands or
+ * leaves the run" - it may never reach a landing, so "has landed" would promise one.
+ */
+export const resolveWaitNote = (ref: (id: string) => string, c: { for: string[]; running: string[] }): string => {
+  const list = (ids: string[], one: string, many: string) => `${ids.map(ref).join(", ")} ${ids.length > 1 ? many : one}`;
+  const queued = c.for.filter((id) => !c.running.includes(id));
+  const parts = [...(queued.length ? [list(queued, "has landed", "have landed")] : []), ...(c.running.length ? [list(c.running, "lands or leaves the run", "land or leave the run")] : [])];
+  return `waits to resolve its conflict until ${parts.join(" and ")}`;
 };
 
 /** The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment. */
@@ -740,32 +873,13 @@ export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, 
   return typeof prior?.started === "number" ? { attemptStarted: at } : { started: at, attemptStarted: at };
 };
 
-/** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
-export const SLOT_WAIT_SHOWN = 3 * 60_000;
-
-/** The summary line's time for a ticket: its work, and a wait of `SLOT_WAIT_SHOWN` or more for a machine-wide sandbox slot (not in that work). */
-export const ticketTime = (workMs: number | undefined, slotWaitMs: number | undefined): string => {
-  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
-  if (slotWaitMs === undefined || slotWaitMs < SLOT_WAIT_SHOWN) return work && ` ${work}`;
-  const m = Math.round(slotWaitMs / 60_000);
-  const long = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ""}`;
-  return `${work && ` ${work},`} waited ${long} for a slot`;
-};
-
 /**
- * An attempt's start: its sandbox slot, taken again after each pause that ended a wait for one (`take` answers
- * false; `park` waits out the pause). Returns the time spent waiting for the slot, the time parked left out:
- * the slot is taken before the ticket's first step, so no step's timer would hold the wait.
+ * The summary line's time for a ticket: its work. A wait for a machine-wide sandbox slot is no ticket's: a worker
+ * leases its slot before it takes a ticket (slot first), so the wait is the run's (`createSlotWaits`).
  */
-export const takeStartSlot = async (take: () => Promise<boolean>, park: () => Promise<void>, now: () => number = Date.now): Promise<number> => {
-  let waitMs = 0;
-  for (;;) {
-    const asked = now();
-    const got = await take();
-    waitMs += now() - asked;
-    if (got) return waitMs;
-    await park();
-  }
+export const ticketTime = (workMs: number | undefined): string => {
+  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
+  return work && ` ${work}`;
 };
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
@@ -807,6 +921,8 @@ export type PipelineContext = {
   results: readonly PromiseSettledResult<Outcome>[];
   /** Each ticket's red landing gate, for its requeue (`repairFromRed`); read once, by its next pipeline. */
   reds: Map<string, RedLanding>;
+  /** The tickets landed so far in this run, with the files each changed (`LandContext.landed`): who a branch that no longer merges collides with. None, and it is named with no one. */
+  landed?: ReadonlyMap<string, { files: string[]; commit: string }>;
   /** Who is repairing which failure, shared by the run's pipelines: a ticket red on one another is repairing waits for that landing. A pipeline given none waits for no one. */
   fixes?: FixBoard;
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
@@ -835,6 +951,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
   const fixes = ctx.fixes ?? createFixBoard();
   const waited = ctx.waited ?? new Map<string, number>();
+  const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
   const base = project.baseBranch;
   const ref = tracker.ref;
   // A run that died between merging a branch and closing its issue leaves the
@@ -915,10 +1032,36 @@ export const createPipeline = (ctx: PipelineContext) => {
     return fileOnly && failureKey(failure) !== failureKey(onBase) ? undefined : tests;
   };
 
+  // Read once: `git --version` does not change during a run.
+  let mergeTreeOk: boolean | undefined;
+  /**
+   * Whether `branch` still merges onto the base's tip, by git's own merge on the host as landing checks it (`landOne`):
+   * the files that conflict and the tickets landed in this run that changed them, or undefined when it merges. Another
+   * ticket that landed over the same lines leaves a branch whose review and gates landing would throw away - a review
+   * of a doomed branch once took most of a run's lost time - so the pipeline asks before its review and again before
+   * its gates. A conflict only in generated files is none (landing regenerates them), nor is a check that cannot run
+   * (git older than 2.38, a git call that failed): the pipeline goes on as it did before.
+   */
+  const conflictBefore = (branch: string): Conflict | undefined => {
+    try {
+      mergeTreeOk ??= mergeTreeSupported(project.root);
+      if (!mergeTreeOk) return undefined;
+      const head = sh("git", ["rev-parse", branch], project.root);
+      const files = [...mergeTree(project.root, sh("git", ["rev-parse", base], project.root), head).conflicted];
+      if (!files.length || regensFor(files, project.generated)) return undefined;
+      // The landed tickets this branch has never seen that changed a file of the conflict, as landing names them.
+      const others = [...landed].filter(([, r]) => files.some((f) => r.files.includes(f)) && !isAncestor(project.root, r.commit, head)).map(([id]) => id);
+      return { files, with: others };
+    } catch {
+      return undefined;
+    }
+  };
+
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
-  // `at.slotWaitMs`: how long the attempt waited for its machine-wide sandbox slot, which it took before this
-  // pipeline began: the first `setup` step records it as its `waitMs`.
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; slotWaitMs?: number }): Promise<Outcome> => {
+  // `at.resolveWaitMs`: a sent-back ticket's wait for the tickets ahead of its resolve, which came before the attempt:
+  // the first `setup` step records it as its `waitMs`. No wait for a sandbox slot is a ticket's: its worker held the
+  // slot before it took the ticket (slot first).
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; resolveWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -941,7 +1084,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       open(branch),
       requeuedAs.get(issue.id),
       undefined,
-      at?.slotWaitMs,
+      at?.resolveWaitMs,
     ).catch(async (error) => {
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
@@ -1032,6 +1175,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
       lockWorktree(sandbox.worktreePath, project.root);
+      // A branch that no longer merges onto the base ends its pipeline at once: no review or gate run is spent on it,
+      // and the scheduler sends it back to resolve the merge (the requeue-once rule). Never a green, which would tell
+      // landing that the gates vouched for a commit they never ran on.
+      const conflicted = (before: "review" | "gates", o: Pick<Outcome, "reviewCommits" | "repairs" | "idleRepairs" | "carried">): Outcome | undefined => {
+        const conflict = conflictBefore(branch);
+        if (!conflict) return undefined;
+        console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
+        return { issue: issue.id, branch, status: "conflict", conflict, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
+      };
       // A branch kept from an earlier run (red, conflicted, crashed) forks from
       // an older base. Asked to "merge it in", an agent that found the work
       // already done said so and stopped, and the branch hit the same conflict
@@ -1311,6 +1463,9 @@ export const createPipeline = (ctx: PipelineContext) => {
           return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, gates: [] };
         }
 
+        const beforeReview = conflicted("review", { reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+        if (beforeReview) return beforeReview;
+
         // Only a base merge since the last completed review: review the merge, not the branch.
         const since = narrowReviewBase(project.root, base, issue.id);
         if (since !== undefined && since === sh("git", ["rev-parse", branch], project.root)) {
@@ -1380,6 +1535,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
       // A land-only re-run gives one only when a narrow review ran in this sandbox (after a resolve, or for a carried merge).
       if (agentsRan) await agentBaseline(sandbox);
+
+      const beforeGates = conflicted("gates", { reviewCommits, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+      if (beforeGates) return beforeGates;
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
@@ -1918,11 +2076,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const runId = run.startedAt;
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<string, { phase: string; since: number }>();
+  // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
+  const landing = new Map<string, { phase?: string; since: number }>();
+  const resolving = new Map<string, number>();
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
-  // Each issue's waits for a machine-wide sandbox slot at the start of an attempt: outside `took`, named in the summary.
-  const slotWaited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Each issue's step, and when it started, go to run.json's tickets: the
@@ -2097,22 +2256,45 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId);
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
-      wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
-      gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
+      wait: () => {
+        // The heartbeat says a wait as a wait; the gate time is counted from the first gate (below).
+        const step = active.get(id) ?? landing.get(id);
+        if (step) step.phase = "gates: waiting for a gates slot";
+        run.ticket(id, { note: "waiting for a gates slot" });
+      },
+      gate: (i, name) => {
+        // The step's `since` is set before the wait for a gates slot: the gate time starts at the first gate.
+        const step = active.get(id) ?? landing.get(id);
+        if (step) {
+          step.phase = "gates";
+          if (i === 0) step.since = Date.now();
+        }
+        run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` });
+      },
       log: gatesLog(project, id),
     }, priority);
   };
 
+  // The run's waits for a sandbox slot. One held back by the run's share, not only by a full pool, is the run
+  // record's `waitsForShare`, which the status view's next-to-start rows say.
+  const slotWaits = createSlotWaits((held) => {
+    try {
+      run.update({ waitsForShare: held || undefined });
+    } catch {
+      /* the record's note only: a throw here would end the wait it describes */
+    }
+  });
   // A run is silent for as long as its agents are, which for a review can be
-  // half an hour. One line every five minutes says it is alive and where, and names a ticket
-  // that has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
-  const slotWaits = new Map<string, number>();
+  // half an hour. One line every five minutes says it is alive and where, and says when the run
+  // has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
   const heartbeat = setInterval(() => {
     const line = heartbeatLine({
       now: Date.now(),
       clock: new Date().toTimeString().slice(0, 5),
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
-      slotWaits: [...slotWaits].map(([n, since]) => ({ ref: ref(n), since })),
+      landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
+      resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
+      slotWait: slotWaits.since,
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
     if (line) console.log(line);
@@ -2147,7 +2329,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notes: Note[] = [];
   // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
   // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
-  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun });
+  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun, exists: onBase(project.root, project.baseBranch) });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
@@ -2164,7 +2346,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(gateProject, image, planFile),
-    greenBase: (commit) => noteGreenCommit(gateProject, image, planFile, commit),
+    greenBase: (commit, by) => noteGreenCommit(gateProject, image, planFile, commit, by),
     runId,
     withdrawal,
     host,
@@ -2174,6 +2356,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     landed: new Map(),
     slotWanted,
     reds,
+    timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };
 
   const results: PromiseSettledResult<Outcome>[] = [];
@@ -2239,6 +2422,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     requeuedAs,
     results,
     reds,
+    landed: ctx.landed,
     fixes,
     reports,
     notes,
@@ -2263,10 +2447,36 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     tampered,
   });
 
-  // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
-  // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
-  const attempt = async (issue: Issue, { last, juncture, paused }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
-    await pausing.waitOutPause(usagePause !== undefined, paused, juncture);
+  // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
+  // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
+  // `keep`: beside another run the tickets leave the last slot of the run's share to landing, as `pipelineWorkers`
+  // leaves one of the machine's for a run alone; a dry run lands nothing.
+  const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
+    await slotTurn(slotWanted);
+    const wait = slotWaits.begin();
+    try {
+      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp, false, !DRY_RUN);
+    } finally {
+      wait.end();
+    }
+  };
+  // One attempt of a ticket (schedule.ts runs it), in the sandbox slot its worker leased (`slot`): the usage check and
+  // the tracker's word before it, then its pipeline.
+  const attempt = async (issue: Issue, { last, juncture, paused, resolveWaitMs, slot }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number; slot?: SlotLease }): Promise<Attempted<Outcome, Outcome>> => {
+    // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
+    // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
+    let lease: SlotLease | undefined = slot;
+    const take = async () => {
+      lease = await sandboxSlot(ref(issue.id), paused);
+      return lease !== undefined;
+    };
+    const give = () => {
+      lease?.release();
+      lease = undefined;
+    };
+    // At its start the ticket gives the slot back for a pause and takes one only once it goes on (below).
+    const start: Park = { suspend: async () => give(), resume: async () => {} };
+    await pausing.waitOutPause(usagePause !== undefined, paused, (phase) => juncture(phase, start));
     const line = await usageStop(env, undefined, () => planUsage.find((u) => u.provider === "claude"));
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
@@ -2279,31 +2489,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     })();
     if (called) return { kind: "not begun", why: { kind: "withdrawn", reason: called.reason } };
-    // A ticket that waits for the run's share, not only for a slot, says so; the note goes with its next state.
-    let shareNote = false;
-    const waitNote = (why: WaitReason) =>
-      bookkeep(issue.id, () => {
-        if (why === "share") run.ticket(issue.id, { note: "waits for the run's share" });
-        else if (shareNote) run.ticket(issue.id, { note: null });
-        shareNote = why === "share";
-      });
-    // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
-    // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
-    let lease: SlotLease | undefined;
-    const take = async () => {
-      await slotTurn(slotWanted);
-      slotWaits.set(issue.id, Date.now());
-      try {
-        lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
-      } finally {
-        slotWaits.delete(issue.id);
-      }
-      return lease !== undefined;
-    };
-    const give = () => {
-      lease?.release();
-      lease = undefined;
-    };
     const parkable = (park?: Park): Park => ({
       suspend: async () => {
         await park?.suspend();
@@ -2317,12 +2502,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     });
     const result = await (async () => {
       try {
-        // The start's wait for its slot. A slot taken again on a resume is in the time parked, so it is not counted here.
-        const slotWaitMs = await takeStartSlot(take, () => juncture("start", { suspend: async () => {}, resume: async () => {} }));
-        slotWaited.set(issue.id, (slotWaited.get(issue.id) ?? 0) + slotWaitMs);
-        // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
-        await juncture("start", parkable());
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, slotWaitMs });
+        // A pause gives the slot back and waits; the ticket then leases its own, in the time parked. Its worker's slot
+        // was gone too when the run was paused as the attempt began.
+        for (await juncture("start", start); !lease; await juncture("start", start)) await take();
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, resolveWaitMs });
       } finally {
         give();
       }
@@ -2390,6 +2573,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     holdAwake,
     refresh: () => view.refresh(),
   });
+  // The landing worker's ports, with each landing in flight on the heartbeat's list.
+  const landingPorts = landingWork(ctx);
+  const landings: typeof landingPorts = {
+    ...landingPorts,
+    land: async (o) => {
+      landing.set(o.issue, { since: Date.now() });
+      try {
+        return await landingPorts.land(o);
+      } finally {
+        landing.delete(o.issue);
+      }
+    },
+  };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
     switch (c.kind) {
@@ -2401,7 +2597,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
         ledger.tell(c);
         return holds.tell(run, c);
+      case "resolve waits":
+        // The heartbeat's wait counts from the first telling; a later one only changes the list.
+        if (!resolving.has(c.id)) resolving.set(c.id, Date.now());
+        return holds.tell(run, c);
+      case "resolve starts":
+        resolving.delete(c.id);
+        return holds.tell(run, c);
       case "ended":
+        // A wait the run's stop cut short is told no "resolve starts".
+        resolving.delete(c.id);
         // Its label refuses it, found as it would have started: that ticket only, never the run.
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
@@ -2463,7 +2668,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
+    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       usageWatch?.stop();
@@ -2517,11 +2722,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
+  let verifySkipped: { commit: string; by?: string } | undefined;
   let newDockerfiles: string[] = [];
   if (merged.length > 1 || regenerated > 0) {
-    // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
-    setDemand(1);
-    const gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
+    // Verify is proof that the merged base is green: a landing's gates, or those of a branch that held the base, may
+    // have run on exactly this tip, and the green-base record says so (it names no tip after a failed note: then it runs).
+    verifySkipped = greenProofOfBase(gateProject, image, planFile);
+    let gated: { gates: Gate[]; failures: GateRun["failures"] } = { gates: [], failures: [] };
+    if (verifySkipped) console.log(`${verifySkippedLine(base, verifySkipped)}.`);
+    else {
+      // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
+      setDemand(1);
+      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
+    }
     verify = gated.gates;
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
@@ -2550,7 +2763,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const o = r.value;
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
-    const time = ticketTime(took.get(o.issue), slotWaited.get(o.issue));
+    const time = ticketTime(took.get(o.issue));
     const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }
@@ -2567,7 +2780,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     dryRunCheck,
   });

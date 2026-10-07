@@ -23,7 +23,8 @@ export type Resolution = {
   gitVersion?: string;
 };
 
-const supported = (root: string, gitVersion?: string) => {
+/** Whether this git has `merge-tree --write-tree` (2.38+). `gitVersion` is `git --version`'s output, injected by a test. */
+export const mergeTreeSupported = (root: string, gitVersion?: string) => {
   let out = gitVersion;
   try {
     out ??= sh("git", ["--version"], root);
@@ -32,6 +33,27 @@ const supported = (root: string, gitVersion?: string) => {
   }
   const m = out?.match(/(\d+)\.(\d+)/);
   return !!m && (Number(m[1]) > MIN_GIT[0] || (Number(m[1]) === MIN_GIT[0] && Number(m[2]) >= MIN_GIT[1]));
+};
+
+/**
+ * Git's own automatic merge of `ours` and `theirs`, written to the object store and nowhere else:
+ * the merged tree (its conflicted files as git left them) and the paths that conflicted. Throws
+ * when git fails; the caller decides what an unanswered check means. Needs git 2.38
+ * (`mergeTreeSupported`).
+ */
+export const mergeTree = (root: string, ours: string, theirs: string): { tree: string; conflicted: Set<string> } => {
+  // Exit 1 means conflicts, which is the case callers ask about: the output is still on stdout.
+  let out: string;
+  try {
+    out = sh("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs], root);
+  } catch (error) {
+    const stdout = (error as { status?: number; stdout?: string }).status === 1 ? (error as { stdout?: string }).stdout : undefined;
+    if (stdout === undefined) throw error;
+    out = stdout;
+  }
+  // `<tree>\0<conflicted path>\0...`; with -z the tree id is NUL-terminated and `sh` trims only the ends.
+  const [tree, ...rest] = out.split("\0");
+  return { tree, conflicted: new Set(rest.filter(Boolean)) };
 };
 
 /**
@@ -46,20 +68,9 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
     said = true;
     return undefined;
   };
-  if (!supported(root, gitVersion)) return unavailable(`it needs git ${MIN_GIT.join(".")} or newer`);
+  if (!mergeTreeSupported(root, gitVersion)) return unavailable(`it needs git ${MIN_GIT.join(".")} or newer`);
   try {
-    // Exit 1 means conflicts, which is the case here: the output is still on stdout.
-    let out: string;
-    try {
-      out = sh("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs], root);
-    } catch (error) {
-      const stdout = (error as { status?: number; stdout?: string }).status === 1 ? (error as { stdout?: string }).stdout : undefined;
-      if (stdout === undefined) throw error;
-      out = stdout;
-    }
-    // `<tree>\0<conflicted path>\0...`; with -z the tree id is NUL-terminated and `sh` trims only the ends.
-    const [tree, ...rest] = out.split("\0");
-    const conflicted = new Set(rest.filter(Boolean));
+    const { tree, conflicted } = mergeTree(root, ours, theirs);
     // No rename detection: with it a path list names only a rename's target, and a stray
     // deletion paired with an added file would hide behind that path.
     const changed = sh("git", ["diff", "--no-renames", "--name-only", "-z", tree, resolved], root).split("\0").filter(Boolean);

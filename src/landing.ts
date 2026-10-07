@@ -24,6 +24,8 @@ import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
+import { mergeTree, mergeTreeSupported } from "./resolution.ts";
+import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, readHeads } from "./run.ts";
@@ -293,8 +295,8 @@ export type LandContext = {
   dryRun: boolean;
   /** Opens a sandbox on a branch, for redoing a conflict confined to generated files. */
   opener: Opener;
-  /** Told the commit a landing's gates passed on once it is the base's tip: the next turn's base check need not gate it again. */
-  greenBase?: (commit: string) => void;
+  /** Told the commit a landing's gates passed on once it is the base's tip, and the ticket whose gates they were: the next turn's base check, and the end-of-run verify, need not gate it again. */
+  greenBase?: (commit: string, by: string) => void;
   /** The run's start time, which a landing sandbox's peak memory is filed under. */
   runId?: string;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
@@ -311,8 +313,12 @@ export type LandContext = {
   landed: Map<string, { files: string[]; commit: string }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
+  /** `git --version`'s output, injected by a test to simulate a git older than 2.38 (the conflict precheck then does not run). */
+  gitVersion?: string;
   /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
   reds?: Map<string, RedLanding>;
+  /** Told each landing that reached its merge, with its whole time and its wait for a sandbox slot: the run's `landing` timings line. */
+  timed?: (issue: string, took: { elapsed: number; slotWaitMs: number }, landed: Landed) => void;
 };
 
 /** What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit. */
@@ -371,7 +377,8 @@ export const isAncestor = (root: string, ancestor: string, of: string) => {
   }
 };
 
-export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> => {
+/** `at.slotWaited`: told how long the landing waited for its sandbox slot, once it has it. */
+export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void }): Promise<Landed> => {
   const { project, tracker, base, gateNames, reports, run, dryRun, opener, withdrawal, host, landed } = ctx;
   const ref = tracker.ref;
   const root = project.root;
@@ -485,15 +492,31 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     // The ticket's own gates ran on this tree (the branch holds the base's tip, so the merge adds
     // no content), and the base now names it: the next turn's check need not gate it again.
     try {
-      ctx.greenBase?.(after);
+      ctx.greenBase?.(after, ref(o.issue));
     } catch {
       /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
     }
   } else {
+    // Git's own merge of the base tip and the gated head, on the host, before a sandbox slot is taken: a
+    // branch that no longer merges would otherwise wait for a slot and start a sandbox to find that out.
+    // A conflict confined to generated files is left to the sandbox, which regenerates them; so is a
+    // check that cannot run (git older than 2.38, or a git call that failed).
+    let conflicted: string[] = [];
+    try {
+      if (mergeTreeSupported(root, ctx.gitVersion)) conflicted = [...mergeTree(root, before, o.head!).conflicted];
+    } catch {
+      conflicted = [];
+    }
+    if (conflicted.length && !regensFor(conflicted, project.generated)) {
+      // Named with the landed ticket it collides with, as the sandbox's conflict is.
+      const other = since().filter(([, r]) => conflicted.some((f) => r.files.includes(f))).map(([id]) => id);
+      return { kind: "conflict", files: conflicted, with: other };
+    }
     let result: Awaited<ReturnType<typeof landInSandbox>>;
     try {
       const wanted = ctx.slotWanted ?? { n: 0 };
       let waiting = true;
+      const asked = Date.now();
       wanted.n++;
       try {
         // Priority: `slotTurn` holds back only the pipelines that have not asked the pool yet, and the pool
@@ -501,6 +524,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
         result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () => {
           wanted.n--;
           waiting = false;
+          at?.slotWaited?.(Date.now() - asked);
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
@@ -563,7 +587,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       record(before, result.commit);
       // The gates ran in the sandbox on exactly this tree (a squash keeps it), and the base now names it.
       try {
-        ctx.greenBase?.(result.commit);
+        ctx.greenBase?.(result.commit, ref(o.issue));
       } catch {
         /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
       }
@@ -623,16 +647,23 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
   Math.min(concurrency, tickets, landing ? Math.max(1, pool - 1) : Infinity);
 
 /**
- * What the start line says of the slot `pipelineWorkers` leaves. It is left in the run's worker
- * count, not in the pool, so it is one of the machine's slots, not of the run's share: beside another
- * run the workers can fill the share, at 2 as at 1 (a ticket already running is never taken back,
- * ADR 0001). A landing still goes first when a slot frees (`slotTurn`).
+ * What the start line says of the slot `pipelineWorkers` leaves. Alone, it is one of the machine's slots, left in
+ * the run's worker count. Beside another run it is one of the run's share, while the share is 2 or more: the pool
+ * holds the run's ticket pipelines to share - 1 at each lease (`leaseSlot`'s `keep`). At a share of 1 the run's one
+ * slot is a ticket's, and a landing goes first when a slot frees (`slotTurn`); a ticket already running is never
+ * taken back (ADR 0001).
  */
 export const landingSlotNote = (pool: number) =>
-  `one of the ${pool} machine-wide sandbox slots is kept for landing while no other run takes a share of them - beside one, tickets may fill this run's share, and a landing goes first when a slot frees`;
+  `one of the ${pool} machine-wide sandbox slots is kept for landing - beside another run, one of this run's share while it is 2 or more, and at a share of 1 a landing goes first when a slot frees`;
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };
+
+/** The endings of a landing that never came to a merge: it is not timed (`LandContext.timed`). */
+const NO_MERGE: ReadonlySet<Landed["kind"]> = new Set(["taken-back", "withdrawn", "closed-earlier", "held", "skipped", "dry-run"]);
+
+/** Whether a landing's ending left the branch merged: the `ok` of its timings line. */
+export const didMerge = (landed: Landed) => landed.kind === "merged" || landed.kind === "partly-done" || landed.kind === "close-failed";
 
 /**
  * The scheduler's land and host ports over one `LandContext`: `landOne`, and the `.git` check
@@ -642,12 +673,24 @@ export type Waiting = Landable & { carried?: boolean };
  */
 export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
   land: async (o) => {
+    const since = Date.now();
+    let slotWaitMs = 0;
+    let landed: Landed;
     try {
-      return await landOne(ctx, o);
+      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms) });
     } catch (error) {
       if (error instanceof OperatorError) throw error;
-      return { kind: "not-landed", reason: errorLine(error) };
+      landed = { kind: "not-landed", reason: errorLine(error) };
     }
+    // A landing decided without a merge (the ticket taken back, a hold, a moved branch, a dry run) is no landing to time.
+    if (!NO_MERGE.has(landed.kind)) {
+      try {
+        ctx.timed?.(o.issue, { elapsed: Date.now() - since, slotWaitMs }, landed);
+      } catch {
+        /* a timings line is a record: it may not cost a landing its ending */
+      }
+    }
+    return landed;
   },
   host: {
     check: (id) => ctx.host.check(`before landing ${ctx.tracker.ref(id)}`),

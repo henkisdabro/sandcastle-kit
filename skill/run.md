@@ -26,10 +26,11 @@ This continues SKILL.md: run its "Before every action" first.
      from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
      nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
      same. Check `sandcastle status` (is a run live?) before any git write to the base in that
-     checkout, yours included. Another worktree shares `.git/config`, which the guard watches whole:
-     a branch given an upstream there (`git worktree add ... origin/<x>`, `git push -u`,
-     `git branch -u`, `gh pr create` from a local branch) stops the run too. Use `--no-track`, or
-     push with `git push origin HEAD:<branch>`.
+     checkout, yours included. Another worktree shares `.git/config`, which the guard reads by key:
+     an upstream for your own branch there (`git worktree add ... origin/<x>`, `git push -u`,
+     `git branch -u`, `gh pr create` from a local branch) is let through with one line, but any other
+     change stops the run - a remote, a hook path, an `include`, a `rebase` or `pushRemote` setting,
+     or an upstream on the base or an `agent/issue-*` branch.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. `sandcastle usage`
      prints the plan's usage now, read-only (never a script of your own against `src/usage.ts`). Offer
@@ -136,7 +137,8 @@ This continues SKILL.md: run its "Before every action" first.
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
-      merged base re-gated green, and on which image. If it is **RED TOGETHER**, say so first and plainly: do not push.
+      merged base re-gated green, and on which image (or that it was green at that commit already, with the
+      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
@@ -158,7 +160,7 @@ This continues SKILL.md: run its "Before every action" first.
       never among the changes. The summary shows only the last run's lines: for a release's changelog, `sandcastle report
       --changelog [--since <ref>]` lists the lines of every ticket that landed since a ref (default: the
       latest tag) across runs, and the landed tickets that have none. A `Landed on a second attempt` line names the tickets the run sent back
-      once after a conflict or a red gate at landing and then merged: say so, as it is the reason a
+      once after a conflict (at landing, or found before its review or gates) or a red gate at landing and then merged: say so, as it is the reason a
       ticket's work took two passes.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
@@ -168,10 +170,11 @@ This continues SKILL.md: run its "Before every action" first.
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder is a person's decision,
       when the summary suggests moving the ticket to the hold label instead). Each ticket listed `the reviewer named a gap it did not file`: a sentence the reviewer left in prose, with no
-      `<followup>` or `<unmet>` line, so nothing was filed - file it as a ticket (offer to), or say it needs nothing. Each follow-up `filed for triage` (the kit filed it from
-      an agent's `<followup>` line; one the summary says to file by hand is one the kit could not file, after a
-      stop or a failed filing: file it, or offer to) and each `needs-triage` issue opened during the run: one line on what
-      it asks, and offer the `queue` action for it.
+      `<followup>` or `<unmet>` line, so nothing was filed - file it as a ticket (offer to), or say it needs nothing. A follow-up the summary says to file by hand is one the kit
+      could not file, after a stop or a failed filing: file it, or offer to. The rest are under a `### To triage`
+      sub-heading, after the run's own items, and the headline's `to triage` counts them (`need you` counts the items
+      above it): each follow-up `filed for triage` (the kit filed it from an agent's `<followup>` line) and each
+      `needs-triage` issue opened during the run. One line on what it asks, and offer the `queue` action for it.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a
@@ -202,7 +205,7 @@ This continues SKILL.md: run its "Before every action" first.
 Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
 not in a batch after the last one. So the summary's merged count includes tickets that landed
 mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
-tickets merged), and a ticket's gates passing on its own branch says nothing about the base it
+tickets merged, unless the last landing's own gates already proved that very commit, which the line says), and a ticket's gates passing on its own branch says nothing about the base it
 lands on. Two cases follow from that:
 
 - **`red together with #N`** (under Needs fixing) is a branch green alone but red once merged with
@@ -233,7 +236,8 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
 - **Run STOPPED** in the heading: the run landed nothing after the stop (the heading says how many
   merged before it), and it names what moved. For a moved base branch, show the user the commits
   it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
-  or `.git/info/`, stop and have them inspect it.
+  or `.git/info/`, stop and have them inspect it (the stop names the keys that changed, and for
+  a key that is not a command, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` before blaming the branch.

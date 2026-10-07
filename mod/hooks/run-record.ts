@@ -292,6 +292,12 @@ export type RunRecord = {
   share?: number;
   /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
   cap?: number;
+  /**
+   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, not
+   * only a full pool: the status view's next-to-start rows say `waits for the run's share`. The wait is the run's, not a
+   * ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting ticket's note.
+   */
+  waitsForShare?: boolean;
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */
@@ -306,8 +312,9 @@ export type RunRecord = {
   /**
    * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
    * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
+   * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it.
    */
-  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[] } | null;
+  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;

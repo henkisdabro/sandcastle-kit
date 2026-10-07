@@ -20,8 +20,10 @@ test("the start line names the base and says a commit, pull or merge on it stops
   assert.match(line, /Do not commit, pull or merge on trunk in this checkout until the run ends/);
   assert.match(line, /another worktree/);
   assert.match(line, /stops the run/);
-  // Another worktree shares .git/config: a branch given an upstream there stopped a drain run.
-  assert.match(line, /Worktrees share \.git\/config, so a branch given an upstream there .* stops it too: use --no-track/);
+  // Another worktree shares .git/config: an upstream for its own branch is let through (the guard
+  // compares by key), and the line says what still stops the run.
+  assert.match(line, /Worktrees share \.git\/config: an upstream for your own branch there .* is fine, but any other change to it stops the run/);
+  assert.match(line, /upstream on trunk or an agent\/issue-\* branch/);
 });
 
 test("a run prints that line, for its own base branch, after the keep-awake line", () => {

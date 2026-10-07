@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { type Gate, LANDING_GATES } from "./gates.ts";
+import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
@@ -141,11 +141,12 @@ let released = false;
  * The start line that tells the operator the base is the run's. The guard cannot tell a person's
  * commit on the base from a sandbox's, so one made mid-run stops the run (pipelines in flight
  * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run. Worktrees share
- * `.git/config`, which the guard fingerprints whole, so the routine ways of giving a branch an upstream
- * there stop it too: a person told to use another worktree did, and stopped a drain run (#451).
+ * `.git/config`, and a person told to use another worktree gave a branch an upstream there and
+ * stopped a drain run (#451): the guard reads the file by key now and lets that one through, so the
+ * line says what still stops it.
  */
 export const baseIsTheRunsLine = (base: string) =>
-  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config, so a branch given an upstream there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) stops it too: use --no-track, or \`git push origin HEAD:<branch>\`.`;
+  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config: an upstream for your own branch there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) is fine, but any other change to it stops the run - a remote, a hook path, an include, or an upstream on ${base} or an agent/issue-* branch.`;
 
 export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
@@ -698,7 +699,7 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 };
 
 /**
- * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate); `extra` adds this run's finished issues (ms).
+ * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed (a ticket landed with no gate counts none), the median over the window's tickets,
  * and absent when no line of the window is a landing gate.
  */
@@ -720,6 +721,8 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
       continue;
     }
+    // A landing's own line holds its landing gates' time already: left out, or it counts them twice.
+    if (l.phase === LANDING) continue;
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
     byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
@@ -861,6 +864,8 @@ export const estimate = (
   }
   const window = recentWindow(ticketLines);
   for (const l of window) {
+    // A landing's own line (`LANDING`) holds its landing gates' time, which is `landMs`: priced once, there.
+    if (l.phase === LANDING) continue;
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false, run: String(l.run) };
     // A landing gate is the landing worker's time, not the ticket's own pipeline.

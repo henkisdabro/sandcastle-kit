@@ -1,6 +1,7 @@
 // A drain turn after a single fast-forward landing: the merge commit the landing leaves is a green base
 // (the ticket's own gates ran on that tree), so the next turn's base check skips the gates but still runs
-// the hook checks, which a landing never runs. Run for real against a fake docker; no Docker or network.
+// the hook checks, which a landing never runs: no earlier record covered them to carry over (that case is
+// test/hook-checks-kept-across-landings.test.ts). Run for real against a fake docker; no Docker or network.
 //
 //   node --test test/fast-forward-landing-recorded.test.ts
 
@@ -44,7 +45,7 @@ type Ctx = import("../src/landing.ts").LandContext;
 const git = (root: string, ...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 const IMAGE = "sandcastle-fixture:t";
 
-test("a drain turn after a single fast-forward landing skips the base gates but still runs the hook checks", async () => {
+test("a drain turn after a single fast-forward landing with no earlier hook-check record skips the base gates but still runs the hook checks", async () => {
   const root = join(dir, "project");
   process.env.SANDCASTLE_TEST_REPO = root;
   mkdirSync(join(root, ".sandcastle"), { recursive: true });

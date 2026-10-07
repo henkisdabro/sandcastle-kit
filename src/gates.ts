@@ -11,8 +11,9 @@
 import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import type { HookTest, Project } from "./config.ts";
+import { protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -383,9 +384,9 @@ export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitM
 };
 
 /**
- * A step's times with a wait that came before it began added to `waitMs`: a ticket takes its machine-wide
- * sandbox slot before its `setup` step starts, so `elapsed` never held that wait, and a ticket that stood two
- * hours for a slot once had `waitMs: null` on its setup line and nothing anywhere to show the stall.
+ * A step's times with a wait that came before it began added to `waitMs`: a sent-back ticket waits for the
+ * tickets ahead of its resolve before its `setup` step starts, so `elapsed` never held that wait, and a wait
+ * left off the setup line showed nowhere at all.
  */
 export const withQueued = (times: { ms: number; waitMs?: number }, queued: number | undefined): { ms: number; waitMs?: number } => {
   const q = typeof queued === "number" && queued > 0 ? Math.round(queued) : 0;
@@ -397,6 +398,30 @@ export const withQueued = (times: { ms: number; waitMs?: number }, queued: numbe
  * their own, and are no part of a ticket's pipeline time.
  */
 export const LANDING_GATES = "landing gates";
+
+/**
+ * The phase of a landing's own timings line: one per landing that reached its merge, whatever it ended in (a
+ * fast-forward, a conflict, a red tree). Its `ms` is the landing less its slot wait, which is `waitMs`; the landing
+ * gates it ran are lines of their own (`LANDING_GATES`) and are in its `ms` too, so a sum of a ticket's
+ * time leaves this line out, as it leaves out the landing gates, or it counts them twice.
+ */
+export const LANDING = "landing";
+
+/**
+ * Appends a landing's timings line (`LANDING`): `elapsed` is the landing's whole time, `slotWaitMs` how long it waited
+ * for a machine-wide sandbox slot (0 for a fast-forward, which takes none, and for a conflict found on the host
+ * before one), `result` the kind of ending `landOne` returned. Without it a landing that waited minutes for a slot
+ * and then found a conflict ran no gate and left no line at all.
+ */
+export const writeLandingLine = (
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
+) => {
+  const line = {
+    ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING, ...stepTimes(took.elapsed, { waitMs: took.slotWaitMs }), ok: result.ok, result: result.kind,
+    ...(who.carried ? { carried: true } : {}),
+  };
+  appendFileSync(timings, JSON.stringify(line) + "\n");
+};
 
 /**
  * Runs a landing gate and appends its timings line (`LANDING_GATES`, the slot wait out of `ms` as in
@@ -477,17 +502,21 @@ const hooksCovered = (root: string, key: string) => {
 // the check and fan agents out on a base known to be red.
 // `hooks` says the green result covered the hook tests and the git-hook probe as well as the gates: only the base check
 // runs them, so a landing's or verify's record (gates alone) leaves the next base check its hook checks, which a
-// commit that changed a hook file would otherwise have skipped.
+// commit that changed a hook file would otherwise have skipped - unless `noteGreenCommit` finds the record before it
+// covered them and no file they read changed.
 // `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
-export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false) => {
+// `proof` is the commit that result is of and whose gates proved it (a ticket's `#427`, "the base check", "verify"): the
+// end-of-run verify says it when it skips for this record, and a record without one is an older kit's.
+export type GreenProof = { commit: string; by: string };
+export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false, proof?: GreenProof) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
   // The key names the commit, so the hook files: a gates-only result at the key a base check recorded in full says nothing less.
   const covered = hooks || hooksCovered(root, key);
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, ...(proof ? { commit: proof.commit, by: proof.by } : {}) }) + "\n");
 };
 
 const recordedRun = (root: string): string | undefined => {
@@ -498,12 +527,79 @@ const recordedRun = (root: string): string | undefined => {
   }
 };
 
+// A package manifest or lockfile, by name: the project's setup (a `pnpm install`) reads one, and the sandbox the hook
+// checks run in is set up from it, so a change to one re-checks the hooks as a change to a hook file does.
+const MANIFEST = /^(package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|pyproject\.toml|poetry\.lock|uv\.lock|pdm\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|Cargo\.(toml|lock)|go\.(mod|sum|work)|Gemfile(\.lock)?|composer\.(json|lock)|mix\.(exs|lock)|pom\.xml|build\.gradle(\.kts)?|gradle\.lockfile|[^/]*\.csproj|packages\.lock\.json|deno\.(json|jsonc|lock))$/;
+
+// Whether any file changed between two commits is one the hook tests or the git-hook probe read: the hooks directory
+// (`core.hooksPath`, `.husky`, `.git-hooks`, the default protected set), the files the lean plan's kept hooks run, the
+// package manifests and lockfiles, and `protectedPaths`. A conservative list, not a trace: anything it does not name
+// but a hook reads is a miss the maintainer chose to accept. A diff that cannot be read says yes.
+const hookInputsChanged = (project: Project, planFile: string, from: string, to: string): boolean => {
+  let changed: string[];
+  try {
+    changed = sh("git", ["diff", "--name-only", from, to], project.root).split("\n").filter(Boolean);
+  } catch {
+    return true;
+  }
+  const dirs = [".husky/", ".git-hooks/"];
+  try {
+    // `--local`: the host's own hooks are switched off through the environment, which a plain read would answer with.
+    const configured = sh("git", ["config", "--local", "--get", "core.hooksPath"], project.root);
+    const rel = isAbsolute(configured) ? relative(project.root, configured) : posix.normalize(configured);
+    if (configured && rel && !rel.startsWith("..") && !isAbsolute(rel)) dirs.push(`${rel.replace(/\/+$/, "")}/`);
+  } catch {
+    // no core.hooksPath set
+  }
+  let commands: string[] = [];
+  try {
+    commands = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks?: Hook[] }).hooks?.map((h) => h.command) ?? [];
+  } catch {
+    return true;
+  }
+  return changed.some(
+    (f) => dirs.some((d) => f.startsWith(d)) || MANIFEST.test(posix.basename(f)) || protectedAmong(project, [f]).length > 0 || commands.some((c) => c.includes(f)),
+  );
+};
+
 /**
  * A commit the run's own gates passed on - a landing's merge, which the base now names - is the green
  * base the next turn's check would otherwise gate again, in the one gate slot, minutes later.
+ * The record covers the hook tests and the git-hook probe too (so the next check opens no base sandbox) only when
+ * the record before it did, at a commit it names, on this image and config, and nothing the hook checks read changed
+ * since (`hookInputsChanged`). Anything else - no earlier record, an older kit's without a commit - re-checks.
  */
-export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string) =>
-  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true);
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing") => {
+  let hooks = false;
+  try {
+    const prev = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));
+    hooks =
+      prev.hooks === true &&
+      typeof prev.commit === "string" &&
+      prev.key === baseKey(project, image, planFile, prev.commit) &&
+      !hookInputsChanged(project, planFile, prev.commit, commit);
+  } catch {
+    // no record, or an unreadable one: the hooks are checked
+  }
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by });
+};
+
+/**
+ * Whether the green-base record already proves the base's tip on this image and plan: the commit, and whose gates
+ * ran on it (`by`; a record from an older kit names no one). The end-of-run verify is proof that the merged base is
+ * green, so it is skipped when this answers, and only then: a missing record, or one at another commit (a landing's
+ * failed note is swallowed), leaves the verify to run. The key is the record's own test, as the base check's is.
+ */
+export const greenProofOfBase = (project: Project, image: string, planFile: string): { commit: string; by?: string } | undefined => {
+  const commit = sh("git", ["rev-parse", project.baseBranch], project.root);
+  if (!baseCacheHit(project.root, baseKey(project, image, planFile, commit))) return undefined;
+  try {
+    const by = JSON.parse(readFileSync(baseRecord(project.root), "utf8")).by;
+    return { commit, ...(typeof by === "string" && by ? { by } : {}) };
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * The gates on the merged base at the end of a run (`gateBase`, no hook tests). What they say of the
@@ -514,7 +610,7 @@ export const verifyBase = async (project: Project, image: string, planFile: stri
   const gated = await gateBase(project, image, planFile, "verify", false, runId);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
-  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head);
+  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify");
   else noteBaseResult(project.root, "", false);
   return gated;
 };
@@ -571,7 +667,8 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
-  // A landing's or verify's green record covers the gates, not the hook tests or the git-hook probe.
+  // A landing's or verify's green record covers the gates, and the hook tests and the git-hook probe only when
+  // `noteGreenCommit` carried them over from the record before it.
   const gatesGreen = cached && baseCacheHit(project.root, key);
   if (gatesGreen) {
     const commit = sh("git", ["rev-parse", "--short", base]);
@@ -593,7 +690,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green, true);
+  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check" });
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,
