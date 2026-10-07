@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -368,7 +368,8 @@ const fixture = (agent: (kind: string, call: number, path: string, log: string) 
         const before = git(path, "rev-parse", "HEAD");
         // The readable log the library writes, which the run reads to tell a spent allowance from any other failure.
         const log = join(root, `.sandcastle/logs/agent-issue-7-${name}.log`);
-        writeFileSync(log, "pass finished\n");
+        // Appended, as the library does: a pass that runs again writes after what the pass before it left.
+        appendFileSync(log, "pass finished\n");
         agent(kind, call, path, log);
         const commits = git(path, "rev-list", `${before}..HEAD`).split("\n").filter(Boolean).map((sha) => ({ sha }));
         return { iterations: [], stdout: "", commits };
@@ -521,6 +522,65 @@ test("a pass that fails for another reason than the limit is not waited out, wha
   await quietly(() => assert.rejects(f.pipeline(f.issue, NO_PAUSE), /idle timeout/));
   assert.deepEqual(asked, [], "the run was not asked to pause");
   assert.equal(readPause(root, PID, T0), undefined);
+});
+
+/**
+ * An implement pass that hits the limit on its first call and, on its second, appends `again` to the same log and
+ * fails (or, with `again` undefined, succeeds). Returns what the run was asked and how the pipeline ended.
+ */
+const reRun = async (again: string) => {
+  const { clock, pause } = world(90);
+  const asked: string[] = [];
+  const f = fixture(
+    (kind, call, _path, log) => {
+      if (kind !== "impl") return;
+      if (call === 1) {
+        appendFileSync(log, `working\n${LIMIT_WORDS}\n`);
+        throw new Error("agent exited with code 1");
+      }
+      appendFileSync(log, again);
+      throw new Error("second pass failed");
+    },
+    (phase) => {
+      asked.push(phase);
+      // Once the window has reset the readings no longer say it is spent, as in a real run.
+      return pause.limit(clock.seconds > FIVE_RESET ? [] : [reading([100, FIVE_RESET], [10, WEEK_RESET])], "claude");
+    },
+  );
+  const ended: { error?: unknown } = {};
+  const done = quietly(() =>
+    createSchedule<T, G, string, string>({ tickets: [f.issue] }).run({
+      workers: 1,
+      pause: { read: pause.source.read, pollMs: 5 },
+      attempt: async (_t, at) => {
+        try {
+          await f.pipeline(f.issue, at);
+        } catch (error) {
+          ended.error = error;
+        }
+        return { kind: "pipeline", outcome: "red" };
+      },
+      land: merged,
+      host,
+      tell: () => {},
+    }),
+  );
+  await until(() => f.writes.some((w) => w.state === "paused"), "the ticket to park");
+  clock.seconds = FIVE_RESET + 60;
+  await done;
+  return { asked, error: ended.error, events: f.events };
+};
+
+test("a re-run that fails early for another reason is not read as the limit again, though the log it appends to ends with the limit message", async () => {
+  const r = await reRun("Sandbox failed to start\nexec error\n");
+  assert.deepEqual(r.events, ["impl in sandbox 0", "impl in sandbox 1"]);
+  assert.match(String((r.error as Error).message), /second pass failed/, "the re-run's own failure ends the ticket");
+  assert.deepEqual(r.asked, ["implement"], "the run was asked once, for the first pass: the re-run's two lines are no limit message");
+});
+
+test("a re-run that itself ends with the limit message is read as the limit", async () => {
+  const r = await reRun(`working again\n${LIMIT_WORDS}\n`);
+  assert.deepEqual(r.asked, ["implement", "implement"], "the run was asked again for the re-run");
 });
 
 // ---------------------------------------------------------------------------
