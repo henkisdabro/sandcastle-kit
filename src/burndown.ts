@@ -1658,6 +1658,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     waiting,
     stage: "starting",
     concurrency: slots,
+    load: { concurrency: slots, tickets: candidates.length },
     ...(turn ? { settings: settingsGroup(turn.settings, turn.turn, usageReadingLost()) } : {}),
     typical: typicalTimes(project),
     tickets: Object.fromEntries(startTickets),

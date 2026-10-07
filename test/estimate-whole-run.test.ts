@@ -48,13 +48,13 @@ const landed = () => [line({ issue: "1", phase: "implement", ms: 10 * MIN, token
 test("a two-ticket chain takes both pipelines, the landing between them and the final landing", () => {
   const p = history(landed());
   // 10m + 2m landing, then the dependant's 10m + 2m landing: 24m, not the 20m of the pipelines alone.
-  assert.match(estimate(p, 2, 5, 2, undefined, { chainAt: [0, 1] })!, /and 24m for 2 ticket\(s\), 5 at a time \(2 tickets in sequence\)\.$/);
+  assert.match(estimate(p, 2, 5, 2, undefined, { chainAt: [0, 1] })!, /and 24m for 2 ticket\(s\), 5 at a time \(2 tickets in sequence\)\.(?: No history at .*)?$/);
 });
 
 test("tickets side by side end with the last one's landing", () => {
   const p = history(landed());
   // Two 10m pipelines at once, then a 2m landing.
-  assert.match(estimate(p, 2, 5)!, /and 12m for 2 ticket\(s\), 5 at a time\.$/);
+  assert.match(estimate(p, 2, 5)!, /and 12m for 2 ticket\(s\), 5 at a time\.(?: No history at .*)?$/);
 });
 
 test("the base gates before the tickets and verify after them are in the time", () => {
@@ -65,7 +65,7 @@ test("the base gates before the tickets and verify after them are in the time", 
     // Steps of the run that are neither are not its gates.
     line({ issue: 0, phase: "image", ms: 30 * MIN }),
   ]);
-  assert.match(estimate(p, 1, 1)!, /and 12m for 1 ticket\(s\), 1 at a time\.$/);
+  assert.match(estimate(p, 1, 1)!, /and 12m for 1 ticket\(s\), 1 at a time\.(?: No history at .*)?$/);
 });
 
 test("the line names the tickets that priced the run, not the window's", () => {

@@ -95,14 +95,14 @@ test("typicalTimes: a ticket that landed without a gate counts none, so the medi
 test("18 tickets, 9 sandboxes: the landings in a row set the time, whatever the gate slots", () => {
   const p = project();
   // Sandbox-bound: 2 rounds of 10m. Landings: 18 x 5m on one worker.
-  assert.match(estimate(p, 18, 9)!, /and 1h 30m for 18 ticket\(s\), 9 at a time \(landing gates, one after another, set the time\)\.$/);
+  assert.match(estimate(p, 18, 9)!, /and 1h 30m for 18 ticket\(s\), 9 at a time \(landing gates, one after another, set the time\)\.(?: No history at .*)?$/);
   assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 100 })!, /and 1h 30m for 18 ticket\(s\), 9 at a time \(landing gates, one after another/);
 });
 
 test("the landing gates share the gates pool with the tickets' own passes", () => {
   const p = project();
   // (18 x 6m + 18 x 5m) over 2 slots is 99m, above the 90m of landings in a row.
-  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 2 })!, /and 1h 39m for 18 ticket\(s\), 9 at a time \(gate runs on 2 slot\(s\) set the time\)\.$/);
+  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 2 })!, /and 1h 39m for 18 ticket\(s\), 9 at a time \(gate runs on 2 slot\(s\) set the time\)\.(?: No history at .*)?$/);
 });
 
 test("a landing gate is no part of the ticket's own pipeline time, and a history without one is as before", () => {
@@ -110,7 +110,7 @@ test("a landing gate is no part of the ticket's own pipeline time, and a history
   // 3 tickets, 3 slots: one round of 10m; the 3 landings take 15m.
   assert.match(estimate(p, 3, 3)!, /and 15m for 3 ticket\(s\), 3 at a time \(landing/);
   const bare = project([], null);
-  assert.match(estimate(bare, 18, 9)!, /and 20m for 18 ticket\(s\), 9 at a time\.$/);
+  assert.match(estimate(bare, 18, 9)!, /and 20m for 18 ticket\(s\), 9 at a time\.(?: No history at .*)?$/);
 });
 
 // The status view: one sandbox, one ticket in it, two queued.

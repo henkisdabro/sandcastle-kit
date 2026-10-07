@@ -767,6 +767,9 @@ export const isCarried = (root: string, base: string, id: string): boolean => {
 /** The nearest-rank percentile, `p` in (0, 1]; the median above takes the middle one, this the one a fraction `p` of the list is at or below. */
 const percentile = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length, Math.max(1, Math.ceil(xs.length * p))) - 1];
 const HIGH = 0.8;
+/** A history run is of a similar load when its concurrency is within this many of the run's; at least `LOAD_RUNS` of them price the gate times. */
+const LOAD_BAND = 1;
+const LOAD_RUNS = 2;
 /** Tickets of one model in the window that make its own history solid; fewer are blended with all tickets. */
 const SOLID_HISTORY = 5;
 
@@ -801,6 +804,11 @@ const SOLID_HISTORY = 5;
  * resolve on (resolve, narrow review, gates) a carried one: a carried branch's attempt is not its
  * ticket's first one.
  *
+ * The gate and landing-gate times (not the bounds that combine them) are priced from the window's runs whose recorded `load` (the
+ * run's effective concurrency, in `history.jsonl`, joined by `startedAt`) is within `LOAD_BAND` of `slots`, when `LOAD_RUNS` such
+ * runs are in the window; a run with no `load` is unknown and counts only in the fallback, which prices them from all the window's
+ * runs and says there is no history at this concurrency, so the estimate may be low.
+ *
  * `detail.gateSlots` is the machine's gates pool (`limit("gates")`): every ticket's gate passes (the
  * pre-landing `gates` lines, and the `landing gates` lines) share it, so the run takes at least their
  * summed time over those slots, and the larger of that and the sandbox-bound or chain figure sets the
@@ -820,6 +828,8 @@ export const estimate = (
   type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
   type Group = {
     ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string;
+    // The run it was timed in: its load, if the history knows it, says whether its gate times are this run's to borrow.
+    run?: string;
     // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
     flagged?: boolean; resolved?: boolean; implemented?: boolean;
     // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
@@ -848,7 +858,7 @@ export const estimate = (
   const window = recentWindow(ticketLines);
   for (const l of window) {
     const key = `${l.run}|${l.issue}`;
-    const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false };
+    const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false, run: String(l.run) };
     // A landing gate is the landing worker's time, not the ticket's own pipeline.
     if (l.phase === LANDING_GATES) g.landMs += l.ms as number;
     else g.ms += l.ms as number;
@@ -858,7 +868,7 @@ export const estimate = (
     if (l.phase === "implement") g.implemented = true;
     if (l.phase === "resolve") {
       g.resolved = true;
-      g.tail ??= { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: true, origin: g };
+      g.tail ??= { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: true, origin: g, run: g.run };
     }
     // From the first resolve on, the lines are the carried branch's attempt, which a ticket implemented in this run is requeued into.
     const t = g.tail;
@@ -891,7 +901,37 @@ export const estimate = (
   const counted = [...groups.values()].filter((g) => g.tokened);
   const samples = (g: Group): Group[] => (g.tail ? [g, g.tail] : [g]);
   if (!counted.length) return undefined;
-  const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)), gateMs: at(gs.map((g) => g.gateMs)), landMs: at(gs.map((g) => g.landMs)) });
+  // Gate and landing-gate times slow with the load (a full queue runs several suites at once), so they are priced from the runs
+  // that ran at about this run's concurrency - within `LOAD_BAND` of `slots` - when the window holds `LOAD_RUNS` of them. The
+  // history says each run's load (its line's `load`, joined by `startedAt`); a run with none is unknown, used in the fallback only.
+  const loads = new Map<string, number>();
+  try {
+    for (const raw of readFileSync(join(project.root, ".sandcastle/logs/history.jsonl"), "utf8").split("\n").filter(Boolean)) {
+      try {
+        const r = JSON.parse(raw);
+        const c = r?.load?.concurrency;
+        if (typeof r?.startedAt === "string" && typeof c === "number" && Number.isFinite(c)) loads.set(r.startedAt, c);
+      } catch {
+        /* a line that does not parse is skipped */
+      }
+    }
+  } catch {
+    /* no history: every run's load is unknown */
+  }
+  const similar = new Set([...new Set(window.map((l) => String(l.run)))].filter((r) => {
+    const c = loads.get(r);
+    return c !== undefined && Math.abs(c - slots) <= LOAD_BAND;
+  }));
+  const byLoad = similar.size >= LOAD_RUNS;
+  const figures = (gs: Group[], at: (xs: number[]) => number) => {
+    // This pool's tickets from a run of a similar load; one with none keeps its own, as the fallback does.
+    const loaded = byLoad ? gs.filter((g) => g.run !== undefined && similar.has(g.run)) : [];
+    const gates = loaded.length ? loaded : gs;
+    const gateMs = at(gates.map((g) => g.gateMs));
+    // A ticket's pipeline time holds its gate passes: with the gate time priced by load, each history ticket's own passes are swapped for it.
+    const ms = loaded.length ? at(gs.map((g) => g.ms - g.gateMs + gateMs)) : at(gs.map((g) => g.ms));
+    return { inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms, gateMs, landMs: at(gates.map((g) => g.landMs)) };
+  };
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
@@ -968,6 +1008,7 @@ export const estimate = (
     ...[...thin].map(([model, n]) => ` ${model} from ${n} ticket${n === 1 ? "" : "s"}, blended.`),
     unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
+    byLoad ? "" : ` No history at ${slots} at a time (gate times are from runs of any load), so it may be low.`,
   ].join("");
   return (
     `Estimate (rough, from ${pricedFrom.size} ticket(s) in the last 3 runs): ` +

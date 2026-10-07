@@ -46,10 +46,10 @@ const history = [
 test("medians of earlier tickets, times the tickets, their summed time across the slots", () => {
   const p = project(history);
   assert.equal(
-    estimate(p, 5, 2),
+    estimate(p, 5, 2)?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 3 ticket(s) in the last 3 runs): about 10.0M to 15.0M tokens in / 100k to 150k out and 50m to 1h 15m for 5 ticket(s), 2 at a time.",
   );
-  assert.match(estimate(p, 1, 4)!, /about 2\.0M to 3\.0M tokens in \/ 20k to 30k out and 20m to 30m for 1 ticket\(s\), 4 at a time\.$/);
+  assert.match(estimate(p, 1, 4)!, /about 2\.0M to 3\.0M tokens in \/ 20k to 30k out and 20m to 30m for 1 ticket\(s\), 4 at a time\.(?: No history at .*)?$/);
 });
 
 test("no timings file: nothing to print", () => {
