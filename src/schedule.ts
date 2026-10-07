@@ -796,7 +796,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       );
       // Attempts that began, by ticket.
       const attempts = new Map<string, 1 | 2>();
-      // What a requeued ticket's first attempt collided with: its second carries it, and a second collision is final.
+      // What a requeued ticket's last attempt collided with: its next carries it, and a second collision is final unless
+      // a landing after its resolve began caused it (`requeue`).
       const first = new Map<string, Again>();
       // A ticket landing sent back, until its second attempt begins: if that never begins, this landing is its ending.
       const sentBack = new Map<string, { green: G; landed: Landed }>();
@@ -866,7 +867,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         noticeStop();
         demand();
         tellPaused();
-        if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
+        // A ticket waiting to resolve runs nothing: with only those left in a pipeline, the run is landing.
+        if (working === resolving.size && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
       // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
       // parked ticket from the demand before any of them asks for a slot again, and wakes them.

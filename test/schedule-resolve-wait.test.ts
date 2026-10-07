@@ -176,3 +176,39 @@ test("a second conflict with a ticket that landed before the resolve began ends 
   assert.equal(told.filter((c) => c.kind === "requeued").length, 1);
   assert.equal((endings.get("10") as { landed: Landed }).landed.kind, "conflict");
 });
+
+test("while a sent-back ticket waits to resolve, the run still says which landing it is at", async () => {
+  const told: Change<G, string>[] = [];
+  const greens = later();
+  let ready = 0;
+  let first = true;
+  const schedule = createSchedule<T, G, string>({
+    tickets: [{ id: "10" }, { id: "20" }, { id: "30" }],
+    files: filesOf({ 10: ["src/a.ts"], 20: ["src/a.ts"], 30: ["src/a.ts"] }),
+  });
+  await schedule.run({
+    workers: 3,
+    attempt: async (t) => {
+      if (t.id !== "10" && ++ready === 2) greens.open();
+      return green(t.id);
+    },
+    land: async (g) => {
+      if (g.issue === "10" && first) {
+        // 20 and 30 are green and queued behind it: 10's resolve waits for both to land.
+        await greens.done;
+        first = false;
+        return { kind: "conflict", files: ["src/a.ts"], with: [] };
+      }
+      await tick();
+      return { kind: "merged" };
+    },
+    host: { check: async () => {}, failed: undefined },
+    tell: (c) => void told.push(c),
+  });
+  assert.ok(told.some((c) => c.kind === "resolve waits"));
+  // The pipelines are idle but for the wait, which runs no agent: each landing is said, the third (30's) too, not left at the second.
+  assert.deepEqual(
+    told.flatMap((c) => (c.kind === "landing" ? [c.at] : [])),
+    [1, 2, 3, 4],
+  );
+});
