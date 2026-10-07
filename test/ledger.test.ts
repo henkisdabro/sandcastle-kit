@@ -250,6 +250,7 @@ const ROWS: Row[] = [
   ],
   ["not started: the run stopped", { kind: "not begun", why: { kind: "usage limit", line: "usage at 95%" } }, { stopLine: "usage at 95%" }, "skipped - not started: usage at 95%"],
   ["still waiting for a file", { kind: "waiting", on: "file" }, {}],
+  ["parked by a pause when the run stopped: its record stays as the pause left it", { kind: "parked", cause: { kind: "usage limit", line: "usage at 95%" } }, {}],
 ];
 
 const said = (s: Said) => [
@@ -267,7 +268,7 @@ for (const [name, ending, context, ...want] of ROWS) {
 }
 
 test("the table has a row for every ending kind, every landing and every pipeline that ends one", () => {
-  const endings: Record<TicketEnding["kind"], true> = { landing: true, pipeline: true, crashed: true, stopped: true, "not begun": true, waiting: true };
+  const endings: Record<TicketEnding["kind"], true> = { landing: true, pipeline: true, crashed: true, stopped: true, "not begun": true, waiting: true, parked: true };
   const landings: Record<Landed["kind"], true> = {
     merged: true,
     conflict: true,

@@ -473,6 +473,19 @@ export type Attempted<G, O> =
   | { kind: "not begun"; why: StopCause | Withdrawn };
 
 /**
+ * What a juncture throws to a ticket parked by a pause when the run stops before the pause ends: the
+ * ticket's attempt is over, and ends as `parked`. A port lets it through; the scheduler is its only catcher.
+ */
+export class StoppedWhileParked extends Error {
+  /** The `.git` check after its sandbox closed, when it failed: the run stops with it as after any other attempt. */
+  readonly causes: readonly StopCause[];
+  constructor(causes: readonly StopCause[] = []) {
+    super("the run stopped while this ticket was parked by a pause");
+    this.causes = causes;
+  }
+}
+
+/**
  * How one ticket's part in a run ends: exactly one per ticket the run took in. `attempts` counts the
  * attempts that began; a requeued ticket whose second attempt never began ends with its first
  * landing (`withdrawn` when the tracker took it back meanwhile). `again` is what the first attempt
@@ -486,6 +499,8 @@ export type Ending<G, O> =
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
   | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
   | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string } }
+  /** Parked at a juncture of a paused run when the run stopped: it never resumed, its branch holds every commit and the next run picks it up. */
+  | { kind: "parked"; cause: StopCause | undefined }
   /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
   | { kind: "waiting"; on: "file" | "blockers" };
 
@@ -858,6 +873,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // change, the poll. The host's refused write is read live, so no one adds it and any caller may find it.
       let toldStop = false;
       const noticeStop = () => {
+        // A stop wakes the parked tickets: a pause that ends only with the window's reset must not outlast a run that can do nothing more.
+        if (stop.startsNothing) for (const wake of wakers.splice(0)) wake();
         if (toldStop || !stop.landsNothing) return;
         toldStop = true;
         tell({ kind: "stopped landing", cause: stop.headline! });
@@ -900,12 +917,12 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           for (const wake of wakers.splice(0)) wake();
         }
       };
-      // The ticket holds nothing while the run is paused; returns once it is not.
+      // The ticket holds nothing while the run is paused; returns once it is not, or once the run stops.
       const waitParked = async (id: string, phase: string) => {
         parked.set(id, phase);
         tellPaused();
         demand();
-        for (sync(); pausedSince !== undefined; sync()) await new Promise<void>((wake) => wakers.push(wake));
+        for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) await new Promise<void>((wake) => wakers.push(wake));
         parked.delete(id);
       };
       const juncture = async (id: string, phase: string, park?: Park) => {
@@ -913,6 +930,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (pausedSince === undefined) return;
         await park?.suspend();
         await waitParked(id, phase);
+        // Woken by a stop, not the resume: its sandbox stays closed - a stopped run opens none - and the branch holds every commit.
+        if (pausedSince !== undefined && stop.startsNothing) throw new StoppedWhileParked();
         await park?.resume();
       };
       // Not unref'd: with every ticket parked nothing else may keep the process alive, and a run that
@@ -1144,6 +1163,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           try {
             r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => juncture(t.id, phase, park), paused: () => (sync(), pausedSince !== undefined) });
           } catch (error) {
+            // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
+            if (error instanceof StoppedWhileParked) {
+              for (const c of error.causes) stop.add(c);
+              return await end(t.id, { kind: "parked", cause: stop.headline });
+            }
             r = { kind: "crashed", error };
           }
           if (r.kind === "not begun") {

@@ -793,13 +793,14 @@ run_cell() {
   if [ -n "$finished" ]; then
     kvl state "${mute}ended (exit ${code})${off}"; RUNC[0]="$REPLY"
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
-  elif run_alive "$pid" && [ -n "$paused_at" ]; then
-    paused_cell "$paused_at" "$finishing" "$started" "$p_win" "$p_pct" "$p_res" "$p_prov"
   elif run_alive "$pid" && [ -n "$stopped" ]; then
     # The guard stopped the landing: what is in flight still finishes, nothing more lands. Said in the
-    # cell the moment it happens, not once the run has ended.
+    # cell the moment it happens, not once the run has ended - and before a pause, which a stop ends
+    # (it wakes the parked tickets), so the cell never reads PAUSED for a run that cannot resume.
     kvl state "${bold}${hot}STOPPED${off} ${mute}landing · $(dur $(( $(date +%s) - t0 )))${off}"; RUNC[0]="$REPLY"
     kvl since "${mute}${started} · lands nothing more${off}"; RUNC[1]="$REPLY"
+  elif run_alive "$pid" && [ -n "$paused_at" ]; then
+    paused_cell "$paused_at" "$finishing" "$started" "$p_win" "$p_pct" "$p_res" "$p_prov"
   elif run_alive "$pid"; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".
