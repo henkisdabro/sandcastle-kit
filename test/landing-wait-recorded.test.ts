@@ -56,6 +56,10 @@ const setup = (branch: Record<string, string>, base?: Record<string, string>, ov
   const root = join(tmp, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
+  // The landing's own merge commit reads the repo's identity: a Linux sandbox has none to guess, unlike macOS.
+  git(root, "config", "user.name", "Operator Example");
+  git(root, "config", "user.email", "operator@example.com");
+  git(root, "config", "commit.gpgsign", "false");
   commit(root, { "shared.txt": "start\n" }, "start");
   git(root, "checkout", "-q", "-b", "agent/issue-7");
   commit(root, branch, "work on 7");
