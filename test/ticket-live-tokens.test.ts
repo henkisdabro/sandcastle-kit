@@ -180,3 +180,18 @@ test("a record the run has finished is not written to", () => {
   watch.poll();
   assert.equal(tokens("7"), undefined);
 });
+
+// burndown() needs Docker, so no test drives it: the wiring the tests above stand in for (`running`, `finish`) is held by its source.
+test("burndown starts the watch with or without a plan to show, and settles a ticket in the step that counts its pass's result", () => {
+  const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
+  const start = src.slice(src.indexOf("usageWatch = watchUsage({"));
+  assert.match(start.slice(0, start.indexOf("});")), /tokens: \{ owner: logOwner, write: liveTokenWriter\(run, spent\) \}/);
+  assert.match(src, /\n {2}usageWatch = watchUsage\(\{/, "at the run's own level");
+  assert.doesNotMatch(src, /if \(planUsage\.length\) \{/, "not inside the plan usage row's `if`");
+  const timed = src.slice(src.indexOf("const timed = "), src.indexOf("const image = await timed("));
+  const counted = timed.indexOf("spent.set(issue, ");
+  const settled = timed.indexOf("usageWatch?.settle(issue)");
+  assert.ok(counted > 0 && settled > counted, "settled after the result's figure is in `spent`");
+  assert.ok(timed.lastIndexOf("finally {", settled) > counted, "in the `finally`, so a pass that threw is settled too");
+  assert.doesNotMatch(timed.slice(counted, settled), /\bawait\b/, "nothing a tick could interleave with between them");
+});
