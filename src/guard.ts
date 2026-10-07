@@ -167,19 +167,21 @@ const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 // sandbox's to choose. The others show old and new (a URL's credentials hidden).
 const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
 
-const shown = (value: string) => {
+const shown = (value: string | null) => {
+  if (value === null) return "(no value)";
   const text = clean(value).replace(/\/\/[^/@\s]*@/g, "//***@");
   return JSON.stringify(text.length > 100 ? `${text.slice(0, 100)}...` : text);
 };
 
 const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"]) => {
   if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"] };
+  // A key with no value (`[core] bare`, true) is not one with an empty value (`bare =`, false).
   const values = (entries: string[]) => {
-    const by = new Map<string, string[]>();
+    const by = new Map<string, (string | null)[]>();
     for (const e of entries) {
       const at = e.indexOf("\n");
       const key = at < 0 ? e : e.slice(0, at);
-      by.set(key, [...(by.get(key) ?? []), at < 0 ? "" : e.slice(at + 1)]);
+      by.set(key, [...(by.get(key) ?? []), at < 0 ? null : e.slice(at + 1)]);
     }
     return by;
   };
@@ -193,7 +195,7 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     const next = is.get(key) ?? [];
     if (old.length === next.length && old.every((v, i) => v === next[i])) continue;
     const upstream = UPSTREAM_KEY.exec(key);
-    const valid = next.every((v) => (upstream?.[2] === "remote" ? PLAIN_REMOTE.test(v) : /^refs\/\S+$/.test(v)));
+    const valid = next.every((v) => v !== null && (upstream?.[2] === "remote" ? PLAIN_REMOTE.test(v) : /^refs\/\S+$/.test(v)));
     if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
     else allBenign = false;
     const name = clean(key);

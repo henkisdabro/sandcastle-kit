@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -163,4 +163,13 @@ test("a change to another file of .git still stops the run beside a benign confi
   git("branch", "-q", "--track", "topic", "origin/main");
   appendFileSync(join(project.root, ".git", "info", "attributes"), "* filter=x\n");
   await quietly(() => assert.throws(() => assertGitUnchanged(project, before, "after #1"), /\.git\/info\/attributes changed/));
+});
+
+test("a key that loses its value stops the run: `bare` is true, `bare =` is false", () => {
+  const { project } = repo();
+  const config = join(project.root, ".git", "config");
+  appendFileSync(config, "[x]\n\tflag =\n");
+  const before = gitFingerprint(project);
+  writeFileSync(config, readFileSync(config, "utf8").replace("\tflag =\n", "\tflag\n"));
+  assert.match(stops(project, before), /x\.flag: "" -> \(no value\)/);
 });
