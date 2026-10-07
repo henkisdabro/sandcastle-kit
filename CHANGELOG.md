@@ -38,6 +38,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   each expected text or fixture it changed (a width, a timeout) unless the ticket changes that
   behaviour, and a reviewer undoes the ones it does not. A reviewer also fixes a side effect its
   branch causes outside the ticket, instead of filing it as a follow-up.
+- **The start line, the skill and the README say that another worktree shares `.git/config`**,
+  so a branch given an upstream there (`git worktree add` from a remote branch, `git push -u`,
+  `gh pr create`) stops the run as a commit on the base does; `--no-track` or
+  `git push origin HEAD:<branch>` avoid it.
 - **The start plan says `up to N at a time`.** Beside another project's live run, the plain
   figure sat above `this run's share is 1` and an estimate for one at a time, as though the run
   would start two.
