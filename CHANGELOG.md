@@ -72,6 +72,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **With `herdr.panes: "all"`, closing the status pane no longer turns the whole Herdr view off**
   when the first ticket claims a sandbox pane: the run says once that the status pane closed, and
   the sidebar, tab bar and notifications carry on.
+- **A Herdr view that turned itself off no longer reports to Herdr at the run's exit**, where a
+  status pane found gone printed "Herdr status pane closed" after the "view off" line.
 - **A sandbox pane closed by hand while it waited for the next ticket no longer turns the run's
   Herdr view off** when that ticket claims it: the pane is forgotten and the ticket gets another.
 - **A ticket held behind another held ticket no longer reads "(lands this run)" once the run

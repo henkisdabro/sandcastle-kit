@@ -30,7 +30,7 @@ if (process.env.NODE_TEST_CONTEXT) {
   // execFileSync with the default stderr hands the parent an empty chunk when the command said nothing.
   guard(process.stderr, "stderr", (chunk) => (chunk as string | Uint8Array).length > 0);
 
-  process.on("exit", (code) => {
+  const check = (code: number) => {
     if (stray.length === 0) return;
     // A file that already failed keeps its own failure; the stray lines are noise next to it.
     if (code !== 0) return;
@@ -38,5 +38,18 @@ if (process.env.NODE_TEST_CONTEXT) {
     const more = stray.length > shown.length ? `\n  ... and ${stray.length - shown.length} more` : "";
     writeSync(2, `\ntest/no-stray.ts: this test file wrote ${stray.length} line(s) outside quietly() (test/quiet.ts):\n${shown.join("\n")}${more}\n`);
     process.exitCode = 1;
-  });
+  };
+  process.on("exit", check);
+  // Exit listeners run in the order they were added, and this one is added before any module the test
+  // loads: a line the kit's own exit handler printed (a Herdr view's) went by unseen. So it is moved
+  // behind each exit listener added after it.
+  const on = process.on.bind(process);
+  process.on = ((event: string | symbol, listener: (...args: any[]) => void) => {
+    on(event, listener);
+    if (event === "exit" && listener !== check) {
+      process.removeListener("exit", check);
+      on("exit", check);
+    }
+    return process;
+  }) as typeof process.on;
 }

@@ -799,7 +799,9 @@ export const openSandboxView = (
       /* best effort */
     }
     // A run that never reached its close was killed or crashed: its pane must not go on saying "working".
-    if (mode === "none" && !ended) {
+    // Not once the view has turned itself off: its exit is no time to talk to Herdr again, and a status
+    // pane found gone here said so after the "view off" line.
+    if (mode === "none" && !ended && !failed) {
       try {
         reportRun({ state: "blocked", message: "ended early" });
       } catch {
