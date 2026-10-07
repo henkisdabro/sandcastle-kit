@@ -1057,6 +1057,8 @@ export type BranchHead = {
   reviewed?: string;
   /** The tip a pipeline ended green on, not held as unreviewed. */
   green?: string;
+  /** The tip whose gates ended red: a branch reviewed at a tip that went red needs the implementer, not just a re-run of the gates. Dropped by the next review or green. */
+  red?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
   /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
@@ -1083,11 +1085,13 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
-  all[id] = { ...all[id], ...fields, run, at: new Date().toISOString() };
+  // A review reads the branch afresh: a red result recorded before it is no longer the branch's state.
+  const kept = "reviewed" in fields && !("red" in fields) ? { ...all[id], red: undefined } : all[id];
+  all[id] = { ...kept, ...fields, run, at: new Date().toISOString() };
   // Written whole and renamed into place, as the run record is: a half-written
   // file read as no record would quietly cost a later run its skip.
   writeFileSync(`${file}.tmp`, JSON.stringify(all, null, 2) + "\n");
@@ -1130,6 +1134,26 @@ export const landOnlyHead = (root: string, base: string, id: string): string | u
     return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.green : undefined;
   } catch {
     return undefined; // no such branch, not an ancestor, or git failed
+  }
+};
+
+/**
+ * The recorded reviewed head of a branch that never recorded a green one (stopped while its
+ * gates ran, say) when it sits on it, or past it by merge commits only, and has work not on base;
+ * otherwise undefined. A tip whose gates ended red (`red`) is never one: that branch needs the
+ * implementer, and the record cannot tell a red result from a stop. Like `landOnlyHead`, a missing
+ * or doubtful record means "run it in full".
+ */
+export const reviewedOnlyHead = (root: string, base: string, id: string): string | undefined => {
+  const branch = `agent/issue-${id}`;
+  const record = readHeads(root)[id];
+  if (!record?.reviewed || record.red || record.branch !== branch) return undefined;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    if (sh("git", ["rev-parse", branch], root) !== record.reviewed && !onlyMergesSince(root, base, branch, record.reviewed)) return undefined;
+    return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.reviewed : undefined;
+  } catch {
+    return undefined;
   }
 };
 

@@ -39,7 +39,7 @@ import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState, type UsagePaused } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason, wholeNumber } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, type Context, createLedger, outcomesFile, repairWords } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -662,7 +662,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -849,13 +849,17 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Read before the base merge, which moves the tip. A branch at the head it
       // was reviewed and gated green on, or past it by merge commits only, needs no
       // implement or full review: only the merge and the gates stand between it and landing.
-      const greenHead = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
+      const greenOnly = carried ? landOnlyHead(project.root, base, issue.id) : undefined;
+      // A branch reviewed but never green (stopped while its gates ran) needs no implementer either:
+      // the gates have not said it is wrong. A red result is the record's `red`, which this refuses.
+      const reviewedOnly = carried && greenOnly === undefined ? reviewedOnlyHead(project.root, base, issue.id) : undefined;
+      const greenHead = greenOnly ?? reviewedOnly;
       let landOnly = greenHead !== undefined;
-      // A tip past the green head is merge commits only (landOnlyHead): a resolution a hold left
+      // A tip past the head is merge commits only (landOnlyHead): a resolution a hold left
       // on the branch was never reviewed, unless a narrow review has since recorded the tip.
       const carriedMerge = greenHead !== undefined && sh("git", ["rev-parse", branch], project.root) !== greenHead && readHeads(project.root)[issue.id]?.reviewed !== sh("git", ["rev-parse", branch], project.root);
       if (greenHead !== undefined) {
-        console.log(greenCarriedLine(ref(issue.id), greenHead, requeued));
+        console.log((reviewedOnly !== undefined ? reviewedCarriedLine : greenCarriedLine)(ref(issue.id), greenHead, requeued));
         run.ticket(issue.id, { note: "land only - reviewed earlier" });
       }
       let mergeConflicted = false;
@@ -889,7 +893,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             await sandbox.exec(merge);
             mergeConflicted = true;
             console.log(
-              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
+              `${ref(issue.id)}: ${carriedBranch(landOnly, requeued, reviewedOnly !== undefined)} conflicts with ${base} in generated files (${files.join(", ")}), and regenerating failed (${r.reason}); ${landOnly ? "a resolver resolves the merge, then the gates run" : "the implementer resolves the merge"}.`,
             );
           }
         } else if (pull.exitCode === 0) {
@@ -903,7 +907,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           mergeConflicted = true;
           console.log(
             landOnly
-              ? `${ref(issue.id)}: its green branch conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
+              ? `${ref(issue.id)}: ${carriedBranch(true, requeued, reviewedOnly !== undefined)} conflicts with ${base} (${files.join(", ")}); a resolver resolves the merge, then the gates run.`
               : `${ref(issue.id)}: ${carriedBranch(false, requeued)} conflicts with ${base} (${unmerged.split("\n").join(", ")}); the implementer resolves the merge.`,
           );
         }
@@ -1034,6 +1038,16 @@ export const createPipeline = (ctx: PipelineContext) => {
       let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
       let reviewed = false;
       const unmet: string[] = [];
+      // What the agents have said so far, as a head record keeps it: a branch stopped mid-gates is re-run
+      // from its reviewed tip with no agent, and without this its criteria and changelog lines would be gone.
+      const agentsSaid = () => {
+        const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
+        return {
+          unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
+          changelog: changelog.length ? [...new Set(changelog)] : undefined,
+          changelogDropped: changelogDropped || undefined,
+        };
+      };
       if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
         // The resolver finished the merge on a branch reviewed and green at greenHead, or the branch
         // carries a merge from an earlier run that no review has read: nobody has seen its
@@ -1048,6 +1062,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         if (said) addReport(issue.id, "Reviewer (after conflict resolution)", said);
         const u = unmetOf(resolved.stdout);
         if (u) unmet.push(u);
+        noteHead(issue.id, branch, agentsSaid());
       }
       if (!landOnly) {
         await juncture("implement");
@@ -1106,6 +1121,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (said) addReport(issue.id, "Reviewer (after base merge)", said);
           const u = unmetOf(merged.stdout);
           if (u) unmet.push(u);
+          noteHead(issue.id, branch, agentsSaid());
         } else {
           await juncture("review");
           let reviewModel: string | undefined;
@@ -1144,6 +1160,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             const m = r && unmetOf(r.stdout);
             if (m) unmet.push(m);
           }
+          noteHead(issue.id, branch, agentsSaid());
           if (!tracker.agentsWrite) {
             for (const [who, r] of [["Reviewer", review], ["Cross-reviewer", cross]] as const) {
               const said = r && tags(r.stdout).report;
@@ -1352,18 +1369,19 @@ export const createPipeline = (ctx: PipelineContext) => {
           noteChangelog(after.stdout, true);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
+          noteHead(issue.id, branch, agentsSaid());
           const said = tracker.agentsWrite ? undefined : tags(after.stdout).report;
           if (said) addReport(issue.id, "Reviewer (after repair)", said);
           if (after.commits.length) gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
         }
       }
 
-      const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
       const head = sh("git", ["rev-parse", branch], project.root);
-      const unmetNote = left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined;
-      const changelogNote = changelog.length ? [...new Set(changelog)] : undefined;
+      const { unmet: unmetNote, changelog: changelogNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
+      // A red result is told apart from a stop mid-gates, which never gets here: only the second re-runs from its review.
+      else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {
         issue: issue.id,
         branch,

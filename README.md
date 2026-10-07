@@ -863,7 +863,10 @@ A queued ticket with a branch from an earlier run builds on that branch:
   resolver prompt first (it runs the typecheck gate and the tests that cover the conflicted files, not the
   full suite: the kit gates the merge commit once it exits), and a merge an earlier run left on it that no
   review has read (a held resolution, say) gets a review of the merge alone. A re-run whose only change
-  since its last review is the base merge gets a review of the merge alone too. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+  since its last review is the base merge gets a review of the merge alone too. A branch that was
+  reviewed but never got a gate result (a run stopped while its gates ran) is treated the same way:
+  its gates run and no implementer does, unless its last gate result was red, which sends it back to
+  the implementer. The record behind these is `.sandcastle/logs/heads.json`, which also keeps a criterion its
   agents left undone, so a branch that skips them still lands as partly done, and their
   [`changelog`](#-configuration) lines, so its closing summary still lists them; `sandcastle requeue`
   clears a ticket's entry.
