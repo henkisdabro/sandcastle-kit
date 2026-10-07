@@ -47,7 +47,7 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -566,6 +566,8 @@ export const render = (f: Facts, plain = false): string => {
   // The tests the red verify named (a file in a repository: only strings count).
   const verifyTests = Array.isArray(f.verify?.failing) ? f.verify!.failing.filter((t): t is string => typeof t === "string" && !!t) : [];
   const verifyFailing = verifyTests.length ? ` - failing: ${verifyTests.join(", ")}${f.verify?.failingMore === true ? ", and more" : ""}` : "";
+  // The ticket whose gates passed the verified tree (a file in a repository: only a string counts).
+  const sameTree = typeof f.verify?.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
   const newDockerfiles = Array.isArray(f.verify?.dockerfiles) ? f.verify!.dockerfiles.filter((d): d is string => typeof d === "string" && !!d) : [];
   const startingImage = newDockerfiles.length
     ? ` Merged work changed ${newDockerfiles.join(", ")}, so this ran on the run's starting image - rebuild and run sandcastle gates to check the new one.`
@@ -608,7 +610,7 @@ export const render = (f: Facts, plain = false): string => {
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
-        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
+        : `Merged ${f.base} re-gated: ${sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
@@ -822,7 +824,14 @@ export const render = (f: Facts, plain = false): string => {
         (stoppedIds.length ? ` - ${list(stoppedIds)} finished and land then.` : "."),
     );
   }
-  if (f.verify && !f.verify.green) next.push(`Fix ${f.base}: merged together, the gates are red. Do not push until they are green.`);
+  if (f.verify && !f.verify.green) {
+    const same = typeof f.verify.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
+    next.push(
+      same
+        ? `Fix ${f.base}: the gates are red in a clean sandbox on the tree ${same}'s own gates passed - look at the sandbox (git identity, environment), not at the tickets meeting. Do not push until they are green.`
+        : `Fix ${f.base}: merged together, the gates are red. Do not push until they are green.`,
+    );
+  }
   if (sameTest.length) next.push(`Fix ${sameTest.map(([test]) => test).join(", ")} once - it fails on ${new Set(sameTest.flatMap(([, w]) => w)).size} of the unmerged branches.`);
   // Grouped, these tickets got no step of their own (see `lone`): say here what the next run does with them.
   if (sameFile.length) {
