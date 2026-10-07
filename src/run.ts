@@ -13,6 +13,8 @@ import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+import { commandOf } from "./live-runs.ts";
+import { liveness } from "../mod/hooks/run-live.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
 
 // How the run was ended, for the record `recordRun` writes at its exit: a SIGINT of a detached
@@ -555,6 +557,24 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
 // run is still alive; `finishedAt` is written on a clean exit.
 // ---------------------------------------------------------------------------
 
+/**
+ * A run killed without its exit handler (SIGKILL, the machine going down) never wrote its history
+ * line, and this record's first write replaces its `run.json`: so a record that has not finished
+ * and whose process is gone is appended to history first, with the changelog lines it holds. A
+ * record of a live run (another process of this project) or of this very process is left alone.
+ */
+const keepKilledRecord = (root: string, file: string) => {
+  try {
+    if (!existsSync(file)) return;
+    const record = JSON.parse(readFileSync(file, "utf8"));
+    if (!record || typeof record !== "object" || Array.isArray(record)) return;
+    if (liveness({ record, self: process.pid }, commandOf).state !== "dead") return;
+    appendFileSync(join(root, ".sandcastle/logs/history.jsonl"), JSON.stringify(record) + "\n");
+  } catch {
+    /* history is a convenience: an unreadable record is replaced, as it always was */
+  }
+};
+
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
 
@@ -563,6 +583,7 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   current?.(0);
   const file = join(project.root, ".sandcastle/logs/run.json");
   mkdirSync(join(project.root, ".sandcastle/logs"), { recursive: true });
+  keepKilledRecord(project.root, file);
   // Only the id: the session's other variables include tokens. It tells the Claude Code mod
   // whose run this is, wherever the project's root is.
   const session = sessionId(process.env.CLAUDE_CODE_SESSION_ID);

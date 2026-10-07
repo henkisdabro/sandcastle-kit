@@ -23,6 +23,7 @@ import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
+import { OperatorError } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -441,6 +442,30 @@ const span = (ms: number) => {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 };
 
+/**
+ * The suggested changelog lines as the closing summary and `report --changelog` print them: a line
+ * starting with none of the three words is a Changed. An `Upgrading:` line is what an existing
+ * project must act on: it is listed apart, never among the changes.
+ */
+const changelogLines = (all: { id: string; line: string }[]): string[] => {
+  const out: string[] = [];
+  const isUpgrading = ({ line }: { line: string }) => /^Upgrading:/.test(line);
+  const lines = all.filter((l) => !isUpgrading(l));
+  const upgrading = all.filter(isUpgrading);
+  if (lines.length) {
+    out.push("Changelog lines the agents suggested:");
+    for (const group of ["Added", "Changed", "Fixed"]) {
+      const mine = lines.filter(({ line }) => (/^(Added|Changed|Fixed):/.exec(line)?.[1] ?? "Changed") === group);
+      for (const { id, line } of mine) out.push(`  ${group}: ${line.replace(/^(Added|Changed|Fixed):\s*/, "")} (${refOf(id)})`);
+    }
+  }
+  if (upgrading.length) {
+    out.push("Upgrading notes the agents suggested - an existing project must act on these, so write them under Upgrading, not as changes:");
+    for (const { id, line } of upgrading) out.push(`  Upgrading: ${line.replace(/^Upgrading:\s*/, "")} (${refOf(id)})`);
+  }
+  return out;
+};
+
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const ids = (states: TicketState[]) => Object.entries(f.tickets).filter(([, t]) => !!t.state && states.includes(t.state)).map(([id]) => id);
@@ -592,24 +617,9 @@ export const render = (f: Facts, plain = false): string => {
     done.push(`Not landed, as the tracker said during the run: ${name(id)} - ${f.tickets[id].note ?? "withdrawn"}${kept}`);
   }
   // Changelog lines the agents suggested (`changelog: true`), for the tickets that landed: the
-  // maintainer writes the entries from them. A line starting with none of the three words is a Changed.
-  // An `Upgrading:` line is what an existing project must act on: it is listed apart, never among the changes.
-  const all = merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })));
-  const isUpgrading = ({ line }: { line: string }) => /^Upgrading:/.test(line);
-  const lines = all.filter((l) => !isUpgrading(l));
-  const upgrading = all.filter(isUpgrading);
+  // maintainer writes the entries from them.
+  done.push(...changelogLines(merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })))));
   const dropped = merged.filter((id) => f.tickets[id].changelogDropped);
-  if (lines.length) {
-    done.push("Changelog lines the agents suggested:");
-    for (const group of ["Added", "Changed", "Fixed"]) {
-      const mine = lines.filter(({ line }) => (/^(Added|Changed|Fixed):/.exec(line)?.[1] ?? "Changed") === group);
-      for (const { id, line } of mine) done.push(`  ${group}: ${line.replace(/^(Added|Changed|Fixed):\s*/, "")} (${refOf(id)})`);
-    }
-  }
-  if (upgrading.length) {
-    done.push("Upgrading notes the agents suggested - an existing project must act on these, so write them under Upgrading, not as changes:");
-    for (const { id, line } of upgrading) done.push(`  Upgrading: ${line.replace(/^Upgrading:\s*/, "")} (${refOf(id)})`);
-  }
   // Never shown cut off: a tag too long, a list or holding a commit sha is an agent's message, not a line.
   for (const id of dropped) done.push(`A suggested line for ${refOf(id)} was not a changelog line${f.tickets[id].changelogDropped! > 1 ? ` (${f.tickets[id].changelogDropped} of them)` : ""}: it is left out, so write that entry from the ticket.`);
   section(h("## ✅ Done", "## Done"), done);
@@ -843,4 +853,70 @@ export const closingReport = async (project: Project, turn?: { level: Level; tur
     if (after?.verdict === "run") facts.next = { level: turn.level, turn: turn.turn + 1, tickets: after.ids };
   }
   return render(facts, !!process.env.NO_COLOR);
+};
+
+// ---------------------------------------------------------------------------
+// `sandcastle report --changelog`: the suggested lines of every ticket that landed since a ref,
+// across runs. The closing summary shows only the last run's; a release spans many.
+// ---------------------------------------------------------------------------
+
+type HistoryRecord = { startedAt?: string; dryRun?: boolean; tickets?: unknown };
+
+const parseRecord = (text: string): HistoryRecord | undefined => {
+  try {
+    const run = JSON.parse(text);
+    return run && typeof run === "object" && !Array.isArray(run) ? run : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The commit time (ISO) of a git ref, or undefined when the ref names no commit. */
+const commitTime = (root: string, ref: string) => git(["log", "-1", "--format=%cI", `${ref}^{commit}`], root) || undefined;
+
+/**
+ * What landed since `since` (a git ref; default the latest tag reachable from the base branch,
+ * else all history): the tickets merged in runs that started after the ref's commit time, read
+ * from `logs/history.jsonl` and the current `logs/run.json`. A ticket merged in several runs is
+ * shown once, with the lines of its latest run that has any. A line that does not parse is skipped.
+ */
+export const changelogSince = (project: Project, since?: string): string => {
+  const root = project.root;
+  const logs = join(root, ".sandcastle/logs");
+  const ref = since ?? (git(["describe", "--tags", "--abbrev=0", project.baseBranch], root) || undefined);
+  const after = ref ? commitTime(root, ref) : undefined;
+  if (ref && !after) throw new OperatorError(`\`${ref}\` is not a git ref of this project: give a tag or commit, as in \`sandcastle report --changelog --since v1.2.0\`.`);
+  const read = (file: string) => (existsSync(join(logs, file)) ? readFileSync(join(logs, file), "utf8") : "");
+  // The current record is last: a finished run is in both files, and the later copy replaces the earlier by its start.
+  const runs = new Map<string, HistoryRecord>();
+  for (const text of [...read("history.jsonl").split("\n").filter(Boolean), read("run.json")]) {
+    const run = parseRecord(text);
+    if (run && typeof run.startedAt === "string" && !Number.isNaN(Date.parse(run.startedAt))) runs.set(run.startedAt, run);
+  }
+  const landed = new Map<string, { title?: string; lines: string[]; dropped: number }>();
+  for (const run of [...runs.values()].sort((a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!))) {
+    if (run.dryRun || (after && Date.parse(run.startedAt!) <= Date.parse(after))) continue;
+    for (const [id, t] of Object.entries(readTickets(run))) {
+      if (t.state !== "merged") continue;
+      const before = landed.get(id);
+      const lines = Array.isArray(t.changelog) ? t.changelog.filter((l): l is string => typeof l === "string") : [];
+      // The latest run's lines; an earlier run's stand only while no later one gave any.
+      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0 } : before;
+      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped });
+    }
+  }
+  const ids = [...landed.keys()];
+  const out = [`${ids.length} ticket(s) landed in runs started after ${ref ? `${ref} (${after})` : "the start of the history"}.`];
+  const all = ids.flatMap((id) => landed.get(id)!.lines.map((line) => ({ id, line })));
+  out.push(...changelogLines(all));
+  for (const id of ids.filter((id) => landed.get(id)!.dropped)) {
+    out.push(`A suggested line for ${refOf(id)} was not a changelog line: it is left out, so write that entry from the ticket.`);
+  }
+  const bare = ids.filter((id) => !landed.get(id)!.lines.length);
+  if (bare.length) {
+    out.push("No suggested line - write from the ticket:");
+    for (const id of bare) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
+  }
+  if (!all.length && ids.length && !project.changelog) out.push("This project has no `changelog: true`, so the agents were not asked for lines.");
+  return out.join("\n");
 };
