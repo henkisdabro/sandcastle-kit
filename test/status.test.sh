@@ -139,7 +139,7 @@ row '#104' 'gate red' 'pytest red'
 row '#105' queued 'next to start'
 row '#106' queued '1 ahead of it'
 row '#107' blocked 'waits for #103'
-row '#108' held '.github/'
+row '#108' held 'human merge: .gi'
 row '#109' conflict 'with #103'
 row '#110' merged
 row '#120' queued 'not in this run'
@@ -238,7 +238,7 @@ has 'finishing +#120 review, #121 landing'
 hasnt 'running · '
 hasnt 'ends ~'
 row '#120' review
-row '#122' paused 'before review at a1b'
+row '#122' paused 'before review at a1'
 row '#123' queued 'waits for the resume'
 # Nothing in flight: the cell says only that it is paused.
 sed -i.bak 's/"finishing": \["120", "121"\]/"finishing": []/' "$L/run.json"
@@ -455,7 +455,7 @@ cat >"$L/outcomes.json" <<EOF
   "103": { "run": "earlier", "outcome": "gate red: ruff=FAIL" } }
 EOF
 render ""
-row '#104' 'gate red' 'pytest=FAIL'
+row '#104' 'gate red' 'pytest=FA'
 row '#109' conflict
 row '#110' merged
 # Its commits are what it landed, not the 0 its merged branch has left over the base.
@@ -497,6 +497,7 @@ row '#101' impl
 has '^│ +#101 .*│ +1\.5c/276M +│'
 has 'CPU/MEM'
 has 'CPU in cores'
+has 'time = in state while working, start to end once finished \(red: twice the usual\)'
 # A GiB figure under 10 keeps its decimal.
 FAKE_STATS='sandcastle-c1|100.00%|2.1GiB / 11.73GiB' FAKE_DOCKER="$REPO" render "101"
 has '^│ +#101 .*│ +1\.0c/2\.1G +│'
@@ -526,7 +527,7 @@ EOF
 COLS_WAS="$COLS"
 # 100 columns and up: both columns.
 COLS=120; render "131 132 133 134"
-has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +CPU/MEM +│ +TOKENS +│ +ACTIVITY +│'
+has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +CPU/MEM +│ +TOKENS +│ +ACTIVITY +│'
 has '^│ +#131 .*│ +- +│ +3\.1M/42k +│'
 has '^│ +#132 .*│ +- +│ +980k/1\.2M +│'
 has '^│ +#133 .*│ +- +│ +- +│'
@@ -537,7 +538,7 @@ has 'CPU in cores'
 # 80 to 99: TOKENS alone, which is what a person watching the plan's allowance needs.
 for COLS in 80 90 99; do
   render "131 132 133 134"
-  has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +TOKENS +│ +ACTIVITY +│'
+  has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +TOKENS +│ +ACTIVITY +│'
   hasnt 'CPU/MEM'
   hasnt 'CPU in cores'
   has '^│ +#131 .*│ +3\.1M/42k +│'
@@ -546,7 +547,7 @@ for COLS in 80 90 99; do
 done
 # Below 80: neither, and no legend for them.
 COLS=70; render "131 132 133 134"
-has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +ACTIVITY +│'
+has '^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│ +ACTIVITY +│'
 hasnt 'TOKENS'
 hasnt 'CPU/MEM'
 hasnt 'tokens = in/out'

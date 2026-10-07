@@ -725,6 +725,14 @@ type Note = { issue: string; kind: "hold"; text: string };
 /** One step of a run or a ticket, timed into logs/timings.jsonl and the run record (burndown's `timed`). */
 export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined, queuedMs?: number) => Promise<T>;
 
+/**
+ * The `started` a step's run.json write carries: at the ticket's first `setup` only, kept through a
+ * requeued second attempt or a resume, as the status view's TIME for a finished ticket is
+ * `since - started`, its whole wall time, not its last attempt's.
+ */
+export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number } =>
+  phase === "setup" && typeof prior?.started !== "number" ? { started: Math.floor(sinceMs / 1000) } : {};
+
 /** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
 export const SLOT_WAIT_SHOWN = 3 * 60_000;
 
@@ -1912,7 +1920,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     if (issue) {
       if (!isTicketState(phase)) throw new Error(`"${phase}" is a step of the run, not a state of ticket ${issue}`);
       // The record first: the view's workspace count reads it.
-      run.ticket(issue, { state: phase, ...(phase === "setup" ? { started: Math.floor(since / 1000) } : {}), ...(note ? { note } : {}) });
+      run.ticket(issue, { state: phase, ...firstStart(run.tickets()[issue], phase, since), ...(note ? { note } : {}) });
       view.phase(issue, phase);
     } else run.update({ stage: phase });
     let ok = false;

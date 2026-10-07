@@ -570,7 +570,7 @@ in_record() { [ "$RECORD" = 1 ] && has_line "$1" "$TICKET_IDS"; }
 # Seconds a step usually takes in this project (run.json's `typical`), or empty.
 typical_of() { fields_of "$1" "$TYPICAL" '|' || return 0; printf '%s\n' "${F[1]:-}"; }
 
-# Seconds as the AGE column shows them.
+# Seconds as the TIME column shows them.
 # Into AGO, not printed: every row has one, and a subshell each cost the frame a process.
 ago() {
   # The frame's clock is read before run.json, so a state written in between is a second "ahead".
@@ -1108,11 +1108,12 @@ render() {
   # wide: 2 with CPU/MEM and TOKENS, 1 with TOKENS only (what a person watching the plan's allowance
   # needs), 0 with neither.
   wide=2; [ "$cols" -lt 100 ] && wide=1; [ "$cols" -lt 80 ] && wide=0
+  # TIME's minimum fits "1h12m", a finished ticket's length.
   # STATE's minimum fits "! uncommitted", the longest state - but for the
   # narrowest panes, which cut it.
-  local -a MIN=($(( longest + 2 )) 15 6 9 13 12) PCT=(6 9 5 6 8 7)
-  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 15 6 9 12); PCT=(6 9 5 6 7); }
-  [ "$wide" = 0 ] && { MIN=($(( longest + 2 )) 12 6 9); PCT=(6 9 5 6); }
+  local -a MIN=($(( longest + 2 )) 15 7 9 13 12) PCT=(6 9 5 6 8 7)
+  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 15 7 9 12); PCT=(6 9 5 6 7); }
+  [ "$wide" = 0 ] && { MIN=($(( longest + 2 )) 12 7 9); PCT=(6 9 5 6); }
   avail=$(( cols - ${#MIN[@]} - 2 ))
   for (( i=0; i<${#MIN[@]}; i++ )); do
     TW[i]=$(( avail * PCT[i] / 100 )); [ "${TW[i]}" -lt "${MIN[i]}" ] && TW[i]=${MIN[i]}; sum=$(( sum + TW[i] ))
@@ -1128,6 +1129,16 @@ render() {
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
     ago $(( now_s - since )); age="$AGO"; age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
+    # A finished row's TIME is its whole length, first start to end (`since` is when it entered its end
+    # state): "how long ago" would read the same for a quick ticket and a slow one. A row with no
+    # start in the record keeps time in state.
+    case "$tstate" in
+      merged|held|red|conflict|nochange|uncommitted|crashed|"not landed"|withdrawn|stopped|skipped)
+        if [[ "$started" =~ ^[0-9]+$ ]] && [ "$since" -ge "$started" ]; then
+          if [ $(( since - started )) -lt 60 ]; then ago $(( since - started )); age="$AGO"
+          else printf -v age '%s' "$(dur $(( since - started )))"; fi
+        fi;;
+    esac
     commits=$(git rev-list --count "${BASE}..agent/issue-$n" 2>/dev/null || echo -)
     stat_for "$n"; cpu_cols; tokens_cell "$tokens"
     case "$tstate" in
@@ -1223,7 +1234,7 @@ render() {
     case "$log" in *-resolve-*) phase="resolve";; *-review-codex-*) phase="codex";; *-review-*) phase="review";; *-repair-*) phase="repair";; *-gates-*) phase="gates";; *) phase="impl";; esac
 
     mtime=$(mtime_of "$log")
-    # AGE is how long a working row has been at its phase, from an older
+    # TIME is how long a working row has been at its phase, from an older
     # run's record; any other row's is how long since its log last changed.
     act=""; [ "$RUN_LIVE" = 1 ] && act=$(active_of "$n")
     if [ -n "$act" ]; then
@@ -1406,7 +1417,7 @@ render() {
   # The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
   [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open): in merged here, in needs you in the closing summary${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
-  NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
+  NOTE[${#NOTE[@]}]="${gry}time = in state while working, start to end once finished (red: twice the usual)${off}"
   # Below 80 columns there is no TOKENS column to explain, and from 100 a CPU/MEM column too.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}tokens = in/out, cache included${off}"
   [ "$wide" = 2 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
@@ -1591,7 +1602,7 @@ build_header() {
   # The table's headings, under a light rule: their bold text sets them apart.
   OW=("${TW[@]}"); bars_of
   junction '├' '┤' '─' "$prev" "$BARS"; put "$REPLY"
-  CELL=("${bold}${head}TICKET${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
+  CELL=("${bold}${head}TICKET${off}" "${bold}${head}STATE${off}" "${bold}${head}TIME${off}" "${bold}${head}COMMITS${off}")
   [ "$wide" = 2 ] && CELL[4]="${bold}${head}CPU/MEM${off}"
   [ "$wide" -ge 1 ] && CELL[wide + 3]="${bold}${head}TOKENS${off}"
   CELL[${#TW[@]}-1]="${bold}${head}ACTIVITY${off}"

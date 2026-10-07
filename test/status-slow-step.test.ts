@@ -1,4 +1,4 @@
-// The status view's flags on a step that runs long: past twice the step's usual time the AGE turns
+// The status view's flags on a step that runs long: past twice the step's usual time the TIME turns
 // red and the note says what usual is; past three times it the note says so in words, since an agent
 // pass is bounded by nothing but its idle timeout. A made-up live run record, a fake `sandcastle`
 // and a `docker` that finds nothing; no Docker, no network, no model calls.
@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 
 const KIT = join(import.meta.dirname, "..");
-const COLS = 80;
+const COLS = 84;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-slow-"));
 const REPO = join(TMP, "my repo");
 const FAKE = join(TMP, "bin");
