@@ -180,6 +180,7 @@ test("while a sent-back ticket waits to resolve, the run still says which landin
   const greens = later();
   let ready = 0;
   let first = true;
+  const merged: string[] = [];
   const schedule = createSchedule<T, G, string>({
     tickets: [{ id: "10" }, { id: "20" }, { id: "30" }],
     files: filesOf({ 10: ["src/a.ts"], 20: ["src/a.ts"], 30: ["src/a.ts"] }),
@@ -198,11 +199,14 @@ test("while a sent-back ticket waits to resolve, the run still says which landin
         return { kind: "conflict", files: ["src/a.ts"], with: [] };
       }
       await tick();
+      merged.push(g.issue);
       return { kind: "merged" };
     },
     host: { check: async () => {}, failed: undefined },
     tell: (c) => void told.push(c),
   });
+  // The resolve waited for both (shorter than the settling, so unsaid): 10 merges last.
+  assert.deepEqual(merged, ["20", "30", "10"]);
   // The pipelines are idle but for the wait, which runs no agent: each landing is said, the third (30's) too, not left at the second.
   assert.deepEqual(
     told.flatMap((c) => (c.kind === "landing" ? [c.at] : [])),

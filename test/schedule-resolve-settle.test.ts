@@ -78,6 +78,9 @@ test("a resolve wait is said once its list has held, worded by who is still runn
   run30.open();
   const { endings } = await running;
   assert.equal(told.filter((c) => c.kind === "resolve starts").length, 1);
+  // Its end is said once nothing is ahead of it: after 20 and 30 have ended.
+  const at = (ok: (c: Change<G, string>) => boolean) => told.findIndex(ok);
+  for (const id of ["20", "30"]) assert.ok(at((c) => c.kind === "resolve starts") > at((c) => c.kind === "ended" && c.id === id), id);
   assert.equal(waitsOf().length, 2);
   assert.equal((endings.get("10") as { landed: Landed }).landed.kind, "merged");
 });
