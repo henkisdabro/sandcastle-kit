@@ -24,10 +24,12 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A ticket whose branch stops merging onto the base while it runs skips its review and gates**
   and goes straight back to resolve the merge, instead of finding the conflict only at landing. It
   is sent back once, as a conflict at landing is.
-- **The end-of-run verify no longer re-gates a merged base tip the run's own gates just passed.**
-  It is skipped when the green-base record names the current tip on the same image and plan, and
-  the summary says whose gates proved it (`Merged main re-gated: green at <sha> already on image
-  <tag> (gated with #427) - not run again`).
+- **The end-of-run verify no longer re-gates a merged base tip that a gate-only sandbox already
+  passed**: a landing merged in a sandbox, the base check or an earlier verify. The summary says
+  whose gates proved it (`Merged main re-gated: green at <sha> already on image <tag> (gated with
+  #427 in its landing sandbox) - not run again`). A fast-forward landing's proof is its ticket's own
+  sandbox, which can differ from a clean one (its agent's git identity, say), so after one the
+  verify still runs.
 - **Beside another run, a run whose share of the machine's sandbox slots is 2 or more keeps one
   slot of that share for landing**, so a green branch no longer waits for a ticket to finish before
   it can land.
@@ -63,6 +65,25 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Follow-up filing no longer merges two findings because their evidence cites the same line**,
   now merges findings that name the same file with close titles, and no longer reads a host and
   port such as `api.example.com:443` as a place.
+
+- **A red end-of-run verify on a tree a ticket's own gates passed is no longer called "RED
+  TOGETHER"** (every landing a fast-forward, say). The summary says the red is the verify sandbox's,
+  not the merge's, and its next step says the same.
+- **A red end-of-run verify names its failing tests** (up to five, then "and more") above the
+  output excerpt and on the summary's re-gated line, not only in `verify-gates.log`.
+- **Sandboxes can no longer call the EnterWorktree, ExitWorktree, Workflow, DesignSync or
+  PushNotification tools, and the git guard refuses `git worktree add` in the shared repository**
+  (a scratch repository's own is still allowed), so an agent cannot leave a worktree record or
+  branch in the shared `.git`.
+- **A run that ends with a red merged base exits 1**, and records `exitCode: 1` in `run.json`, at
+  every autonomy level, so `sandcastle wait` no longer reports success on a base the summary says not
+  to push.
+
+### Upgrading
+
+- **`sandcastle run` and `sandcastle wait` now exit 1 when the merged base re-gated red.** A script
+  or harness that treated exit 0 as "safe to push" needs no change; one that treated any non-zero
+  exit as a crash should read the closing summary (or `run.json`'s `verify`) before retrying.
 
 ## [0.10.0] - 2026-10-07
 
