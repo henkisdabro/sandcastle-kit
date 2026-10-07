@@ -1415,9 +1415,14 @@ render() {
   NOTE=()
   [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
   # The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
-  [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open): in merged here, in needs you in the closing summary${off}"
+  # Two notes for the same reason as the time note below: one line of 98 characters was cut at 80 columns.
+  [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open)${off}" \
+    && NOTE[${#NOTE[@]}]="${gry}the closing summary counts it under needs you${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
-  NOTE[${#NOTE[@]}]="${gry}time = in state while working, start to end once finished (red: twice the usual)${off}"
+  # Two short notes, not one: wrap_items cuts a note wider than the frame, and one of 81 characters
+  # lost what red means at 80 columns.
+  NOTE[${#NOTE[@]}]="${gry}time = in state; once finished, start to end${off}"
+  NOTE[${#NOTE[@]}]="${gry}red time = past twice the usual${off}"
   # Below 80 columns there is no TOKENS column to explain, and from 100 a CPU/MEM column too.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}tokens = in/out, cache included${off}"
   [ "$wide" = 2 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"

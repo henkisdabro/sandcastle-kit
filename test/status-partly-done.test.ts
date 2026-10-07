@@ -63,7 +63,8 @@ test("a ticket merged partly done is named in the note, counted once", () => {
   land(6, "closes");
   const out = frame([5, 6]);
   assert.match(out, /#5 +│ . merged .*partly done, ticket open/);
-  assert.match(out, /1 merged, partly done \(ticket open\): in merged here, in needs you in the closing summary/);
+  assert.match(out, /1 merged, partly done \(ticket open\)/);
+  assert.match(out, /the closing summary counts it under needs you/);
   assert.match(out, /needs you 0/);
 });
 

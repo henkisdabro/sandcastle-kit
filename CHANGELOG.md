@@ -61,6 +61,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   the sidebar, tab bar and notifications carry on.
 - **A ticket held behind another held ticket no longer reads "(lands this run)" once the run
   stops**; it says the blocker did not land.
+- **The status view's legend no longer cuts a note at 80 columns.** The TIME and partly-done notes
+  are two short ones each, so they wrap instead of losing their ends, and the website's demo fits
+  its TIME column on a phone.
 
 ## [0.9.0] - 2026-10-07
 
