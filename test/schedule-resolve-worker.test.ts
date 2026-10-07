@@ -63,8 +63,8 @@ test("a sent-back ticket waiting for the ticket ahead of its resolve leaves its 
   // 40 starts while 10 waits for 20, and 10's second attempt begins only after 20 has landed.
   assert.ok(order.indexOf("start 40 #1") < order.indexOf("end 20 #1"), order.join(" | "));
   assert.ok(order.indexOf("land 20 merged") < order.indexOf("start 10 #2"), order.join(" | "));
-  assert.deepEqual(told.find((c) => c.kind === "resolve waits"), { kind: "resolve waits", id: "10", for: ["20"] });
-  assert.ok(told.findIndex((c) => c.kind === "resolve starts") > told.findIndex((c) => c.kind === "ended" && c.id === "20"));
+  // The wait was shorter than the settling, so the run never said it: nor says it resolves now.
+  assert.equal(told.some((c) => c.kind === "resolve waits" || c.kind === "resolve starts"), false);
   for (const id of ["10", "20", "30", "40"]) assert.equal(endings.get(id)?.kind, "landing", id);
   assert.equal((endings.get("10") as { landed: Landed }).landed.kind, "merged");
   assert.equal(order.filter((o) => o === "land 10 merged").length, 1);

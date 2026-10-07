@@ -708,8 +708,9 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
           waitsFor(run, c.id, c.freed, c.wait?.with);
           return;
         case "resolve waits": {
-          const note = `waits to resolve its conflict until ${c.for.map(o.ref).join(", ")} ${c.for.length > 1 ? "have" : "has"} landed`;
-          o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
+          const note = resolveWaitNote(o.ref, c);
+          // Said once: a list that changes later updates the record's note, not the log.
+          if (c.first) o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
           run.ticket(c.id, { note });
           return;
         }
@@ -719,6 +720,17 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
       }
     },
   };
+};
+
+/**
+ * A resolve wait's note: the branches queued to land have landed, and a ticket still in its pipeline "lands or
+ * leaves the run" - it may never reach a landing, so "has landed" would promise one.
+ */
+export const resolveWaitNote = (ref: (id: string) => string, c: { for: string[]; running: string[] }): string => {
+  const list = (ids: string[], one: string, many: string) => `${ids.map(ref).join(", ")} ${ids.length > 1 ? many : one}`;
+  const queued = c.for.filter((id) => !c.running.includes(id));
+  const parts = [...(queued.length ? [list(queued, "has landed", "have landed")] : []), ...(c.running.length ? [list(c.running, "lands or leaves the run", "land or leave the run")] : [])];
+  return `waits to resolve its conflict until ${parts.join(" and ")}`;
 };
 
 /** The hold notes, an agent's <blocked> or the kit's own hold: the ledger says the ticket is held, and gives it no second comment. */

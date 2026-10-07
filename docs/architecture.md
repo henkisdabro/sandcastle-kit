@@ -61,8 +61,10 @@ state.
   again; the wait holds no sandbox slot and no pipeline worker - the worker that takes the ticket
   hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
   once nothing is ahead of it - and is not in the run's demand, and ends at a stop; a pause
-  parks it as at the start; the run says `resolve waits` and `resolve starts`,
-  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`). A second conflict is still final, unless it names a ticket
+  parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
+  (the log line once, a later change only the record's note; a ticket still in its pipeline is worded
+  "lands or leaves the run", a queued branch "has landed") and `resolve starts` for a wait it said,
+  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`, `test/schedule-resolve-settle.test.ts`). A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
 - **Release of dependants.** The tickets held for a blocker that starts in this run: when one lands
