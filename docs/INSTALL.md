@@ -152,7 +152,9 @@ pull, `sandcastle doctor` in a project lists the Upgrading notes that project ha
 last update, and `sandcastle run` warns about them in one line, until `/sandcastle update` (or
 `sandcastle updated`) records the notes as acted on. The record is per project and per machine
 (`.sandcastle/.run/kit-updated`, gitignored); a project with none is told to update once. Existing `.sandcastle/config.ts` files keep
-working - a new field is always optional, with a default - but a new default can change what a
+working - a new field is always optional, with a default - as long as they use only type
+annotations, `satisfies`, `as` and `import type`, as `sandcastle init` writes them (an `enum`, a
+`namespace` or a parameter property is refused, naming the file and the place) - but a new default can change what a
 run does or spends, and a key the kit does not know (a typo an older version ignored) is now
 refused with the nearest real one: fix the key it names. The skill updates with the pull, since it
 is a link into the kit, but a session that was already open keeps the skill it loaded at its

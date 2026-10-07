@@ -222,6 +222,8 @@ function snapshot(t) {
       id, state,
       note: note.startsWith('@') ? `[${clock12(START + at * 60, id)}] ${note.slice(1)}` : note,
       since: prev && prev.state === state ? prev.since : at,
+      // When it first left the queue: its tokens grow from here.
+      started: prev?.started ?? (['queued', 'blocked'].includes(state) ? undefined : at),
       commits: commits ?? prev?.commits ?? 0,
     });
   }
@@ -235,6 +237,15 @@ function load(id, state, t) {
   if (state === 'gates') return [`${(6 + wobble * 6).toFixed(1)}c`, `${(1.4 + wobble * 0.6).toFixed(1)}G`, wobble > 0.8];
   if (WORKING.includes(state)) return [`${(0.2 + wobble * 1.4).toFixed(1)}c`, `${180 + ((n * 37) % 300) + Math.round(wobble * 40)}M`, false];
   return ['-', '-', false];
+}
+
+// A ticket's tokens in/out: none before its first pass, then growing with its time since it started, as the
+// real column does while passes report usage, and never falling.
+function ticketTokens(id, state, ran) {
+  if (['queued', 'blocked', 'setup'].includes(state) || !(ran >= 0)) return '-';
+  const n = Number(id.slice(1));
+  const part = Math.min(1, 0.15 + ran / 25);
+  return `${((0.6 + ((n * 13) % 20) / 10) * part).toFixed(1)}M/${Math.round((10 + ((n * 7) % 40)) * part)}k`;
 }
 
 function gauge(used, of) {
@@ -316,14 +327,14 @@ function frame(t, cols, changed = new Set()) {
   }
 
   // The table: status.sh's minimum widths and shares, ACTIVITY takes the rest.
-  // Below 80 columns CPU and MEM give way to ACTIVITY; on a phone COMMITS too.
+  // Below 80 columns CPU/MEM and TOKENS give way to ACTIVITY; on a phone COMMITS too.
   const wide = cols >= 100 ? 2 : cols >= 80 ? 1 : cols >= 62 ? 0 : -1;
-  let min = [7, 14, 6, 9, 7, 7];
-  let pct = [6, 9, 5, 6, 6, 6];
-  min = min.slice(0, 4 + Math.max(wide, 0));
-  pct = pct.slice(0, 4 + Math.max(wide, 0));
+  // As status.sh: CPU/MEM and TOKENS from 100 columns, TOKENS alone from 80, neither below.
+  const extra = wide === 2 ? ['cpu', 'tokens'] : wide === 1 ? ['tokens'] : [];
+  let min = [8, 14, 6, 9, ...extra.map((c) => (c === 'cpu' ? 11 : 10))];
+  let pct = [6, 9, 5, 6, ...extra.map(() => 7)];
   if (wide < 0) {
-    min = [7, 11, 5];
+    min = [8, 11, 5];
     pct = [6, 9, 5];
   }
   const avail = win - min.length - 2;
@@ -331,7 +342,7 @@ function frame(t, cols, changed = new Set()) {
   tw.push(Math.max(10, avail - tw.reduce((a, b) => a + b, 0)));
   const tal = [...tw.map((_, i) => (i === 1 ? 'l' : 'c')).slice(0, -1), 'l'];
   const tbars = bars(tw);
-  const heads = ['ISSUE', 'STATE', 'AGE', 'COMMITS', 'CPU', 'MEM'].slice(0, tw.length - 1);
+  const heads = ['TICKET', 'STATE', 'AGE', 'COMMITS', ...extra.map((c) => (c === 'cpu' ? 'CPU/MEM' : 'TOKENS'))].slice(0, tw.length - 1);
   put(junction(win, '├', '┤', '─', prevBars, tbars));
   put(cellsLine(tw, [...heads, 'ACTIVITY'].map((h) => [[h, 'head b']]), tal));
   put(junction(win, '├', '┤', '─', tbars, tbars));
@@ -353,8 +364,11 @@ function frame(t, cols, changed = new Set()) {
       // A step past twice its usual time: the age turns red, the note says what usual is.
       idle ? [['-', 'gry']] : [[ago(Math.min(t, END) - r.since), r.note.startsWith('usually') ? 'hot' : 'head']],
       idle ? [['-', 'gry']] : [[String(r.commits), 'head']],
-      [[cpu, hot ? 'hot' : cpu === '-' ? 'gry' : 'head']],
-      [[mem, mem === '-' ? 'gry' : 'head']],
+      ...extra.map((c) => {
+        if (c === 'cpu') return cpu === '-' ? [['-', 'gry']] : [[cpu, hot ? 'hot' : 'head'], [`/${mem}`, 'head']];
+        const tok = ticketTokens(r.id, r.state, Math.min(t, END) - r.started);
+        return [[tok, tok === '-' ? 'gry' : 'head']];
+      }),
     ].slice(0, tw.length - 1);
     cells.push([[r.note, NEEDS.includes(r.state) ? 'hot' : 'mute']]);
     put(cellsLine(tw, cells, tal), r.id);
@@ -391,7 +405,8 @@ function frame(t, cols, changed = new Set()) {
   put(junction(win, '├', '┤', '─', lbars, []));
   // The notes joined by " · " into as few lines as they fit, as wrap_items does.
   const notes = ['ready = gates green, waits for the landing worker', 'age = time in state (red: twice the usual)'];
-  if (wide >= 1) notes.push('CPU in cores of 8');
+  if (wide >= 1) notes.push('tokens = in/out, cache included');
+  if (wide >= 2) notes.push('CPU in cores of 8');
   const noteLines = [];
   for (const item of notes) {
     const lastLine = noteLines[noteLines.length - 1];
