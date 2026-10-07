@@ -12,7 +12,8 @@
 // Started anywhere else (a detached run, a pipe), it makes a tab of its own,
 // whose first pane is the status view, and adds nothing to the tab it was
 // launched from. When the run ends its sandbox panes close, so no sidebar
-// entry outlives it; the status view stays.
+// entry outlives it; the status view stays, and the next run reuses its pane
+// wherever a person moved it, in place of either.
 //
 // Sandbox panes are opt-in (`herdr.panes: "all"`, or SANDBOX_PANES=all). By
 // default none opens, and the run is one agent on the status pane instead:
@@ -81,6 +82,9 @@ const bareShell = (processes: Foreground) => {
   return SHELLS.has(basename(command.replace(/^-/, ""))) && flags.every((f) => SHELL_FLAGS.has(f));
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
+// The closing report the plugin types into a finished run's status pane (`bin/sandcastle` runs the CLI as `node ... cli.ts report`).
+const showsReport = (processes: Foreground) => processes.some((p) => /\bcli\.ts\s+report(\s|$)/.test(p.cmdline));
+const pause = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** What herdr said went wrong, cut to its `message` when it answered with its JSON error, and to 160 characters. */
 export const herdrMessage = (error: unknown) => {
@@ -474,19 +478,63 @@ export const openSandboxView = (
   if (failed) return none();
   const myTab = me?.tab_id;
 
+  let previous: View = {};
+  if (existsSync(record)) {
+    try {
+      previous = JSON.parse(readFileSync(record, "utf8")) as View;
+    } catch {
+      /* unreadable: no earlier view to tell */
+    }
+  }
+  const home = me?.workspace_id ?? process.env.HERDR_WORKSPACE_ID;
+
+  // The previous run's status pane is reused when it is still there, wherever the person put it:
+  // the same server, the same terminal (Herdr reuses pane ids across a restart), this run's
+  // workspace, and not the pane this run is typed in. What it runs is stopped first: the previous status
+  // view or the plugin's report. A bare shell is as good (the view ended or was quit); any other
+  // command is a person's, and the pane is replaced as below.
+  const reuse = ((): Pane | undefined => {
+    if (!previous.status || !previous.terminal_id || previous.status === mine || onOtherServer(previous)) return undefined;
+    try {
+      const pane = paneOf(previous.status) as Pane & { workspace_id?: string };
+      if (pane.terminal_id !== previous.terminal_id || !pane.tab_id || (home && pane.workspace_id !== home)) return undefined;
+      const processes = foreground(previous.status);
+      if (bareShell(processes)) return pane;
+      if (!showsStatus(processes) && !showsReport(processes)) return undefined;
+      // Ctrl-C makes status.sh mark the record `quit` when it names the pane (a person quitting the
+      // view). The record names no status pane while the view is stopped, so nothing is marked and
+      // the tab bar leaves the pane alone; the new record is written once the pane is a shell.
+      const { status: _, quit: __, ...rest } = previous;
+      writeView(project.root, rest);
+      herdr(["pane", "send-keys", previous.status, "ctrl+c"]);
+      for (let waited = 0; waited < 5000; waited += 100) {
+        pause(100);
+        if (bareShell(foreground(previous.status))) return pane;
+      }
+    } catch {
+      /* gone, or Herdr cannot say: not reused */
+    }
+    return undefined;
+  })();
+  const reusedStatus = reuse ? previous.status : undefined;
+  // The kit's own tab goes whole with the status pane in it; a tab that holds a person's panes never does.
+  // Read as the close below reads it (a record with no `adopted` is an own tab), or that close took the
+  // reused pane with the tab. The tab this run is typed in holds the person's run pane: adopted.
+  const reusedOwnTab = !!reuse && !previous.adopted && reuse.tab_id === previous.tab && reuse.tab_id !== myTab;
+
   // A previous run's view is replaced, not stacked. Only ids from our own
   // record are closed, and never the pane this run is typed in: a tab the
   // kit made goes whole, an adopted tab keeps its run pane. A pane a person
   // moved out of that tab outlives the tab, or the tab is already gone and
   // its close fails: either way the record's panes are closed by id after it,
   // the status pane only while it is still the recorded terminal (Herdr
-  // reuses pane ids across a restart).
+  // reuses pane ids across a restart). A status pane being reused stays, and
+  // so does the tab it is in.
   if (existsSync(record)) {
     try {
-      const old = JSON.parse(readFileSync(record, "utf8")) as { tab?: string; panes?: string[]; status?: string; adopted?: boolean; terminal_id?: string };
-      if (old.tab && !old.adopted && old.tab !== myTab) {
+      if (previous.tab && !previous.adopted && previous.tab !== myTab && !reusedOwnTab) {
         try {
-          herdr(["tab", "close", old.tab]);
+          herdr(["tab", "close", previous.tab]);
         } catch {
           /* gone already: its panes may live on in another tab */
         }
@@ -500,8 +548,8 @@ export const openSandboxView = (
           /* already closed */
         }
       };
-      for (const pane of old.panes ?? []) close(pane);
-      if (old.status) close(old.status, old.terminal_id);
+      for (const pane of previous.panes ?? []) close(pane);
+      if (previous.status && !reusedStatus) close(previous.status, previous.terminal_id);
     } catch {
       /* already closed */
     }
@@ -510,12 +558,15 @@ export const openSandboxView = (
   // Alone in its tab, in a terminal: adopt it. The status view splits off the run's pane.
   const myTabInfo = safe(() => (myTab ? (herdrJson(["tab", "get", myTab]).result.tab as { pane_count: number; label?: string }) : undefined));
   if (failed) return none();
-  const alone = adoptsTab(myTabInfo?.pane_count === 1, !!process.stdout.isTTY);
+  const alone = !reuse && adoptsTab(myTabInfo?.pane_count === 1, !!process.stdout.isTTY);
   let tab: string;
   let statusPane: string;
-  let workspace = me?.workspace_id ?? process.env.HERDR_WORKSPACE_ID;
+  let workspace = home;
   let wide = false;
-  if (alone && mine && myTab) {
+  if (reuse && reusedStatus) {
+    tab = reuse.tab_id!;
+    statusPane = reusedStatus;
+  } else if (alone && mine && myTab) {
     wide = (safe(() => (herdrJson(["pane", "layout", "--pane", mine]).result.layout.panes as { pane_id: string; rect: { width: number } }[])
       .find((p) => p.pane_id === mine)?.rect.width) ?? 0) >= 160;
     const ratio = String(layoutRatios(true, wide).status);
@@ -544,7 +595,8 @@ export const openSandboxView = (
   // Pane-log links left by an earlier run point at logs since archived, and
   // one past this run's pane count would never be repointed.
   for (const f of readdirSync(logs)) if (/^herdr-pane-\d+\.log$/.test(f)) rmSync(join(logs, f), { force: true });
-  const adopted = tab === myTab;
+  // A reused pane in a tab the kit did not make is a person's: the tab is never closed whole.
+  const adopted = reuse ? !reusedOwnTab : tab === myTab;
   const slots: Slot[] = [];
   // The status pane's terminal, so a person's quit of the view is told from a Herdr restart
   // (`restartStatusView`). Without it the view still opens: the record then acts as an older kit's.
@@ -579,7 +631,8 @@ export const openSandboxView = (
   save();
   if (!safe(() => {
     herdr(["pane", "rename", statusPane, `sandcastle status ${project.name}`]);
-    herdr(["pane", "run", statusPane, STATUS_COMMAND]);
+    // `cd`: a pane a person moved or kept may sit in another directory than the project's.
+    herdr(["pane", "run", statusPane, reuse ? `cd ${shellQuote(project.root)} && ${STATUS_COMMAND}` : STATUS_COMMAND]);
     return true;
   })) return NONE;
   // A status pane an earlier kit version opened in the user's own tab is now

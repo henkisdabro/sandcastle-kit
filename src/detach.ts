@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OperatorError } from "./errors.ts";
 import { commandOf } from "./live-runs.ts";
+import { withLockSync } from "./pool.ts";
 import { DOCKER_INFO_ENV } from "./runtime.ts";
 import { readUsagePaused, type StandingPause } from "./usage.ts";
 import type { UsagePaused } from "../mod/hooks/run-record.ts";
@@ -57,6 +58,14 @@ export const PAUSE_FILE = ".sandcastle/.run/paused";
 const pauseFile = (root: string) => join(root, PAUSE_FILE);
 
 /**
+ * Runs a read-then-write of the control file whole under a short lock beside it: the usage timer's
+ * `holdForUsage` read "no pause" and then renamed its own over a person's `sandcastle pause` that
+ * landed in between. Every writer and `resumeRun` takes it, so the rule that the timer never replaces
+ * or undoes a person's pause holds whatever the order of the processes.
+ */
+const underLock = <T>(root: string, fn: () => T): T => withLockSync(`${pauseFile(root)}.lock`, "pause", fn);
+
+/**
  * The pause asked for the run with this pid (`since` in seconds since the epoch), or undefined: no
  * file, one that cannot be read, or one written for another run - a run that died while paused must
  * not leave the next one paused. A pause the run took for its plan's usage carries `usage`, and is none
@@ -89,11 +98,12 @@ const writePause = (root: string, pause: { pid: number; since: number } & Partia
  * the time to resume at. Nothing when a person's pause stands - the timer must never undo it - or when the
  * run's own already waits for this window or a later one; a later reset moves the standing one on, and keeps its `since`.
  */
-export const holdForUsage = (root: string, pid: number, pause: UsagePaused, now = Math.floor(Date.now() / 1000)): void => {
-  const standing = readPause(root, pid, now);
-  if (standing && (!standing.usage || standing.usage.resumesAt >= pause.resumesAt)) return;
-  writePause(root, { pid, since: standing?.since ?? now, ...pause });
-};
+export const holdForUsage = (root: string, pid: number, pause: UsagePaused, now = Math.floor(Date.now() / 1000)): void =>
+  underLock(root, () => {
+    const standing = readPause(root, pid, now);
+    if (standing && (!standing.usage || standing.usage.resumesAt >= pause.resumesAt)) return;
+    writePause(root, { pid, since: standing?.since ?? now, ...pause });
+  });
 
 /** What `sandcastle pause` did: nothing for lack of a run, nothing for a run already paused, or paused it. */
 export type Paused =
@@ -107,15 +117,17 @@ export type Paused =
 export const pauseRun = (root: string, probe: Probe = commandOf, now = () => Math.floor(Date.now() / 1000)): Paused => {
   const pid = livePid(root, probe);
   if (pid === undefined) return { kind: "no run" };
-  const since = now();
-  const standing = readPause(root, pid, since);
-  if (standing?.usage) {
-    writePause(root, { pid, since: standing.since });
-    return { kind: "taken over", pid, since: standing.since, usage: standing.usage };
-  }
-  if (standing) return { kind: "already", pid, since: standing.since };
-  writePause(root, { pid, since });
-  return { kind: "paused", pid, since };
+  return underLock(root, (): Paused => {
+    const since = now();
+    const standing = readPause(root, pid, since);
+    if (standing?.usage) {
+      writePause(root, { pid, since: standing.since });
+      return { kind: "taken over", pid, since: standing.since, usage: standing.usage };
+    }
+    if (standing) return { kind: "already", pid, since: standing.since };
+    writePause(root, { pid, since });
+    return { kind: "paused", pid, since };
+  });
 };
 
 /** What `sandcastle resume` did: nothing for lack of a run, nothing for a run not paused, or resumed it. */
@@ -125,8 +137,11 @@ export type Resumed = { kind: "no run" } | { kind: "not paused"; pid: number } |
 export const resumeRun = (root: string, probe: Probe = commandOf): Resumed => {
   const pid = livePid(root, probe);
   if (pid === undefined) return { kind: "no run" };
-  const standing = readPause(root, pid);
-  rmSync(pauseFile(root), { force: true });
+  const standing = underLock(root, () => {
+    const found = readPause(root, pid);
+    rmSync(pauseFile(root), { force: true });
+    return found;
+  });
   return standing ? { kind: "resumed", pid, since: standing.since, ...(standing.usage ? { usage: standing.usage } : {}) } : { kind: "not paused", pid };
 };
 

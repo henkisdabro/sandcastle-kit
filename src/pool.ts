@@ -256,6 +256,33 @@ export const withLock = async <T>(file: string, label: string, fn: () => Promise
   }
 };
 
+/**
+ * `withLock` for a caller that cannot wait on a promise: a read-then-write of one small file, made
+ * whole under the lock so two processes' sequences never interleave. It sleeps in place between
+ * looks (`Atomics.wait`, no busy spin) and takes over a lock whose owner died, as `takeLock` does.
+ * A lock still held by a live process after `timeoutMs` is not worth stalling the caller for (a
+ * run's loop calls this every second): `fn` then runs without it, as it would have before the lock existed.
+ */
+export const withLockSync = <T>(file: string, label: string, fn: () => T, timeoutMs = 5000, pollMs = 5): T => {
+  mkdirSync(dirname(file), { recursive: true });
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + timeoutMs;
+  let taken = takeLock(file, label);
+  while (!taken.mine && Date.now() < deadline) {
+    Atomics.wait(nap, 0, 0, pollMs);
+    taken = takeLock(file, label);
+  }
+  const { mine } = taken;
+  if (!mine) return fn();
+  held.set(file, mine);
+  try {
+    return fn();
+  } finally {
+    held.delete(file);
+    releaseLock(file, mine);
+  }
+};
+
 export type SlotLock = { pid: number; run: string; label: string };
 
 /**

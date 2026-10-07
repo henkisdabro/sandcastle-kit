@@ -36,7 +36,7 @@ import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLine
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
 import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
-import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState, type UsagePaused } from "../mod/hooks/run-record.ts";
+import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason, wholeNumber } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
@@ -51,7 +51,7 @@ import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker
 import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
-import { createUsagePause, readCodexAuth, resumeClock, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usagePauseWords, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
+import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
@@ -2044,9 +2044,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
   const attempt = async (issue: Issue, { last, juncture, paused }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
-    // A pause the latest reading has just asked for is read before the guard decides: the guard's stop is for a run that is
-    // not waiting out the window (it would otherwise win a race of a second against the schedule's own poll).
-    while (usagePause && paused()) await juncture("start", { suspend: async () => {}, resume: async () => {} });
+    await pausing.waitOutPause(usagePause !== undefined, paused, juncture);
     const line = await usageStop(env, undefined, () => planUsage.find((u) => u.provider === "claude"));
     noteReading();
     if (line) return { kind: "not begun", why: { kind: "usage limit", line } };
@@ -2154,11 +2152,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     return attempted(issue.id, ended, check, limited);
   };
 
-  // Said once per pause: the first time the scheduler tells it, and again when what it waits for changes.
-  let pauseSaid: string | undefined;
-  // What the run is paused for when it took the pause itself, to say how it ended.
-  let pausedForUsage: UsagePaused | undefined;
-  const clockOf = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
+  const pausing = createPauseHandling({
+    record: (paused) => run.update({ paused }),
+    say: (line) => console.log(line),
+    ref,
+    releaseAwake,
+    holdAwake,
+    refresh: () => view.refresh(),
+  });
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
     switch (c.kind) {
@@ -2187,40 +2188,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
         setDemand(c.n);
         return poolValues();
-      case "paused": {
-        // The tickets still finishing; once none is, the machine may sleep (the demand is 0 by then too).
-        run.update({ paused: { since: c.since, finishing: c.finishing, ...c.usage } });
-        const finishing = c.finishing.length ? `finishing ${c.finishing.map(ref).join(", ")}` : "nothing is in flight";
-        const cause = c.usage ? JSON.stringify(c.usage) : "person";
-        if (pauseSaid === undefined) {
-          console.log(
-            c.usage
-              ? `[${clockOf(c.since)}] paused for plan usage (${usagePauseWords(c.usage)}): no new ticket or agent pass starts; ${finishing}. It resumes by itself at ${resumeClock(c.usage.resumesAt)}, a minute after the window resets, or at \`sandcastle resume\`.`
-              : `[${clockOf(c.since)}] paused by \`sandcastle pause\`: no new ticket or agent pass starts; ${finishing}.`,
-          );
-        } else if (pauseSaid !== cause) {
-          console.log(
-            c.usage
-              ? `The pause now waits for ${usagePauseWords(c.usage)}: it resumes at ${resumeClock(c.usage.resumesAt)}.`
-              : "The pause is a person's now (`sandcastle pause`): it stays until `sandcastle resume`.",
-          );
-        }
-        pauseSaid = cause;
-        pausedForUsage = c.usage;
-        if (!c.finishing.length) releaseAwake();
-        return view.refresh();
-      }
+      case "paused":
       case "resumed":
-        run.update({ paused: undefined });
-        console.log(
-          pausedForUsage && Date.now() / 1000 >= pausedForUsage.resumesAt
-            ? `Resumed: the plan's usage window has reset; each paused ticket goes on from its next phase.`
-            : "Resumed: each paused ticket goes on from its next phase.",
-        );
-        pauseSaid = undefined;
-        pausedForUsage = undefined;
-        void holdAwake();
-        return view.refresh();
+        return pausing.told(c);
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed), new Map(c.ended.map((id) => [id, ledger.endedAs(id)]))) }));
       case "unreleased":
@@ -2272,11 +2242,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     });
   clearInterval(heartbeat);
   // A run whose last ticket landed while it was paused goes on to its verify and summary: not paused any more, and awake.
-  if (pauseSaid !== undefined) {
-    run.update({ paused: undefined });
-    pauseSaid = undefined;
-    await holdAwake();
-  }
+  await pausing.end();
   // The last reading is in the record before the closing summary reads it.
   usageWatch?.stop();
   // The cause the closing summary names: the most severe, a `.git` change before a limit.

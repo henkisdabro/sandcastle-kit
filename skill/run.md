@@ -74,7 +74,7 @@ This continues SKILL.md: run its "Before every action" first.
    going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
    `drain`, or run it attached (below); and it refuses a run that would bill API credits unless
    given `--api-key`, which only the user's own yes to that (step 1) allows. Inside Herdr the run opens a tab of its own holding only
-   the status view, which is the one status view; expect no pane per sandbox unless the config
+   the status view (or reuses the status pane an earlier run left, wherever it now is), which is the one status view; expect no pane per sandbox unless the config
    sets `herdr.panes: "all"` (the sidebar carries the run). It prints:
 
    ```
@@ -140,7 +140,8 @@ This continues SKILL.md: run its "Before every action" first.
       under Runnable now for the next `sandcastle run` to pick up.
       Under it, the `Settings:` line names the run's settings, a `Plan usage at the end:` line
       (a run on a subscription) gives the plan's 5-hour and weekly usage as the last agent
-      reported it, and a line after them may name the switch that would have helped
+      reported it, a `Codex plan usage at the end:` line (a cross-review run on a ChatGPT plan)
+      gives Codex's the same way, and a line after them may name the switch that would have helped
       (`AUTONOMY_LEVEL=2` for a level-0 run that left tickets it could run again; a usage guard
       that had no reading, so the run was not guarded): relay them unchanged, and name only the
       switch the report names.

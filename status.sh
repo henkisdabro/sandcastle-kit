@@ -1639,6 +1639,8 @@ restore() {
 # view must come back after the restart; a TERM is nobody's choice either. One jq and a rename, as
 # the pane may be torn down before a slow trap finishes. The pane is checked against the record, so
 # the plugin's popup and a view a person opened elsewhere mark nothing.
+# A run that reuses the pane (src/herdr.ts) stops this view with Ctrl-C after rewriting the record
+# without `status`, so the `select` below finds nothing to mark.
 mark_quit() {
   [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] && [ -f logs/herdr-view.json ] || return 0
   local tmp="logs/herdr-view.json.$$.quit"
