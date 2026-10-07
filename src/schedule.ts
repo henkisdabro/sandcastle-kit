@@ -492,10 +492,10 @@ export class StoppedWhileParked extends Error {
  * collided with, on a second attempt's landing; its `landed.with` then names the tickets of both.
  */
 export type Ending<G, O> =
-  | { kind: "landing"; green: G; landed: Landed; attempts: 1 | 2; again?: Again }
-  | { kind: "pipeline"; outcome: O; attempts: 1 | 2 }
+  | { kind: "landing"; green: G; landed: Landed; attempts: number; again?: Again; unstarted?: true }
+  | { kind: "pipeline"; outcome: O; attempts: number }
   /** `green` when the land port threw, rather than the pipeline. */
-  | { kind: "crashed"; error: unknown; attempts: 1 | 2; green?: G }
+  | { kind: "crashed"; error: unknown; attempts: number; green?: G }
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
   | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
   | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string } }
@@ -744,7 +744,7 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * has not begun waits before its attempt does. `paused()` reads the pause now: an attempt that waits
    * for a machine-wide slot stops waiting when the run is paused, and reaches its first juncture instead.
    */
-  attempt(ticket: T, at: { n: 1 | 2; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -814,7 +814,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         { ticketOf: blockers?.ticketOf ?? (() => undefined), open: blockers?.open },
       );
       // Attempts that began, by ticket.
-      const attempts = new Map<string, 1 | 2>();
+      const attempts = new Map<string, number>();
       // What a requeued ticket's last attempt collided with: its next carries it, and a second collision is final unless
       // a landing after its resolve began caused it (`requeue`).
       const first = new Map<string, Again>();
@@ -1106,7 +1106,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         sentBack.delete(t.id);
         if (!back) return end(t.id, { kind: "not begun", why });
         const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : back.landed;
-        return end(t.id, { kind: "landing", green: back.green, landed, attempts: 1 });
+        // `unstarted` only says more than `attempts: 1` does once a third attempt, or later, is the one that never began.
+        const done = attempts.get(t.id) ?? 1;
+        return end(t.id, { kind: "landing", green: back.green, landed, attempts: done, ...(done > 1 && { unstarted: true as const }) });
       };
       // What a sent-back ticket's resolve waits for: the green branches queued to land that share a file with it, and the
       // tickets still in their pipelines whose branches touch the files it conflicted on. Each lands on the same lines
@@ -1160,16 +1162,21 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         working++;
         running.add(t.id);
         try {
-          const n = attempts.has(t.id) ? 2 : 1;
-          if (n === 2 && first.get(t.id)?.kind === "conflict") await resolveTurn(t);
+          // #398's exception sends a ticket back again after a landing that finished after its resolve began: a third attempt counts as one.
+          const n = (attempts.get(t.id) ?? 0) + 1;
+          if (n >= 2 && first.get(t.id)?.kind === "conflict") await resolveTurn(t);
           if (stop.startsNothing) return await notBegun(t, stop.headline!);
           let r: Attempted<G, O>;
+          // Every step the attempt takes is announced by a juncture of a phase other than "start", so a stop that wakes the
+          // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
+          let stepped = false;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => juncture(t.id, phase, park), paused: () => (sync(), pausedSince !== undefined) });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
               for (const c of error.causes) stop.add(c);
+              if (!stepped) return await notBegun(t, stop.headline!);
               return await end(t.id, { kind: "parked", cause: stop.headline });
             }
             r = { kind: "crashed", error };

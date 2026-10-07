@@ -140,7 +140,7 @@ test("a second conflict caused by a landing after the resolve began sends the ti
     tell: (c) => void told.push(c),
   });
   assert.equal(told.filter((c) => c.kind === "requeued" && c.id === "10").length, 2);
-  assert.deepEqual(attempts, [1, 2, 2]);
+  assert.deepEqual(attempts, [1, 2, 3]);
   const ending = endings.get("10");
   assert.equal(ending?.kind, "landing");
   assert.equal((ending as { landed: Landed }).landed.kind, "merged");
