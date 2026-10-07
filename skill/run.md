@@ -74,7 +74,7 @@ This continues SKILL.md: run its "Before every action" first.
    going. A detached run cannot ask a question, so it refuses autonomy level 1: use 2, 3 or
    `drain`, or run it attached (below); and it refuses a run that would bill API credits unless
    given `--api-key`, which only the user's own yes to that (step 1) allows. Inside Herdr the run opens a tab of its own holding only
-   the status view, which is the one status view; expect no pane per sandbox unless the config
+   the status view (or reuses the status pane an earlier run left, wherever it now is), which is the one status view; expect no pane per sandbox unless the config
    sets `herdr.panes: "all"` (the sidebar carries the run). It prints:
 
    ```

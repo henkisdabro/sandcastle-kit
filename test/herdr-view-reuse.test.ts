@@ -56,12 +56,13 @@ process.setMaxListeners(40);
 // IN_HERDR is read when the module loads, so the environment comes first.
 const { openSandboxView, viewRecord, STATUS_COMMAND } = await import("../src/herdr.ts");
 
-type Setup = { tab?: string; term?: string; workspace?: string; fg?: string; stuck?: boolean; adopted?: boolean; recordTab?: string };
+// `adopted: null` leaves the key out of the record.
+type Setup = { tab?: string; term?: string; workspace?: string; fg?: string; stuck?: boolean; adopted?: boolean | null; recordTab?: string };
 /** Opens a view over a previous run's record (own tab tOld, status pane pOld in term_old, a sandbox pane pSandbox); returns herdr's calls and the new record. */
 const open = ({ tab = "tPerson", term = "term_old", workspace = "w1", fg = "bash /kit/status.sh 3", stuck = false, adopted = false, recordTab = "tOld" }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-herdr-reuse-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  writeFileSync(viewRecord(root), JSON.stringify({ tab: recordTab, adopted, status: "pOld", terminal_id: "term_old", panes: ["pSandbox"] }));
+  writeFileSync(viewRecord(root), JSON.stringify({ tab: recordTab, ...(adopted === null ? {} : { adopted }), status: "pOld", terminal_id: "term_old", panes: ["pSandbox"] }));
   const log = join(root, "herdr-calls.log");
   writeFileSync(log, "");
   Object.assign(process.env, { FAKE_LOG: log, FAKE_RECORD: viewRecord(root), FAKE_OLD_TAB: tab, FAKE_OLD_TERM: term, FAKE_OLD_WS: workspace, FAKE_FG: fg });
@@ -102,6 +103,20 @@ test("a status pane still in the kit's own tab is reused there, the tab kept", (
   assert.ok(!calls.includes("pane close pOld"));
   assert.ok(calls.some((c) => c.startsWith("pane run pOld ")));
   assert.deepEqual([record.tab, record.status, record.adopted], ["tOld", "pOld", false]);
+});
+
+test("a record with no adopted word: the pane in its tab is reused and the tab not closed under it", () => {
+  const { calls, record } = open({ tab: "tOld", adopted: null });
+  assert.ok(!created(calls), calls.join("\n"));
+  assert.ok(!calls.includes("tab close tOld"), "the tab holds the reused pane");
+  assert.deepEqual([record.tab, record.status, record.adopted], ["tOld", "pOld", false]);
+});
+
+test("the kit's own tab this run is typed in is adopted: it holds the person's run pane", () => {
+  const { calls, record } = open({ tab: "tMine", recordTab: "tMine" });
+  assert.ok(!created(calls), calls.join("\n"));
+  assert.ok(!calls.includes("tab close tMine"));
+  assert.deepEqual([record.tab, record.status, record.adopted], ["tMine", "pOld", true]);
 });
 
 test("a status pane in a person's tab, whose recorded tab is gone, is reused and not left beside a new one", () => {

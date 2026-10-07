@@ -204,7 +204,7 @@ flowchart LR
 | 🔒 | **Host safety** | Fine-grained tokens only, host git hooks off during a run, the shared `.git` fingerprinted, risky branches held for a human merge (see [Safety model](#-safety-model)). |
 | ⚖️ | **Machine-wide limits** | Several projects can run at once without starving each other. |
 | 📺 | **A live status view** | `sandcastle status` in any terminal: every ticket of the run and where it is - working, ready to land, needing you, queued, blocked, merged - which gate is running, and when landing should start. |
-| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view, and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
+| 🖥️ | **Best in [Herdr](https://herdr.dev)** | The run opens its own tab with the status view (the next run reuses that view wherever you put it), and rolls the run up in Herdr's sidebar (a pane per sandbox is opt-in) - see [Works best in Herdr](#-works-best-in-herdr). |
 | 🔭 | **A Claude Code mod** | Optional: the session that started the run shows it above the prompt, says when a ticket needs you, and is told when the run ends - see [The Claude Code mod](#-the-claude-code-mod). |
 | 🧩 | **An agent skill** | `/sandcastle` in Claude Code, `$sandcastle` in Codex, also read by OpenCode - for setup, auditing a repo for work, ticket triage, starting and closing runs, and updating. |
 
@@ -937,7 +937,8 @@ out its own view:
   tab, adopts that tab, names it `sandcastle <project>` and puts the status view beside its own
   output. Started anywhere else - by an agent, with `--detach`, into a pipe - it opens a tab itself,
   holding only the status view, and the tab you launched from gets nothing new: a run adopts a tab
-  only from a terminal. The run prints `Status view: pane <id> (tab <id>)`. An agent starts its
+  only from a terminal. Either way, a status view an earlier run left is reused where it is
+  instead (below). The run prints `Status view: pane <id> (tab <id>)`. An agent starts its
   run with `sandcastle run --detach` and waits for it with `sandcastle wait` (see
   [Detached runs](#-detached-runs)).
 - 🚦 **The run in the sidebar.** Herdr cannot see an agent inside a container, so the run

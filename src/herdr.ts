@@ -12,7 +12,8 @@
 // Started anywhere else (a detached run, a pipe), it makes a tab of its own,
 // whose first pane is the status view, and adds nothing to the tab it was
 // launched from. When the run ends its sandbox panes close, so no sidebar
-// entry outlives it; the status view stays.
+// entry outlives it; the status view stays, and the next run reuses its pane
+// wherever a person moved it, in place of either.
 //
 // Sandbox panes are opt-in (`herdr.panes: "all"`, or SANDBOX_PANES=all). By
 // default none opens, and the run is one agent on the status pane instead:
@@ -517,7 +518,9 @@ export const openSandboxView = (
   })();
   const reusedStatus = reuse ? previous.status : undefined;
   // The kit's own tab goes whole with the status pane in it; a tab that holds a person's panes never does.
-  const reusedOwnTab = !!reuse && previous.adopted === false && reuse.tab_id === previous.tab;
+  // Read as the close below reads it (a record with no `adopted` is an own tab), or that close took the
+  // reused pane with the tab. The tab this run is typed in holds the person's run pane: adopted.
+  const reusedOwnTab = !!reuse && !previous.adopted && reuse.tab_id === previous.tab && reuse.tab_id !== myTab;
 
   // A previous run's view is replaced, not stacked. Only ids from our own
   // record are closed, and never the pane this run is typed in: a tab the
