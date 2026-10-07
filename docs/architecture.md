@@ -108,7 +108,7 @@ state.
   ends, and burndown checks it with `git merge-base --is-ancestor`): the ticket started after the fix, the merge
   would bring it nothing, and the red is its own, so it repairs at once. A landing with no commit
   on record merges as before. A ticket that did not land (red, gave up, crashed, held,
-  stopped) or was sent back at landing (`requeued`: its second attempt may sit behind the very
+  stopped) or was sent back, at landing or by its pipeline (`requeued`: its second attempt may sit behind the very
   pipelines that wait for it) frees its waiters, which repair as before. A ticket sent back keeps
   the failures it had claimed until it ends: its second attempt is often a land-only one with no
   repair pass, so when it lands, its landing is the fix to them (unless another ticket claimed one
