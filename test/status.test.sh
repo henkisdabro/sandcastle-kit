@@ -281,6 +281,12 @@ render "120 121"
 has 'state +STOPPED landing · '
 has 'since +[0-9:]+ · lands nothing more'
 hasnt 'running · '
+# A stop that arrives while the run is paused wakes its parked tickets: the cell reads STOPPED, never PAUSED.
+sed -i.bak "s/\"stopped\": /\"paused\": { \"since\": $((now - 300)), \"finishing\": [] }, \"stopped\": /" "$L/run.json"
+render "120 121"
+has 'state +STOPPED landing · '
+hasnt 'PAUSED'
+sed -i.bak 's/"paused": {[^}]*}, //' "$L/run.json"
 # A record whose `stopped` is empty stops nothing.
 sed -i.bak 's/"stopped": "[^"]*",/"stopped": "",/' "$L/run.json"
 render "120 121"

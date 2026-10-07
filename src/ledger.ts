@@ -376,6 +376,10 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
     }
     case "waiting":
       return {};
+    case "parked":
+      // Nothing more to say: its record is the `paused` state and the note its juncture wrote ("before review at <head>"),
+      // which the closing summary lists as runnable - the same as for a run stopped, or killed, while paused.
+      return {};
     default:
       return e satisfies never;
   }

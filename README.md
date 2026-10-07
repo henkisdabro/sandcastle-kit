@@ -770,7 +770,7 @@ finishing on the cell's second row); a ticket parked between two phases shows as
 phase it resumes at in its note. The Herdr sidebar and tab bar say `paused` in place of the working
 count, and the Claude Code mod treats a paused run as live: no "the run ended" prompt.
 `sandcastle wait` keeps waiting through a pause, and `sandcastle stop` works while paused. A run
-that ends while paused (stopped, crashed) lists the paused tickets under **Runnable now** in its
+that ends while paused (stopped, crashed, or stopped by its safety guard, which does not wait for the resume) lists the paused tickets under **Runnable now** in its
 summary: each branch holds its work, and the next `sandcastle run` picks it up. A pause does not
 count as no progress for the `drain` autonomy level, which judges a turn by what it landed, and
 a turn cannot end while it is paused.

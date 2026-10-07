@@ -60,7 +60,7 @@ import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -808,6 +808,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     // not repeated. It is called before the pass's `timed` step: the wait is not the pass's time, nor part of
     // the ticket's usual one (`waited`, as a wait for a gates slot is).
     let parkedAt = 0;
+    // The sandbox was closed at a juncture and the run stopped before the resume reopened one: nothing is left to close.
+    let closedWhileParked = false;
     // How often the ticket has parked: a juncture that returns with it unchanged did not park, as a run that is not paused.
     let parkCount = 0;
     // The time parked from inside an agent pass (the plan's limit), which the pass reports as the `waitMs` of its step.
@@ -824,6 +826,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (closed.preservedWorktreePath) lockWorktree(closed.preservedWorktreePath, project.root);
           parkedAt = Date.now();
           parkCount++;
+          closedWhileParked = true;
         },
         resume: async () => {
           const parked = Date.now() - parkedAt;
@@ -832,6 +835,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           releaseBranchWorktree(branch, project.root);
           sandbox = await timed(issue.id, "setup", () => open(branch), `resumed before ${phase}`);
           lockWorktree(sandbox.worktreePath, project.root);
+          closedWhileParked = false;
         },
       });
 
@@ -1418,13 +1422,17 @@ export const createPipeline = (ctx: PipelineContext) => {
     } finally {
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
       took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
-      unlockWorktree(sandbox.worktreePath, project.root);
-      // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
-      await recordPeak(sandbox, project.root, runId);
-      // Sandcastle keeps a worktree with uncommitted files rather than lose
-      // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
-      const closed = await sandbox.close();
-      if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
+      // A ticket parked by a pause when the run stopped closed its sandbox at the juncture, and keeps its lock like a
+      // ticket whose run was killed while paused: the next run's resume releases it.
+      if (!closedWhileParked) {
+        unlockWorktree(sandbox.worktreePath, project.root);
+        // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
+        await recordPeak(sandbox, project.root, runId);
+        // Sandcastle keeps a worktree with uncommitted files rather than lose
+        // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
+        const closed = await sandbox.close();
+        if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
+      }
       // A failed check stops the run; the pipeline keeps its own result, or its own error.
       await settleAfter(
         () => host.settle(branch, `after ${ref(issue.id)}`),
@@ -2083,6 +2091,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     );
     const check = tampered.has(issue.id) ? { error: tampered.get(issue.id) } : undefined;
     tampered.delete(issue.id);
+    // Parked by a pause when the run stopped: not a crash. The schedule ends it as parked, its record still `paused`.
+    if (result.status === "rejected" && result.reason instanceof StoppedWhileParked) {
+      bookkeep(issue.id, () => view.finish(issue.id, "stopped", true));
+      throw result.reason;
+    }
     // Its ending arrives complete: an agent's hand-back is read now, not patched in after the schedule.
     const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
     // A requeued ticket's second pipeline replaces its first in the per-issue lines.
