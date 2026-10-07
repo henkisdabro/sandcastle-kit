@@ -609,6 +609,9 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
   return undefined;
 };
 
+/** How long a wait is quiet before it says again why it waits: a reason that flips back and forth says nothing new. */
+const REPRINT_MS = 15 * 60_000;
+
 /** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own (or at its cap). */
 export type WaitReason = "slots" | "share";
 
@@ -619,7 +622,7 @@ export type SlotLease = { release(): void };
  * Waits for a slot and hands it over: the caller frees it with `release()`. `withSlot` is this with
  * the release tied to a function's end; a ticket that closes its sandbox mid-way (a paused run) gives
  * its slot back and leases another when it resumes. `onWait` is told when no slot was free, and why
- * (again when the reason changes). The slot goes to the run that has waited longest, within each
+ * (again at each change of reason; the console line is said once, then every 15 minutes). The slot goes to the run that has waited longest, within each
  * run's share; `pollMs` is how often a wait looks again. With `giveUp`, asked at each look while no
  * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  * `priority` puts this wait before the run's other waits for the pool (the ones that did not ask for
@@ -641,6 +644,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
   let slot: ReturnType<typeof tryAcquire>;
   try {
     let told: WaitReason | undefined;
+    let printedAt: number | undefined;
     let yielded: "run" | "priority" | "earlier" | undefined;
     const attempt = (): WaitReason | undefined => {
       const seen: Seen = new Map();
@@ -655,8 +659,11 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
     };
     for (let why = attempt(); !slot; why = attempt()) {
       if (giveUp?.()) return undefined;
-      if (why !== told) {
-        told = why;
+      // The line is said when the wait starts and again after REPRINT_MS, not at every change of reason:
+      // with a second run live the reason alternates and one wait printed about 30 lines. `onWait` still
+      // fires at each change, since the run's note of waiting for its share follows it.
+      if (printedAt === undefined || clock() - printedAt >= REPRINT_MS) {
+        printedAt = clock();
         const me = why === "share" ? myShare() : undefined;
         const reason = why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
           : yielded === "run" ? "another run has waited longer"
@@ -664,6 +671,9 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
           : yielded === "earlier" ? "an earlier wait of this run goes first"
           : `${limit(pool)} in use`;
         console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${reason})`);
+      }
+      if (why !== told) {
+        told = why;
         onWait?.(why!);
       }
       await new Promise((r) => setTimeout(r, pollMs));

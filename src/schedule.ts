@@ -858,6 +858,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let landings = 0;
       const landedAt = new Map<string, number>();
       const resolveFrom = new Map<string, number>();
+      // The tickets whose resolve waits were told, by what they waited for; a wait that failed.
+      const resolveSaid = new Map<string, string>();
+      const failures: unknown[] = [];
       const settles: (() => void)[] = [];
       let working = 0;
       let pushed = 0;
@@ -926,8 +929,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         noticeStop();
         demand();
         tellPaused();
-        // A ticket waiting to resolve runs nothing: with only those left in a pipeline, the run is landing.
-        if (working === resolving.size && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
+        // A ticket waiting to resolve runs nothing and is no attempt: with none left in a pipeline, the run is landing.
+        if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
       };
       // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
       // parked ticket from the demand before any of them asks for a slot again, and wakes them.
@@ -1165,7 +1168,6 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       };
       // Returns when none is ahead of the ticket's resolve, or the run starts nothing; a pause parks it as at the start.
       const resolveTurn = async (t: T) => {
-        let said = "";
         try {
           for (sync(); !stop.startsNothing; sync()) {
             if (pausedSince !== undefined) {
@@ -1173,13 +1175,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               continue;
             }
             const before = ahead(t);
-            if (!before.length) {
-              if (said) tell({ kind: "resolve starts", id: t.id });
-              break;
-            }
+            if (!before.length) break;
             resolving.add(t.id);
-            if (before.join(",") !== said) {
-              said = before.join(",");
+            if (before.join(",") !== resolveSaid.get(t.id)) {
+              resolveSaid.set(t.id, before.join(","));
               tell({ kind: "resolve waits", id: t.id, for: before });
             }
             demand();
@@ -1193,18 +1192,38 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           resolving.delete(t.id);
           demand();
         }
-        resolveFrom.set(t.id, landings);
+      };
+      // A sent-back ticket's wait is no pipeline worker's: the worker that took it hands it here and goes back to the
+      // queue, so with N workers a waiting resolve leaves all N for the tickets behind it. Pushed again once nothing
+      // is ahead of it (or the run starts nothing: the attempt then ends it as not begun), ahead of the queue as before.
+      const waitToResolve = (t: T) => {
+        void resolveTurn(t).then(
+          () => {
+            // A closed queue means a worker or the landing worker failed: the run rejects with that, nothing would take it.
+            if (!pipelines.closed) pipelines.push({ ticket: t, rank: REQUEUED });
+          },
+          (error) => {
+            failures.push(error);
+            closeAll();
+          },
+        );
       };
       const attempt = async (t: T) => {
         // A paused run starts no ticket: it waits here, holding nothing, until the resume - or a stop.
         for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) await waitParked(t.id, "start");
+        // #398's exception sends a ticket back again after a landing that finished after its resolve began: a third attempt counts as one.
+        const n = (attempts.get(t.id) ?? 0) + 1;
+        const resolves = n >= 2 && first.get(t.id)?.kind === "conflict";
+        // Something is ahead of its resolve (checked again here: a landing may have queued since it was pushed): wait off the worker.
+        if (resolves && !stop.startsNothing && ahead(t).length) return waitToResolve(t);
         working++;
         running.add(t.id);
         try {
-          // #398's exception sends a ticket back again after a landing that finished after its resolve began: a third attempt counts as one.
-          const n = (attempts.get(t.id) ?? 0) + 1;
-          if (n >= 2 && first.get(t.id)?.kind === "conflict") await resolveTurn(t);
           if (stop.startsNothing) return await notBegun(t, stop.headline!);
+          if (resolves) {
+            resolveFrom.set(t.id, landings);
+            if (resolveSaid.delete(t.id)) tell({ kind: "resolve starts", id: t.id });
+          }
           let r: Attempted<G, O>;
           // Every step the attempt takes is announced by a juncture of a phase other than "start", so a stop that wakes the
           // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
@@ -1265,8 +1284,16 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const lands = landing.run().finally(() => pipelines.close());
       const [a, b] = await Promise.allSettled([fanOut, lands]);
       clearInterval(poll);
-      for (const { ticket } of later) if (!endings.has(ticket.id)) endings.set(ticket.id, { kind: "waiting", on: behind.has(ticket.id) ? "file" : "blockers" });
+      // A ticket that never started ends here as `waiting`: no landing will free it, so it is no longer
+      // in flight, and what waits behind it is told again - else its note keeps "(lands this run)".
+      const unstarted = later.map((l) => l.ticket.id).filter((id) => !endings.has(id));
+      for (const id of unstarted) waits.ended(id);
+      const again = new Map<string, ReturnType<typeof waits.notes>[number]>();
+      for (const id of unstarted) for (const n of waits.notes(id)) again.set(n.id, n);
+      for (const n of again.values()) tell({ kind: "blocked", ...n });
+      for (const id of unstarted) endings.set(id, { kind: "waiting", on: behind.has(id) ? "file" : "blockers" });
       for (const r of [a, b]) if (r.status === "rejected") throw r.reason;
+      if (failures.length) throw failures[0];
       return { endings, stop: readings(stop) };
     },
   };

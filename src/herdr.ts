@@ -826,10 +826,20 @@ export const openSandboxView = (
           // pane: one that waited for a machine-wide slot starts after the
           // queue looked empty and its neighbours' panes closed, and a split
           // from a closed pane turned the whole view off.
+          // With no pane open and the status pane gone there is nothing to split from: no sandbox
+          // pane then, and the rest of the view goes on. Not another pane, and not a new status pane.
+          if (!open.length && statusGone) return;
           const [from, direction] = open.length ? [open[open.length - 1].pane, "down"] : [statusPane, "right"];
           const ratio = String(open.length ? stackRatio(open.length, panes) : layoutRatios(adopted, wide).column);
-          const pane = herdrJson(["pane", "split", from, "--direction", direction, "--ratio", ratio, "--cwd", project.root, "--no-focus"])
-            .result.pane.pane_id as string;
+          let pane: string;
+          try {
+            pane = herdrJson(["pane", "split", from, "--direction", direction, "--ratio", ratio, "--cwd", project.root, "--no-focus"])
+              .result.pane.pane_id as string;
+          } catch (error) {
+            // The status pane closed since the last report: told as a closed pane, not a broken view.
+            if (!open.length && statusPaneClosed(error)) return;
+            throw error;
+          }
           slot = addSlot(pane);
         }
         if (!slot) return;
