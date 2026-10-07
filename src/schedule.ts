@@ -562,6 +562,11 @@ export type Change<G, O, B = unknown> =
   | { kind: "paused"; since: number; finishing: string[]; usage?: UsagePaused }
   /** The pause was lifted: the parked tickets continue and the run asks for its slots again. */
   | { kind: "resumed" }
+  /**
+   * A stop arrived while the run was paused, told once as it is noticed: the pause no longer holds - the parked tickets
+   * end as parked and the ones in flight finish - so no `paused` follows and the record must stop saying paused now.
+   */
+  | { kind: "pause stopped" }
   | HoldChange
   | BlockerChange<B>;
 
@@ -866,7 +871,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       };
       // The tickets still doing something while paused; told again each time the list changes.
       const tellPaused = () => {
-        if (pausedSince === undefined) return;
+        // After a stop the pause is over (`noticeStop` told it): the finishing list changing is not a pause to record again.
+        if (pausedSince === undefined || stop.startsNothing) return;
         const finishing = [...new Set([...[...running].filter((id) => !parked.has(id)), ...greens])];
         const key = JSON.stringify([finishing, pausedFor]);
         if (key === toldFinishing) return;
@@ -876,9 +882,17 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Told once, the moment the stop first holds - from wherever it is noticed: an ending, a stage
       // change, the poll. The host's refused write is read live, so no one adds it and any caller may find it.
       let toldStop = false;
+      let toldPauseStopped = false;
       const noticeStop = () => {
         // A stop wakes the parked tickets: a pause that ends only with the window's reset must not outlast a run that can do nothing more.
-        if (stop.startsNothing) for (const wake of wakers.splice(0)) wake();
+        if (stop.startsNothing) {
+          for (const wake of wakers.splice(0)) wake();
+          // The record says paused until told otherwise, and only the run's end would: the tickets in flight finish first.
+          if (pausedSince !== undefined && !toldPauseStopped) {
+            toldPauseStopped = true;
+            tell({ kind: "pause stopped" });
+          }
+        }
         if (toldStop || !stop.landsNothing) return;
         toldStop = true;
         tell({ kind: "stopped landing", cause: stop.headline! });
@@ -916,7 +930,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           pausedFor = undefined;
           parked.clear();
           toldFinishing = undefined;
-          tell({ kind: "resumed" });
+          // A stop already ended the pause for the record: a resume now would say a pause lifted that never held.
+          if (!toldPauseStopped) tell({ kind: "resumed" });
           demand();
           for (const wake of wakers.splice(0)) wake();
         }
