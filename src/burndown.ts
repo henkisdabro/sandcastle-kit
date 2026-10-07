@@ -102,6 +102,8 @@ type Outcome = {
   changelogDropped?: number;
   /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
   unmet?: string;
+  /** What a reviewer said in prose about a gap it filed neither as a `<followup>` nor as an `<unmet>` line (`gapOf`), for the closing summary. */
+  gap?: string;
 };
 
 /**
@@ -351,6 +353,39 @@ const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
     const title = (at > 0 ? said.slice(0, at) : said).trim();
     return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
+// A reviewer that names a known gap in prose and files it as neither a `<followup>` nor an `<unmet>` line
+// loses it: nobody reads the message. The words that name one, as a person writes them ("left alone",
+// "remains", "a gap", "not fixed"); the wording of the prompts alone did not hold.
+const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaining|gaps?|not\s+(?:fixed|addressed|handled)|unfixed|unaddressed|still\s+(?:fails?|broken|wrong))\b/i;
+// What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
+// issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
+// every review prompt asks for, which would otherwise list nearly every merged ticket.
+const GAP_NEGATED =
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
+// The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
+// fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
+const sentencesOf = (text: string): string[] => {
+  const prose = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "").replace(/<(\w+)>[\s\S]*?<\/\1>/g, "");
+  const units: string[] = [];
+  let open = false;
+  for (const raw of prose.split("\n")) {
+    const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
+    if (!line) open = false;
+    else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
+    else {
+      units.push(line);
+      open = true;
+    }
+  }
+  return units.flatMap((u) => u.split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)).map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim());
+};
+// The gap sentences of a reviewer's final message, when it filed none: a message with a `<followup>` or an
+// `<unmet>` line has said it the way the kit reads. Several sentences are one note.
+const gapOf = (text: string): string | undefined => {
+  if (followUpsOf(text).length || unmetOf(text)) return undefined;
+  const said = sentencesOf(text).filter((s) => GAP_WORDS.test(s) && !GAP_NEGATED.test(s));
+  return said.length ? cutAtWord([...new Set(said)].join(" "), UNGATED_MAX) : undefined;
+};
 // The phase a pass's name says, in the words a person reads in the filed ticket.
 const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
@@ -1049,6 +1084,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       const ownNow = () => ownCommits(base, branch, project.root);
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
+      // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
+      const gaps: string[] = [];
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -1183,6 +1220,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
             if (u) ungated.push(u);
+            const g = r && gapOf(r.stdout);
+            if (g) gaps.push(g);
             noteChangelog(r?.stdout);
             const m = r && unmetOf(r.stdout);
             if (m) unmet.push(m);
@@ -1403,6 +1442,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           reviewCommits += ownNow() - beforeAfter;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
+          const g = gapOf(after.stdout);
+          if (g) gaps.push(g);
           noteChangelog(after.stdout, true);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
@@ -1435,6 +1476,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         changelog: changelogNote,
         changelogDropped: changelogDropped || undefined,
         unmet: unmetNote,
@@ -2137,6 +2179,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
+          ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
