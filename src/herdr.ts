@@ -82,6 +82,19 @@ const bareShell = (processes: Foreground) => {
 };
 export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
+/** What herdr said went wrong, cut to its `message` when it answered with its JSON error, and to 160 characters. */
+export const herdrMessage = (error: unknown) => {
+  const text = String((error as { stderr?: string }).stderr || (error as Error)?.message || error).trim();
+  try {
+    const message = JSON.parse(text)?.error?.message;
+    if (typeof message === "string" && message.trim()) return message.trim().slice(0, 160);
+  } catch {
+    /* not JSON: herdr's own words, or node's */
+  }
+  return text.slice(0, 160);
+};
+const paneNotFound = (error: unknown) => /pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""));
+
 type View = { tab?: string; adopted?: boolean; status?: string; reported?: boolean; socket?: string; kit?: string; terminal_id?: string; quit?: boolean; panes?: string[] };
 // The record sits in a clone's gitignored `logs/`, where a hostile clone can force-add a file, and
 // the tab bar runs whatever kit it names: used only as an absolute path to a checkout that has
@@ -442,14 +455,15 @@ export const openSandboxView = (
   const logs = join(project.root, ".sandcastle/logs");
   const record = viewRecord(project.root);
   let failed = false;
-  // One warning, then silence: a broken view must not flood the run's output.
+  // One warning, then silence: a broken view must not flood the run's output. Herdr's own
+  // `message`, not the JSON it answers with.
   const safe = <T>(fn: () => T): T | undefined => {
     if (failed) return undefined;
     try {
       return fn();
     } catch (error) {
       failed = true;
-      console.log(`Herdr sandbox view off for this run (${String((error as { stderr?: string }).stderr ?? error).trim().slice(0, 160)}).`);
+      console.log(`Herdr sandbox view off for this run (${herdrMessage(error)}).`);
       return undefined;
     }
   };
@@ -540,6 +554,7 @@ export const openSandboxView = (
     /* no terminal_id recorded */
   }
   let saved = false;
+  let statusGone = false;
   const save = () => {
     // Others write the record while the run lives: status.sh marks the view quit, and the tab bar
     // records a restarted view's terminal. A rewrite here (a pane closing, the run's exit) keeps both,
@@ -555,7 +570,9 @@ export const openSandboxView = (
     }
     // Through `writeView`: status.sh's trap and the tab bar read the record at any moment, and a
     // plain write shows them a truncated one.
-    writeView(project.root, { tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, status: statusPane, ...kept, panes: slots.filter((s) => !s.closed).map((s) => s.pane) });
+    // A status pane that is gone is no longer recorded: the tab bar would type the view into whatever
+    // Herdr gave its id to, or find it moved to a tab that is not the run's.
+    writeView(project.root, { tab, adopted, ...(process.env.HERDR_SOCKET_PATH ? { socket: process.env.HERDR_SOCKET_PATH } : {}), kit: KIT, ...(statusGone ? {} : { status: statusPane }), ...kept, panes: slots.filter((s) => !s.closed).map((s) => s.pane) });
     saved = true;
   };
   save();
@@ -609,6 +626,18 @@ export const openSandboxView = (
     save();
     return true;
   };
+  // The status pane closed by hand, moved or lost is no broken view: the workspace's tokens and the
+  // end notification do not need it. Left to `safe`, its pane_not_found turned all of them off
+  // with a line of raw JSON. Told once, and the record forgets the pane.
+  const statusPaneClosed = (error: unknown) => {
+    if (!paneNotFound(error)) return false;
+    if (!statusGone) {
+      statusGone = true;
+      save();
+      console.log("Herdr status pane closed - `sandcastle status` shows the run.");
+    }
+    return true;
+  };
   // `state` only when it changed: the minute's re-send is the metadata alone, as a repeated
   // idle report could mark a finished sandbox unseen again. Metadata expires (TTL) unless
   // re-sent, so a run killed without its exit handler leaves nothing behind for long.
@@ -650,17 +679,22 @@ export const openSandboxView = (
   let ended = false;
   let said = "";
   const reportRun = (final?: ReturnType<typeof runAgent>) => {
+    if (statusGone) return;
     const a = final ?? runAgent(runCounts(tickets(), paused()), ended);
-    if (said !== `${a.state} ${a.message}`) {
-      herdr(["pane", "report-agent", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--state", a.state, "--message", a.message, "--seq", seq()]);
-      said = `${a.state} ${a.message}`;
+    try {
+      if (said !== `${a.state} ${a.message}`) {
+        herdr(["pane", "report-agent", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--state", a.state, "--message", a.message, "--seq", seq()]);
+        said = `${a.state} ${a.message}`;
+      }
+      herdr([
+        "pane", "report-metadata", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${project.name} run`, "--display-agent", "sandcastle",
+        ...["working", "blocked", "idle", "done"].flatMap((k) => ["--state-label", `${k}=${a.message}`]),
+        ...tokenArgs({ ...sandboxTokens(project.name, a.message, ended ? undefined : startedAt, Date.now()), ...usageTokens() }),
+        "--ttl-ms", TTL,
+      ]);
+    } catch (error) {
+      if (!statusPaneClosed(error)) throw error;
     }
-    herdr([
-      "pane", "report-metadata", statusPane, "--source", SOURCE, "--agent", "sandcastle", "--title", `${project.name} run`, "--display-agent", "sandcastle",
-      ...["working", "blocked", "idle", "done"].flatMap((k) => ["--state-label", `${k}=${a.message}`]),
-      ...tokenArgs({ ...sandboxTokens(project.name, a.message, ended ? undefined : startedAt, Date.now()), ...usageTokens() }),
-      "--ttl-ms", TTL,
-    ]);
   };
   // The plan's usage, once a reading exists: no token before it, and none cleared after.
   const usageTokens = (): Record<string, string> => {
@@ -672,10 +706,11 @@ export const openSandboxView = (
   const reportUsage = () => {
     const tokens = usageTokens();
     if (!tokens.sc_usage) return;
+    if (statusGone) return;
     try {
       herdr(["pane", "report-metadata", statusPane, "--source", SOURCE, ...tokenArgs(tokens), "--ttl-ms", TTL]);
-    } catch {
-      /* the sidebar's usage is a convenience */
+    } catch (error) {
+      statusPaneClosed(error); // the sidebar's usage is a convenience: any other error is let go
     }
   };
   const reportRunAndSpace = () => {
