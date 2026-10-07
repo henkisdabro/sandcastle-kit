@@ -511,8 +511,8 @@ export class StoppedWhileParked extends Error {
 
 /**
  * How one ticket's part in a run ends: exactly one per ticket the run took in. `attempts` counts the
- * attempts that began; a requeued ticket whose second attempt never began ends with its first
- * landing (`withdrawn` when the tracker took it back meanwhile). `again` is what the first attempt
+ * attempts that began; a requeued ticket whose later attempt never began (`unstarted`) ends with the
+ * landing of the attempt before it (`withdrawn` when the tracker took it back meanwhile). `again` is what the first attempt
  * collided with, on a second attempt's landing; its `landed.with` then names the tickets of both.
  */
 export type Ending<G, O> =
@@ -764,7 +764,7 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /** A person's pause, if the run takes one (a dry run may: it simply has nothing to hold). Without it nothing is held. */
   pause?: PauseSource;
   /**
-   * One attempt of a ticket: `n` is 2 for a requeued ticket, which carries `again`. `last()` says
+   * One attempt of a ticket: `n` counts its attempts, 1 for the first; a requeued one (2 or more) carries `again`. `last()` says
    * nothing more will start after it - none queued, none that may be freed, or a stopped run - so a
    * sandbox's pane can close. `juncture(phase, park)` is awaited before each step that would start
    * an agent pass (`phase` names it): it returns at once while the run is not paused; while paused it

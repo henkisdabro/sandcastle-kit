@@ -633,7 +633,7 @@ Claude Code login or no token at all leaves it without one for now, and with an 
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
-The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again; `-` while queued or blocked), COMMITS,
+The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again, and after the run from its record; `-` while queued or blocked), COMMITS,
 **CPU/MEM** and **TOKENS**, then ACTIVITY. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
 and memory, the CPU half red when the sandbox takes most of the machine's cores, a greyed `-`
 when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M/42k`, **in** over

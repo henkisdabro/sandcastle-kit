@@ -27,7 +27,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 - **The status view's AGE column is now TIME.** A working ticket still shows its time in the
   current state (red at twice the usual); a finished ticket shows its whole length, first start to
-  end.
+  end, during the run and after it.
 - **The start plan names each mergeable file that tickets share once, with its tickets**, instead
   of a line for every pair. README.md and CHANGELOG.md are one count, and the full pair list goes
   to `.sandcastle/logs/file-shares.log`, under a line per turn naming its time and the run's pid.
