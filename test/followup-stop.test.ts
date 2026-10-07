@@ -81,7 +81,7 @@ const run = (o: { dryRun?: boolean; seen?: Set<string>; create?: () => string } 
   const recorded = (): { title: string; from: string; phase: string; id?: string; failed?: string }[] =>
     JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8")).followUps ?? [];
   const made: string[] = [];
-  const tracker = { ref: (id: string) => `#${id}`, create: o.create ?? ((title: string) => String(made.push(title) + 100)) };
+  const tracker = { ref: (id: string) => `#${id}`, comment: () => {}, create: o.create ?? ((title: string) => String(made.push(title) + 100)) };
   const book = createFollowUpBook(record, { tracker, dryRun: o.dryRun ?? false, write: direct, seen: o.seen ?? new Set() });
   const prompts = Object.fromEntries(
     ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((kind) => {
