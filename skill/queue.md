@@ -65,8 +65,14 @@ comments, and the gates can prove it.
 4. **Close the spec, then label.** Take each decision from its file, and record the user's answer
    in it as `answer`. Then comment the decision on the ticket - the implementing agent reads the
    ticket and its comments, never this chat - then add the queue label. Create a missing label with
-   `gh label create`. A hard ticket can carry `model:`/`effort:` labels (GitHub) for a stronger
-   implementer; offer it, and add it only on a yes.
+   `gh label create`. This holds for every label this action applies, not the queue label alone:
+   before applying a role's label (`needs-info`, the hold label, `wontfix`, or what
+   `docs/agents/triage-labels.md` maps it to), check it exists (`gh label list --search <name>`)
+   and create a missing one with `gh label create`, using the mapping's meaning for that role as its
+   description - `gh issue edit --add-label` fails on a label GitHub does not have. The files
+   tracker has no labels to create: a status is just text. A hard ticket can carry
+   `model:`/`effort:` labels (GitHub) for a stronger implementer; offer it, and add it only on a
+   yes.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping

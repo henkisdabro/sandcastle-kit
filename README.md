@@ -1554,6 +1554,7 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `status needs jq`, or `jq (status view)` shows `FIX` | Install `jq` (`apt install jq`, `dnf install jq` or `brew install jq`); the status view reads every record with it. |
 | Live runs show as ended in the status view on Linux, or `ps (status view)` shows `FIX` | Install procps (`apt install procps` or `dnf install procps-ng`); the status view checks each run's process with `ps`. |
 | `queue label "..." exists on GitHub` shows `FIX` | Run the `gh label create` command doctor prints, or set `label` to the name your repo already uses. |
+| `opt  triage labels mapped in docs/agents/triage-labels.md but missing on GitHub` | Advisory: run the `gh label create` command doctor prints, or leave it - `/sandcastle queue` creates a label before it first applies it. |
 | `warn base image ... was built N days ago` | `sandcastle build --force` pulls the Debian and Node updates. A warning, not a failure. |
 | `Unknown argument "..." for sandcastle run` | `run` takes ticket ids, `--dry`, `--concurrency N`, `--detach` and `--api-key` only; everything else goes in the environment (`CROSS_REVIEW=1 sandcastle run`). |
 | `"notify" ... must be a list of strings` | `notify` in `~/.config/sandcastle-kit/config.json` is a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`. |
