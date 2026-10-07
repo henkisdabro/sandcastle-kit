@@ -1,6 +1,6 @@
 // A ticket that conflicts or goes red at landing is requeued once, in the same run: the scheduler's
 // requeue-once rule (createSchedule in src/schedule.ts). Its second attempt runs on the land-only
-// path, and a second conflict or red holds it for the next run. What the run says of it - the
+// path, and a second conflict or red holds it for the next run (unless a landing after the resolve began caused the conflict: then it goes back once more). What the run says of it - the
 // requeue, the state it ends on, the outcome line, the comment - is the ledger's (`createLedger`,
 // src/ledger.ts): every test drives `createSchedule(plan).run(work)` with the real ledger's `tell`,
 // as burndown.ts hands it what the scheduler tells, over a run record in a temp dir, and reads back
@@ -295,31 +295,35 @@ test("a conflict is requeued and lands on the second try in one run", async () =
   await r.host.check("at the end");
 });
 
-test("a second conflict holds the ticket, naming both tickets it collided with", async () => {
+test("a second conflict that a landing during the resolve caused sends the ticket back once more, and it lands on the third try", async () => {
   const root = makeRepo({ 1: { "shared.txt": "one\n" }, 2: { "shared.txt": "two\n", "other.txt": "two\n" }, 3: { "other.txt": "three\n" } });
-  // 2 meets 1 on shared.txt, and while its second pipeline runs 3 lands on other.txt: the second try conflicts with 3.
+  // 2 meets 1 on shared.txt, and while its second pipeline runs 3 lands on other.txt: the second try conflicts with 3,
+  // which the resolve's merge could not hold. That is a new requeue, not a final "conflicted again".
   // Ordered by events, not by sleeping: 3's pipeline ends once 2's second one has merged the base in,
   // and 2's second one ends once 3 has landed.
   let mergedIn!: () => void;
   const baseMerged = new Promise<void>((resolve) => (mergedIn = resolve));
+  let twos = 0;
   const pipeline: Pipeline = async (issue, attempt) => {
     if (issue.id === "2" && attempt === 1) await new Promise((r) => setTimeout(r, 40));
     if (issue.id === "3") await baseMerged;
-    if (issue.id === "2" && attempt === 2) {
+    if (issue.id === "2" && attempt === 2 && ++twos === 1) {
       mergeBaseIn(root, "2", { "shared.txt": "one\ntwo\n" });
       mergedIn();
       while (!mergeOrder(root).includes("3")) await new Promise((r) => setTimeout(r, 5));
+    } else if (issue.id === "2" && attempt === 2) {
+      // The third try merges 3 in as well.
+      mergeBaseIn(root, "2", { "other.txt": "three\ntwo\n" });
     }
     return outcome(root, issue.id, { carried: attempt > 1 });
   };
   const r = await run(root, ["1", "2", "3"], pipeline, async () => GREEN, 3);
   const two = r.final.find((f) => f.issue === "2")!;
-  assert.equal(two.landed.kind, "conflict");
-  assert.equal(r.states["2"].note, "conflicted again with #1, #3 after a requeue: other.txt");
-  assert.deepEqual(r.sentBack, ["2: requeued after conflict with #1"]);
-  assert.equal(r.attempts.get("2"), 2, "requeued once, never twice");
-  assert.deepEqual(mergeOrder(root).sort(), ["1", "3"]);
-  assert.equal(r.states["2"].state, "conflict");
+  assert.equal(two.landed.kind, "merged");
+  assert.deepEqual(r.sentBack, ["2: requeued after conflict with #1", "2: requeued after conflict with #3"]);
+  assert.equal(twos, 2, "the second and the third try");
+  assert.deepEqual(mergeOrder(root), ["1", "3", "2"]);
+  assert.equal(git(root, "show", "main:other.txt"), "three\ntwo");
   assert.equal(git(root, "status", "--porcelain"), "");
   assert.equal(git(root, "branch", "--list", "sandcastle/*"), "");
 });

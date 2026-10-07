@@ -40,7 +40,7 @@ _Avoid_: using it as a ticket state
 **Attempt**:
 One pass of a ticket through the pipeline - implement, review, gates, repair - in a sandbox of its
 own. A ticket that conflicts or goes red at landing is requeued for a second attempt; a run gives
-a ticket two at most.
+a ticket two, and one more for each conflict that a landing after its resolve began caused.
 _Avoid_: try, retry, run (one `sandcastle run` is the whole run)
 
 **Ending**:
