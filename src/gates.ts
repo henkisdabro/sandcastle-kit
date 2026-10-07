@@ -419,11 +419,12 @@ const gateTimeLine =(gates: Gate[]) =>
 
 // A green result holds for as long as nothing it depended on changes: the
 // base commit, the image, and the config that shapes a sandbox.
-const baseKey = (project: Project, image: string, planFile: string) =>
+// `commit` is the one a gate ran on, when that is not what the base names now.
+const baseKey = (project: Project, image: string, planFile: string, commit = sh("git", ["rev-parse", project.baseBranch])) =>
   createHash("sha256")
     .update(
       JSON.stringify([
-        sh("git", ["rev-parse", project.baseBranch]),
+        commit,
         image,
         project.gates,
         project.setup,
@@ -449,11 +450,41 @@ export const baseCacheHit = (root: string, key: string) => {
 // depends on the clock or the network can go red at the same key `sandcastle
 // gates` was green at, and a record left behind would have the next run skip
 // the check and fan agents out on a base known to be red.
-export const noteBaseResult = (root: string, key: string, green: boolean) => {
+// `run` is the run that gated it: a skip says "verified this run" only for that run's own record.
+export const noteBaseResult = (root: string, key: string, green: boolean, run?: string) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString() }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), ...(run ? { run } : {}) }) + "\n");
+};
+
+const recordedRun = (root: string): string | undefined => {
+  try {
+    return JSON.parse(readFileSync(baseRecord(root), "utf8")).run;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A commit the run's own gates passed on - a landing's merge, which the base now names - is the green
+ * base the next turn's check would otherwise gate again, in the one gate slot, minutes later.
+ */
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, runId?: string) =>
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, runId);
+
+/**
+ * The gates on the merged base at the end of a run (`gateBase`, no hook tests). What they say of the
+ * commit they ran on is the base's record, as the base check's own result is: green is the next
+ * turn's skip, red removes a record that would skip a base known to be red.
+ */
+export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string) => {
+  const gated = await gateBase(project, image, planFile, "verify", false, runId);
+  const green = !gated.failures.length && gated.gates.every((g) => g.pass);
+  // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
+  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, runId);
+  else noteBaseResult(project.root, "", false);
+  return gated;
 };
 
 /** Red on the base before any agent ran. Carries each gate's verdict so the run record, and the closing summary, can name the red ones. */
@@ -509,7 +540,12 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
   if (cached && baseCacheHit(project.root, key)) {
-    console.log(`Gates on ${base}: green at this commit and image before - not re-run.`);
+    const commit = sh("git", ["rev-parse", "--short", base]);
+    console.log(
+      runId && recordedRun(project.root) === runId
+        ? `Gates on ${base}: green at ${commit} already (verified this run) - not re-run.`
+        : `Gates on ${base}: green at this commit and image before - not re-run.`,
+    );
     return;
   }
   console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
@@ -522,7 +558,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green);
+  noteBaseResult(project.root, key, green, runId);
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,
