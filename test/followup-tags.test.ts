@@ -124,7 +124,7 @@ const recording = () => {
   const made: { title: string; body: string; near?: string }[] = [];
   return {
     made,
-    tracker: { ref: (id: string) => `#${id}`, create: (title: string, body: string, near?: string) => String(made.push({ title, body, near }) + 100) },
+    tracker: { ref: (id: string) => `#${id}`, comment: () => {}, create: (title: string, body: string, near?: string) => String(made.push({ title, body, near }) + 100) },
   };
 };
 const direct = async (fn: () => string) => fn();
@@ -175,6 +175,7 @@ test("a filing that fails is kept with its reason, and the rest are still filed"
   let calls = 0;
   const tracker = {
     ref: (id: string) => `#${id}`,
+    comment: () => {},
     create: () => {
       if (calls++ === 0) throw new Error("gh issue create failed: HTTP 502");
       return "12";
