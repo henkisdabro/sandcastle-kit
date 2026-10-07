@@ -158,6 +158,8 @@ test("the summary says whose gates proved a merged base the verify did not run a
   );
   assert.equal(verifySkippedLine("main", { commit: sha, by: "the base check" }), "Merged main re-gated: green at 0123456 already (gated by the base check) - not run again");
   assert.equal(verifySkippedLine("main", { commit: sha }), "Merged main re-gated: green at 0123456 already (gated before) - not run again");
+  // A run record from before proof kinds: the ticket is named, the landing sandbox is not claimed.
+  assert.equal(verifySkippedLine("main", { commit: sha, by: "#474" }), "Merged main re-gated: green at 0123456 already (gated with #474) - not run again");
 });
 
 test("burndown asks the record before the verify, and a landing tells it whose gates ran", () => {

@@ -581,8 +581,9 @@ const hookInputsChanged = (project: Project, planFile: string, from: string, to:
  * The record covers the hook tests and the git-hook probe too (so the next check opens no base sandbox) only when
  * the record before it did, at a commit it names, on this image and config, and nothing the hook checks read changed
  * since (`hookInputsChanged`). Anything else - no earlier record, an older kit's without a commit - re-checks.
+ * `kind` has no default: a caller that forgot it would otherwise be trusted to skip the verify (`greenProofOfBase`).
  */
-export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing", kind: ProofKind = "landing-sandbox") => {
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by: string, kind: ProofKind) => {
   let hooks = false;
   try {
     const prev = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));

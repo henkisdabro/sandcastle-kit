@@ -74,7 +74,7 @@ const turnAfterLanding = async (name: string, file: string, hooksPath?: string, 
     writeFileSync(join(root, file), "changed\n");
     git(root, "add", "-A");
     git(root, "commit", "-q", "-m", `land ${file}`);
-    noteGreenCommit(project, IMAGE, plan, git(root, "rev-parse", "main"));
+    noteGreenCommit(project, IMAGE, plan, git(root, "rev-parse", "main"), "#1", "landing-sandbox");
 
     const second = await quietly(() => requireGreenBase(project, IMAGE, plan, true, "turn-2"));
     return { lines: second.lines.join("\n"), probed: existsSync(join(root, ".probed")) };

@@ -482,7 +482,8 @@ const changelogLines = (all: { id: string; line: string }[]): string[] => {
  */
 export const verifySkippedLine = (base: string, proof: { commit: string; by?: string; kind?: string }, image = "") => {
   const by = typeof proof.by === "string" && proof.by ? proof.by : "";
-  const said = by ? `gated ${by.startsWith("#") ? "with" : "by"} ${by}${by.startsWith("#") ? " in its landing sandbox" : ""}` : "gated before";
+  // "In its landing sandbox" only on that kind: a record from before kinds (a fast-forward's, say) names a ticket too.
+  const said = by ? `gated ${by.startsWith("#") ? "with" : "by"} ${by}${proof.kind === "landing-sandbox" ? " in its landing sandbox" : ""}` : "gated before";
   return `Merged ${base} re-gated: green at ${String(proof.commit).slice(0, 7)} already${image} (${said}) - not run again`;
 };
 
