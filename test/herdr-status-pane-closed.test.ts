@@ -121,8 +121,7 @@ test("an error herdr gives in words over several lines is told on one", async ()
 const CLOSED = "Herdr status pane closed - `sandcastle status` shows the run.";
 
 test("a status pane found closed by the first sandbox pane's split is told as closed, not as a broken view", async () => {
-  const run = await open("ok", "all");
-  run.answer = () => writeFileSync(mode, "gone");
+  const run = await open("gone", "all");
   run.answer();
   const claimed = await run.say(() => run.view.claim("12", "a ticket"));
   assert.deepEqual(claimed, [CLOSED]);
