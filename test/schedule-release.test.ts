@@ -148,8 +148,9 @@ test("a blocker that ends without landing releases nothing; its dependant is tol
   const { lines, endings, asked, order } = await play(["1"], { 2: ["1"] }, { attempt: async () => ({ kind: "pipeline", outcome: "gate red" }) });
   assert.deepEqual(asked, []);
   assert.deepEqual(order, ["attempt 1"]);
-  // 1 is no longer in flight: the burndown words it as waiting for the next run.
-  assert.deepEqual(lines, ["ended 1", "blocked 2 on 1 in flight 2"]);
+  // 1 is no longer in flight: the burndown words it as waiting for the next run. At the run's end 2 is
+  // not in flight either: it never started, so it is told again without itself.
+  assert.deepEqual(lines, ["ended 1", "blocked 2 on 1 in flight 2", "blocked 2 on 1 in flight "]);
   assert.deepEqual(endings.get("2"), { kind: "waiting", on: "blockers" });
 
   // A landing that does not close its ticket (held for a person) is the same.
@@ -194,7 +195,7 @@ test("a stop that arrives while the blockers are read starts nothing", async () 
 
 test("blockers that cannot be read again are told as unreleased, and the run still ends", async () => {
   const { lines, endings } = await play(["1"], { 2: ["1"] }, { open: async () => Promise.reject(new Error("gh: HTTP 502")) });
-  assert.deepEqual(lines, ["ended 1", "unreleased 1", "blocked 2 on 1 in flight 2"]);
+  assert.deepEqual(lines, ["ended 1", "unreleased 1", "blocked 2 on 1 in flight 2", "blocked 2 on 1 in flight "]);
   assert.deepEqual(endings.get("2"), { kind: "waiting", on: "blockers" });
 });
 

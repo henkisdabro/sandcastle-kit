@@ -1284,7 +1284,14 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const lands = landing.run().finally(() => pipelines.close());
       const [a, b] = await Promise.allSettled([fanOut, lands]);
       clearInterval(poll);
-      for (const { ticket } of later) if (!endings.has(ticket.id)) endings.set(ticket.id, { kind: "waiting", on: behind.has(ticket.id) ? "file" : "blockers" });
+      // A ticket that never started ends here as `waiting`: no landing will free it, so it is no longer
+      // in flight, and what waits behind it is told again - else its note keeps "(lands this run)".
+      const unstarted = later.map((l) => l.ticket.id).filter((id) => !endings.has(id));
+      for (const id of unstarted) waits.ended(id);
+      const again = new Map<string, ReturnType<typeof waits.notes>[number]>();
+      for (const id of unstarted) for (const n of waits.notes(id)) again.set(n.id, n);
+      for (const n of again.values()) tell({ kind: "blocked", ...n });
+      for (const id of unstarted) endings.set(id, { kind: "waiting", on: behind.has(id) ? "file" : "blockers" });
       for (const r of [a, b]) if (r.status === "rejected") throw r.reason;
       if (failures.length) throw failures[0];
       return { endings, stop: readings(stop) };
