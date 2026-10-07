@@ -42,13 +42,13 @@ test("a carried ticket is priced from a requeued ticket's resolve, review and ga
   const p = project(requeued(1));
   // Resolve 2m + review 1m + gates 2m = 5m; 500k + 300k = 800k in, 8k out. The first attempt's 12.8M in / 21m is not it.
   assert.equal(
-    estimate(p, 1, 1, 0, undefined, { carried: [true] })!,
+    estimate(p, 1, 1, 0, undefined, { carried: [true] })?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 1 ticket(s) in the last 3 runs): about 800k tokens in / 8k out and 5m for 1 ticket(s) (1 carried, 0 fresh), 1 at a time.",
   );
   // A fresh ticket is still priced from the whole history ticket: 12.8M in, 128k out, 21m.
-  assert.match(estimate(p, 1, 1)!, /about 12\.8M tokens in \/ 128k out and 21m for 1 ticket\(s\), 1 at a time\.$/);
+  assert.match(estimate(p, 1, 1)!, /about 12\.8M tokens in \/ 128k out and 21m for 1 ticket\(s\), 1 at a time\.(?: No history at .*)?$/);
   // And the carried price is not a low one: the history had a carried sample.
-  assert.ok(!/low/.test(estimate(p, 1, 1, 0, undefined, { carried: [true] })!));
+  assert.ok(!/have no carried history/.test(estimate(p, 1, 1, 0, undefined, { carried: [true] })!));
 });
 
 test("a ticket carried from an earlier run, a resolve and no implement, is priced whole as before", () => {
@@ -58,7 +58,7 @@ test("a ticket carried from an earlier run, a resolve and no implement, is price
     line({ issue: "2", phase: "gates", ms: 2 * MIN }),
   ]);
   assert.equal(
-    estimate(p, 1, 1, 0, undefined, { carried: [true] })!,
+    estimate(p, 1, 1, 0, undefined, { carried: [true] })?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 1 ticket(s) in the last 3 runs): about 1.0M tokens in / 10k out and 7m for 1 ticket(s) (1 carried, 0 fresh), 1 at a time.",
   );
 });

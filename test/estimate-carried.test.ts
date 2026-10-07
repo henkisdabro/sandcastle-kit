@@ -57,7 +57,7 @@ test("a run of carried branches, history of one large carried ticket: the high e
     assert.ok(high >= truth / 2 && high <= truth * 2, `${high} is not within 2x of ${truth}: ${text}`);
   }
   // The five-ticket chain is 5 x 6m = 30m, longer than the 10 tickets' 6m each over 4 slots (15m).
-  assert.match(text, /and 30m for 10 ticket\(s\) \(10 carried, 0 fresh\), 4 at a time \(5 tickets in sequence\)\.$/);
+  assert.match(text, /and 30m for 10 ticket\(s\) \(10 carried, 0 fresh\), 4 at a time \(5 tickets in sequence\)\.(?: No history at .*)?$/);
   // The same history priced as fresh tickets, as before: about half the real tokens, outside 2x.
   const [, asFresh] = parse(estimate(p, 10, 4, 5)!.match(/about (.*?) tokens in/)![1]);
   assert.ok(asFresh < real.inTokens / 2, `${asFresh}`);
@@ -67,7 +67,7 @@ test("carried and fresh tickets are priced from their own history, and a range r
   // Fresh: 1M, 1M, 3M in (median 1M, p80 3M). Carried: 6M in.
   const p = project([...fresh(1, 5, 1_000_000, 10_000), ...fresh(2, 5, 1_000_000, 10_000), ...fresh(3, 15, 3_000_000, 30_000), ...carried(4, 20, 6_000_000, 60_000)]);
   assert.equal(
-    estimate(p, 2, 2, 0, undefined, { carried: [true, false] })!,
+    estimate(p, 2, 2, 0, undefined, { carried: [true, false] })?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 4 ticket(s) in the last 3 runs): about 7.0M to 9.0M tokens in / 70k to 90k out and 20m for 2 ticket(s) (1 carried, 1 fresh), 2 at a time.",
   );
   // The median end is the carried ticket's own 20m (the summed 35m over 2 slots is 17.5m); the high end is 65m over 2 slots.
@@ -76,7 +76,7 @@ test("carried and fresh tickets are priced from their own history, and a range r
     "20m to 33m",
   );
   // No carried ticket in the run: no split, and the fresh figures.
-  assert.match(estimate(p, 2, 2)!, /about 2\.0M to 6\.0M tokens in \/ 20k to 60k out and 5m to 15m for 2 ticket\(s\), 2 at a time\.$/);
+  assert.match(estimate(p, 2, 2)!, /about 2\.0M to 6\.0M tokens in \/ 20k to 60k out and 5m to 15m for 2 ticket\(s\), 2 at a time\.(?: No history at .*)?$/);
 });
 
 test("a carried ticket with no carried history says the estimate is low", () => {
@@ -84,8 +84,8 @@ test("a carried ticket with no carried history says the estimate is low", () => 
   const text = estimate(p, 3, 3, 0, undefined, { carried: [true, true, false] })!;
   assert.match(text, /about 3\.0M tokens in/);
   assert.match(text, /\(2 carried, 1 fresh\)/);
-  assert.match(text, /2 carried ticket\(s\) have no carried history here; the estimate is low\.$/);
-  assert.ok(!/low/.test(estimate(p, 3, 3, 0, undefined, { carried: [false, false, false] })!));
+  assert.match(text, /2 carried ticket\(s\) have no carried history here; the estimate is low\.(?: No history at .*)?$/);
+  assert.ok(!/have no carried history/.test(estimate(p, 3, 3, 0, undefined, { carried: [false, false, false] })!));
 });
 
 test("a chain adds up its own tickets' times, not the average of the run", () => {
@@ -93,14 +93,14 @@ test("a chain adds up its own tickets' times, not the average of the run", () =>
   const p = project([...fresh(1, 2, 100_000, 1_000), ...carried(2, 10, 100_000, 1_000)]);
   const flags = [true, false, true, false];
   const real = estimate(p, 4, 4, 3, undefined, { carried: flags, chainAt: [0, 1, 2] })!;
-  assert.match(real, /and 22m for 4 ticket\(s\) \(2 carried, 2 fresh\), 4 at a time \(3 tickets in sequence\)\.$/);
+  assert.match(real, /and 22m for 4 ticket\(s\) \(2 carried, 2 fresh\), 4 at a time \(3 tickets in sequence\)\.(?: No history at .*)?$/);
   // Without the chain's tickets each takes the average, 6m: 18m.
   assert.match(estimate(p, 4, 4, 3, undefined, { carried: flags })!, /and 18m for 4 ticket\(s\)/);
 });
 
 test("a history ticket whose timings lines say `carried` counts as carried", () => {
   const p = project([...fresh(1, 2, 100_000, 1_000), line({ issue: "2", phase: "implement", ms: 10 * MIN, carried: true, tokens: tok(900_000, 9_000) })]);
-  assert.match(estimate(p, 1, 1, 0, undefined, { carried: [true] })!, /about 900k tokens in \/ 9k out and 10m for 1 ticket\(s\) \(1 carried, 0 fresh\), 1 at a time\.$/);
+  assert.match(estimate(p, 1, 1, 0, undefined, { carried: [true] })!, /about 900k tokens in \/ 9k out and 10m for 1 ticket\(s\) \(1 carried, 0 fresh\), 1 at a time\.(?: No history at .*)?$/);
 });
 
 test("isCarried: a branch ahead of the base is, a landed or missing one is not", () => {

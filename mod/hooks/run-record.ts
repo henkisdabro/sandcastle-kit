@@ -257,6 +257,12 @@ export type RunRecord = {
   /** What the run line shows while the run is live. */
   stage?: string;
   concurrency?: number;
+  /**
+   * How loaded the run was, kept in the history line so the estimate prices a run from earlier runs of a similar load:
+   * the sandboxes it ran at once (its effective concurrency, after the machine-wide cap and its share) and its ticket
+   * count. An older kit's record has none, and the estimate counts that run as unknown.
+   */
+  load?: { concurrency: number; tickets: number };
   /** The run settings: what the status view's settings row shows. */
   settings?: RunSettings;
   /**

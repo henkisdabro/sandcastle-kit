@@ -39,7 +39,7 @@ test("two dear Opus tickets in the history are blended with all tickets, and the
   // Opus's own: 12M and 60m a ticket; all 22 tickets' median: 1M and 10m. Two of five parts its own,
   // three all tickets': 5.4M and 30m a ticket, so 21.6M for four - between 4M (all) and 48M (own).
   assert.match(text, /^Estimate \(rough, from 22 ticket\(s\) in the last 3 runs\): about 21\.6M tokens in \/ 216k out and 30m for 4 ticket\(s\), 4 at a time\./);
-  assert.match(text, / claude-opus-5-5 from 2 tickets, blended\.$/);
+  assert.match(text, / claude-opus-5-5 from 2 tickets, blended\.(?: No history at .*)?$/);
 });
 
 test("a model with five tickets is priced from its own", () => {
@@ -50,11 +50,11 @@ test("a model with five tickets is priced from its own", () => {
 
 test("one ticket reads in the singular, and each thin model is named once", () => {
   const text = estimate(project([...dear, line("23", "claude-haiku-fixture", 5 * MIN, 500_000)]), 3, 3, 0, [OPUS, "claude-haiku-fixture", OPUS])!;
-  assert.match(text, / claude-opus-5-5 from 2 tickets, blended\. claude-haiku-fixture from 1 ticket, blended\.$/);
+  assert.match(text, / claude-opus-5-5 from 2 tickets, blended\. claude-haiku-fixture from 1 ticket, blended\.(?: No history at .*)?$/);
 });
 
 test("a model with no history at all still says the estimate is low", () => {
   const text = estimate(project(dear), 1, 1, 0, ["claude-unseen"])!;
-  assert.match(text, /1 ticket\(s\) use a model with no history here; the estimate is low\.$/);
+  assert.match(text, /1 ticket\(s\) use a model with no history here; the estimate is low\.(?: No history at .*)?$/);
   assert.ok(!/blended/.test(text));
 });

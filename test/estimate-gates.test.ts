@@ -36,9 +36,9 @@ const project = (extra: string[] = []) => {
 test("18 tickets on 2 gate slots: gate runs set the time, above the sandbox-only figure", () => {
   const p = project();
   // Sandbox-bound: 18 x 10m over 9 slots is 20m. Gate-bound: 18 x 6m over 2 slots is 54m.
-  assert.match(estimate(p, 18, 9)!, /and 20m for 18 ticket\(s\), 9 at a time\.$/);
-  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 100 })!, /and 20m for 18 ticket\(s\), 9 at a time\.$/);
-  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 2 })!, /and 54m for 18 ticket\(s\), 9 at a time \(gate runs on 2 slot\(s\) set the time\)\.$/);
+  assert.match(estimate(p, 18, 9)!, /and 20m for 18 ticket\(s\), 9 at a time\.(?: No history at .*)?$/);
+  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 100 })!, /and 20m for 18 ticket\(s\), 9 at a time\.(?: No history at .*)?$/);
+  assert.match(estimate(p, 18, 9, 0, undefined, { gateSlots: 2 })!, /and 54m for 18 ticket\(s\), 9 at a time \(gate runs on 2 slot\(s\) set the time\)\.(?: No history at .*)?$/);
 });
 
 test("the slot wait is not gate time, so it is not counted twice", () => {

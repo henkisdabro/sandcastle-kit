@@ -35,7 +35,7 @@ test("a chain of 7 among 9 tickets, 5 slots: the chain sets the time and the not
   const chain = blockerChain(p, tracker, nine);
   assert.equal(chain.length, 7);
   assert.equal(
-    estimate(p, 9, 5, chain.length),
+    estimate(p, 9, 5, chain.length)?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 1 ticket(s) in the last 3 runs): about 9.0M tokens in / 90k out and 1h 10m for 9 ticket(s), 5 at a time (7 tickets in sequence).",
   );
 });
@@ -46,11 +46,11 @@ test("no chain: the figure is as before, and a blocker outside the run adds no t
   assert.equal(blockerChain(p, tracker, free).length, 1);
   const line = estimate(p, 9, 5, 1)!;
   assert.equal(line, estimate(p, 9, 5));
-  assert.match(line, /and 18m for 9 ticket\(s\), 5 at a time\.$/);
+  assert.match(line, /and 18m for 9 ticket\(s\), 5 at a time\.(?: No history at .*)?$/);
 });
 
 test("a chain no longer than the summed tickets over slots sets nothing and says nothing", () => {
   const p = project();
   // 12 x 10m over 5 slots is 24m, longer than the 2-ticket chain's 20m.
-  assert.match(estimate(p, 12, 5, 2)!, /24m for 12 ticket\(s\), 5 at a time\.$/);
+  assert.match(estimate(p, 12, 5, 2)!, /24m for 12 ticket\(s\), 5 at a time\.(?: No history at .*)?$/);
 });

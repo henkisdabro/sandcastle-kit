@@ -48,7 +48,7 @@ test("many small tickets in four old runs, a few large ones in the last three: t
   ]);
   // 6 tickets in the last three runs, all large: medians of those, not of the 22 tickets.
   assert.equal(
-    estimate(p, 4, 2),
+    estimate(p, 4, 2)?.replace(/ No history at .*$/, ""),
     "Estimate (rough, from 6 ticket(s) in the last 3 runs): about 8.0M tokens in / 80k out and 40m for 4 ticket(s), 2 at a time.",
   );
   // Each ticket is 10m implement + 10m gates.
