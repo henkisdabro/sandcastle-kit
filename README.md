@@ -1518,8 +1518,8 @@ and a hash of the project root: no path and no project name. A ticket's sandbox 
 records `agentMib`, its peak read just before its first gate pass (the peak cannot be reset, so after
 a gate it is the gate's), and `agentAnonMib`, the anonymous memory read while its agents worked; a
 line without them is a gate peak only.
-`size` takes the project with the highest peak over its last 5 measured runs, of the projects
-measured in the last 30 days, and prices each figure at the 90th percentile of that project's samples
+`size` takes the project whose peak figure (priced as below) is highest over its last 5 measured runs,
+of the projects measured in the last 30 days, and prices each figure at the 90th percentile of that project's samples
 over those runs (every sandbox's line is one sample; with fewer than 5 samples the highest is used),
 plus 10%: one pass that peaked far above the rest would otherwise set every later pool, so the
 highest is shown beside the figure (`90th of 34 samples; highest 5.1 GiB`) and not priced. The gate
