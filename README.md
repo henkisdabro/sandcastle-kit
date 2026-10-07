@@ -1393,7 +1393,9 @@ and the kit narrows what can cross it:
   git command there, naming the file. A hook planted there would otherwise run on your next
   checkout or commit. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
-  stops the run.
+  stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
+  pull or merge there mid-run stops it: use another worktree until the run ends (the start line
+  says so).
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
   `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare

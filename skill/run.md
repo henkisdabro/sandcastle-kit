@@ -21,6 +21,12 @@ This continues SKILL.md: run its "Before every action" first.
      and its agents are told to write nothing to the tracker.
    - **What it writes.** A run comments on and closes tickets in the tracker (GitHub, or commits
      to ticket files) and merges into the base branch locally.
+   - **The base is the run's.** Until the run ends, nobody commits, pulls or merges on the base
+     branch in this checkout (use another worktree): the `.git` guard cannot tell a person's commit
+     from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
+     nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
+     same. Check `sandcastle status` (is a run live?) before any git write to the base in that
+     checkout, yours included.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. Offer
      `USAGE_CHECK=1` if the plan is close to its limit (it applies only when the sandboxes spend
