@@ -496,6 +496,8 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       let waiting = true;
       wanted.n++;
       try {
+        // Priority: `slotTurn` holds back only the pipelines that have not asked the pool yet, and the pool
+        // serves the run's other waits in the order they began, so a landing would wait out every ticket already waiting.
         result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () => {
           wanted.n--;
           waiting = false;
@@ -506,7 +508,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
             (box) => ctx.gate(box, o.issue),
             host.expected,
           );
-        });
+        }, undefined, undefined, true);
       } finally {
         if (waiting) wanted.n--;
       }

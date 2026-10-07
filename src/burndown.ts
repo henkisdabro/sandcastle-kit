@@ -615,6 +615,25 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
   return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
 };
 
+/** A typical issue's length in ms, from `typicalTimes`' seconds; undefined with no history. */
+export const typicalIssueMs = (typical: Record<string, number>): number | undefined => (typical.issue ? typical.issue * 1000 : undefined);
+
+/** Ms as the heartbeat and the per-issue lines say them: `45s`, `120m`. */
+const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
+
+/**
+ * The run's heartbeat: the tickets working and their step, then the tickets that have waited for a
+ * sandbox slot for longer than a typical issue takes (`typicalMs`; with no history nothing is named, as
+ * the estimate says nothing then). No line when nothing works and no such ticket waits.
+ */
+export const heartbeatLine = (o: { now: number; clock: string; working: { ref: string; phase: string; since: number }[]; slotWaits: { ref: string; since: number }[]; typicalMs?: number }): string | undefined => {
+  const stalled = o.typicalMs === undefined ? [] : o.slotWaits.filter((w) => o.now - w.since > o.typicalMs!);
+  const parts: string[] = [];
+  if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (stalled.length) parts.push(`waiting for a sandbox slot: ${stalled.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
+  return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
+};
+
 /**
  * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
  * is said and put on `waiting` (before the run record exists), and the mergeable files that tickets
@@ -2061,15 +2080,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }, priority);
   };
 
-  const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
-
   // A run is silent for as long as its agents are, which for a review can be
-  // half an hour. One line every five minutes says it is alive and where.
+  // half an hour. One line every five minutes says it is alive and where, and names a ticket
+  // that has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
+  const slotWaits = new Map<string, number>();
   const heartbeat = setInterval(() => {
-    if (!active.size) return;
-    const now = Date.now();
-    const clock = new Date().toTimeString().slice(0, 5);
-    console.log(`[${clock}] working: ${[...active].map(([n, a]) => `${ref(n)} ${a.phase} ${minutes(now - a.since)}`).join(", ")}`);
+    const line = heartbeatLine({
+      now: Date.now(),
+      clock: new Date().toTimeString().slice(0, 5),
+      working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
+      slotWaits: [...slotWaits].map(([n, since]) => ({ ref: ref(n), since })),
+      typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
+    });
+    if (line) console.log(line);
   }, 5 * 60_000);
   heartbeat.unref();
 
@@ -2246,7 +2269,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     let lease: SlotLease | undefined;
     const take = async () => {
       await slotTurn(slotWanted);
-      lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
+      slotWaits.set(issue.id, Date.now());
+      try {
+        lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
+      } finally {
+        slotWaits.delete(issue.id);
+      }
       return lease !== undefined;
     };
     const give = () => {
