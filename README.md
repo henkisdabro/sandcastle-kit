@@ -742,7 +742,9 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   what `sandcastle report` prints and exits with the run's own exit code (recorded in
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
   time cap is met by starting it again. With no run live it prints the last summary at once and
-  exits with the recorded code (0 when there is none).
+  exits with the recorded code (0 when there is none). A run whose last turn left the merged base
+  red (`RED TOGETHER` in the summary) exits **1**, at every autonomy level, so a harness does not
+  read success on a base the summary says not to push.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
   live: `No run is live.`
@@ -1229,7 +1231,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight [--api-key]` | One "Reply OK" from every model, in the project image. Asks first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 yes, briefly |
 | `sandcastle run [--detach] [--api-key]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)) | 💸 yes |
-| `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
+| `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code (1 when the merged base ended red); with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle pause` | Holds the live run at the next safe juncture ([Pausing a run](#-pausing-a-run)): no new ticket or agent pass starts, passes in flight finish and their sandboxes close (branches kept), green branches still land, and the run gives its sandbox slots to other runs and lets the machine sleep. `No run is live.` when none is; `already paused` when it is. A pause the run took for the plan's usage (`USAGE_PAUSE`) becomes yours: it stays until `resume` | ➖ no |
 | `sandcastle resume` | Continues a paused run: each paused ticket goes on from its next phase, in the same run; a pause for the plan's usage ends before its time too. `No run is live.` when none is; `is not paused` when it is not | ➖ no |

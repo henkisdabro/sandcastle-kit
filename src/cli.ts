@@ -103,7 +103,7 @@ import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
-import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, rerunList, stillOpen } from "./autonomy.ts";
+import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
 import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
@@ -295,14 +295,19 @@ try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
       }
+      // The last turn's facts, for the exit code: a turn that ended the loop before gathering (level 0) leaves them unread.
+      let lastFacts: Awaited<ReturnType<typeof gather>> | undefined;
+      let ranTurn = false;
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
         if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
+        ranTurn = true;
         if (level === 0) break;
         const facts = await gather(project);
+        lastFacts = facts;
         drain.turns = turn;
         for (const id of Object.keys(facts.tickets)) drain.inRun.add(id);
         drain.landed += Object.values(facts.tickets).filter((t) => t.state === "merged").length;
@@ -372,6 +377,9 @@ try {
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
         if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()))) console.log(line);
       }
+      // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
+      const redExit = redBaseExit(lastFacts ?? (ranTurn ? await gather(project) : undefined));
+      if (redExit) process.exitCode = redExit;
       break;
     }
     case "status": {
