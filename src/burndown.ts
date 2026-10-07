@@ -400,28 +400,83 @@ const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
 // One problem named by two agents, or twice by one, is one ticket.
 const titleKey = (title: string) => title.replace(/\s+/g, " ").trim().toLowerCase();
-// A `path:line` an agent names, in the title first, else the evidence: the other way two passes of one
-// ticket (implement, review) say the same finding in different words. The first one named is the finding's
-// place; a path is `dir/file.ext` or `file.ext`, so a `host:8080` or a bare `word:3` is not one.
-const PLACE = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+):(\d+)/;
-// Per source ticket: the same place named for another ticket is a different finding.
-const placeKey = (f: FollowUp): string | undefined => {
-  const at = PLACE.exec(f.title) ?? PLACE.exec(f.evidence);
-  return at ? `${f.from}\0${at[1].replace(/^\.\//, "")}:${Number(at[2])}` : undefined;
+// A `path:line` an agent names: the other way two passes of one ticket (implement, review) say the same
+// finding in different words. A path is `dir/file.ext` or `file.ext`; whether it is a place is up to the
+// base tree (`exists`), so `api.example.com:443` is not one and a root-level `status.sh:40` is.
+const PLACE = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+):(\d+)/g;
+// A path with no line behind it (`in site/js/status.js`, `(status.sh)`).
+const FILE_ONLY = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]*)+)(?![\w@/-]|:\d|\.\w)/g;
+// Words that say nothing of what a finding is about: two titles share a finding by what remains.
+const STOPWORDS = new Set(
+  ("about after again also because before being between could does doing done each either else from have here into just like make more most much must never only other over same should since some still such than that their them then there these they this those through under until very were what when where which while will with without would your").split(" "),
+);
+// The significant words of a title: 4 letters or more, no stopword, and not the path itself.
+const significantWords = (title: string, path: string): Set<string> =>
+  new Set(
+    title.replace(path, " ").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+  );
+/** Where a finding is: the source ticket's file, and its line when the agent gave one. */
+type Seat = { from: string; path: string; line?: number; firm: boolean; words: Set<string> };
+/** What `placeSeat` asks of the base tree: is this path a file there? A host such as `api.example.com` is not. */
+export type PathExists = (path: string) => boolean;
+const cleanPath = (p: string) => p.replace(/^(?:\.\/)+/, "");
+// The first match of `re` in `text` whose path is a file of the base tree.
+const firstFile = (re: RegExp, text: string, exists: PathExists) => {
+  for (const m of text.matchAll(re)) {
+    const path = cleanPath(m[1]);
+    if (exists(path)) return { path, line: m[2] === undefined ? undefined : Number(m[2]), whole: m[1] };
+  }
+  return undefined;
 };
+// A place in the title is used as it is (`firm`). One found only in the evidence, or a file with no line in the
+// title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
+// another finding is about, and two titles that name a file say little by it.
+const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
+  const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
+    from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
+  });
+  const inTitle = firstFile(PLACE, f.title, exists);
+  if (inTitle) return seat(inTitle, true);
+  const inEvidence = firstFile(PLACE, f.evidence, exists);
+  if (inEvidence) return seat(inEvidence, false);
+  const fileOnly = firstFile(FILE_ONLY, f.title, exists);
+  return fileOnly ? seat(fileOnly, false) : undefined;
+};
+/** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
+export const onBase = (root: string, base: string): PathExists => (path) => {
+  try {
+    return sh("git", ["cat-file", "-t", `${base}:${path}`], root) === "blob";
+  } catch {
+    return false;
+  }
+};
+const WORDS_SHARED = 2;
+// Per source ticket: the same place named for another ticket is a different finding. Two findings at one line
+// are one when either names it in its title; otherwise (or with no line on one side) their titles must overlap.
+const sameFinding = (a: Seat, b: Seat): boolean => {
+  if (a.from !== b.from || a.path !== b.path) return false;
+  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= WORDS_SHARED;
+  if (a.line !== undefined && b.line !== undefined) return a.line === b.line && (a.firm || b.firm || overlap);
+  return overlap;
+};
+/** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
+export type Places = Map<string, { id: string; seat: Seat }[]>;
+const placesKey = (s: Seat) => `${s.from}\0${s.path}`;
+const placeOf = (places: Places, seat: Seat | undefined) => (seat ? places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat)) : undefined);
+const addPlace = (places: Places, seat: Seat, id: string) => places.set(placesKey(seat), [...(places.get(placesKey(seat)) ?? []), { id, seat }]);
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
   `Named again by the ${f.phase} agent working on ${ref(f.from)}, at the same place, as "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
 // The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
 // requeued) hears its agents name the same problem again, and that is still one ticket.
 const filedThisRun = new Set<string>();
-// The issue each place was filed as, by every turn of this run (`placeKey`): the same finding in other words is a comment on it.
-const placesThisRun = new Map<string, string>();
+// The issue each place was filed as, by every turn of this run (`placeSeat`): the same finding in other words is a comment on it.
+const placesThisRun: Places = new Map();
 
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A follow-up naming the
- * same `path:line` as one already filed for the same source ticket, whatever its title, is not filed:
+ * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
  * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
@@ -431,17 +486,17 @@ const placesThisRun = new Map<string, string>();
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref" | "comment">,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Map<string, string> },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
-  const places = o.places ?? new Map<string, string>();
+  const places = o.places ?? new Map();
   const out: FiledFollowUp[] = [];
   for (const f of followUps) {
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
     const at = { title: f.title, from: f.from, phase: f.phase };
-    const place = placeKey(f);
-    const first = place && !o.dryRun ? places.get(place) : undefined;
+    const place = placeSeat(f, o.exists);
+    const first = o.dryRun ? undefined : placeOf(places, place)?.id;
     if (first !== undefined) {
       try {
         await o.write(() => {
@@ -466,7 +521,7 @@ export const fileFollowUps = async (
       const id = await o.write(() => tracker.create(f.title, body, f.from));
       out.push({ ...at, id });
       seen.add(key);
-      if (place) places.set(place, id);
+      if (place) addPlace(places, place, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -480,7 +535,7 @@ export const fileFollowUps = async (
  * a safety stop) never reaches the filing after the landings, and its lines were then in memory only -
  * not in the closing summary, and unknown to the next run. A title is listed once, and not at all when
  * an earlier turn of the run filed it (`seen`). A line naming the `path:line` of one already heard for
- * the same source ticket (`placeKey`) is not listed: it is held until that one is filed, and then
+ * the same source ticket (`placeSeat`) is not listed: it is held until that one is filed, and then
  * commented on its issue. Held, it is retried by each `file` until it is commented; one whose first
  * failed to file stays held, and a dry run lists and comments none.
  *
@@ -502,15 +557,16 @@ export const createFollowUpBook = (
     dryRun: boolean;
     write: (fn: () => string) => Promise<string>;
     seen?: Set<string>;
-    places?: Map<string, string>;
+    places?: Places;
+    exists: PathExists;
   },
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
-  const places = o.places ?? new Map<string, string>();
+  const places = o.places ?? new Map();
   const heard: FollowUp[] = [];
   // The same finding as a listed one, in other words: comments on its issue once there is one.
   let repeats: FollowUp[] = [];
-  const listedPlaces = new Set<string>();
+  const listedPlaces: Places = new Map();
   // By title, in the order the lines arrived: what the run record's `followUps` holds.
   const listed = new Map<string, FiledFollowUp>();
   const keep = () => run.update({ followUps: [...listed.values()] });
@@ -519,12 +575,12 @@ export const createFollowUpBook = (
       const key = titleKey(f.title);
       if (seen.has(key)) return;
       if (!listed.has(key)) {
-        const place = placeKey(f);
-        if (place && (listedPlaces.has(place) || places.has(place))) {
+        const place = placeSeat(f, o.exists);
+        if (place && (placeOf(listedPlaces, place) || placeOf(places, place))) {
           repeats.push(f);
           return;
         }
-        if (place) listedPlaces.add(place);
+        if (place) addPlace(listedPlaces, place, "");
       }
       heard.push(f);
       if (listed.has(key)) return;
@@ -543,6 +599,7 @@ export const createFollowUpBook = (
         write: refuse ? async () => { throw new Error(unsafe); } : o.write,
         seen,
         places,
+        exists: o.exists,
       });
       if (settled.length) {
         for (const s of settled) listed.set(titleKey(s.title), s);
@@ -550,9 +607,9 @@ export const createFollowUpBook = (
       }
       if (!o.dryRun && !refuse) {
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
-        const ready = repeats.filter((f) => places.has(placeKey(f)!));
+        const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists)));
         // A comment that fails is not recorded: it stays held, and the next `file` tries it again.
-        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places });
+        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists });
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
       }
       if (!settled.length) return [];
@@ -2267,7 +2324,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notes: Note[] = [];
   // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
   // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
-  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun });
+  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun, exists: onBase(project.root, project.baseBranch) });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
