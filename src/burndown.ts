@@ -735,7 +735,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   };
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void> }): Promise<Outcome> => {
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -1280,8 +1280,15 @@ export const createPipeline = (ctx: PipelineContext) => {
           // Not landed (it failed, gave up or was held): nothing to wait for, the repair is this ticket's own.
           // The wait is another ticket's work, like a slot wait: in its usual time, it would inflate every later estimate.
           const asked = Date.now();
-          const fixLanded = await fixes.wait(issue.id, fixer);
+          const fixLanded = await fixes.wait(issue.id, fixer, at?.paused);
           waited.set(issue.id, (waited.get(issue.id) ?? 0) + Date.now() - asked);
+          // The wait ended because the run is paused, and the fixer may be parked and unable to land until the
+          // resume: this ticket parks too (the loop's juncture, above, closes its sandbox and gives its slot back),
+          // then asks the board again - the fixer may have landed meanwhile, and the fix is merged as usual.
+          if (!fixLanded && at?.paused?.()) {
+            waitedFor.delete(key);
+            continue;
+          }
           if (fixLanded) {
             // A merge that conflicts is left for the repair, as the carried branch's is at landing.
             const before = (await sandbox.exec("git rev-parse HEAD")).stdout.trim();
@@ -2084,7 +2091,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         while (!(await take())) await juncture("start", { suspend: async () => {}, resume: async () => {} });
         // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
         await juncture("start", parkable());
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)) });
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused });
       } finally {
         give();
       }
