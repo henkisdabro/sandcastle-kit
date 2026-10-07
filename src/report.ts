@@ -604,9 +604,9 @@ export const render = (f: Facts, plain = false): string => {
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
-      // null: the run ended and chose not to (fewer than two merges this run - a
-      // ticket closed as merged earlier merges nothing); undefined: it never got there.
-      ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
+      // null: the run ended and chose not to (no merge this run - a ticket closed
+      // as merged earlier merges nothing); undefined: it never got there.
+      ? `Merged ${f.base} not re-gated (${f.verify === null ? "no branch merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green && f.verify.skipped
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green

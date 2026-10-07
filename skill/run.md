@@ -204,7 +204,7 @@ This continues SKILL.md: run its "Before every action" first.
 
 Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
 not in a batch after the last one. So the summary's merged count includes tickets that landed
-mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
+mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when one or more
 tickets merged, unless a clean gate-only sandbox already proved that very commit - the last landing's merge gated in its landing sandbox, or the base check - which the line says; a fast-forward's gates ran in the ticket's own sandbox and never skip it), and a ticket's gates passing on its own branch says nothing about the base it
 lands on. Two cases follow from that:
 
