@@ -57,7 +57,7 @@ This continues SKILL.md: run its "Before every action" first.
    - **Turns.** If the config sets `autonomy` (or the user asks for `AUTONOMY_LEVEL`), say how
      many further turns the run may take by itself. Tickets shown `[waits for ...]` form a chain,
      and a chain whose links are all queued drains in one run: each ticket starts once its last
-     blocker lands and closes. With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
+     blocker lands with its work done (a close the tracker refuses holds nothing back). With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
      before left conflicted, released or partly done (still queued); a red ticket is not run again, and a ticket queued after

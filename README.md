@@ -388,7 +388,7 @@ labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only a
 
 A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
-soon as #12 has landed and closed (a chain of tickets drains in one run); a blocker outside the run
+soon as #12 has landed with its work done, even if the tracker then refuses to close it (a chain of tickets drains in one run); a blocker outside the run
 holds it for a later one. A blocker can also live outside
 GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue
 and what holds each ticket back.
@@ -699,7 +699,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 
 **Landing.** Each green branch lands as soon as its gates pass, while the others still run, on one
 landing worker: landing moves the base branch, which the run guards against sandboxes changing, and
-the kit's own writes are the only moves it accepts. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
+the kit's own writes are the only moves it accepts. So a dependant of a ticket in this run starts once that ticket has landed with its work done, closed or not: a close the tracker refuses holds nothing back. Branches from earlier
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged

@@ -104,6 +104,7 @@ const harness = (root: string, over: { gate?: Ctx["gate"]; failClose?: boolean; 
     host: createHostGit(project, gitFingerprint(project)),
     gate: over.gate ?? (async () => GREEN),
     landed: new Map(),
+    closeRetryMs: 0,
   };
   const ledger = createLedger({
     run: { ticket: (id, fields) => void (byLedger[id] = { ...byLedger[id], ...fields }) },

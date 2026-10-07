@@ -34,6 +34,9 @@ import type { LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
+/** How long a landing waits before it retries a close the tracker refused. */
+export const CLOSE_RETRY_MS = 2000;
+
 // "with #12" names the branches merged before it that changed the same files.
 export const conflictLine = (c: { files: string[]; with: string[] }) =>
   (c.with.length ? `with ${c.with.map(refOf).join(", ")}: ` : "") +
@@ -327,6 +330,8 @@ export type LandContext = {
   landed: Map<string, { files: string[]; commit: string }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
+  /** The wait before the one retry of a close that failed (ms; default `CLOSE_RETRY_MS`). */
+  closeRetryMs?: number;
   /** `git --version`'s output, injected by a test to simulate a git older than 2.38 (the conflict precheck then does not run). */
   gitVersion?: string;
   /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
@@ -644,8 +649,17 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }), ...(overrun.length ? { overrun } : {}) };
   // Left open on purpose: the ledger's comment (posted after the schedule) names the criterion.
   if (o.unmet) return { kind: "partly-done", unmet: o.unmet, ...merged };
+  const close = () => host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
   try {
-    await host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
+    await close();
+    return { kind: "merged", ...merged };
+  } catch {
+    // A transient tracker error (a GraphQL hiccup) is the usual cause: one retry, the wait outside
+    // the host's write lock so no other landing waits for it.
+    await new Promise((r) => setTimeout(r, ctx.closeRetryMs ?? CLOSE_RETRY_MS));
+  }
+  try {
+    await close();
     return { kind: "merged", ...merged };
   } catch (error) {
     return { kind: "close-failed", error: errorLine(error), ...merged };

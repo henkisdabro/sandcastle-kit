@@ -359,12 +359,15 @@ export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: Readon
  * of `tickets` now, asked as a ticket they waited for lands. `queued`: the ids of the queued
  * tickets. One that has not landed is open without a lookup, which is wrong once it lands - the
  * tracker has closed it by then - so every call makes a fresh resolver (the cache keeps the answer
- * it gave first) over the ones not `landed`, shared by the tickets of that call.
+ * it gave first) over the ones not `landed`, shared by the tickets of that call. A ticket in
+ * `landed` is closed for its dependants whatever the tracker says: its work is on the base, and a
+ * close the tracker refused (a transient error, `closeFailed`) is the tracker's lag, not the work's.
  */
 export const openBlockersNow = (project: Project, tracker: Tracker, queued: Iterable<string>) => {
   const ids = [...queued];
   return async (tickets: Blocked[], landed: ReadonlySet<string>): Promise<Blocker[][]> => {
-    const resolve = blockerResolver(project, tracker, new Set(ids.filter((id) => !landed.has(id))));
+    const lookup = blockerResolver(project, tracker, new Set(ids.filter((id) => !landed.has(id))));
+    const resolve = async (ref: Ref): Promise<Blocker> => ((ref.kind === "github" || ref.kind === "ticket") && landed.has(ref.id) ? { ...ref, state: "closed" } : lookup(ref));
     const open: Blocker[][] = [];
     for (const t of tickets) open.push(await openBlockers(project, tracker, resolve, t));
     return open;
