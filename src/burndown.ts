@@ -31,7 +31,7 @@ import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
+import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -2233,7 +2233,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const why = String((error as Error).message ?? error);
     run.update({ stopped: why, paused: undefined });
     try {
-      await fileTheFollowUps(safety ? "the shared .git changed, so nothing more was written to the tracker" : undefined);
+      await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {
       // Whatever went wrong here must not replace the reason the run stopped.
       console.log(`Could not file the agents' follow-ups: ${errorLine(e)}`);

@@ -251,7 +251,8 @@ test("burndown files the follow-ups before the summary on both of its stops, and
   const stop = src.slice(src.indexOf("const stopLanding = "), src.indexOf("const { endings, stop } = await schedule"));
   assert.ok(stop.includes("await fileTheFollowUps("), "stopLanding files them");
   assert.ok(stop.indexOf("await fileTheFollowUps(") < stop.indexOf("closingReport"), "before the summary reads the record");
-  assert.match(stop, /safety \? "[^"]+" : undefined/, "a safety stop gives the reason it writes nothing");
+  // Named by what moved, not "the shared .git changed" when only the base branch moved.
+  assert.match(stop, /safety \? `\$\{guardWords\(error\)\.what\}, so nothing more was written to the tracker` : undefined/, "a safety stop gives the reason it writes nothing");
   const after = src.slice(src.indexOf("const { endings, stop } = await schedule"));
   assert.match(after, /return stopLanding\(error, host\.failed !== undefined\)/, "a crash of the schedule");
   assert.match(after, /await stopLanding\(stopError\(headline\), true\)/, "a safety stop after the pipelines");
