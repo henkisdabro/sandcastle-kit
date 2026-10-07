@@ -135,6 +135,14 @@ let inhibitor: ChildProcess | undefined;
 let settling: ChildProcess | undefined;
 let released = false;
 
+/**
+ * The start line that tells the operator the base is the run's. The guard cannot tell a person's
+ * commit on the base from a sandbox's, so one made mid-run stops the run (pipelines in flight
+ * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run.
+ */
+export const baseIsTheRunsLine = (base: string) =>
+  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run.`;
+
 export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
     return "off - the machine's energy settings apply";

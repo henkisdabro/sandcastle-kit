@@ -39,7 +39,7 @@ import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState, type UsagePaused } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason, wholeNumber } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
@@ -1559,6 +1559,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (rough) console.log(rough);
   console.log(`Machine-wide: ${usage()}`);
   console.log(`Keep awake: ${await keepAwake()}`);
+  console.log(baseIsTheRunsLine(project.baseBranch));
   if (TEST_RED_GATE) {
     console.log(
       "SANDCASTLE_TEST_RED_GATE=1: each ticket's first gate run counts as red, to test the repair pass. " +
