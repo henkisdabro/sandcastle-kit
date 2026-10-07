@@ -399,6 +399,30 @@ export const withQueued = (times: { ms: number; waitMs?: number }, queued: numbe
 export const LANDING_GATES = "landing gates";
 
 /**
+ * The phase of a landing's own timings line: one per landing that reached its merge, whatever it ended in (a
+ * fast-forward, a conflict, a red tree). Its `ms` is the landing less its slot wait, which is `waitMs`; the landing
+ * gates it ran are lines of their own (`LANDING_GATES`) and are in its `ms` too, so a sum of a ticket's
+ * time leaves this line out, as it leaves out the landing gates, or it counts them twice.
+ */
+export const LANDING = "landing";
+
+/**
+ * Appends a landing's timings line (`LANDING`): `elapsed` is the landing's whole time, `slotWaitMs` how long it waited
+ * for a machine-wide sandbox slot (0 for a fast-forward, which takes none, and for a conflict found on the host
+ * before one), `result` the kind of ending `landOne` returned. Without it a landing that waited minutes for a slot
+ * and then found a conflict ran no gate and left no line at all.
+ */
+export const writeLandingLine = (
+  timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, took: { elapsed: number; slotWaitMs: number }, result: { ok: boolean; kind: string },
+) => {
+  const line = {
+    ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING, ...stepTimes(took.elapsed, { waitMs: took.slotWaitMs }), ok: result.ok, result: result.kind,
+    ...(who.carried ? { carried: true } : {}),
+  };
+  appendFileSync(timings, JSON.stringify(line) + "\n");
+};
+
+/**
  * Runs a landing gate and appends its timings line (`LANDING_GATES`, the slot wait out of `ms` as in
  * `stepTimes`) to `timings`, whether it came back red or threw. Not the run's `timed`: that writes the
  * ticket's state, and a ticket landing already holds the landing stage `landOne` wrote.

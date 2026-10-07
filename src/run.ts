@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
-import { type Gate, LANDING_GATES } from "./gates.ts";
+import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
@@ -698,7 +698,7 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 };
 
 /**
- * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate); `extra` adds this run's finished issues (ms).
+ * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
  * `LANDING_GATES` is one ticket's landing gates summed (a ticket landed with no gate counts none), the median over the window's tickets,
  * and absent when no line of the window is a landing gate.
  */
@@ -720,6 +720,8 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
       continue;
     }
+    // A landing's own line holds its landing gates' time already: left out, or it counts them twice.
+    if (l.phase === LANDING) continue;
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
     byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
@@ -861,6 +863,8 @@ export const estimate = (
   }
   const window = recentWindow(ticketLines);
   for (const l of window) {
+    // A landing's own line (`LANDING`) holds its landing gates' time, which is `landMs`: priced once, there.
+    if (l.phase === LANDING) continue;
     const key = `${l.run}|${l.issue}`;
     const g = groups.get(key) ?? { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: false, run: String(l.run) };
     // A landing gate is the landing worker's time, not the ticket's own pipeline.
