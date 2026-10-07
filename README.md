@@ -1069,7 +1069,7 @@ holds the status view alone):
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
 │ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
 │ $ sandcastle run                       │   │ #12 ● review   3m  2 ... │ Bash(pnpm test)        │
-│ 2 ticket(s), 2 at a time ...            │   │ #15 ● impl     1m  0 ... │                        │
+│ 2 ticket(s), up to 2 at a time ...     │   │ #15 ● impl     1m  0 ... │                        │
 │ Gates on main: lint=pass test=pass     │   │ #18 ○ queued   not in .. ├ #15 Fix date parsing ──┤
 │ [impl-12] Started ...                  │   │                          │ Edit(src/date.ts)      │
 └────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘

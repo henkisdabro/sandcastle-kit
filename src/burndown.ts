@@ -1767,8 +1767,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
+  // "up to": another project's live run can cut this run's share below it, which the split line under the
+  // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
-    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
+    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
       (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"))})` : ""),
   );
   for (const i of candidates) {

@@ -33,6 +33,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The slot kept for landing is kept only while the run's share of the machine pool is 2 or
   more**, and the start line says so. Below that, tickets may use it, and a landing still goes
   first when a slot frees.
+- **The start plan says `up to N at a time`.** Beside another project's live run, the plain
+  figure sat above `this run's share is 1` and an estimate for one at a time, as though the run
+  would start two.
 
 ### Fixed
 
