@@ -470,6 +470,9 @@ export const protectedForTicket = (project: Project, id: string, body: string): 
 export const protectedWarning = (paths: string[]) =>
   `will always be held; merge by hand: ${paths.join(", ")} is protected, so a run holds the branch for a person however good the work, and a re-run holds it again`;
 
+/** What the start of a run says of a ticket whose Touches line names a protected path: it still runs, only its merge is a person's. */
+export const protectedPlanLine = (ref: string, paths: string[]) => `${ref} will be held for a person to merge (${paths.join(", ")})`;
+
 export const protectedChanges = (project: Project, branch: string) => {
   const base = project.baseBranch;
   const changed = sh("git", ["diff", "--name-only", `${base}...${branch}`], project.root).split("\n").filter(Boolean);

@@ -31,7 +31,7 @@ import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
+import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLine, protectedTouches, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -1633,6 +1633,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const own = implementNote(o);
     const later = parked.find((p) => p.ticket.id === i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
+  }
+  // A Touches line naming a path the kit always holds: the work is still wanted and runs, only its merge is a
+  // person's. Said now, since the reason was otherwise news only at the end of the run.
+  for (const i of candidates) {
+    const paths = protectedTouches(project, i.body ?? "");
+    if (paths.length) console.log(`  ${protectedPlanLine(ref(i.id), paths)}`);
   }
   // After the header, with the ticket list and the shared-file lines: they are indented under it.
   sayWaits();
