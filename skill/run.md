@@ -136,7 +136,8 @@ This continues SKILL.md: run its "Before every action" first.
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
-      merged base re-gated green, and on which image. If it is **RED TOGETHER**, say so first and plainly: do not push.
+      merged base re-gated green, and on which image (or that it was green at that commit already, with the
+      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
@@ -202,7 +203,7 @@ This continues SKILL.md: run its "Before every action" first.
 Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
 not in a batch after the last one. So the summary's merged count includes tickets that landed
 mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
-tickets merged), and a ticket's gates passing on its own branch says nothing about the base it
+tickets merged, unless the last landing's own gates already proved that very commit, which the line says), and a ticket's gates passing on its own branch says nothing about the base it
 lands on. Two cases follow from that:
 
 - **`red together with #N`** (under Needs fixing) is a branch green alone but red once merged with
