@@ -728,6 +728,10 @@ export const carriedFrom = (requeued: boolean) => (requeued ? "its first attempt
 export const greenCarriedLine = (who: string, head: string, requeued: boolean) =>
   `${who}: reviewed and green at ${head.slice(0, 7)} in ${carriedFrom(requeued)} - no implement or full review; the gates decide.`;
 
+/** The line for a branch reviewed at a head and stopped before any gate result (red results are not this): the gates run, not an implementer. */
+export const reviewedCarriedLine = (who: string, head: string, requeued: boolean) =>
+  `${who}: reviewed at ${head.slice(0, 7)} in ${carriedFrom(requeued)}, no gate result since - no implement or full review; the gates decide.`;
+
 /** The line for the base merged into a carried branch, cleanly or with its generated files regenerated. */
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
   `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
@@ -759,8 +763,8 @@ export const firstAttemptIdleRepairs = (results: readonly PromiseSettledResult<{
   return first?.status === "fulfilled" ? (first.value.idleRepairs ?? 0) : 0;
 };
 
-/** What a carried branch is called in a line about its conflict with the base: "its green branch", "its branch from ...". */
-export const carriedBranch = (landOnly: boolean, requeued: boolean) => (landOnly ? "its green branch" : `its branch from ${carriedFrom(requeued)}`);
+/** What a carried branch is called in a line about its conflict with the base: "its green branch", "its reviewed branch" (reviewed, never gated green), "its branch from ...". */
+export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(requeued)}`);
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
 export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {

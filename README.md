@@ -863,7 +863,10 @@ A queued ticket with a branch from an earlier run builds on that branch:
   resolver prompt first (it runs the typecheck gate and the tests that cover the conflicted files, not the
   full suite: the kit gates the merge commit once it exits), and a merge an earlier run left on it that no
   review has read (a held resolution, say) gets a review of the merge alone. A re-run whose only change
-  since its last review is the base merge gets a review of the merge alone too. The record behind both is `.sandcastle/logs/heads.json`, which also keeps a criterion its
+  since its last review is the base merge gets a review of the merge alone too. A branch that was
+  reviewed but never got a gate result (a run stopped while its gates ran) is treated the same way:
+  its gates run and no implementer does, unless its last gate result was red, which sends it back to
+  the implementer. The record behind these is `.sandcastle/logs/heads.json`, which also keeps a criterion its
   agents left undone, so a branch that skips them still lands as partly done, and their
   [`changelog`](#-configuration) lines, so its closing summary still lists them; `sandcastle requeue`
   clears a ticket's entry.
@@ -893,7 +896,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/history.jsonl` | One line per finished run, since `run.json` is replaced by the next; a run killed without its exit handler is added by the next run's start. `sandcastle report --changelog` reads it |
 | `logs/timings.jsonl` | Every step - image, preflight, base gates, each agent pass and gate run - with its time, model, tokens and each gate's own time and a `carried` flag on a ticket whose branch was carried into the run (`ok` is false for a gate run with a red gate, named in `red`). A gate run's wait for a machine-wide gates slot is `waitMs`, not part of its `ms`. A landing gate has lines of its own (phase `landing gates`), so the landings in a row, which can set a run's length, are on record. The estimate and the status view's "usual time" come from it |
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
-| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head (for re-runs) with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
+| `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
