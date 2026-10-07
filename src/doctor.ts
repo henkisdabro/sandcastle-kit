@@ -13,6 +13,7 @@ import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
+import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
 import { apiKeySpend, baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
@@ -98,6 +99,42 @@ export const queueLabel = (root: string, label: string): { state: "ok" | "missin
   // GitHub label names are case-insensitive.
   const found = names.some((n) => typeof n?.name === "string" && n.name.toLowerCase() === label.toLowerCase());
   return { state: found ? "ok" : "missing", fix };
+};
+
+/** The triage roles the queue action applies by hand (the kit creates the other two's labels itself), and what each label means. */
+const ROLE_MEANINGS: Record<string, string> = {
+  "needs-info": "Waiting on reporter for more information",
+  "ready-for-human": "Requires human implementation",
+  wontfix: "Will not be actioned",
+};
+
+/**
+ * The labels `docs/agents/triage-labels.md` maps for the roles the queue action applies, that are
+ * missing on GitHub: `gh issue edit --add-label` fails on one. Same rule as `queueLabel`: anything but
+ * a clear answer is "not checked". `fix` is one command that creates every missing one.
+ */
+export const mappedLabels = (root: string): { state: "ok" | "missing" | "not checked"; missing: string[]; fix: string } => {
+  const mapped = detectFromDocs(root).labels ?? {};
+  const wanted = Object.keys(ROLE_MEANINGS).filter((role) => mapped[role]).map((role) => ({ label: mapped[role], role }));
+  const none = { state: "ok" as const, missing: [], fix: "" };
+  if (!wanted.length) return none;
+  const limit = 500;
+  const out = run("gh", ["label", "list", "--limit", String(limit), "--json", "name"], root);
+  const unknown = { state: "not checked" as const, missing: [], fix: "" };
+  if (out === undefined) return unknown;
+  let names: unknown;
+  try {
+    names = JSON.parse(out || "[]");
+  } catch {
+    return unknown;
+  }
+  // A list cut off at the limit cannot say a label is absent.
+  if (!Array.isArray(names) || names.length >= limit) return unknown;
+  const have = new Set(names.flatMap((n) => (typeof n?.name === "string" ? [n.name.toLowerCase()] : [])));
+  const missing = wanted.filter((w) => !have.has(w.label.toLowerCase()));
+  if (!missing.length) return none;
+  const fix = missing.map((w) => `gh label create ${shellQuote(w.label)} --description ${shellQuote(ROLE_MEANINGS[w.role])}`).join(" && ");
+  return { state: "missing", missing: missing.map((w) => w.label), fix: `\`${fix}\`` };
 };
 
 // Asks GitHub who a token belongs to. Undefined means no answer at all (fetch
@@ -517,6 +554,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         const what = `queue label "${project.label}" exists on GitHub`;
         if (q.state === "not checked") console.log(`opt  queue label "${project.label}" on GitHub - not checked (gh could not list labels)`);
         else check(q.state === "ok", what, q.fix);
+        // Advisory: the queue action creates one on first use, so a missing one is not a broken install.
+        const m = mappedLabels(repoRoot);
+        if (m.state === "missing") console.log(`opt  triage labels mapped in docs/agents/triage-labels.md but missing on GitHub: ${m.missing.join(", ")}\n       -> ${m.fix}`);
       }
     }
     if (project?.blockers?.linear?.length) {
