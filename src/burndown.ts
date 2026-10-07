@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, greenProofOfBase, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2727,11 +2727,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   let newDockerfiles: string[] = [];
   let verifyFailingTests: ReturnType<typeof verifyFailing> | undefined;
   let verifyTreeOf: string | undefined;
-  if (merged.length > 1 || regenerated > 0) {
+  const verifyDue = verifyPlan(gateProject, image, planFile, merged.length, regenerated);
+  if (verifyDue.due) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
     // check or an earlier verify may have gated exactly this tip, and the green-base record says so. A fast-forward's
-    // ticket gates ran in the agent's own sandbox, so they are no proof (it names no tip after a failed note: then it runs).
-    verifySkipped = greenProofOfBase(gateProject, image, planFile);
+    // ticket gates ran in the agent's own sandbox, so they are no proof, one ticket's included (it names no tip after a
+    // failed note: then it runs).
+    verifySkipped = verifyDue.skipped;
     let gated: { gates: Gate[]; failures: GateRun["failures"] } = { gates: [], failures: [] };
     if (verifySkipped) console.log(`${verifySkippedLine(base, verifySkipped)}.`);
     else {
