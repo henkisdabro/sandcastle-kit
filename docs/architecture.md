@@ -216,7 +216,7 @@ It also sets `env.BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` to 15 minut
 
 ## `test/*.test.ts`
 
-One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
+One file per behaviour, named after it (`land-command`, `autonomy`, `report`, `guard`, `skill-split` ...), against temp repos, made-up records and fake sandboxes. Two preloads (`--import`, from `pnpm test`, `test:shard`, `test:weights` and `test/run-shards.sh`) shape every test file's process: `test/hermetic-env.ts` gives each the same environment - `TMPDIR` the realpath of `os.tmpdir()` (a macOS `/var/...` against git's `/private/var/...`), the running node's directory first on `PATH` (a mise or asdf shim fails in a temp cwd), and no `HERDR_*`, `TMUX*`, `SANDCASTLE_*` (but `SANDCASTLE_TEST_*` stays) or setting and credential name `src/` reads, so a test that needs one sets it itself; `test/hermetic-env.test.ts` fails when `src/` reads a name that is neither scrubbed (`SCRUBBED`) nor on its keep list, so a new setting needs a line in one of them - and `test/no-stray.ts` fails a file that prints outside `quietly`. Some read the docs: the `skill*` tests check SKILL.md's frontmatter and pointers, each action file's steps and brief, run.md's seven headings against `src/report.ts`, update.md's step references and AGENTS.md's Layout row for `skill/`
 
 ## `skill/`
 

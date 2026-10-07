@@ -61,5 +61,5 @@ test("the test scripts in package.json preload the guard", () => {
 });
 
 test("test/full-check.sh's shards preload the guard as pnpm test does", () => {
-  assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /node --import \.\/test\/no-stray\.ts --test /);
+  assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /--import \.\/test\/no-stray\.ts --test /);
 });

@@ -30,7 +30,7 @@ i=1
 while [ "$i" -le "$n" ]; do
   (
     files=$(TEST_SHARD="$i/$n" node test/shard.ts) \
-      && node --import ./test/no-stray.ts --test --test-timeout=300000 --test-concurrency="$conc" $files
+      && node --import ./test/hermetic-env.ts --import ./test/no-stray.ts --test --test-timeout=300000 --test-concurrency="$conc" $files
     echo $? >"$dir/shard-$i.status"
   ) >"$dir/shard-$i.log" 2>&1 &
   i=$((i + 1))
