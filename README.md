@@ -818,7 +818,8 @@ fixing** (red, conflicted, crashed or unlanded branches, with the files or tests
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
 the **Next step**. Under the header's `Settings:` line, a run that showed the plan's usage says where
-it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going). `sandcastle report` prints it again at any time, with git and the blockers as they
+it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going), and a cross-review run
+with a Codex reading adds `Codex plan usage at the end:` in the same shape. `sandcastle report` prints it again at any time, with git and the blockers as they
 are now. Then:
 
 - **Push** the base branch yourself when you are happy with it. The kit never pushes.
