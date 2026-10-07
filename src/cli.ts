@@ -44,6 +44,11 @@
 //                    credits, not a plan. Exits 1 when the usage is unknown; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
+//   report --changelog [--since REF]
+//                    every ticket that landed in runs started after REF (default: the latest
+//                    tag, else all history), across runs, with the agents' suggested changelog
+//                    lines (`changelog: true`) grouped Added, Changed, Fixed and Upgrading, and
+//                    those with no line apart; read-only, no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
 //                    it fits its pane unless given "all"
 //   build [--force]  build the base and project images
@@ -109,7 +114,7 @@ import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPla
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
-import { closingReport, gather, operatorSteps, summary } from "./report.ts";
+import { changelogSince, closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
@@ -460,6 +465,13 @@ try {
       break;
     }
     case "report": {
+      if (args.includes("--changelog")) {
+        const at = args.indexOf("--since");
+        const since = at === -1 ? undefined : args[at + 1];
+        if (at !== -1 && (!since || since.startsWith("--"))) throw new OperatorError("`--since` takes a git ref: `sandcastle report --changelog --since v1.2.0`.");
+        console.log(changelogSince(await loadProject(root), since));
+        break;
+      }
       console.log(await closingReport(await loadProject(root)));
       break;
     }

@@ -64,5 +64,8 @@ At release:
 
 1. The milestone is fully closed, or its open tickets are moved to the next one with a note saying
    why.
-2. Check `git log vPREV..HEAD --merges` against the changelog, so no closed ticket is left out.
+2. Check `git log vPREV..HEAD --merges` against the changelog, so no closed ticket is left out. In a
+   project with `changelog: true`, run `sandcastle report --changelog --since vPREV` first: it lists every
+   ticket the runs landed since the tag with the agents' suggested lines (and those with none), across
+   runs, which the last run's closing summary does not.
 3. After the release is published, close the milestone and create the next one.

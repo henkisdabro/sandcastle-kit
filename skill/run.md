@@ -150,7 +150,9 @@ This continues SKILL.md: run its "Before every action" first.
       (the project has `changelog: true`), carry those lines into your message, grouped Added,
       Changed, Fixed: the project keeps agents out of its changelog, so the user writes the entries from
       them. A block headed `Upgrading notes` is what an existing project must act on: keep it apart,
-      never among the changes. A `Landed on a second attempt` line names the tickets the run sent back
+      never among the changes. The summary shows only the last run's lines: for a release's changelog, `sandcastle report
+      --changelog [--since <ref>]` lists the lines of every ticket that landed since a ref (default: the
+      latest tag) across runs, and the landed tickets that have none. A `Landed on a second attempt` line names the tickets the run sent back
       once after a conflict or a red gate at landing and then merged: say so, as it is the reason a
       ticket's work took two passes.
    3. `## 🙋 Needs you` - each held branch: what it does in one line (read its diff), why it was
