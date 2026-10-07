@@ -17,7 +17,7 @@ the same by hand.
 | 🐳 | **A Docker-compatible container runtime** | The kit calls the `docker` command, so any runtime that provides it works - see the table below. |
 | 🟩 | **Node.js 22.18+** | 24 LTS recommended. The kit runs its TypeScript on Node's own type stripping, which 22.18 is the first Node 22 to turn on. |
 | 📦 | **pnpm** | Installs the kit's dependencies. |
-| 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.38 or newer is recommended: older git lands with a weaker check of each landing merge. |
+| 🌿 | **git 2.31+** | Worktrees are the backbone of every run. 2.38 or newer is recommended: older git lands with a weaker check of each landing merge, and finds a branch that no longer merges only once it is in a sandbox. |
 | 🔎 | **jq** | The status view reads run records with it; preinstalled on macOS 15+, not on most Linux. `apt install jq`, `dnf install jq` or `brew install jq`. |
 | 📋 | **procps** (`ps`), on Linux | The status view checks a run is still live with `ps -p <pid> -o command=`; without it every live run reads as ended. Most Linux has it; slim and minimal images do not. `apt install procps` or `dnf install procps-ng`. macOS has `ps` built in. |
 | 🐙 | **GitHub CLI**, signed in | `gh auth login`. Only needed when tickets are GitHub Issues; a project that keeps them as files in the repo can skip it. |
