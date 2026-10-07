@@ -9,6 +9,61 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **`logs/timings.jsonl` has a `landing` line for every landing that reaches its merge**,
+  fast-forwards and conflicts included, with its wait for a machine-wide sandbox slot as `waitMs`.
+  A requeued ticket's wait to resolve behind the tickets ahead of it is added to the `waitMs` of its
+  second `setup` line. The estimate and the status view's usual time leave the new line out.
+
+### Changed
+
+- **A branch that no longer merges onto the base is found on the host before it takes a landing
+  sandbox slot**, so it is requeued or held without starting a sandbox. A conflict only in
+  `generated` files still goes to the sandbox, as does every landing on git older than 2.38.
+- **A ticket whose branch stops merging onto the base while it runs skips its review and gates**
+  and goes straight back to resolve the merge, instead of finding the conflict only at landing. It
+  is sent back once, as a conflict at landing is.
+- **The end-of-run verify no longer re-gates a merged base tip the run's own gates just passed.**
+  It is skipped when the green-base record names the current tip on the same image and plan, and
+  the summary says whose gates proved it (`Merged main re-gated: green at <sha> already on image
+  <tag> (gated with #427) - not run again`).
+- **Beside another run, a run whose share of the machine's sandbox slots is 2 or more keeps one
+  slot of that share for landing**, so a green branch no longer waits for a ticket to finish before
+  it can land.
+- **A wait for a sandbox slot is now the run's, not a ticket's.** The heartbeat says how long the
+  run has waited without naming a ticket, the status view shows `waits for the run's share` on the
+  tickets next to start, and the closing summary no longer says `waited Xm for a slot` on a
+  ticket's line.
+- **When a run stops because `.git/config` changed, the stop names each changed key**, with its
+  old and new values, except for keys that run a program or load more config.
+- **The closing summary's Needs you section lists the follow-ups filed for triage, and the issues
+  opened during the run, under a `### To triage` sub-heading** after the run's own items, so the
+  headline's "need you" and "to triage" counts each match their bullets.
+
+### Fixed
+
+- **A branch another worktree gives an upstream in the shared `.git/config` no longer stops a run
+  as `.git` tampering** (`git worktree add` from a remote branch, `git push -u`, `git branch -u`,
+  `gh pr create`). The guard compares the config by key, and lets through only
+  `branch.<name>.remote` and `.merge` of a branch that is neither the base nor an `agent/issue-*`
+  branch.
+- **A ticket released when its last blocker lands, or sent back after a conflict, really starts at
+  the next free sandbox slot.** Before, it waited behind every later ticket already waiting for a
+  slot, which happened at every release when a run had more workers than its share of the machine.
+- **A drain turn after a landing no longer opens a base sandbox for the hook checks** when the
+  landed diff touched no hook directory, kept hook script, package manifest, lockfile or protected
+  path. A landing that changes one still gets the full hook check.
+- **The heartbeat no longer counts a wait for a gates slot as gate time** (it says `gates: waiting
+  for a gates slot` and counts from the first gate), and it names landings in flight and tickets
+  waiting to resolve a conflict, so it is no longer silent while only those run.
+- **A requeued ticket's wait to resolve its conflict is said once**, after its list of tickets has
+  held for a few seconds, instead of one line per change. A ticket still running is worded "lands
+  or leaves the run" rather than "has landed".
+- **Follow-up filing no longer merges two findings because their evidence cites the same line**,
+  now merges findings that name the same file with close titles, and no longer reads a host and
+  port such as `api.example.com:443` as a place.
+
 ## [0.10.0] - 2026-10-07
 
 ### Added
