@@ -1,8 +1,8 @@
 // The order tickets start in once a run is going (createSchedule in src/schedule.ts): a ticket released
 // when its last blocker lands, and a ticket requeued after a conflict at landing, start at the next free
 // slot, ahead of every ticket that has not started; a requeued ticket goes before a released one, and
-// equals in the order they arrived. Also the two lines the run prints about them (`createHoldRecord` in
-// src/burndown.ts, `fileShareLine`). One pipeline slot, fake attempts and landings; no git, no Docker,
+// equals in the order they arrived. Also the line the run prints about them (`createHoldRecord` in
+// src/burndown.ts) and the file-shares log's pair line (`fileShareLine`). One pipeline slot, fake attempts and landings; no git, no Docker,
 // no network.
 //
 //   node --test test/schedule-start-order.test.ts
@@ -132,7 +132,7 @@ test("the run record puts a requeued ticket, then released ones, ahead of every 
   assert.equal(orders["9"], undefined);
 });
 
-test("the start line for two tickets that change one file says what happens at landing", () => {
+test("the file-shares log line for two tickets that change one file says what happens at landing", () => {
   const { start } = createSchedule<T, G>({
     tickets: [{ id: "1" }, { id: "2" }],
     files: { of: () => ({ all: ["page.html"], unmergeable: [] }) },

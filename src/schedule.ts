@@ -88,9 +88,33 @@ const named = (files: string[]) => `${files.slice(0, SHOWN).join(", ")}${files.l
 /** The ticket's status note while it waits. */
 export const fileWaitNote = (ref: (id: string) => string, w: FileWait) => `waits for ${ref(w.with)}: both change ${w.file} (git cannot merge it)`;
 
-/** One line per pair that starts together and changes the same mergeable files. */
+/** One line per pair that starts together and changes the same mergeable files: the pair list's own line in the file-shares log (`fileShareSummary` is what the start prints). */
 export const fileShareLine = (ref: (id: string) => string, id: string, s: FileShare) =>
   `${ref(s.with)} and ${ref(id)} both change ${named(s.files)} - if they conflict at landing, the later one is sent back once and its merge resolved`;
+
+/** Files nearly every ticket's docs touch: naming the tickets that share one says nothing, so they are counted on one line. */
+const DOC_FILES = ["README.md", "CHANGELOG.md"];
+
+/**
+ * The lines a start prints for the pairs that share mergeable files: one per file, naming its
+ * tickets, and one count for the docs files every ticket touches (a 29-ticket run printed 92 pair
+ * lines, nearly all for those, and buried the pool warning). `pairs` are in `fileShareLine`'s own
+ * shape: `id` shares `share.files` with `share.with`. A file's tickets are in the order they first
+ * appear. Empty when no pair shares a file.
+ */
+export const fileShareSummary = (ref: (id: string) => string, pairs: { id: string; share: FileShare }[]) => {
+  const byFile = new Map<string, string[]>();
+  for (const { id, share } of pairs)
+    for (const file of share.files) {
+      const ids = byFile.get(file) ?? [];
+      for (const t of [share.with, id]) if (!ids.includes(t)) ids.push(t);
+      byFile.set(file, ids);
+    }
+  const lines = [...byFile].filter(([file]) => !DOC_FILES.includes(file)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([file, ids]) => `${file}: ${ids.map(ref).join(" ")}`);
+  const docs = [...byFile].filter(([file]) => DOC_FILES.includes(file));
+  if (docs.length) lines.push(`${docs.map(([file]) => file).join(", ")}: shared by ${new Set(docs.flatMap(([, ids]) => ids)).size} tickets (not listed)`);
+  return lines;
+};
 
 /** The note of a ticket parked in a run that has stopped: nothing will start it before the next run. */
 export const stoppedWaitNote = (ref: (id: string) => string, w?: FileWait) =>

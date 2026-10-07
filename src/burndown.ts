@@ -24,8 +24,8 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
@@ -60,7 +60,7 @@ import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -552,12 +552,12 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
 
 /**
  * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
- * is said and put on `waiting` (before the run record exists), and each pair that starts together
- * sharing a mergeable file is named. `tell`: what the scheduler tells of the hold as the run goes -
+ * is said and put on `waiting` (before the run record exists), and the mergeable files that tickets
+ * starting together share are named, one line per file (`fileShareSummary`; the pair list goes to `log`). `tell`: what the scheduler tells of the hold as the run goes -
  * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
  * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
  */
-export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void }) => {
+export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void; log?(line: string): void }) => {
   // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
   const started = new Set<string>();
   // The status view's queue position (`order`) follows the scheduler's start queue: a requeued ticket
@@ -580,15 +580,25 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
     } else if (on.length) o.waiting.push({ issue: id, on });
     write(run);
   };
+  // One line per file, not per pair: the pairs of a wide run number in the dozens. The pairs go to the log.
+  const sayShares = (pairs: { id: string; share: FileShare }[]) => {
+    const lines = fileShareSummary(o.ref, pairs);
+    if (!lines.length) return;
+    o.say("  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
+    for (const line of lines) o.say(`    ${line}`);
+    for (const { id, share } of pairs) o.log?.(fileShareLine(o.ref, id, share));
+  };
   return {
     start(candidates: readonly Start<{ id: string }>[]) {
+      const pairs: { id: string; share: FileShare }[] = [];
       for (const { ticket, file, shares } of candidates) {
         if (file) {
           o.waiting.push({ issue: ticket.id, on: [o.ref(file.with)] });
           o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
         }
-        for (const share of shares ?? []) o.say(`  ${fileShareLine(o.ref, ticket.id, share)}`);
+        for (const share of shares ?? []) pairs.push({ id: ticket.id, share });
       }
+      sayShares(pairs);
     },
     tell(run: Record, c: HoldChange | { kind: "requeued"; id: string }) {
       switch (c.kind) {
@@ -598,7 +608,7 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
         case "started":
           started.add(c.id);
           o.say(`  ${o.ref(c.id)} ${c.after.kind === "blockers" ? "released: its last blocker has landed; it starts at the next free slot" : `starts: ${o.ref(c.after.freed)} is done with the file they both change`}`);
-          for (const share of c.shares) o.say(`  ${fileShareLine(o.ref, c.id, share)}`);
+          sayShares(c.shares.map((share) => ({ id: c.id, share })));
           run.ticket(c.id, { state: "queued", note: null, ...(c.after.kind === "blockers" && { order: released++ - AHEAD }) });
           write(run, { stage: "running" });
           return;
@@ -1601,7 +1611,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     },
   });
-  const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
+  const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
+  const holds = createHoldRecord({
+    waiting,
+    ref,
+    say: (line) => console.log(line),
+    log: (line) => {
+      mkdirSync(dirname(sharesLog), { recursive: true });
+      appendFileSync(sharesLog, `${line}\n`);
+    },
+  });
   const candidates = schedule.start.map((c) => c.ticket);
   const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
   const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
