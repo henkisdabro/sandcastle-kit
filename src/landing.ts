@@ -480,7 +480,15 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
           : errorLine(error);
       return { kind: "not-landed", reason };
     }
-    record(before, tip());
+    const after = tip();
+    record(before, after);
+    // The ticket's own gates ran on this tree (the branch holds the base's tip, so the merge adds
+    // no content), and the base now names it: the next turn's check need not gate it again.
+    try {
+      ctx.greenBase?.(after);
+    } catch {
+      /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
+    }
   } else {
     let result: Awaited<ReturnType<typeof landInSandbox>>;
     try {
