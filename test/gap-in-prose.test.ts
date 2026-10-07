@@ -147,6 +147,8 @@ test("a review that says nothing is left, or only mentions a tag, flags no gap",
     "There are no gaps between the ticket and the change.",
     "No remaining issues. The behaviour remains unchanged and the gates stay green.",
     "Nothing was left alone: every point I raised is fixed.",
+    // The platform sentence the review prompt asks every reviewer for.
+    "macOS remains unaffected: the change is TypeScript only. Linux behaviour remains untouched.",
     "Reviewed; all good.",
   ]) assert.equal(await gapOfReview(`${clean}\n`), undefined, clean);
   // Words inside a fence or a tag are no prose of the reviewer's.

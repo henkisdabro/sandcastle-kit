@@ -358,9 +358,10 @@ const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
 // "remains", "a gap", "not fixed"); the wording of the prompts alone did not hold.
 const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaining|gaps?|not\s+(?:fixed|addressed|handled)|unfixed|unaddressed|still\s+(?:fails?|broken|wrong))\b/i;
 // What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
-// issue"), and a thing that "remains green" or "remains unchanged".
+// issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
+// every review prompt asks for, which would otherwise list nearly every merged ticket.
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|green|correct|valid|intact|passing|accurate|true|compatible|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
 // fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
 const sentencesOf = (text: string): string[] => {
