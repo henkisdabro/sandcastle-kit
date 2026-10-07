@@ -168,12 +168,18 @@ const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
 
 // Keys whose values are not shown because they carry credentials: an `extraHeader` (an Authorization
-// header), a credential helper's settings, a URL rewrite. Their names can carry a token too
+// header), a credential helper's settings, and any key named for a password, token, secret or cookie
+// (`sendemail.smtpPass`, a tool's `oauthtoken`). A key's name can carry a token too
 // (`url.https://<token>@host/.insteadOf`), which `hidden` hides.
-const SECRET_KEY = /^(http\.(.+\.)?extraheader|credential\..+|url\..+)$/i;
+const SECRET_KEY = /^(http\.(.+\.)?extraheader|credential\..+)$|pass|token|secret|cookie/i;
 
-// A URL's user and password, wherever it sits: in a value, or in a key name.
-const hidden = (t: string) => clean(t).replace(/\/\/[^/@\s]*@/g, "//***@");
+// A URL's user and password, wherever it sits (a value, a key name), with or without a scheme
+// (`url.<token>@host:.insteadOf`), and a token in a query string.
+const hidden = (t: string) =>
+  clean(t)
+    .replace(/\/\/[^/@\s]*@/g, "//***@")
+    .replace(/(^|[\s.])[^\s/@.:]+(:[^\s/@]*)?@/g, "$1***@")
+    .replace(/([?&](?:access_token|token|auth|key|password|secret)=)[^&\s]+/gi, "$1***");
 
 const shown = (value: string | null) => {
   if (value === null) return "(no value)";

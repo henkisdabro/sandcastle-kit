@@ -155,8 +155,13 @@ test("a credential in a key's name or a header's value is never shown", () => {
   git("config", "http.https://tok3n@example.com/.extraheader", "AUTHORIZATION: bearer s3cr3t");
   git("config", "url.https://x-access-token:tok3n@example.com/.insteadof", "https://example.com/");
   git("config", "credential.helper", "store --file /tmp/s3cr3t");
+  git("config", "url.tok3n@example.com:.insteadof", "example:");
+  git("config", "remote.mirror.url", "https://example.com/r.git?access_token=tok3n");
+  git("config", "sendemail.smtpPass", "s3cr3t");
   const said = stops(project, before);
   assert.doesNotMatch(said, /tok3n|s3cr3t/);
+  // A plain remote's URL is still shown: what changed is the useful part of the stop.
+  assert.match(said, /remote\.mirror\.url added: "https:\/\/example\.com\/r\.git\?access_token=\*\*\*"/);
   assert.match(said, /http\.https:\/\/\*\*\*@example\.com\/\.extraheader added/);
   assert.match(said, /url\.https:\/\/\*\*\*@example\.com\/\.insteadof added/);
   assert.match(said, /credential\.helper added/);

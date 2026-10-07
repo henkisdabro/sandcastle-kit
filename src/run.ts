@@ -700,11 +700,12 @@ export const recentWindow = <T extends { run?: unknown; issue?: unknown }>(lines
 
 /**
  * Seconds per step, and `issue` for one whole issue (its own pipeline: not the landing gate, nor a landing's own line); `extra` adds this run's finished issues (ms).
- * `LANDING_GATES` is one ticket's landing gates summed (a ticket landed with no gate counts none), the median over the window's tickets,
- * and absent when no line of the window is a landing gate.
+ * `LANDING_GATES` is one ticket's landing gates summed, the median over the window's tickets that landed (a fast-forward,
+ * with no gate, counts 0; a held, red or conflicted ticket, or one from before landings were timed, is no landing), and
+ * absent when the window has no landing.
  */
 export const typicalTimes = (project: Project, extra: number[] = []) => {
-  let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number }[] = [];
+  let lines: { project?: string; run?: string; issue?: unknown; phase?: string; ms?: number; ok?: boolean }[] = [];
   try {
     lines = readFileSync(join(project.root, ".sandcastle/logs/timings.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   } catch {
@@ -721,10 +722,10 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
       continue;
     }
-    // A landing's own line holds its landing gates' time already: left out, or it counts them twice. It
-    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0.
+    // A landing's own line holds its landing gates' time already: left out, or it counts them twice. A merged one
+    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0. A conflict's is none.
     if (l.phase === LANDING) {
-      landing.set(key, landing.get(key) ?? 0);
+      if (l.ok === true) landing.set(key, landing.get(key) ?? 0);
       continue;
     }
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);

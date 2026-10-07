@@ -90,19 +90,20 @@ test("typicalTimes: a ticket that landed without a gate counts none, so the medi
   const lines = ["1", "2", "3"].flatMap((issue) => [
     line({ issue, phase: "implement", ms: MIN, tokens }),
     ...(issue === "1" ? [line({ issue, phase: LANDING_GATES, ms: 5 * MIN })] : []),
-    line({ issue, phase: LANDING, ms: issue === "1" ? 5 * MIN : 1000 }),
+    line({ issue, phase: LANDING, ms: issue === "1" ? 5 * MIN : 1000, ok: true, result: "merged" }),
   ]);
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), lines.join("\n") + "\n");
   assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 0);
 });
 
 test("typicalTimes: a ticket that never landed, or from before landings were timed, is no landing of 0", () => {
-  // Two landings gated for 5m; four tickets held, red or older, with no landing line at all.
+  // Two landings gated for 5m; three conflicts at landing; three tickets held, red or older, with no landing line at all.
   const root = mkdtempSync(join(TMP, "estimate-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
-  const lines = ["1", "2", "3", "4", "5", "6"].flatMap((issue) => [
+  const lines = ["1", "2", "3", "4", "5", "6", "7", "8"].flatMap((issue) => [
     line({ issue, phase: "implement", ms: MIN, tokens }),
-    ...(issue <= "2" ? [line({ issue, phase: LANDING_GATES, ms: 5 * MIN })] : []),
+    ...(issue <= "2" ? [line({ issue, phase: LANDING_GATES, ms: 5 * MIN }), line({ issue, phase: LANDING, ms: 5 * MIN, ok: true, result: "merged" })] : []),
+    ...(issue >= "3" && issue <= "5" ? [line({ issue, phase: LANDING, ms: 1000, ok: false, result: "conflict" })] : []),
   ]);
   writeFileSync(join(root, ".sandcastle/logs/timings.jsonl"), lines.join("\n") + "\n");
   assert.equal(typicalTimes({ root, name: "fixture" } as Project)[LANDING_GATES], 5 * 60);

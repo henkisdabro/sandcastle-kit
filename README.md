@@ -747,7 +747,7 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
   time cap is met by starting it again. With no run live it prints the last summary at once and
   exits with the recorded code (0 when there is none). A run whose last turn left the merged base
-  red (`RED TOGETHER` in the summary, or red on the tree a ticket's own gates passed) exits **1**, at every autonomy level, so a harness does not
+  red (`RED TOGETHER` in the summary, or red on a tree a ticket's own gates or a landing sandbox passed) exits **1**, at every autonomy level, so a harness does not
   read success on a base the summary says not to push.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
@@ -1437,7 +1437,7 @@ and the kit narrows what can cross it:
   (`branch.<name>.remote` and `.merge`) that another worktree gives its own branch (`git worktree add`
   from a remote branch, `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run
   prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
-  values, except for keys that run a program): a remote, a hook path, an `include`, `rebase` or
+  values, except for keys that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook path, an `include`, `rebase` or
   `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's

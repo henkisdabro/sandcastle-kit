@@ -237,7 +237,7 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   merged before it), and it names what moved. For a moved base branch, show the user the commits
   it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
   or `.git/info/`, stop and have them inspect it (the stop names the keys that changed, and for
-  a key that is not a command, the old and new values: a branch of their own tells at once).
+  a key that neither runs a program nor carries a credential, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` before blaming the branch.

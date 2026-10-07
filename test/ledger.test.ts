@@ -94,6 +94,16 @@ const ROWS: Row[] = [
     "merge conflict (a person acts)",
     `comment: Sandcastle ran this ticket and did not land it: merging \`agent/issue-2\` into \`main\` conflicted (with #1, #3: a.ts). ${NEXT_RUN}\n\nWhat the agents reported:\n\n${REPORT}`,
   ],
+  // The first attempt was red: the second's conflict is no repeat.
+  [
+    "conflict after a requeue for a red merge",
+    { ...again({ kind: "conflict", files: ["a.ts"], with: ["1", "3"] }, ["1"]), again: { kind: "red", with: ["1"] } } as TicketEnding,
+    { report: REPORT },
+    "conflict - conflicted with #1, #3 after a requeue for a red merge: a.ts",
+    "conflict [1,3] - merge conflict: conflicted with #1, #3 after a requeue for a red merge: a.ts",
+    "merge conflict (a person acts)",
+    `comment: Sandcastle ran this ticket and did not land it: merging \`agent/issue-2\` into \`main\` conflicted (with #1, #3: a.ts). ${NEXT_RUN}\n\nWhat the agents reported:\n\n${REPORT}`,
+  ],
   // Before landing: its pipeline found the branch no longer merges, and it was not sent back.
   [
     "conflict found before review or the gates",
