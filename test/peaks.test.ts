@@ -111,7 +111,7 @@ test("recommend: no data keeps the assumed figure", () => {
 test("recommend: one project's highest peak plus 10%", () => {
   const peaks = [line("a", 1, 1000), line("a", 2, 1400), line("a", 3, 900)];
   const m = measuredPeak(peaks, NOW)!;
-  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3 });
+  assert.deepEqual(m, { peakMib: 1400, project: "a", runs: 3, figures: { peak: { mib: 1400, samples: 3, highest: 1400 } } });
   const rec = recommend(10 * GIB, 16, peaks, NOW);
   // floor((10 - 2) / (1540 / 1024)) = floor(5.32) = 5
   assert.equal(rec.byMemory, 5);

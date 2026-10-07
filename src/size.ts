@@ -21,8 +21,8 @@ const GIB = 2 ** 30;
 // covers less there: the desktop and everything else on the machine share it.
 export const HEADROOM_GIB = 2;
 export const PER_SANDBOX_GIB = 1.5;
-// A measured peak is a project's highest over its last RECENT_RUNS measured runs, so one runaway
-// run drops out after a few more; only a project measured within FRESH_DAYS counts, so a project
+// A measured figure is the PERCENTILE of a project's samples over its last RECENT_RUNS measured runs, so one runaway
+// sample or run does not set it, and drops out after a few more runs; only a project measured within FRESH_DAYS counts, so a project
 // no longer worked on does not set the limit; and MARGIN covers a run a little heavier than any seen.
 export const RECENT_RUNS = 5;
 export const FRESH_DAYS = 30;
@@ -117,50 +117,88 @@ const gib = (bytes: number) => `${(Math.round((bytes / GIB) * 10) / 10).toString
 const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
 
 /**
- * What the peaks say: the heaviest project's highest figures over its runs, the project and the runs
- * they rest on. `peakMib` is the whole-life `memory.peak`, `anonMib` the anonymous memory read while a
- * gate ran, `agentMib` the `memory.peak` read before the first gate and `agentAnonMib` the anonymous
- * memory read while an agent pass ran; each optional one is absent when no run recorded it.
+ * One figure the peaks give: `mib`, what is priced, the `samples` it was taken from (one per sandbox's line) and the
+ * `highest` of them. `mib` is `highest` below `MIN_PERCENTILE_SAMPLES` samples, else the `PERCENTILE`th of them.
  */
-export type Measured = { peakMib: number; project: string; runs: number; anonMib?: number; agentMib?: number; agentAnonMib?: number };
+export type Figure = { mib: number; samples: number; highest: number };
 
 /**
- * The heaviest project's figures: each project's highest over its last `RECENT_RUNS` measured runs
- * (a run is the peaks sharing a `run`, as old as its newest line), then the project with the
- * highest `peakMib` of those whose newest measured run is within `FRESH_DAYS` of `now`. Undefined
- * with nothing measured, in which case the caller keeps the assumed figure. A figure under
- * `MIN_MEASURED_MIB` is not measured: a project whose `peakMib` is under it is left out, and any other figure
- * under it is left off (a gate with no anonymous figure is priced from `peakMib`). The anonymous figures of a
- * line not marked `sampled` are left out too: it may hold the sandbox at rest, and nothing on it says.
+ * What the peaks say: the heaviest project's figures over its runs, the project and the runs they rest
+ * on. `peakMib` is the whole-life `memory.peak`, `anonMib` the anonymous memory read while a gate ran,
+ * `agentMib` the `memory.peak` read before the first gate and `agentAnonMib` the anonymous memory read
+ * while an agent pass ran; each optional one is absent when no run recorded it. `figures` says what each
+ * rests on: how many samples, and the highest of them.
+ */
+export type Measured = {
+  peakMib: number;
+  project: string;
+  runs: number;
+  anonMib?: number;
+  agentMib?: number;
+  agentAnonMib?: number;
+  figures: { peak: Figure; anon?: Figure; agent?: Figure; agentAnon?: Figure };
+};
+
+/**
+ * Priced at a high percentile of the samples, not their maximum: one agent pass that peaked at twice the
+ * rest priced every later pool at that pass, though the turn that recorded it ran without a fault. Under
+ * `MIN_PERCENTILE_SAMPLES` samples a percentile is the maximum anyway, and the maximum is what is used.
+ */
+export const PERCENTILE = 90;
+export const MIN_PERCENTILE_SAMPLES = 5;
+
+// Nearest rank, in integers: 90 x 10 / 100 is exactly 9, where 0.9 x 10 would round up to 10.
+const figureOf = (samples: number[]): Figure | undefined => {
+  const sorted = samples.filter((v) => v >= MIN_MEASURED_MIB).sort((a, b) => a - b);
+  if (!sorted.length) return undefined;
+  const highest = sorted[sorted.length - 1];
+  const mib = sorted.length < MIN_PERCENTILE_SAMPLES ? highest : sorted[Math.ceil((PERCENTILE * sorted.length) / 100) - 1];
+  return { mib, samples: sorted.length, highest };
+};
+
+/**
+ * The heaviest project's figures: each project's last `RECENT_RUNS` measured runs (a run is the peaks
+ * sharing a `run`, as old as its newest line), each figure the `PERCENTILE`th of that project's samples
+ * in them (`figureOf`; every sandbox's line is one sample), then the project with the highest `peakMib`
+ * of those whose newest measured run is within `FRESH_DAYS` of `now`. Undefined with nothing measured,
+ * in which case the caller keeps the assumed figure. A sample under `MIN_MEASURED_MIB` is not measured and is
+ * left out: a project whose `peakMib` has none is left out, and any other figure with none is left off
+ * (a gate with no anonymous figure is priced from `peakMib`). The anonymous figures of a line not marked
+ * `sampled` are left out too: it may hold the sandbox at rest, and nothing on it says.
  */
 export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefined => {
-  type RunPeak = { at: number; peakMib: number; anonMib: number; agentMib: number; agentAnonMib: number };
-  const byProject = new Map<string, Map<string, RunPeak>>();
+  type Run = { at: number; lines: PeakLine[] };
+  const byProject = new Map<string, Map<string, Run>>();
   for (const l of peaks) {
-    const runs = byProject.get(l.project) ?? new Map<string, RunPeak>();
-    const run = runs.get(l.run) ?? { at: 0, peakMib: 0, anonMib: 0, agentMib: 0, agentAnonMib: 0 };
-    const read = (l.sampled ?? 0) >= SAMPLED;
-    runs.set(l.run, {
-      at: Math.max(run.at, Date.parse(l.ts)),
-      peakMib: Math.max(run.peakMib, l.peakMib),
-      anonMib: Math.max(run.anonMib, read ? (l.anonMib ?? 0) : 0),
-      agentMib: Math.max(run.agentMib, l.agentMib ?? 0),
-      agentAnonMib: Math.max(run.agentAnonMib, read ? (l.agentAnonMib ?? 0) : 0),
-    });
+    const runs = byProject.get(l.project) ?? new Map<string, Run>();
+    const run = runs.get(l.run) ?? { at: 0, lines: [] };
+    run.at = Math.max(run.at, Date.parse(l.ts));
+    run.lines.push(l);
+    runs.set(l.run, run);
     byProject.set(l.project, runs);
   }
   let best: (Measured & { at: number }) | undefined;
   for (const [project, runs] of byProject) {
     const recent = [...runs.values()].sort((a, b) => b.at - a.at).slice(0, RECENT_RUNS);
     if (!recent.length || recent[0].at < now - FRESH_DAYS * 86_400_000) continue;
-    const peakMib = Math.max(...recent.map((r) => r.peakMib));
-    if (peakMib < MIN_MEASURED_MIB) continue;
-    if (!best || peakMib > best.peakMib || (peakMib === best.peakMib && recent[0].at > best.at)) {
-      const most = (k: "anonMib" | "agentMib" | "agentAnonMib") => {
-        const v = Math.max(...recent.map((r) => r[k]));
-        return v >= MIN_MEASURED_MIB ? { [k]: v } : {};
+    const lines = recent.flatMap((r) => r.lines);
+    const read = lines.filter((l) => (l.sampled ?? 0) >= SAMPLED);
+    const peak = figureOf(lines.map((l) => l.peakMib));
+    if (!peak) continue;
+    if (!best || peak.mib > best.peakMib || (peak.mib === best.peakMib && recent[0].at > best.at)) {
+      const anon = figureOf(read.flatMap((l) => (l.anonMib === undefined ? [] : [l.anonMib])));
+      const agent = figureOf(lines.flatMap((l) => (l.agentMib === undefined ? [] : [l.agentMib])));
+      const agentAnon = figureOf(read.flatMap((l) => (l.agentAnonMib === undefined ? [] : [l.agentAnonMib])));
+      best = {
+        peakMib: peak.mib,
+        project,
+        runs: recent.length,
+        ...(anon ? { anonMib: anon.mib } : {}),
+        ...(agent ? { agentMib: agent.mib } : {}),
+        ...(agentAnon ? { agentAnonMib: agentAnon.mib } : {}),
+        figures: { peak, ...(anon ? { anon } : {}), ...(agent ? { agent } : {}), ...(agentAnon ? { agentAnon } : {}) },
+        at: recent[0].at,
       };
-      best = { peakMib, project, runs: recent.length, ...most("anonMib"), ...most("agentMib"), ...most("agentAnonMib"), at: recent[0].at };
     }
   }
   if (!best) return undefined;
@@ -290,15 +328,19 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
   if (m) {
     const where = m.project === readers.projectId?.() ? "this project" : `project ${m.project}`;
     const plus = `plus ${Math.round((MARGIN - 1) * 100)}%`;
+    const from = (f: Figure) =>
+      f.samples < MIN_PERCENTILE_SAMPLES
+        ? `highest of ${f.samples} sample${f.samples === 1 ? "" : "s"}`
+        : `${PERCENTILE}th of ${f.samples} samples; highest ${gib2(f.highest / 1024)} GiB`;
     const gate =
       rec.gateFrom === "anon"
-        ? `Gate figure: ${gib2(m.anonMib! / 1024)} GiB, the anonymous memory (no page cache) read during gates; ${plus} is ${gib2(rec.gateGib)} GiB. (Their cgroup \`memory.peak\`, page cache included, was ${gib2(m.peakMib / 1024)} GiB.)`
-        : `Gate figure: ${gib2(m.peakMib / 1024)} GiB, cgroup \`memory.peak\`, which includes page cache the kernel has not yet reclaimed, so it can overstate what a sandbox needs; ${plus} is ${gib2(rec.gateGib)} GiB. No usable anonymous-memory (no page cache) figure was recorded during gates in those runs, so no pool warning is given until one is.`;
+        ? `Gate figure: ${gib2(m.anonMib! / 1024)} GiB, the anonymous memory (no page cache) read during gates (${from(m.figures.anon!)}); ${plus} is ${gib2(rec.gateGib)} GiB. (Their cgroup \`memory.peak\`, page cache included, was ${gib2(m.peakMib / 1024)} GiB.)`
+        : `Gate figure: ${gib2(m.peakMib / 1024)} GiB, cgroup \`memory.peak\` (${from(m.figures.peak)}), which includes page cache the kernel has not yet reclaimed, so it can overstate what a sandbox needs; ${plus} is ${gib2(rec.gateGib)} GiB. No usable anonymous-memory (no page cache) figure was recorded during gates in those runs, so no pool warning is given until one is.`;
     const baseline =
       rec.baselineFrom === "agent-anon"
-        ? `Agent baseline: ${gib2(m.agentAnonMib! / 1024)} GiB, the anonymous memory read during agent passes; ${plus} is ${gib2(rec.baselineGib)} GiB.`
+        ? `Agent baseline: ${gib2(m.agentAnonMib! / 1024)} GiB, the anonymous memory read during agent passes (${from(m.figures.agentAnon!)}); ${plus} is ${gib2(rec.baselineGib)} GiB.`
         : rec.baselineFrom === "agent-peak"
-          ? `Agent baseline: ${gib2(m.agentMib! / 1024)} GiB, \`memory.peak\` read before the first gate pass; ${plus} is ${gib2(rec.baselineGib)} GiB. That figure includes page cache, and agents run the project's test suite themselves, so it may sit above the gate figure; it switches to anonymous memory once a run records agent samples, and no pool warning is given until then.`
+          ? `Agent baseline: ${gib2(m.agentMib! / 1024)} GiB, \`memory.peak\` read before the first gate pass (${from(m.figures.agent!)}); ${plus} is ${gib2(rec.baselineGib)} GiB. That figure includes page cache, and agents run the project's test suite themselves, so it may sit above the gate figure; it switches to anonymous memory once a run records agent samples, and no pool warning is given until then.`
           : `Agent baseline: no agent baseline measured yet, priced at the gate figure (${gib2(rec.baselineGib)} GiB).`;
     lines.push(
       `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days.`,

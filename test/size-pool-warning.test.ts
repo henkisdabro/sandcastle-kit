@@ -94,10 +94,10 @@ test("an unreadable runtime gives no warning and no error", () => {
 
 test("size says memory.peak includes page cache, and prices the gate from the anonymous figure when recorded", () => {
   const without = sizeLines(reading({ peaks: () => [peak(5253)] }), {}, {}).join("\n");
-  assert.match(without, /Gate figure: 5\.13 GiB, cgroup `memory\.peak`, which includes page cache/);
+  assert.match(without, /Gate figure: 5\.13 GiB, cgroup `memory\.peak` \(highest of 1 sample\), which includes page cache/);
   assert.match(without, /no pool warning is given until one is/);
   const withAnon = sizeLines(reading(measured), {}, {}).join("\n");
-  assert.match(withAnon, /Gate figure: 2\.93 GiB, the anonymous memory \(no page cache\) read during gates; plus 10% is 3\.22 GiB\. \(Their cgroup `memory\.peak`, page cache included, was 5\.13 GiB\.\)/);
+  assert.match(withAnon, /Gate figure: 2\.93 GiB, the anonymous memory \(no page cache\) read during gates \(highest of 1 sample\); plus 10% is 3\.22 GiB\. \(Their cgroup `memory\.peak`, page cache included, was 5\.13 GiB\.\)/);
 });
 
 test("memory.stat's anon figure read while a gate pass runs is recorded beside memory.peak", async () => {

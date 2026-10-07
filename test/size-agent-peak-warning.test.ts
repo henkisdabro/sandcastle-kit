@@ -51,7 +51,7 @@ test("an anonymous gate figure beside a memory.peak agent baseline gives no pool
 
 test("size says the memory.peak agent baseline includes page cache, may sit above the gate figure and will switch to anonymous memory", () => {
   const out = sizeLines(reading(unmarked), {}, {}).join("\n");
-  assert.match(out, /Agent baseline: 4\.88 GiB, `memory\.peak` read before the first gate pass; plus 10% is 5\.37 GiB\./);
+  assert.match(out, /Agent baseline: 4\.88 GiB, `memory\.peak` read before the first gate pass \(highest of 1 sample\); plus 10% is 5\.37 GiB\./);
   assert.match(out, /includes page cache/);
   assert.match(out, /agents run the project's test suite themselves, so it may sit above the gate figure/);
   assert.match(out, /switches to anonymous memory once a run records agent samples/);
