@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -2337,6 +2337,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const gateNames = project.gates.map((g) => g.name).join(", ");
 
   const slotWanted = { n: 0 };
+  const landed = new Map<string, { files: string[]; commit: string }>();
   const ctx: LandContext = {
     project,
     tracker,
@@ -2353,7 +2354,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // Named apart: a green ticket's wait read as if its branch gates had started again.
     gate: (box, id) =>
       timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
-    landed: new Map(),
+    landed,
     slotWanted,
     reds,
     timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
@@ -2725,6 +2726,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   let verifySkipped: { commit: string; by?: string; kind: ProofKind } | undefined;
   let newDockerfiles: string[] = [];
   let verifyFailingTests: ReturnType<typeof verifyFailing> | undefined;
+  let verifyTreeOf: string | undefined;
   if (merged.length > 1 || regenerated > 0) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
     // check or an earlier verify may have gated exactly this tip, and the green-base record says so. A fast-forward's
@@ -2741,6 +2743,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const verifyRed = verifyFailing(gated.failures);
     verifyFailingTests = verifyRed;
     newDockerfiles = changedDockerfiles(project, startTip, base);
+    // A red verify on a tree a landing's own gates passed is red for its sandbox, not for the tickets meeting.
+    if (verify.some((g) => !g.pass)) {
+      const same = landingOfTree(project.root, `refs/heads/${base}`, landed);
+      if (same) verifyTreeOf = ref(same);
+    }
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);
     if (writeGateLog(join(project.root, VERIFY_LOG), `# gates on the merged ${base} at ${at}, ${new Date().toISOString()}: ${gateLine(verify)}`, gated.failures)) {
@@ -2786,7 +2793,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     dryRunCheck,
   });

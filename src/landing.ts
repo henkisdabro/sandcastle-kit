@@ -164,6 +164,20 @@ export type HostGit = {
 const parentsOf = (root: string, c: string) => sh("git", ["rev-list", "--parents", "-n", "1", c], root).split(" ").slice(1);
 const treeOf = (root: string, c: string) => sh("git", ["rev-parse", `${c}^{tree}`], root);
 
+/**
+ * The ticket whose landing left `tip`'s exact tree (the last such landing), or undefined. A landing's tree is
+ * the one its gates passed (`landingMade` checks it), so a red verify on that tree is red because of the sandbox
+ * it ran in, not because tickets met: the closing summary says so instead of "together".
+ */
+export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>): string | undefined => {
+  try {
+    const want = treeOf(root, tip);
+    return [...landed].filter(([, r]) => treeOf(root, r.commit) === want).map(([id]) => id).pop();
+  } catch {
+    return undefined;
+  }
+};
+
 /** A landing merge or squash of `head`: on the previous tip, with exactly the gated head's tree. */
 export const landingMade =
   (root: string, head: string, mode: "merge" | "squash") =>
