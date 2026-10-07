@@ -35,8 +35,8 @@ to land, need you, queued, blocked, merged. The states:
   container still works: `sandcastle clean` stops it); the activity says why. `withdrawn` (closed
   or unqueued during the run, or marked `ready-for-human` before it started) is greyed with the
   leftovers.
-- **`queued`** (next to start, how many are ahead, or `waits for the run's share` while other
-  runs hold their part of the machine's sandbox slots), **`blocked`** (what it waits for, and
+- **`queued`** (next to start, how many are ahead, or - on the tickets next to start - `waits for
+  the run's share` while other runs hold their part of the machine's sandbox slots), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - `(stopped)`, `(gate red)` or another state when the blocker ended in this run without landing - or `(not in this run)` when it was never this run's), **`merged`**, **`no change`**, **`skipped`** (not started
   because the run stopped early).

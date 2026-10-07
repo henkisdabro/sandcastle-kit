@@ -21,6 +21,10 @@ export type Queue<T> = {
   readonly closed: boolean;
   /** `workers` loops, each awaiting `fn` for one item at a time. Rejects as soon as one `fn` does. */
   run(workers: number, fn: (item: T) => Promise<void>): Promise<void>;
+  /** The item `run` would take next, taken now, or undefined when none is queued: for a worker that holds what an item needs before it takes one. */
+  takeNow(): T | undefined;
+  /** Resolves true once more items are queued than `claimed()` says are spoken for already, false once the queue is closed and empty. */
+  ready(claimed: () => number): Promise<boolean>;
 };
 
 /**
@@ -36,13 +40,19 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
     for (const resume of waiting.splice(0)) resume();
   };
   // Boxed, so an item that is itself undefined or falsy is not mistaken for "no more".
+  const head = (): { item: T } | undefined => {
+    if (!items.length) return undefined;
+    // `>` keeps the earliest of equal ranks.
+    const at = items.reduce((best, item, i) => (rank(item) > rank(items[best]) ? i : best), 0);
+    const item = items.splice(at, 1)[0];
+    // A worker in `ready` may be waiting for the queue to be closed and empty.
+    wake();
+    return { item };
+  };
   const take = async (): Promise<{ item: T } | undefined> => {
     for (;;) {
-      if (items.length) {
-        // `>` keeps the earliest of equal ranks.
-        const at = items.reduce((best, item, i) => (rank(item) > rank(items[best]) ? i : best), 0);
-        return { item: items.splice(at, 1)[0] };
-      }
+      const next = head();
+      if (next) return next;
       if (closed) return undefined;
       await new Promise<void>((resume) => waiting.push(resume));
     }
@@ -69,6 +79,14 @@ export const createQueue = <T>(rank: (item: T) => number = () => 0): Queue<T> =>
           for (let next = await take(); next; next = await take()) await fn(next.item);
         }),
       );
+    },
+    takeNow: () => head()?.item,
+    async ready(claimed) {
+      for (;;) {
+        if (items.length > claimed()) return true;
+        if (closed && !items.length) return false;
+        await new Promise<void>((resume) => waiting.push(resume));
+      }
     },
   };
 };
@@ -780,9 +798,19 @@ export type PauseSource = {
  */
 export type Park = { suspend(): Promise<void>; resume(): Promise<void> };
 
+/** A machine-wide sandbox slot a worker holds: `release` frees it, once; a second call does nothing. */
+export type Slot = { release(): void };
+
 export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /** Pipelines at once. */
   workers: number;
+  /**
+   * A worker's sandbox slot, leased before it takes a ticket (slot first): the ticket it then takes is the head of
+   * the queue at the moment the slot is granted, so a requeued or released ticket, first in line, gets the next free
+   * slot. `wanted()` turns false while the wait is no longer wanted (the run was paused or stopped): the wait then
+   * ends with no slot. Without it (a test that has no pool) a worker takes its ticket at once.
+   */
+  slot?(wanted: () => boolean): Promise<Slot | undefined>;
   /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
   concurrency?: number;
   /** The clock the resolve wait's settling reads, in milliseconds; `Date.now` when not given. */
@@ -799,8 +827,11 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * has not begun waits before its attempt does. `paused()` reads the pause now: an attempt that waits
    * for a machine-wide slot stops waiting when the run is paused, and reaches its first juncture instead.
    * `resolveWaitMs`: how long a sent-back ticket's resolve waited for the tickets ahead of it (`resolveTurn`; the time parked by a pause is left out), for the record of the attempt's start.
+   * `slot`: the sandbox slot the worker leased for it (`slot` above), the attempt's to give back and lease again across
+   * a pause and to release as it ends. None without the port, or when the run was paused as the attempt began: the
+   * scheduler gave that one back before the ticket waited for the resume, and the attempt leases its own.
    */
-  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number; slot?: Slot }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -1254,14 +1285,22 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           },
         );
       };
-      const attempt = async (t: T) => {
-        // A paused run starts no ticket: it waits here, holding nothing, until the resume - or a stop.
-        for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) await waitParked(t.id, "start");
+      // `held.slot`: the worker's slot. The attempt takes it over, unless the ticket waits off the worker to resolve, which
+      // leaves it to the worker for the next ticket.
+      const attempt = async (t: T, held: { slot?: Slot }) => {
+        // A paused run starts no ticket: it waits here, holding nothing - the worker's slot goes back first - until the resume, or a stop.
+        for (sync(); pausedSince !== undefined && !stop.startsNothing; sync()) {
+          held.slot?.release();
+          held.slot = undefined;
+          await waitParked(t.id, "start");
+        }
         // #398's exception sends a ticket back again after a landing that finished after its resolve began: a third attempt counts as one.
         const n = (attempts.get(t.id) ?? 0) + 1;
         const resolves = n >= 2 && first.get(t.id)?.kind === "conflict";
         // Something is ahead of its resolve (checked again here: a landing may have queued since it was pushed): wait off the worker.
         if (resolves && !stop.startsNothing && aheadOf(t).length) return waitToResolve(t);
+        const slot = held.slot;
+        held.slot = undefined;
         working++;
         running.add(t.id);
         const resolveWaitMs = resolveWaited.get(t.id);
@@ -1277,7 +1316,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
           let stepped = false;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined), ...(resolveWaitMs ? { resolveWaitMs } : {}) });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined), ...(resolveWaitMs ? { resolveWaitMs } : {}), ...(slot ? { slot } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {
@@ -1318,10 +1357,54 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });
           }
         } finally {
+          // The attempt's to release, and a second release does nothing: a ticket that never reached its port gives it back here.
+          slot?.release();
           working--;
           running.delete(t.id);
           inPipeline--;
           stage();
+        }
+      };
+
+      // Slot first: a worker leases its sandbox slot, then takes the head of the queue, so a ticket's rank decides when a
+      // slot is granted. A worker that took its ticket first and then waited for a slot left every worker parked on a
+      // later ticket, and a requeued or released ticket, first in line, started only after each of their pipelines. A
+      // worker asks the pool only while more tickets are queued than workers asking already, none while the run is
+      // paused (no ticket starts) and none once it starts nothing (each queued ticket ends as not begun, with no slot).
+      let asking = 0;
+      const worker = async () => {
+        const held: { slot?: Slot } = {};
+        try {
+          for (;;) {
+            if (!held.slot) {
+              if (!(await pipelines.ready(() => asking))) return;
+              // Checked again: another worker may have begun asking for the same ticket since `ready` answered.
+              if (pipelines.size <= asking) continue;
+              if (work.slot && (sync(), !stop.startsNothing)) {
+                if (pausedSince !== undefined) {
+                  // Woken by the resume or a stop.
+                  await new Promise<void>((wake) => wakers.push(wake));
+                  continue;
+                }
+                asking++;
+                try {
+                  held.slot = await work.slot(() => (sync(), pausedSince === undefined && !stop.startsNothing));
+                } finally {
+                  asking--;
+                }
+                if (!held.slot) continue;
+              }
+            }
+            const next = pipelines.takeNow();
+            if (!next) {
+              held.slot?.release();
+              held.slot = undefined;
+              continue;
+            }
+            await attempt(next.ticket, held);
+          }
+        } finally {
+          held.slot?.release();
         }
       };
 
@@ -1333,7 +1416,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       demand();
       // A pipeline worker that throws ends both queues; a landing worker that ends early closes the
       // pipelines too: nothing is left to send a ticket back to them, and they would wait for ever.
-      const fanOut = pipelines.run(work.workers, (q) => attempt(q.ticket)).finally(() => {
+      const fanOut = Promise.all(Array.from({ length: work.workers }, worker)).finally(() => {
         closeAll();
         stage();
       });

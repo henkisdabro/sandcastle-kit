@@ -491,10 +491,10 @@ run_alive() {
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
 WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""; ENDED_TICKETS=""
-TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; RUN_PAUSED=0
+TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; SHARE_WAIT=0; RUN_PAUSED=0
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""; ENDED_TICKETS=""
-  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; RUN_PAUSED=0
+  TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; SHARE_WAIT=0; RUN_PAUSED=0
   local f=logs/run.json pid="" paused="" pool="" issues="" waiting="" active="" tickets="" free="" typical="" eta="" last_tokens=""
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
@@ -510,7 +510,8 @@ load_run() {
   #            `sandcastle resume`.
   #   pool     this run's demand and share of the machine pool, live values the run rewrites; an
   #            older kit's record has neither. The cap (`sandcastle cap`) is a person's, and
-  #            absent when there is none.
+  #            absent when there is none. Then 1 while the run waits for a slot its share holds
+  #            back (`waitsForShare`), else 0.
   #   free     sandboxes the run has yet to fill: queued tickets that fit in them start at once,
   #            so none of them is "behind" another. A ticket that is landing holds no slot: its
   #            merge runs on the host, or in the landing worker's own box.
@@ -528,7 +529,7 @@ load_run() {
     @sh "RUN_STARTED=\(lines(.startedAt // empty))",
     @sh "pid=\(lines(if .finishedAt then empty else (.pid // empty) end))",
     @sh "paused=\(lines(if (.paused | type) == "object" then 1 else 0 end))",
-    @sh "pool=\(lines([(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")))",
+    @sh "pool=\(lines([(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring), (if .waitsForShare == true then "1" else "0" end)] | join(" ")))",
     @sh "issues=\(lines((.issues // [])[] | tostring))",
     @sh "waiting=\(lines((.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"))",
     @sh "active=\(lines((.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"))",
@@ -553,9 +554,10 @@ load_run() {
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
   [ "$paused" = 1 ] && RUN_PAUSED=1
-  read -r POOL_DEMAND POOL_SHARE POOL_CAP <<<"$pool"
+  read -r POOL_DEMAND POOL_SHARE POOL_CAP SHARE_WAIT <<<"$pool"
   [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
   [[ "$POOL_CAP" =~ ^[0-9]+$ ]] || POOL_CAP=""
+  [ "$SHARE_WAIT" = 1 ] || SHARE_WAIT=0
   RUN_ISSUES="$issues"; WAITING="$waiting"; ACTIVE="$active"; TICKETS="$tickets"; TYPICAL="$typical"; RUN_ETA="$eta"
   if [ -n "$TICKETS" ]; then
     RECORD=1
@@ -1154,7 +1156,9 @@ render() {
         key=$(( 1000000 - ${order:-0} )); age="-"
         if [ $(( pos - FREE )) -le 1 ]; then activity="next to start"; else activity="$(( pos - 1 - FREE )) ahead of it"; fi
         [ "$RUN_PAUSED" = 1 ] && activity="waits for the resume"
-        # Taken by a worker but held back by the run's share of the machine's slots, not only by a full pool.
+        # The run waits for a slot its share of the machine's slots holds back, not only a full pool: the slot goes
+        # to the ticket next to start. An older kit wrote it as the note of a ticket a worker had taken.
+        if [ "$SHARE_WAIT" = 1 ] && [ "$activity" = "next to start" ]; then activity="waits for the run's share"; fi
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
       held) if hand_merged "$n"; then state=merged; activity=$(hand_merged_note "$n"); fi;;
