@@ -31,9 +31,9 @@ test("a fine-grained GitHub token shows github_pat_ only; one day is singular", 
 });
 
 test("an unrecognised value shows no character of itself", () => {
-  const line = fingerprint("ANTHROPIC_API_KEY", "zzqqxxyy-private", join(tmpdir(), "x.env"), now, now);
+  const line = fingerprint("ANTHROPIC_API_KEY", "zzqqxxyy-mystery", join(tmpdir(), "x.env"), now, now);
   assert.ok(line.includes("unknown prefix, 16 chars, file written 0 days ago"));
-  assert.ok(!line.includes("zzqq") && !line.includes("private"));
+  assert.ok(!line.includes("zzqq") && !line.includes("mystery"));
 });
 
 test("a file under the home directory is shown with ~", () => {

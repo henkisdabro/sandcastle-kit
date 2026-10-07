@@ -48,10 +48,12 @@ for (const shell of shells) {
     assert.match(lines[0]!, /^logs: \S+$/);
     const legs = lines.slice(1).map((l) => l.replace(/ \(\d+s\)$/, ""));
     assert.ok(lines.slice(1).every((l) => / \(\d+s\)$/.test(l)), r.stderr);
-    for (const want of ["types: FAIL", "view: ok", "tests: ok", "agent: ok", "scan: ok"]) {
+    // macOS runs a leg more: the status view under its own bash 3.2.
+    const wants = ["types: FAIL", "view: ok", "tests: ok", "agent: ok", "scan: ok", ...(process.platform === "darwin" ? ["bash32: ok"] : [])];
+    for (const want of wants) {
       assert.ok(legs.some((l) => l.startsWith(want)), `${want} in ${r.stderr}`);
     }
-    assert.equal(legs.length, 5, r.stderr);
+    assert.equal(legs.length, wants.length, r.stderr);
     assert.equal(legs.at(-1), "agent: ok", "the slow leg reports last, not in the summary's order");
     assert.equal(r.stdout.trimEnd().split("\n").at(-1), "RESULT: FAIL");
     assert.match(r.stdout, /^== (Linux|Darwin)\n(tsc: FAIL\n)/m);

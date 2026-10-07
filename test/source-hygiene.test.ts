@@ -93,7 +93,7 @@ test("no source file holds a raw invisible character", () => {
   assert.deepEqual(found, []);
 });
 
-// A real home directory in a tracked file (`/Users/<name>`, `/home/<name>`) is a leak, and the
+// A real home directory in a tracked file (a name under `/Users` or `/home`) is a leak, and the
 // outbound scan in test/full-check.sh (`home_paths`) is where the rule comes from: it runs on a
 // contributor's machine before a push, never in a sandbox gate, so an agent's fixture with one
 // passed every gate and landed. Run here, the same rule fails the gate. `home` must start a path
@@ -122,7 +122,7 @@ test("a home-directory path names its file and line", () => {
   const files: Record<string, string> = {
     "test/fixture.ts": `const a = 1;\nconst p = "${alice}";\n`,
     "docs/x.md": `see ${linux}\n`,
-    "ok.md": "/home/user/x, /home/node/y and site/home/index.html and /Users/<name>\n",
+    "ok.md": "/home/user/x, /home/node/y and site/home/index.html and " + "/" + "Users/<name>\n",
   };
   assert.deepEqual(homePathHits(Object.keys(files), (p) => files[p]), [`test/fixture.ts:2: const p = "${alice}";`, `docs/x.md:1: see ${linux}`]);
 });
