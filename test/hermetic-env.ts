@@ -39,8 +39,12 @@ export const SCRUBBED = [
 export const scrubs = (name: string): boolean =>
   SCRUBBED.includes(name) || name.startsWith("HERDR_") || name.startsWith("TMUX") || (name.startsWith("SANDCASTLE_") && !name.startsWith("SANDCASTLE_TEST_"));
 
-/** The git identity variables: any one of them lets a commit through in a repo with no identity of its own. */
-const GIT_IDENTITY = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"];
+/**
+ * The author identity variables: any one of them lets a commit through in a repo with no identity of its own. The
+ * committer's stay: alone they let no commit through (git still asks for the author, `user.useConfigOnly`), and
+ * `test/full-check.sh`'s agent-committer leg sets them to run the suite as an agent's sandbox does.
+ */
+const GIT_IDENTITY = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"];
 
 /** One more `GIT_CONFIG_*` pair, after any already set, and not twice (a child that loads this preload again keeps one). */
 const addGitConfig = (key: string, value: string): void => {

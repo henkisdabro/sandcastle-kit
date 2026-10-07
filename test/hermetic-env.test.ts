@@ -77,7 +77,9 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
-  for (const gone of ["GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"]) assert.equal(seen.env[gone], undefined, gone);
+  for (const gone of ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"]) assert.equal(seen.env[gone], undefined, gone);
+  // The committer's stay (full-check's agent leg sets them); alone they let no commit through.
+  assert.deepEqual([seen.env.GIT_COMMITTER_NAME, seen.env.GIT_COMMITTER_EMAIL], ["n", "n@example.com"]);
   assert.notEqual(seen.env.GIT_CONFIG_GLOBAL, join(dir, "host-gitconfig"));
   assert.equal(seen.env.GIT_CONFIG_NOSYSTEM, "1");
   // The pair the gate set stays at its index, and the new one follows it.
