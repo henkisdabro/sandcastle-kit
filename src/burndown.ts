@@ -615,13 +615,6 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
   return { all, unmergeable: unmergeableFiles(project.root, project.baseBranch, all, project.generated ?? []) };
 };
 
-/**
- * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
- * is said and put on `waiting` (before the run record exists), and the mergeable files that tickets
- * starting together share are named, one line per file (`fileShareSummary`; the pair list goes to `log`). `tell`: what the scheduler tells of the hold as the run goes -
- * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
- * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
- */
 /** A typical issue's length in ms, from `typicalTimes`' seconds; undefined with no history. */
 export const typicalIssueMs = (typical: Record<string, number>): number | undefined => (typical.issue ? typical.issue * 1000 : undefined);
 
@@ -641,6 +634,13 @@ export const heartbeatLine = (o: { now: number; clock: string; working: { ref: s
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
 };
 
+/**
+ * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
+ * is said and put on `waiting` (before the run record exists), and the mergeable files that tickets
+ * starting together share are named, one line per file (`fileShareSummary`; the pair list goes to `log`). `tell`: what the scheduler tells of the hold as the run goes -
+ * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
+ * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
+ */
 export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void; log?(line: string): void }) => {
   // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
   const started = new Set<string>();
