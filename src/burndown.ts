@@ -24,7 +24,7 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
@@ -215,11 +215,26 @@ const hitLimit = (root: string, issue: string) => {
     .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
 };
 
-// Whether this pass's own readable log ends saying the allowance is spent: not another pass's of the ticket, whose log an
-// earlier run may have left that way, so a pass that failed for another reason is never taken for the limit.
-const passHitLimit = (logging: { type?: string; path?: string } | undefined) => {
+// How many bytes a pass's readable log holds before the pass starts. Sandcastle appends to the same log when a pass runs
+// again, so what the pass itself wrote is what follows this offset.
+const logSize = (logging: { type?: string; path?: string } | undefined) => {
   try {
-    return logging?.type === "file" && typeof logging.path === "string" && logSaysLimit(readFileSync(logging.path, "utf8"));
+    return logging?.type === "file" && typeof logging.path === "string" ? statSync(logging.path).size : 0;
+  } catch {
+    return 0;
+  }
+};
+
+// Whether this pass's own readable log ends saying the allowance is spent: not another pass's of the ticket, whose log an
+// earlier run may have left that way, so a pass that failed for another reason is never taken for the limit. Only what the
+// pass wrote after `from` counts: a re-run that fails early writes fewer lines than the tail `logSaysLimit` reads, and the
+// limit message of the pass before it would be read again.
+const passHitLimit = (logging: { type?: string; path?: string } | undefined, from: number) => {
+  try {
+    if (logging?.type !== "file" || typeof logging.path !== "string") return false;
+    const log = readFileSync(logging.path);
+    // A log shorter than before the pass was rewritten, not appended to: all of it is this pass's.
+    return logSaysLimit(log.subarray(log.length < from ? 0 : from).toString("utf8"));
   } catch {
     return false;
   }
@@ -746,6 +761,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       const phase = phaseOf(opts.name ?? "");
       const parkedBefore = parkedInStep;
       for (;;) {
+        const logFrom = logSize(opts.logging);
         try {
           const r = await sampling(sandbox, "agent", () => sandbox.run(opts))
             .then((r) => {
@@ -758,7 +774,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
           const parks = parkCount;
-          const pausing = at && ctx.limitPause && phase !== "cross-review" && passHitLimit(opts.logging) && ctx.limitPause(phase);
+          const pausing = at && ctx.limitPause && phase !== "cross-review" && passHitLimit(opts.logging, logFrom) && ctx.limitPause(phase);
           if (pausing) {
             console.log(`${ref(issue.id)}: the ${phase} pass hit the plan's usage limit - the run pauses until the window resets, and the pass runs again then.`);
             await juncture(phase as TicketState, true);
