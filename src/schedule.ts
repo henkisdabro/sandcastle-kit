@@ -811,6 +811,12 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * queued for it): the wait then ends with no slot. Without it (a test that has no pool) a worker takes its ticket at once.
    */
   slot?(wanted: () => boolean): Promise<Slot | undefined>;
+  /**
+   * A landing of the run waits for a sandbox slot. A worker whose ticket went off to wait for its resolve keeps its slot
+   * for the next ticket, never passing through `slot`, where an attempt yields to a waiting landing: it gives the slot
+   * back and asks again, so the landing goes first. Without it a kept slot goes to the next ticket at once.
+   */
+  landingWaits?(): boolean;
   /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
   concurrency?: number;
   /** The clock the resolve wait's settling reads, in milliseconds; `Date.now` when not given. */
@@ -1376,6 +1382,12 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         const held: { slot?: Slot } = {};
         try {
           for (;;) {
+            // A kept slot taken to the next ticket would leave a landing that waits for a sandbox (the one the resolve
+            // waits for, often) waiting out that ticket's whole pipeline: it goes back to the pool, which serves the landing first.
+            if (held.slot && work.landingWaits?.()) {
+              held.slot.release();
+              held.slot = undefined;
+            }
             if (!held.slot) {
               if (!(await pipelines.ready(() => asking))) return;
               // Checked again: another worker may have begun asking for the same ticket since `ready` answered.

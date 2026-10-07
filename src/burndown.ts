@@ -2669,7 +2669,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
+    .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), landingWaits: () => slotWanted.n > 0, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       usageWatch?.stop();
