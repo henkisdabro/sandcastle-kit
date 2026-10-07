@@ -161,7 +161,10 @@ directory, never in a real project.
   project may need to act on - a new default that changes what a run does or spends, a new
   convention, anything `sandcastle init` now writes differently - also gets an **Upgrading**
   note, and if a project needs a check or a fix, a step in the skill's `update` action (`skill/update.md`). Write
-  that step as a check that is safe to repeat, never as "since version X".
+  that step as a check that is safe to repeat, never as "since version X". A pull request that
+  changes shipped files and adds nothing under `[Unreleased]` fails the Changelog check
+  (`scripts/changelog-check.mjs`, which lists the paths that count); label it `no-changelog`
+  when nobody outside the code would notice, a refactor say.
 
 ## Releases
 
