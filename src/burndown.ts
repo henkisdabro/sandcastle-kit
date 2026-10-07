@@ -29,7 +29,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -1910,6 +1910,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(gateProject, image, planFile),
+    greenBase: (commit) => noteGreenCommit(gateProject, image, planFile, commit, runId),
     runId,
     withdrawal,
     host,
@@ -2286,7 +2287,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (merged.length > 1 || regenerated > 0) {
     // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
     setDemand(1);
-    const gated = await timed("", "verify", () => gateBase(gateProject, image, planFile, "verify", false, runId)).finally(() => setDemand(0));
+    const gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
     verify = gated.gates;
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.

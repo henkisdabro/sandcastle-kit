@@ -292,6 +292,8 @@ export type LandContext = {
   dryRun: boolean;
   /** Opens a sandbox on a branch, for redoing a conflict confined to generated files. */
   opener: Opener;
+  /** Told the commit a landing's gates passed on once it is the base's tip: the next turn's base check need not gate it again. */
+  greenBase?: (commit: string) => void;
   /** The run's start time, which a landing sandbox's peak memory is filed under. */
   runId?: string;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
@@ -548,6 +550,12 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     }
     if (result.kind === "merged") {
       record(before, result.commit);
+      // The gates ran in the sandbox on exactly this tree (a squash keeps it), and the base now names it.
+      try {
+        ctx.greenBase?.(result.commit);
+      } catch {
+        /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
+      }
       if (result.files.length) {
         regenerated = { files: result.files, regen: result.regen };
         console.log(

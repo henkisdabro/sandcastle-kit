@@ -96,6 +96,7 @@ test("burndown opens the landing, base, mid-run base and verify gates' sandboxes
   assert.match(src, /requireGreenBase\(gateProject, /);
   assert.match(src, /sandboxOpener\(gateProject, /);
   const gateBases = [...src.matchAll(/\bgateBase\((\w+), /g)].map((m) => m[1]);
-  assert.deepEqual(gateBases, ["gateProject", "gateProject"], "the mid-run base check and the verify");
+  assert.deepEqual(gateBases, ["gateProject"], "the mid-run base check");
+  assert.match(src, /verifyBase\(gateProject, /);
   assert.match(src, /createSandbox\(\{ branch, baseBranch: base, \.\.\.sandboxConfig\(project, /);
 });
