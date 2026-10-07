@@ -102,7 +102,12 @@ state.
   the failures it had claimed until it ends: its second attempt is often a land-only one with no
   repair pass, so when it lands, its landing is the fix to them (unless another ticket claimed one
   since and is still repairing it), and a later red on one merges the base instead of repairing;
-  one that ends without landing leaves nothing. A merge that conflicts and a re-gate that is
+  one that ends without landing leaves nothing. A wait also ends when the run is paused (`wait`'s
+  `paused`, the attempt's `paused()`): the fixer may be parked at its own juncture and unable to land, and the
+  waiter would hold its sandbox and slot through the whole pause. The waiter goes round the repair loop
+  again: its `repair` juncture parks it (sandbox closed, slot given back, demand 0), and after the resume
+  it asks the board afresh - the fixer may have landed, and then the fix is merged as above
+  (`test/fix-wait-pause.test.ts`). A merge that conflicts and a re-gate that is
   still red also send a waiter to repair (it waits once per failure). A wait that would close a
   cycle is refused, a forced red (`SANDCASTLE_TEST_RED_GATE`) never waits, and the waiting ticket
   keeps its sandbox slot - so while a landing of the run waits for a slot (`slotWanted`), every

@@ -605,16 +605,20 @@ export const createFixBoard = (starved?: () => boolean, pause = 1000, landedAt?:
       for (let at = waitingOn.get(by); at !== undefined; at = waitingOn.get(at)) if (at === id) return undefined;
       return { by, landed: false };
     },
-    /** Resolves when `on` has ended or been sent back for a second attempt, or a landing is starved of a slot: true when it landed. */
-    async wait(id: string, on: string): Promise<boolean> {
+    /**
+     * Resolves when `on` has ended or been sent back for a second attempt, a landing is starved of a slot, or
+     * the run is `paused` (the waiter holds a sandbox and a slot the pause would have it give back, and `on` may
+     * be parked and unable to land until the resume): true when it landed.
+     */
+    async wait(id: string, on: string, paused?: () => boolean): Promise<boolean> {
       if (ended.has(on)) return ended.get(on) === true;
       waitingOn.set(id, on);
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await new Promise<boolean>((resume) => {
           resumes.set(on, [...(resumes.get(on) ?? []), resume]);
-          const poll = () => (starved?.() ? resume(false) : (timer = setTimeout(poll, pause)));
-          if (starved) timer = setTimeout(poll, pause);
+          const poll = () => (starved?.() || paused?.() ? resume(false) : (timer = setTimeout(poll, pause)));
+          if (starved || paused) timer = setTimeout(poll, pause);
         });
       } finally {
         clearTimeout(timer);
