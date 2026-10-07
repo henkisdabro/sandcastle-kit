@@ -1,5 +1,5 @@
-// A host test run leaves no temp directory and no fixture process behind. `pnpm test`, `test:shard`
-// and test/run-shards.sh run through test/in-temp.sh, which makes one directory for the whole run,
+// A host test run leaves no temp directory and no fixture process behind. `pnpm test`, `test:shard`,
+// `test:weights` and test/run-shards.sh run through test/in-temp.sh, which makes one directory for the whole run,
 // exports it as TMPDIR and removes it on the way out - also when killed; a node child started
 // through test/cli-spawn.ts dies with the test process, also when that was killed outright.
 // No Docker, model calls or network.
@@ -107,7 +107,7 @@ test("a run killed with SIGTERM ends its command's descendants too, and removes 
 
 test("the test scripts and run-shards.sh run through in-temp.sh", () => {
   const scripts = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")).scripts as Record<string, string>;
-  for (const name of ["test", "test:shard"]) assert.match(scripts[name]!, /^bash test\/in-temp\.sh /, name);
+  for (const name of ["test", "test:shard", "test:weights"]) assert.match(scripts[name]!, /^bash test\/in-temp\.sh /, name);
   assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /exec bash .*in-temp\.sh/);
 });
 

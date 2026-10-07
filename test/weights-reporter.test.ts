@@ -15,12 +15,13 @@ const root = mkdtempSync(join(tmpdir(), "weights-reporter-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 mkdirSync(join(root, "test"));
 
-// Each file's top-level tests wait for the given milliseconds; a nested test's time is part of its parent's.
+// Each top-level test waits the given milliseconds inside a nested test: the nested test's time is
+// already part of its parent's, so a reporter that counted it too would double the file.
 const fixture = (name: string, ...waits: number[]) =>
   writeFileSync(
     join(root, "test", name),
     `import { test } from "node:test";\n` +
-      waits.map((ms, i) => `test("t${i}", async (t) => { await t.test("inner", () => {}); await new Promise((r) => setTimeout(r, ${ms})); });\n`).join(""),
+      waits.map((ms, i) => `test("t${i}", async (t) => { await t.test("inner", () => new Promise((r) => setTimeout(r, ${ms}))); });\n`).join(""),
   );
 fixture("slow.test.ts", 900, 900, 900, 900);
 fixture("fast.test.ts", 50);
@@ -38,7 +39,7 @@ test("it prints a WEIGHTS block of the files at 2.5 s or more, heaviest first, i
     r.stdout,
     [
       "const WEIGHTS: Record<string, number> = {",
-      '  "test/slow.test.ts": 4,', // four tests of 0.9 s: 3.6 s, to the nearest second
+      '  "test/slow.test.ts": 4,', // four tests of 0.9 s: 3.6 s, to the nearest second, and not 7
       '  "test/failing.test.ts": 3,', // a failing test counts as much as a passing one
       "};",
       "",

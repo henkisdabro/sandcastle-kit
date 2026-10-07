@@ -3,7 +3,7 @@
 # command ends - also when this script is interrupted or terminated. Most test files make a
 # `sandcastle-*` directory and never remove it, so a test run on the host left tens of thousands of
 # them a day; with the whole run's temp files in one directory, one `rm -rf` clears every one.
-# package.json's `test` and `test:shard` and test/run-shards.sh run their test files through it.
+# package.json's `test`, `test:shard` and `test:weights`, and test/run-shards.sh, run their test files through it.
 #
 #   bash test/in-temp.sh COMMAND [ARGS...]
 #
