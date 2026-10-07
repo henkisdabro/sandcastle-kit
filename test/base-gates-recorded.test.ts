@@ -244,22 +244,24 @@ const landTwo = async (gateGreen: boolean) => {
   };
   const outcome = (id: string) => ({ issue: id, branch: `agent/issue-${id}`, status: "green", commits: 1, repairs: 0, head: git(root, "rev-parse", `agent/issue-${id}`) });
   const first = await landOne(ctx, outcome("1"));
+  const afterFirst = git(root, "rev-parse", "main");
   const second = await landOne(ctx, outcome("2"));
-  return { root, told, first, second };
+  return { root, told, first, second, afterFirst };
 };
 
 test("a landing gated in a sandbox tells the commit the base now names", async () => {
-  const { root, told, first, second } = await quietly(() => landTwo(true)).then((r) => r.result);
+  const { root, told, first, second, afterFirst } = await quietly(() => landTwo(true)).then((r) => r.result);
   assert.equal(first.kind, "merged");
   assert.equal(second.kind, "merged");
-  // The first landing is a fast-forward of a tree its own gates ran; the second is a merge made and gated here.
-  assert.deepEqual(told, [git(root, "rev-parse", "main")]);
+  // The first landing is a fast-forward of a tree its own gates ran; the second is a merge made and gated here. Both are told.
+  assert.deepEqual(told, [afterFirst, git(root, "rev-parse", "main")]);
 });
 
 test("a landing whose gates went red tells no commit", async () => {
-  const { root, told, second } = await quietly(() => landTwo(false)).then((r) => r.result);
+  const { root, told, second, afterFirst } = await quietly(() => landTwo(false)).then((r) => r.result);
   assert.equal(second.kind, "red");
-  assert.deepEqual(told, []);
+  // Only the first landing's fast-forward: the red merge is never the base.
+  assert.deepEqual(told, [afterFirst]);
   assert.equal(git(root, "log", "-1", "--format=%s", "main").startsWith("Merge"), true);
 });
 
