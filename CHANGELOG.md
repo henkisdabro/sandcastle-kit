@@ -22,6 +22,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ### Changed
 
+- **The status view draws a frame with about a third fewer processes.** Its helpers set a
+  variable instead of printing into a subshell, the run record is read by one `jq` instead of
+  a dozen, and lookups by ticket stay in bash instead of piping through `awk`. On macOS, where
+  starting a process is slow, the view's test of 61 frames went from 60 s to 43 s. A run record
+  caught half-written no longer stops the view with an unset variable.
 - **Commands start about twice as fast.** The kit runs on Node's own type stripping, not tsx's
   loader: `sandcastle help` and the Herdr tab bar's `sandcastle herdr line`, which runs every 10
   seconds, took about 0.4 s against 0.8-1.2 s. A project whose `package.json` says
