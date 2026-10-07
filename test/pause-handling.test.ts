@@ -98,22 +98,23 @@ test("a run that ends paused is cleared and held awake, and one that never pause
 
 test("an attempt waits at its start while the run is paused and goes on at the resume", async () => {
   const { handling } = harness();
-  let paused = true;
+  // Still paused after the first juncture returns (the pause's cause changed, say): the attempt waits again.
+  let pausedFor = 2;
   const phases: string[] = [];
   let released = false;
   await handling.waitOutPause(
     true,
-    () => paused,
+    () => pausedFor > 0,
     async (phase, park) => {
       phases.push(phase);
       // The park a waiting ticket hands in holds nothing: it has no sandbox to close or open.
       await park.suspend();
       await park.resume();
-      released = true;
-      paused = false;
+      pausedFor--;
+      released = pausedFor === 0;
     },
   );
-  assert.deepEqual(phases, ["start"]);
+  assert.deepEqual(phases, ["start", "start"]);
   assert.equal(released, true);
 });
 
