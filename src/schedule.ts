@@ -858,9 +858,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       let landings = 0;
       const landedAt = new Map<string, number>();
       const resolveFrom = new Map<string, number>();
-      // The tickets whose resolve waits were told, by what they waited for, and the waits still going on; a wait that failed.
+      // The tickets whose resolve waits were told, by what they waited for; a wait that failed.
       const resolveSaid = new Map<string, string>();
-      const resolveWaits = new Set<Promise<void>>();
       const failures: unknown[] = [];
       const settles: (() => void)[] = [];
       let working = 0;
@@ -1198,7 +1197,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // queue, so with N workers a waiting resolve leaves all N for the tickets behind it. Pushed again once nothing
       // is ahead of it (or the run starts nothing: the attempt then ends it as not begun), ahead of the queue as before.
       const waitToResolve = (t: T) => {
-        const settled = resolveTurn(t).then(
+        void resolveTurn(t).then(
           () => {
             // A closed queue means a worker or the landing worker failed: the run rejects with that, nothing would take it.
             if (!pipelines.closed) pipelines.push({ ticket: t, rank: REQUEUED });
@@ -1208,8 +1207,6 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             closeAll();
           },
         );
-        resolveWaits.add(settled);
-        void settled.finally(() => resolveWaits.delete(settled));
       };
       const attempt = async (t: T) => {
         // A paused run starts no ticket: it waits here, holding nothing, until the resume - or a stop.
