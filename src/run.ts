@@ -141,11 +141,12 @@ let released = false;
  * The start line that tells the operator the base is the run's. The guard cannot tell a person's
  * commit on the base from a sandbox's, so one made mid-run stops the run (pipelines in flight
  * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run. Worktrees share
- * `.git/config`, which the guard fingerprints whole, so the routine ways of giving a branch an upstream
- * there stop it too: a person told to use another worktree did, and stopped a drain run (#451).
+ * `.git/config`, and a person told to use another worktree gave a branch an upstream there and
+ * stopped a drain run (#451): the guard reads the file by key now and lets that one through, so the
+ * line says what still stops it.
  */
 export const baseIsTheRunsLine = (base: string) =>
-  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config, so a branch given an upstream there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) stops it too: use --no-track, or \`git push origin HEAD:<branch>\`.`;
+  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config: an upstream for your own branch there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) is fine, but any other change to it stops the run - a remote, a hook path, an include, or an upstream on ${base} or an agent/issue-* branch.`;
 
 export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
