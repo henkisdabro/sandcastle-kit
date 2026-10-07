@@ -230,6 +230,8 @@ const createDependants = <T extends { id: string }, B>(
   ports: Pick<NonNullable<Plan<T, B>["blockers"]>, "ticketOf" | "open">,
 ) => {
   const landed = new Set<string>();
+  // Candidates that ended without landing: still in this run's endings, never "not in this run".
+  const ended = new Set<string>();
   const waitsOn = (h: { on: B[] }, id: string) => h.on.some((b) => ports.ticketOf(b) === id);
   return {
     /** The ticket is on the base and closed: a blocker no more. */
@@ -240,6 +242,7 @@ const createDependants = <T extends { id: string }, B>(
     /** The ticket will not land in this run (red, nothing to change, crashed, held, not begun). */
     ended(id: string) {
       inFlight.delete(id);
+      ended.add(id);
     },
     get size() {
       return held.size;
@@ -251,11 +254,12 @@ const createDependants = <T extends { id: string }, B>(
     /**
      * What each held ticket waits for now, with the candidates still in flight and the tickets
      * landed: every dependant, and of the others only the ones that waited for `id`, whose note
-     * changes with its ending. No lookup: a landed blocker is left out, any other ending is "not in this run".
+     * changes with its ending. No lookup: a landed blocker is left out, and one that ended another
+     * way is in `ended`, for the run to word by its state - never "not in this run".
      */
     notes: (id: string) => [
-      ...[...held].map(([k, h]) => ({ id: k, on: h.on, inFlight: [...inFlight], landed: [...landed] })),
-      ...outside.filter((h) => waitsOn(h, id)).map((h) => ({ id: h.ticket.id, on: h.on, inFlight: [...inFlight], landed: [...landed] })),
+      ...[...held].map(([k, h]) => ({ id: k, on: h.on, inFlight: [...inFlight], landed: [...landed], ended: [...ended] })),
+      ...outside.filter((h) => waitsOn(h, id)).map((h) => ({ id: h.ticket.id, on: h.on, inFlight: [...inFlight], landed: [...landed], ended: [...ended] })),
     ],
     /**
      * Reads again the blockers of each held ticket that waited for `id`, and takes out and returns
@@ -499,12 +503,13 @@ export type HoldChange =
  * ending, what each one still held waits for (`on`), and `inFlight`, the candidates that have not
  * ended - a blocker among them lands this run, any other is not this run's - and `landed`, the
  * tickets that have landed and closed, which are no blocker any more though `on` may still name
- * them. The held tickets that are not candidates (they also wait outside the run) are told too, as
+ * them - and `ended`, the candidates that ended without landing, which the run words by the state
+ * each ended in. The held tickets that are not candidates (they also wait outside the run) are told too, as
  * a blocker of theirs ends, with the `on` the start read. `unreleased`: the
  * blockers could not be read again after `id` landed, so what waits for it starts no earlier than
  * another landing frees it.
  */
-export type BlockerChange<B> = { kind: "blocked"; id: string; on: B[]; inFlight: string[]; landed: string[] } | { kind: "unreleased"; id: string; error: unknown };
+export type BlockerChange<B> = { kind: "blocked"; id: string; on: B[]; inFlight: string[]; landed: string[]; ended: string[] } | { kind: "unreleased"; id: string; error: unknown };
 
 /** What the scheduler tells as the run goes, for the run record and the views. */
 export type Change<G, O, B = unknown> =
@@ -512,6 +517,12 @@ export type Change<G, O, B = unknown> =
   | { kind: "requeued"; id: string; again: Again }
   /** The ticket's ending, as it happens: before the tickets it frees start. */
   | { kind: "ended"; id: string; ending: Ending<G, O> }
+  /**
+   * The stop's first safety cause (`stop.landsNothing` turned true), told once, as it holds: the
+   * run finishes what is in flight and lands nothing more. `cause` is the headline then; the
+   * closing summary may name a more severe one.
+   */
+  | { kind: "stopped landing"; cause: StopCause }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
   | { kind: "landing"; at: number; of: number }
   /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
@@ -822,7 +833,16 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         toldFinishing = key;
         tell({ kind: "paused", since: pausedSince, finishing, ...(pausedFor ? { usage: pausedFor } : {}) });
       };
+      // Told once, the moment the stop first holds - from wherever it is noticed: an ending, a stage
+      // change, the poll. The host's refused write is read live, so no one adds it and any caller may find it.
+      let toldStop = false;
+      const noticeStop = () => {
+        if (toldStop || !stop.landsNothing) return;
+        toldStop = true;
+        tell({ kind: "stopped landing", cause: stop.headline! });
+      };
       const stage = () => {
+        noticeStop();
         demand();
         tellPaused();
         if (working === 0 && pipelines.size === 0 && dealt < pushed) tell({ kind: "landing", at: dealt + 1, of: pushed });
@@ -830,6 +850,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Reads the pause: at each juncture, and every `pollMs` for a run none reaches. A resume drops every
       // parked ticket from the demand before any of them asks for a slot again, and wakes them.
       const sync = () => {
+        noticeStop();
         let now: { since: number; usage?: UsagePaused } | undefined;
         try {
           now = work.pause?.read();
@@ -887,6 +908,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // before the open count drops: the queues close at zero, and a ticket started after that
       // would never run.
       const end = async (id: string, ending: Ending<G, O>, landed = false) => {
+        noticeStop();
         endings.set(id, ending);
         tell({ kind: "ended", id, ending });
         try {

@@ -144,7 +144,7 @@ test("a held ticket that also waits on something outside the run is the next run
   assert.deepEqual(none.start, []);
 });
 
-test("a blocker that ends without landing releases nothing; its dependant is told it is not in this run, and waits", async () => {
+test("a blocker that ends without landing releases nothing; its dependant is told which blocker ended, and waits", async () => {
   const { lines, endings, asked, order } = await play(["1"], { 2: ["1"] }, { attempt: async () => ({ kind: "pipeline", outcome: "gate red" }) });
   assert.deepEqual(asked, []);
   assert.deepEqual(order, ["attempt 1"]);

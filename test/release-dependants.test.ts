@@ -224,7 +224,7 @@ const runWith = async (
           return;
         }
         case "blocked":
-          record.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight)) });
+          record.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed), new Map(c.ended.map((id) => [id, "not landed"]))) });
           return;
         case "unreleased":
           say(`#${c.id}: could not start the tickets that wait for it`);
@@ -305,7 +305,7 @@ test("a blocker that conflicts twice releases nothing, and the run still ends", 
   assert.ok(!run.started.includes("2"), `2 started: ${run.events.join(" | ")}`);
   assert.deepEqual(mergeOrder(run.root), ["9"]);
   assert.equal(run.states["2"].state, "blocked");
-  assert.equal(run.states["2"].note, "waits for #1 (not in this run)");
+  assert.equal(run.states["2"].note, "waits for #1 (not landed)");
 });
 
 test("a dependant with a blocker outside the run stays held, with the note", async () => {
@@ -357,7 +357,7 @@ test("a red ticket releases nothing", async () => {
   const run = await runWith([ticket("1"), ticket("2", ["1"])], { pipeline: async () => "red" });
   assert.deepEqual(run.started, ["1"]);
   assert.equal(run.states["2"].state, "blocked");
-  assert.equal(run.states["2"].note, "waits for #1 (not in this run)");
+  assert.equal(run.states["2"].note, "waits for #1 (not landed)");
 });
 
 test("a bad label on a released ticket holds that ticket, never the run", async () => {

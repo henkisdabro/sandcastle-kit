@@ -765,15 +765,16 @@ paused_cell() {
 
 # The run's state, its times and its tokens, as the run cell's three rows (RUNC).
 run_cell() {
-  local f=logs/run.json orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov t0 eta
+  local f=logs/run.json orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov stopped t0 eta
   RUNC=("" "" "")
   [ -f "$f" ] || { kvl state "${mute}no run recorded yet${off}"; RUNC[0]="$REPLY"; return 0; }
   # A unit separator, not a tab: read collapses runs of whitespace IFS, so an
   # empty finishedAt would shift every later field. A paused run (`sandcastle pause`) adds when it
   # was paused (empty when it is not) and the tickets it still finishes, as "id=state id=state"; one that
   # paused itself for its plan's usage adds the window, its percent, when it resumes and whose plan it is
-  # (empty for a person's pause, and for a cause the record does not state with numbers).
-  IFS="$US" read -r orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov < <(jq -r \
+  # (empty for a person's pause, and for a cause the record does not state with numbers). A run that
+  # stopped landing (its `.git` guard tripped) but still finishes what is in flight adds 1 last.
+  IFS="$US" read -r orch pid started finished code models stage dry tokens paused_at finishing p_win p_pct p_res p_prov stopped < <(jq -r \
     '. as $r | (if (.paused | type) == "object" then .paused else null end) as $p
       | [.orchestrator, (.pid|tostring), .startedAt, (.finishedAt // ""), (.exitCode // "" | tostring), .models, (.stage // ""), (if .dryRun then "dry run" else "" end), (.tokens // ""),
       (if $p then ($p.since // 0 | tostring) else "" end),
@@ -781,6 +782,7 @@ run_cell() {
       + (if $p and $p.cause == "usage" and ($p.window == "fiveHour" or $p.window == "week") and ($p.percent | type) == "number" and ($p.resumesAt | type) == "number"
          then [$p.window, ([([$p.percent | floor, 100] | min), 0] | max | tostring), ($p.resumesAt | floor | tostring), (if $p.provider == "codex" then "codex" else "claude" end)]
          else ["", "", "", ""] end)
+      + [(if (.stopped | type) == "string" and .stopped != "" then "1" else "" end)]
       | join("\u001f")' "$f")
   t0=$(utc_to_epoch "${started%%.*}")
   # The date only when it is not today: the run cell has to fit 80 columns.
@@ -793,6 +795,11 @@ run_cell() {
     kvl started "${mute}${started}${off}"; RUNC[1]="$REPLY"
   elif run_alive "$pid" && [ -n "$paused_at" ]; then
     paused_cell "$paused_at" "$finishing" "$started" "$p_win" "$p_pct" "$p_res" "$p_prov"
+  elif run_alive "$pid" && [ -n "$stopped" ]; then
+    # The guard stopped the landing: what is in flight still finishes, nothing more lands. Said in the
+    # cell the moment it happens, not once the run has ended.
+    kvl state "${bold}${hot}STOPPED${off} ${mute}landing · $(dur $(( $(date +%s) - t0 )))${off}"; RUNC[0]="$REPLY"
+    kvl since "${mute}${started} · lands nothing more${off}"; RUNC[1]="$REPLY"
   elif run_alive "$pid"; then
     # The stage says what a run is doing before its first sandbox exists -
     # image, preflight, base gates - and after its last: "landing 6/25".

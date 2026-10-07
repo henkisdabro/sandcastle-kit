@@ -1,7 +1,7 @@
 // The note of a held ticket that is not a candidate: it waits on a blocker in this run and on one
 // outside it, so it never starts here and its blockers are never read again. As the in-run blocker
 // ends, the scheduler tells its note again from the run's own endings - a landed blocker drops out,
-// any other ending makes it "not in this run" - with no call to the blockers port. No git, no
+// any other ending names the state it ended in (never "not in this run") - with no call to the blockers port. No git, no
 // Docker, no network.
 //
 //   node --test test/schedule-outside-note.test.ts
@@ -44,7 +44,7 @@ const play = async (attempt: (id: string) => Attempted<G, string>) => {
     host: { check: async () => {}, failed: undefined },
     tell: (c) => void told.push(c),
   });
-  const notes = told.flatMap((c) => (c.kind === "blocked" && c.id === "2" ? [blockedNote(c.on, new Set(c.inFlight), new Set(c.landed))] : []));
+  const notes = told.flatMap((c) => (c.kind === "blocked" && c.id === "2" ? [blockedNote(c.on, new Set(c.inFlight), new Set(c.landed), new Map(c.ended.map((id) => [id, "gate red"])))] : []));
   return { notes, asked, endings, schedule };
 };
 
@@ -57,9 +57,9 @@ test("a blocker that landed drops out of the note of a ticket that also waits ou
   assert.deepEqual(asked, []);
 });
 
-test("a blocker that ended red reads not in this run, not lands this run", async () => {
+test("a blocker that ended red reads gate red, not lands this run; only the outside one is not in this run", async () => {
   const { notes, asked } = await play(() => ({ kind: "pipeline", outcome: "gate red" }));
-  assert.deepEqual(notes.at(-1), "waits for #1, #50 (not in this run)");
+  assert.deepEqual(notes.at(-1), "waits for #1 (gate red), #50 (not in this run)");
   assert.deepEqual(asked, []);
 });
 

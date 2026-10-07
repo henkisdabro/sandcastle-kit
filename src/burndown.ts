@@ -59,7 +59,7 @@ import { sandboxOpener } from "./land.ts";
 import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
-import { accountLanding, type Context, createLedger, outcomesFile, repairWords } from "./ledger.ts";
+import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
@@ -1837,17 +1837,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // it to the scheduler as the cause that stops the run (schedule.ts), which no one else may add.
   const tampered = new Map<string, unknown>();
   // How a cause reads in the skipped tickets' notes and the closing summary.
-  const stopWords = (c: StopCause): string => {
-    switch (c.kind) {
-      case "plan limit":
-        return `${ref(c.ticket)} hit the plan's usage limit`;
-      case "usage limit":
-        return c.line;
-      case "tampered":
-      case "host failed":
-        return "the shared .git changed";
-    }
-  };
+  const stopWords = (c: StopCause): string => causeWords(c, ref);
   // What a stopped run throws: a safety stop's own error, which names what moved.
   const stopError = (c: StopCause) => ("error" in c ? c.error : new OperatorError(stopWords(c)));
 
@@ -2147,6 +2137,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
         return ledger.tell(c);
+      case "stopped landing": {
+        // Said as the stop first holds, not at the run's end: the run goes on printing `working` lines
+        // for tickets in flight, and a person would read each as a run that still lands.
+        const error = stopError(c.cause);
+        run.update({ stopped: String((error as Error).message ?? error) });
+        console.log(stoppedLine(c.cause, ref));
+        return view.refresh();
+      }
       case "demand":
         // Before the pipelines ask for their slots, so the share they are held to is worked out from it.
         setDemand(c.n);
@@ -2186,7 +2184,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         void holdAwake();
         return view.refresh();
       case "blocked":
-        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed)) }));
+        return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed), new Map(c.ended.map((id) => [id, ledger.endedAs(id)]))) }));
       case "unreleased":
         console.log(`${ref(c.id)}: could not start the tickets that wait for it (${errorLine(c.error)}); they wait for the next run.`);
         return;

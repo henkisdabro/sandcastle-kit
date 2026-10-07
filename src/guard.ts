@@ -272,6 +272,30 @@ const hasCommit = (root: string, sha: string) => {
   }
 };
 
+/**
+ * A stop the `.git` guard raised. `what` is the cause in a few words (`main moved while sandboxes
+ * ran`), which a skipped ticket's note and the stop's headline carry; `detail` is what a person
+ * needs to see it for themselves (the commits, the files), after `what` in the headline only.
+ */
+export class GuardStop extends OperatorError {
+  readonly what: string;
+  readonly detail: string;
+  constructor(message: string, words: { what: string; detail?: string }, options?: ErrorOptions) {
+    super(message, options);
+    this.what = words.what;
+    this.detail = words.detail ?? "";
+  }
+}
+
+/** Said of a stop whose error is not the guard's own, so no note names it wrongly. */
+const UNNAMED = "the shared .git changed";
+
+/** What a stop's error says changed: the guard's own words, or those of the error it wraps. */
+export const guardWords = (error: unknown): { what: string; detail: string } => {
+  for (let e = error, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) if (e instanceof GuardStop) return { what: e.what, detail: e.detail };
+  return { what: UNNAMED, detail: "" };
+};
+
 // Puts a vanished branch back where the run expected it, and says so. The copy in the backup repo
 // first when it is that tip (the objects may be gone from the shared `.git`), then the recorded
 // commit if it still resolves, then whatever the backup holds; no copy at all stops the run.
@@ -292,9 +316,10 @@ const restoreBranch = (project: Project, name: string, want: string, when: strin
     fromBackup();
     source = "an older backup";
   } else {
-    throw new OperatorError(
+    throw new GuardStop(
       `STOPPED ${when}: ${clean(name)} was deleted while sandboxes ran, and no copy of its commits survives (it was last at ${want.slice(0, 12)}, which the shared .git no longer holds, and ${relative(root, backupRepo(project))} has no entry). ` +
         `A sandbox may have deleted it and removed its commits.`,
+      { what: `${clean(name)} was deleted while sandboxes ran, with no copy of its commits`, detail: `(it was last at ${want.slice(0, 12)})` },
     );
   }
   const tip = tipOf(root, ref);
@@ -334,22 +359,26 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   const root = project.root;
   const changed = changedFiles(before.files, now.files);
   if (changed.length) {
-    throw new OperatorError(
-      `STOPPED ${when}: ${changed.map((f) => relative(realpathSync(root), f)).join(", ")} changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
+    const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
+    throw new GuardStop(
+      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
         `Inspect \`git -C ${root} config --local --list\` and .git/info/ before running any other git command there.`,
+      { what: "the shared .git changed while sandboxes ran", detail: `(${names})` },
     );
   }
   const rewritten = rewrittenWorktrees(project);
   if (rewritten.length) {
-    throw new OperatorError(
+    throw new GuardStop(
       `STOPPED ${when}: the worktree record of ${rewritten.join(", ")} no longer holds its host path under .sandcastle/worktrees/ (\`git worktree repair\` in a sandbox writes its container path). ` +
         `The host cannot find ${rewritten.length === 1 ? "that sandbox" : "those sandboxes"} now. Once nothing runs, \`git -C ${root} worktree repair <path>\` for each worktree under .sandcastle/worktrees/ puts the records right.`,
+      { what: "a sandbox's worktree record was rewritten", detail: `(${rewritten.join(", ")})` },
     );
   }
   if (before.base && !now.base) {
-    throw new OperatorError(
+    throw new GuardStop(
       `STOPPED ${when}: ${base} was deleted while sandboxes ran. It may be a person's doing, so the run lands nothing more. ` +
         `Put it back with \`git -C ${root} update-ref refs/heads/${base} ${before.base}\` (it fails if ${base} exists by then), then \`sandcastle run\` again.`,
+      { what: `${base} was deleted while sandboxes ran` },
     );
   }
   if (now.base !== before.base) {
@@ -364,12 +393,15 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     const range = `${before.base}..${now.base}`;
     const commits = lines(["log", "--format=%h by %cn, %cr: %s", "-5", range]);
     const files = lines(["diff", "--name-only", range]);
-    throw new OperatorError(
-      `STOPPED ${when}: ${base} moved while sandboxes ran (${commits.join("; ") || `${before.base.slice(0, 7)} -> ${now.base.slice(0, 7)}, not a fast-forward`}` +
-        `${files.length ? `; changes ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` and ${files.length - 5} more` : ""}` : ""}). ` +
+    const detail =
+      `(${commits.join("; ") || `${before.base.slice(0, 7)} -> ${now.base.slice(0, 7)}, not a fast-forward`}` +
+      `${files.length ? `; changes ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` and ${files.length - 5} more` : ""}` : ""})`;
+    throw new GuardStop(
+      `STOPPED ${when}: ${base} moved while sandboxes ran ${detail}. ` +
         `A run cannot tell a person's commit from a sandbox's, so it lands nothing more. Check the commits are yours - a sandbox can ` +
         `set any name - with \`git show --stat ${before.base.slice(0, 9)}..${now.base.slice(0, 9)}\`; if they are, \`sandcastle run\` again and each branch starts from where it stopped. ` +
         `If they are not, \`git -C ${root} update-ref refs/heads/${base} ${before.base} ${now.base}\` puts ${base} back (it fails if ${base} moved again).`,
+      { what: `${base} moved while sandboxes ran`, detail },
     );
   }
   const moved: string[] = [];
@@ -379,9 +411,10 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
     else if (at !== tip && !before.flying.has(name)) moved.push(`${clean(name)} ${tip.slice(0, 12)} -> ${at.slice(0, 12)}`);
   }
   if (moved.length) {
-    throw new OperatorError(
+    throw new GuardStop(
       `STOPPED ${when}: ${moved.join(", ")} moved while its ticket was not running. A sandbox may have rewritten another ticket's branch; nothing else touches a branch between its pipeline and its landing. ` +
         `The commit it had is still in the object store unless a gc ran: \`git -C ${root} update-ref refs/heads/<branch> <old tip>\` puts a branch back, and ${relative(root, backupRepo(project))} holds a copy of each branch a pipeline ended with.`,
+      { what: "an agent branch moved while its ticket was not running", detail: `(${moved.join(", ")})` },
     );
   }
 };
