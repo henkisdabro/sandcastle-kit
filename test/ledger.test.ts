@@ -94,6 +94,21 @@ const ROWS: Row[] = [
     "merge conflict (a person acts)",
     `comment: Sandcastle ran this ticket and did not land it: merging \`agent/issue-2\` into \`main\` conflicted (with #1, #3: a.ts). ${NEXT_RUN}\n\nWhat the agents reported:\n\n${REPORT}`,
   ],
+  // Before landing: its pipeline found the branch no longer merges, and it was not sent back.
+  [
+    "conflict found before review or the gates",
+    {
+      kind: "conflict",
+      outcome: { issue: "2", branch: "agent/issue-2", status: "conflict", commits: 1, repairs: 0, gates: [], conflict: { files: ["a.ts"], with: ["1"] } },
+      conflict: { files: ["a.ts"], with: ["1"] },
+      attempts: 1,
+    },
+    {},
+    "conflict - no longer merges onto main: with #1: a.ts",
+    "conflict [1] - merge conflict before landing: with #1: a.ts",
+    "merge conflict (a person acts)",
+    `comment: Sandcastle ran this ticket and did not land it: merging \`agent/issue-2\` into \`main\` conflicted (with #1: a.ts). ${NEXT_RUN}`,
+  ],
   [
     "red once merged",
     landing({ kind: "red", with: ["1"], gates: ["test"] }),
@@ -268,7 +283,7 @@ for (const [name, ending, context, ...want] of ROWS) {
 }
 
 test("the table has a row for every ending kind, every landing and every pipeline that ends one", () => {
-  const endings: Record<TicketEnding["kind"], true> = { landing: true, pipeline: true, crashed: true, stopped: true, "not begun": true, waiting: true, parked: true };
+  const endings: Record<TicketEnding["kind"], true> = { landing: true, pipeline: true, conflict: true, crashed: true, stopped: true, "not begun": true, waiting: true, parked: true };
   const landings: Record<Landed["kind"], true> = {
     merged: true,
     conflict: true,

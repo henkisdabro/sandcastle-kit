@@ -42,7 +42,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { strayChanges, strayNote } from "./resolution.ts";
+import { mergeTree, mergeTreeSupported, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -57,10 +57,10 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -75,7 +75,12 @@ type Outcome = {
   branch: string;
   // "green", never "shipped": the pane titles said shipped while nothing had
   // landed, and the status table said queued - a run read as going in circles.
-  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held";
+  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held" | "conflict";
+  /**
+   * What its branch no longer merged onto the base with (`conflict`), found on the host before its review or its
+   * gates: the pipeline stopped there, and the scheduler sends it back to resolve the merge (`conflictBefore`).
+   */
+  conflict?: Conflict;
   /** Why the kit held a finished branch for a person (`held`): nothing was handed back by an agent. */
   heldNote?: string;
   /** The agent handed the ticket back through the tracker's hold label (`nochange`), read as the pipeline ended (`handBack`). */
@@ -165,6 +170,8 @@ export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, 
   if (result.status === "rejected") return { kind: "crashed", error: result.reason, causes: [...tampered, ...(limited ? [{ kind: "plan limit" as const, ticket: issue }] : [])] };
   const value = result.value;
   if (value.status === "green" || value.status === "merged-earlier") return check ? { kind: "stopped", cause: tampered[0] } : { kind: "green", green: value };
+  // Never pushed on as green: the gates vouched for no commit of it. The requeue-once rule decides what comes next.
+  if (value.status === "conflict" && value.conflict) return { kind: "conflict", outcome: value, conflict: value.conflict, ...(check && { causes: tampered }) };
   return { kind: "pipeline", outcome: value, ...(check && { causes: tampered }) };
 };
 
@@ -187,7 +194,7 @@ export const handBack = (o: Outcome, tracker: Pick<Tracker, "agentsWrite" | "get
 // What an issue's pane and sidebar entry say when its pipeline ends - the
 // status table's words, so the two never disagree.
 const finishWord = (o: Outcome) =>
-  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human" })[o.status];
+  ({ green: "ready to land", "gate-failed": "gate red", nochange: "no change", "merged-earlier": "ready to land", held: "needs a human", conflict: "merge conflict" })[o.status];
 
 // A fence one backtick longer than any run inside, so gate output cannot
 // close it and carry on as prompt text.
@@ -819,6 +826,8 @@ export type PipelineContext = {
   results: readonly PromiseSettledResult<Outcome>[];
   /** Each ticket's red landing gate, for its requeue (`repairFromRed`); read once, by its next pipeline. */
   reds: Map<string, RedLanding>;
+  /** The tickets landed so far in this run, with the files each changed (`LandContext.landed`): who a branch that no longer merges collides with. None, and it is named with no one. */
+  landed?: ReadonlyMap<string, { files: string[]; commit: string }>;
   /** Who is repairing which failure, shared by the run's pipelines: a ticket red on one another is repairing waits for that landing. A pipeline given none waits for no one. */
   fixes?: FixBoard;
   /** What the agents reported, by ticket, when they cannot write to the tracker. */
@@ -847,6 +856,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
   const fixes = ctx.fixes ?? createFixBoard();
   const waited = ctx.waited ?? new Map<string, number>();
+  const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
   const base = project.baseBranch;
   const ref = tracker.ref;
   // A run that died between merging a branch and closing its issue leaves the
@@ -925,6 +935,31 @@ export const createPipeline = (ctx: PipelineContext) => {
     if (!tests.every((t) => there.includes(t))) return undefined;
     const fileOnly = tests.some((t) => !t.includes("::"));
     return fileOnly && failureKey(failure) !== failureKey(onBase) ? undefined : tests;
+  };
+
+  // Read once: `git --version` does not change during a run.
+  let mergeTreeOk: boolean | undefined;
+  /**
+   * Whether `branch` still merges onto the base's tip, by git's own merge on the host as landing checks it (`landOne`):
+   * the files that conflict and the tickets landed in this run that changed them, or undefined when it merges. Another
+   * ticket that landed over the same lines leaves a branch whose review and gates landing would throw away - a review
+   * of a doomed branch once took most of a run's lost time - so the pipeline asks before its review and again before
+   * its gates. A conflict only in generated files is none (landing regenerates them), nor is a check that cannot run
+   * (git older than 2.38, a git call that failed): the pipeline goes on as it did before.
+   */
+  const conflictBefore = (branch: string): Conflict | undefined => {
+    try {
+      mergeTreeOk ??= mergeTreeSupported(project.root);
+      if (!mergeTreeOk) return undefined;
+      const head = sh("git", ["rev-parse", branch], project.root);
+      const files = [...mergeTree(project.root, sh("git", ["rev-parse", base], project.root), head).conflicted];
+      if (!files.length || regensFor(files, project.generated)) return undefined;
+      // The landed tickets this branch has never seen that changed a file of the conflict, as landing names them.
+      const others = [...landed].filter(([, r]) => files.some((f) => r.files.includes(f)) && !isAncestor(project.root, r.commit, head)).map(([id]) => id);
+      return { files, with: others };
+    } catch {
+      return undefined;
+    }
   };
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
@@ -1044,6 +1079,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       // Normally already locked by the worktree hook; this covers a worktree
       // Sandcastle reused.
       lockWorktree(sandbox.worktreePath, project.root);
+      // A branch that no longer merges onto the base ends its pipeline at once: no review or gate run is spent on it,
+      // and the scheduler sends it back to resolve the merge (the requeue-once rule). Never a green, which would tell
+      // landing that the gates vouched for a commit they never ran on.
+      const conflicted = (before: "review" | "gates", o: Pick<Outcome, "reviewCommits" | "repairs" | "idleRepairs" | "carried">): Outcome | undefined => {
+        const conflict = conflictBefore(branch);
+        if (!conflict) return undefined;
+        console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
+        return { issue: issue.id, branch, status: "conflict", conflict, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
+      };
       // A branch kept from an earlier run (red, conflicted, crashed) forks from
       // an older base. Asked to "merge it in", an agent that found the work
       // already done said so and stopped, and the branch hit the same conflict
@@ -1323,6 +1367,9 @@ export const createPipeline = (ctx: PipelineContext) => {
           return { issue: issue.id, branch, status: "nochange", commits: 0, reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, gates: [] };
         }
 
+        const beforeReview = conflicted("review", { reviewCommits: 0, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+        if (beforeReview) return beforeReview;
+
         // Only a base merge since the last completed review: review the merge, not the branch.
         const since = narrowReviewBase(project.root, base, issue.id);
         if (since !== undefined && since === sh("git", ["rev-parse", branch], project.root)) {
@@ -1392,6 +1439,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // What the agents needed before any gate: `memory.peak` cannot be reset, so after a gate it is the gate's.
       // A land-only re-run gives one only when a narrow review ran in this sandbox (after a resolve, or for a carried merge).
       if (agentsRan) await agentBaseline(sandbox);
+
+      const beforeGates = conflicted("gates", { reviewCommits, repairs: earlierRepairs, idleRepairs: earlierIdle, carried });
+      if (beforeGates) return beforeGates;
 
       // Gates are checked here, in the orchestrator. No agent gets to tell us
       // they passed - `exitCode` is returned rather than thrown.
@@ -2251,6 +2301,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     requeuedAs,
     results,
     reds,
+    landed: ctx.landed,
     fixes,
     reports,
     notes,
