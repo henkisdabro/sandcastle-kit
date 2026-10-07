@@ -1953,7 +1953,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(gateProject, image, planFile),
-    greenBase: (commit) => noteGreenCommit(gateProject, image, planFile, commit, runId),
+    greenBase: (commit) => noteGreenCommit(gateProject, image, planFile, commit),
     runId,
     withdrawal,
     host,

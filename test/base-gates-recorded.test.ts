@@ -123,15 +123,6 @@ test("a changed image, plan file or commit still gates the base after a green ve
   });
 });
 
-test("a record from an earlier run keeps the older skip wording", async () => {
-  const root = makeProject("check-red");
-  await inProject(root, async (project, plan) => {
-    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
-    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-2"));
-    assert.equal(skipped(lines), "Gates on main: green at this commit and image before - not re-run.");
-  });
-});
-
 test("the mid-run base check red on a recorded commit removes the record, so the next turn gates it", async () => {
   const root = makeProject("check-red");
   await inProject(root, async (project, plan) => {
@@ -205,4 +196,20 @@ test("a landing whose gates went red tells no commit", async () => {
   assert.equal(second.kind, "red");
   assert.deepEqual(told, []);
   assert.equal(git(root, "log", "-1", "--format=%s", "main").startsWith("Merge"), true);
+});
+
+// Each autonomy turn writes a fresh run record with its own `startedAt`, which the kit passes as the
+// run id: a skip keyed on it never said "verified this run" in a later turn.
+test("a later turn's check knows the verify an earlier turn of the same run passed", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "turn-1"));
+    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "turn-2"));
+    assert.match(skipped(lines) ?? "", /already \(verified this run\)/);
+    // A record another process wrote (`sandcastle gates` by hand, an earlier run) is only "before".
+    const file = join(root, ".sandcastle/.run/base-gates.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), run: "another" }) + "\n");
+    const again = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "turn-3"));
+    assert.match(skipped(again.lines) ?? "", /green at this commit and image before/);
+  });
 });
