@@ -511,9 +511,10 @@ export const render = (f: Facts, plain = false): string => {
   // counted as attempted and listed nowhere, under a headline that said "finished".
   const early = !baseRed && !f.stopped && !f.live &&
     (!!f.killed || !!f.stoppedBy || (!!f.finished && f.stage !== "report" && typeof f.exitCode === "number" && f.exitCode !== 0));
-  // Parked at a juncture of a paused run when it ended (stopped, crashed, or stopped by the guard, which wakes it): nothing
+  // Parked at a juncture of a paused run when it ended (crashed, killed, or stopped by any cause, which wakes it - a usage
+  // stop as well as the guard's, which leave no `stopped` or early exit): a run that is not live is not paused. Nothing
   // was cut short, its branch holds every commit and the next run picks it up, so it is runnable, not cut.
-  const parked = early || (f.stopped && !f.live) ? Object.keys(f.tickets).filter((id) => f.tickets[id].state === "paused") : [];
+  const parked = f.live ? [] : Object.keys(f.tickets).filter((id) => f.tickets[id].state === "paused");
   const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && f.tickets[id].state !== "paused" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
