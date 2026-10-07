@@ -140,7 +140,10 @@ export type TicketRecord = {
   state?: TicketState;
   /** Seconds since the epoch at which the state began. */
   since?: number;
+  /** Seconds since the epoch at the ticket's first `setup`, kept through a requeue or a resume: TIME's start. */
   started?: number;
+  /** Seconds since the epoch at the current attempt's `setup` (a requeued second attempt, a resume): the ETA's start. */
+  attemptStarted?: number;
   order?: number;
   note?: string | null;
   title?: string;

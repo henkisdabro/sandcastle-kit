@@ -741,9 +741,11 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
 export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.now()): number | undefined => {
   const typical = typicalTimes(project).issue;
   if (typical === undefined) return undefined;
-  const left = Object.values(record.tickets ?? {}).flatMap((t) =>
-    t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof t.started === "number" ? [Math.max(typical - (nowMs / 1000 - t.started), 60)] : [],
-  );
+  // From the current attempt's start: a requeued second attempt is a pipeline of its own.
+  const left = Object.values(record.tickets ?? {}).flatMap((t) => {
+    const from = t.attemptStarted ?? t.started;
+    return t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof from === "number" ? [Math.max(typical - (nowMs / 1000 - from), 60)] : [];
+  });
   return left.length ? Math.min(...left) : undefined;
 };
 

@@ -55,7 +55,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Follow-ups that a ticket's implement and review passes give for the same `path:line` are filed
   once**; the later one becomes a comment on the first issue.
 - **A ticket the run put back and ran again keeps its first start time** in the run record, and a
-  third send-back after a conflict records three attempts, not two.
+  third send-back after a conflict records three attempts, not two. Each attempt's own start is
+  recorded too (`attemptStarted`), which the ETA counts from.
 - **A stop that arrives during a pause, before a ticket's first step, ends that ticket as not
   started** instead of parked; a requeued ticket keeps the ending of its first landing.
 - **A guard stop during a pause clears "paused" in the Herdr sidebar and tab bar at once**,

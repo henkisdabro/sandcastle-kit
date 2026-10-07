@@ -160,6 +160,7 @@ test("the wait is the usual issue time less the oldest working ticket's age, a m
   const record = { tickets: { "1": { state: "implement" as const, started: at(5) }, "2": { state: "gates" as const, started: at(18) }, "3": { state: "queued" as const }, "4": { state: "landing" as const, started: at(1) } } };
   assert.equal(firstSlotWait(project, record, now), 120, "20 minutes less the oldest ticket's 18; the queued and the landing ticket hold no slot to free");
   assert.equal(firstSlotWait(project, { tickets: { "1": { state: "implement", started: at(40) } } }, now), 60, "overdue: a minute at least, as the status view counts it");
+  assert.equal(firstSlotWait(project, { tickets: { "1": { state: "resolve", started: at(40), attemptStarted: at(5) } } }, now), 900, "a requeued second attempt counts from its own start");
 });
 
 test("no history, or no working ticket: no wait", () => {

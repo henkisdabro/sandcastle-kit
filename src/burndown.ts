@@ -730,10 +730,15 @@ export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Pro
 /**
  * The `started` a step's run.json write carries: at the ticket's first `setup` only, kept through a
  * requeued second attempt or a resume, as the status view's TIME for a finished ticket is
- * `since - started`, its whole wall time, not its last attempt's.
+ * `since - started`, its whole wall time, not its last attempt's. `attemptStarted` is every `setup`'s:
+ * the ETA counts a working ticket's time left from it, and from the first start a second attempt after a
+ * long first one read as overdue.
  */
-export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number } =>
-  phase === "setup" && typeof prior?.started !== "number" ? { started: Math.floor(sinceMs / 1000) } : {};
+export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number; attemptStarted?: number } => {
+  if (phase !== "setup") return {};
+  const at = Math.floor(sinceMs / 1000);
+  return typeof prior?.started === "number" ? { attemptStarted: at } : { started: at, attemptStarted: at };
+};
 
 /** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
 export const SLOT_WAIT_SHOWN = 3 * 60_000;

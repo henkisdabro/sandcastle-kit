@@ -541,7 +541,7 @@ load_run() {
       (.typical.issue // null) as $t
       | if $t == null or (.stage // "") != "running" then empty else
         ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
-        | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))) | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
+        | ([(.tickets // {})[] | (.attemptStarted // .started) as $s | select($s != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))) | ([$t - ($now - $s), 60] | max)] | add // 0) as $a
         | ([(.tickets // {})[] | select((.state // "") | IN("queued", "setup", "implement", "resolve", "review", "cross-review", "gates", "repair", "ready", "landing"))] | length) as $n
         | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) as $p
         | ($now + $n * (.typical["landing gates"] // 0)) as $l
