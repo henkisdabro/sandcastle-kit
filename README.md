@@ -1457,7 +1457,9 @@ and the kit narrows what can cross it:
   a file over 50 MB is held the same way: GitHub refuses a push with one over 100 MB, and a file
   that size stays in the history for good. A ticket whose work lies in a protected path therefore
   always ends held, so `sandcastle queue --lint` and `sandcastle requeue` warn about one (its `Touches:`
-  line, or a kept branch, names the path): merge it by hand rather than queue it.
+  line, or a kept branch, names the path): merge it by hand rather than queue it. A run still starts
+  one whose `Touches:` line names the path, and says so in its start plan (`#N will be held for a
+  person to merge (paths)`); its `needs a human` line at landing names the paths too.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.
