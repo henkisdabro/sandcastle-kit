@@ -1,12 +1,13 @@
 // Every test file starts from the same environment (test/hermetic-env.ts, preloaded beside
 // test/no-stray.ts): a canonical TMPDIR, the running node's directory first on PATH, and none of the
-// host's HERDR_*, TMUX*, SANDCASTLE_* or kit settings. Also the guard against a new setting leaking in:
+// host's HERDR_*, TMUX*, SANDCASTLE_* or kit settings, and no git identity of the host's. Also the guard against a new setting leaking in:
 // a name `src/` reads from the environment must be scrubbed or on the keep list below.
 //
 //   node --import ./test/hermetic-env.ts --test test/hermetic-env.test.ts
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -62,6 +63,9 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     PATH: `/shim${delimiter}${process.env.PATH}`,
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
     SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", GH_TOKEN: "t", NO_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
+    GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
+    GIT_CONFIG_GLOBAL: join(dir, "host-gitconfig"), GIT_CONFIG_NOSYSTEM: "0",
+    GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
   };
   delete env.NODE_TEST_CONTEXT;
   const r = runNode(["--import", join(KIT, "test/hermetic-env.ts"), "--test", "--test-reporter=spec", file], { cwd: dir, env, encoding: "utf8", timeoutMs: 120_000 });
@@ -73,6 +77,33 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
+  for (const gone of ["GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "EMAIL"]) assert.equal(seen.env[gone], undefined, gone);
+  assert.notEqual(seen.env.GIT_CONFIG_GLOBAL, join(dir, "host-gitconfig"));
+  assert.equal(seen.env.GIT_CONFIG_NOSYSTEM, "1");
+  // The pair the gate set stays at its index, and the new one follows it.
+  assert.deepEqual(
+    [seen.env.GIT_CONFIG_COUNT, seen.env.GIT_CONFIG_KEY_0, seen.env.GIT_CONFIG_VALUE_0, seen.env.GIT_CONFIG_KEY_1, seen.env.GIT_CONFIG_VALUE_1],
+    ["2", "commit.gpgsign", "false", "user.useConfigOnly", "true"],
+  );
+});
+
+test("a fixture repo without its own git identity cannot commit", () => {
+  assert.equal(process.env.GIT_CONFIG_NOSYSTEM, "1");
+  assert.ok(existsSync(process.env.GIT_CONFIG_GLOBAL!), "the global config is an empty file");
+  assert.equal(readFileSync(process.env.GIT_CONFIG_GLOBAL!, "utf8"), "");
+  const repo = join(dir, "no-identity");
+  mkdirSync(repo);
+  const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+  assert.equal(git("init", "-q", "-b", "main").status, 0);
+  writeFileSync(join(repo, "f.txt"), "x\n");
+  assert.equal(git("add", "-A").status, 0);
+  const refused = git("commit", "-q", "-m", "no identity");
+  assert.notEqual(refused.status, 0, "git guessed an identity (macOS) or inherited one");
+  assert.match(refused.stderr, /user\.name|user\.email|identity/i);
+  // The same repo with its own identity commits: the refusal is the missing identity, not the fixture.
+  assert.equal(git("config", "user.name", "T").status, 0);
+  assert.equal(git("config", "user.email", "t@localhost").status, 0);
+  assert.equal(git("commit", "-q", "-m", "with identity").status, 0);
 });
 
 test("the test scripts in package.json and test/run-shards.sh preload it beside the stray-output guard", () => {
