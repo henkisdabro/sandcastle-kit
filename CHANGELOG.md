@@ -63,6 +63,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **With `herdr.panes: "all"`, closing the status pane no longer turns the whole Herdr view off**
   when the first ticket claims a sandbox pane: the run says once that the status pane closed, and
   the sidebar, tab bar and notifications carry on.
+- **A sandbox pane closed by hand while it waited for the next ticket no longer turns the run's
+  Herdr view off** when that ticket claims it: the pane is forgotten and the ticket gets another.
 - **A ticket held behind another held ticket no longer reads "(lands this run)" once the run
   stops**; it says the blocker did not land.
 - **The status view's legend no longer cuts a note at 80 columns.** The TIME and partly-done notes

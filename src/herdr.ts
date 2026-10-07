@@ -813,40 +813,52 @@ export const openSandboxView = (
     }
   });
 
+  // One try at a sandbox pane for a ticket; true when a pane it met had been closed by hand and is forgotten.
+  const claimOnce = (issue: string, title: string): boolean | void => {
+    let slot = slots.find((s) => s.issue === undefined && !s.closed);
+    const open = slots.filter((s) => !s.closed);
+    if (!slot && open.length < panes) {
+      // Sandboxes stack to the right of the status view. From an open
+      // pane: one that waited for a machine-wide slot starts after the
+      // queue looked empty and its neighbours' panes closed, and a split
+      // from a closed pane turned the whole view off.
+      // With no pane open and the status pane gone there is nothing to split from: no sandbox
+      // pane then, and the rest of the view goes on. Not another pane, and not a new status pane.
+      if (!open.length && statusGone) return;
+      const [from, direction] = open.length ? [open[open.length - 1].pane, "down"] : [statusPane, "right"];
+      const ratio = String(open.length ? stackRatio(open.length, panes) : layoutRatios(adopted, wide).column);
+      let pane: string;
+      try {
+        pane = herdrJson(["pane", "split", from, "--direction", direction, "--ratio", ratio, "--cwd", project.root, "--no-focus"])
+          .result.pane.pane_id as string;
+      } catch (error) {
+        // The status pane closed since the last report: told as a closed pane, not a broken view.
+        if (!open.length && statusPaneClosed(error)) return;
+        if (open.length && gone(from, error)) return true;
+        throw error;
+      }
+      slot = addSlot(pane);
+    }
+    if (!slot) return;
+    slot.issue = issue;
+    try {
+      herdr(["pane", "rename", slot.pane, `${ref(issue)} ${title}`.slice(0, 60)]);
+    } catch (error) {
+      if (gone(slot.pane, error)) return true;
+      throw error;
+    }
+    show(slot.pane, { issue, title, state: "working", phase: "setup", since: Date.now() });
+  };
+
   return {
     status: statusPane,
     tab,
     claim(issue, title) {
       if (mode === "none") return void safe(reportRunAndSpace);
-      safe(() => {
-        let slot = slots.find((s) => s.issue === undefined && !s.closed);
-        const open = slots.filter((s) => !s.closed);
-        if (!slot && open.length < panes) {
-          // Sandboxes stack to the right of the status view. From an open
-          // pane: one that waited for a machine-wide slot starts after the
-          // queue looked empty and its neighbours' panes closed, and a split
-          // from a closed pane turned the whole view off.
-          // With no pane open and the status pane gone there is nothing to split from: no sandbox
-          // pane then, and the rest of the view goes on. Not another pane, and not a new status pane.
-          if (!open.length && statusGone) return;
-          const [from, direction] = open.length ? [open[open.length - 1].pane, "down"] : [statusPane, "right"];
-          const ratio = String(open.length ? stackRatio(open.length, panes) : layoutRatios(adopted, wide).column);
-          let pane: string;
-          try {
-            pane = herdrJson(["pane", "split", from, "--direction", direction, "--ratio", ratio, "--cwd", project.root, "--no-focus"])
-              .result.pane.pane_id as string;
-          } catch (error) {
-            // The status pane closed since the last report: told as a closed pane, not a broken view.
-            if (!open.length && statusPaneClosed(error)) return;
-            throw error;
-          }
-          slot = addSlot(pane);
-        }
-        if (!slot) return;
-        slot.issue = issue;
-        herdr(["pane", "rename", slot.pane, `${ref(issue)} ${title}`.slice(0, 60)]);
-        show(slot.pane, { issue, title, state: "working", phase: "setup", since: Date.now() });
-      });
+      // A pane closed by hand before any report found it gone is forgotten here too, and the claim tries
+      // again: its pane_not_found left to `safe` turned the whole view off. Each try closes a slot, so the
+      // tries end.
+      for (let again = true, tries = 0; again && tries <= slots.length; tries++) again = safe(() => claimOnce(issue, title)) === true;
     },
     phase(issue, phase) {
       if (mode === "none") return void safe(reportRunAndSpace);
