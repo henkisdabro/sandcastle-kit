@@ -256,6 +256,9 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
       const run = await runGates(project, sandbox, `${project.name} ${label}`, true, undefined, ownSlot);
+      // Red on the base, whoever asked: a green record of it (a landing's, the verify's) would have the next
+      // turn skip the check on a base known to be red - a flaky test passes once and fails the next time.
+      if (run.failures.length || run.gates.some((g) => !g.pass)) noteBaseResult(project.root, "", false);
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
       return {
         ...run,

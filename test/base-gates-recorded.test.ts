@@ -34,7 +34,7 @@ process.env.PATH = [bin, dirname(process.execPath), process.env.PATH].join(delim
 mkdirSync(join(dir, "config/sandcastle-kit"), { recursive: true });
 writeFileSync(join(dir, "config/sandcastle-kit/.env"), "CLAUDE_CODE_OAUTH_TOKEN=made-up\nGH_TOKEN=github_pat_made-up\n");
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { requireGreenBase, verifyBase } = await import("../src/gates.ts");
+const { gateBase, requireGreenBase, verifyBase } = await import("../src/gates.ts");
 const { loadProject } = await import("../src/config.ts");
 const { writePlan } = await import("../src/lean.ts");
 const { landOne, createHostGit } = await import("../src/landing.ts");
@@ -129,6 +129,19 @@ test("a record from an earlier run keeps the older skip wording", async () => {
     await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
     const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-2"));
     assert.equal(skipped(lines), "Gates on main: green at this commit and image before - not re-run.");
+  });
+});
+
+test("the mid-run base check red on a recorded commit removes the record, so the next turn gates it", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
+    assert.ok(existsSync(join(root, ".sandcastle/.run/base-gates.json")));
+    // A flaky test: green when the landing or the verify gated the commit, red when a ticket's red asked about the base.
+    writeFileSync(join(root, ".red"), "");
+    await quietly(() => gateBase(project, "sandcastle-fixture:t", plan, "base-red", false, "run-1", false));
+    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1").catch(() => undefined));
+    assert.ok(ran(lines), lines.join("\n"));
   });
 });
 
