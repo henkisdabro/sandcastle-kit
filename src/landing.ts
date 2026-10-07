@@ -7,7 +7,8 @@
 // makes of it. What the tracker is told at landing, `landOne` takes from the ledger too.
 //
 // A ticket that conflicts or goes red at landing goes back to the pipelines once, in the same run
-// (the scheduler's requeue-once rule, schedule.ts); a second one holds it for the next run.
+// (the scheduler's requeue-once rule, schedule.ts); a second one holds it for the next run, unless
+// it is a conflict with a ticket that landed after the resolve began, which sends it back again.
 //
 // Landing runs on one worker beside the pipelines (schedule.ts), and every write to the
 // host's git goes through `HostGit.write`: the merge, the tracker's commits on the base, the

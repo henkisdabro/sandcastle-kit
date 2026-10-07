@@ -563,6 +563,16 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
         case "next run":
           run.ticket(c.id, { note: stoppedWaitNote(o.ref, c.wait) });
           waitsFor(run, c.id, c.freed, c.wait?.with);
+          return;
+        case "resolve waits": {
+          const note = `waits to resolve its conflict until ${c.for.map(o.ref).join(", ")} ${c.for.length > 1 ? "have" : "has"} landed`;
+          o.say(`  ${o.ref(c.id)} ${note}: a resolve made now would conflict again with the landing of a ticket that shares its files`);
+          run.ticket(c.id, { note });
+          return;
+        }
+        case "resolve starts":
+          o.say(`  ${o.ref(c.id)} resolves its conflict now: nothing that shares its files is left to land`);
+          run.ticket(c.id, { note: null });
       }
     },
   };

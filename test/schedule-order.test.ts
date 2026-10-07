@@ -213,7 +213,8 @@ const play = async (seed: number) => {
       return later(`land ${g.issue}`, (): Landed => {
         const others = [...s.tickets, ...s.held.map((h) => h.id)].filter((id) => id !== g.issue);
         const other = others[Math.floor(rng() * others.length)];
-        const end = s.lands[g.issue][n];
+        // A landing beyond the script (a conflict a landing after the resolve began caused sends the ticket back again) merges.
+        const end = s.lands[g.issue][n] ?? "merged";
         switch (end) {
           case "merged":
           case "closed-earlier":
@@ -280,14 +281,18 @@ const check = ({ s, start, log, endings, stop }: Awaited<ReturnType<typeof play>
   }
   for (const c of told) if (c.kind === "ended") assert.ok(start.includes(c.id), `#${c.id} ended, yet the run never took it in`);
 
-  // At most two attempts, the second only after a requeue told once.
+  // A first attempt, then each further one only after a requeue of its own told before it: a first conflict or red, and
+  // again only a conflict a landing caused after the resolve began (the scenario's landings after the script merge).
   for (const id of start) {
     const ns = log.flatMap((e) => (e.kind === "attempt" && e.id === id ? [e.n] : []));
-    const requeued = log.findIndex((e) => e.kind === "told" && e.change.kind === "requeued" && e.change.id === id);
-    assert.ok(ns.length <= 2 && ns.every((n, i) => n === i + 1), `#${id} attempts: ${ns.join(", ")}`);
-    assert.ok(told.filter((c) => c.kind === "requeued" && c.id === id).length <= 1, `#${id} is requeued twice`);
-    const second = log.findIndex((e) => e.kind === "attempt" && e.id === id && e.n === 2);
-    if (second >= 0) assert.ok(requeued >= 0 && requeued < second, `#${id}'s second attempt was never told as requeued`);
+    assert.ok(ns.every((n, i) => n === (i === 0 ? 1 : 2)), `#${id} attempts: ${ns.join(", ")}`);
+    const requeues = told.filter((c) => c.kind === "requeued" && c.id === id).length;
+    assert.ok(requeues <= Math.max(0, ns.length), `#${id} is requeued ${requeues} times over ${ns.length} attempts`);
+    for (let i = 1; i < ns.length; i++) {
+      const at = log.findIndex((e, k) => e.kind === "attempt" && e.id === id && log.slice(0, k + 1).filter((x) => x.kind === "attempt" && x.id === id).length === i + 1);
+      const before = log.slice(0, at).filter((e) => e.kind === "told" && e.change.kind === "requeued" && e.change.id === id).length;
+      assert.ok(before >= i, `#${id}'s attempt ${i + 1} was never told as requeued`);
+    }
   }
 
   // Two tickets sharing a file git cannot merge never run at the same time: from a ticket's first
