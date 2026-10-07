@@ -1,10 +1,12 @@
-// Two checks over every tracked file, so neither depends on a hand-kept list:
+// Three checks over every tracked file, so none depends on a hand-kept list:
 // - every shell script parses: the `bash -n` lists in the docs and CI had drifted, and a script
 //   added later (herdr/entry.sh) was never checked; the host's scripts parse under bash 3.2 as
 //   well, where there is one;
 // - no invisible character sits raw in a source file: an editor tool once wrote `\u200b` and
 //   `\u202e` as the characters themselves, and esbuild failed on a regex it could no longer read.
-//   Write them as escapes.
+//   Write them as escapes;
+// - no tracked file names a real home directory: only the outbound scan in test/full-check.sh
+//   caught one, and that never runs in a sandbox gate.
 // Reads the git index of this checkout (or walks it); no Docker, gh, model calls or network.
 //
 //   node --test test/source-hygiene.test.ts
@@ -136,6 +138,5 @@ test("the home-path rule is the one test/full-check.sh scans with", () => {
 });
 
 test("no tracked file names a real home directory", () => {
-  // The rule's source is home_paths in test/full-check.sh.
-  assert.deepEqual(homePathHits(tracked, text), []);
+  assert.deepEqual(homePathHits(tracked, text), [], "a real home directory in a tracked file (the rule is home_paths in test/full-check.sh): write a placeholder such as /home/user");
 });
