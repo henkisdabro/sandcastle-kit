@@ -22,12 +22,12 @@
 // has an older entry for that pool: without it, a run that has just freed a slot asks again at
 // once and almost always wins, and a second project's run waits until the first drains. A wait
 // entry whose process is gone is ignored and removed, by the same rule as a stale slot.
-// Within one run, a waiter that asks for priority (`withSlot`'s last argument: the gates a landing, the
-// base check and the verify make, which the run's end waits on) goes before the run's other waiters for
-// the same pool, and counts from the run's oldest wait, so the run is picked as before; the rest of the
+// Within one run, a waiter that asks for priority (`withSlot`'s last argument: a landing's sandbox, and the
+// gates a landing, the base check and the verify make, which the run's end waits on) goes before the run's
+// other waiters for the same pool, and counts from the run's oldest wait, so the run is picked as before; the
 // run's other waiters go in the order they began waiting (the earliest first, ties in the order they asked), so
 // a ticket is not passed by later ones of its run for as long as the run's share leaves it one slot, and `slotTurn`
-// (landing.ts) puts a landing before the run's next pipeline for sandbox slots.
+// (landing.ts) keeps the run's next pipeline from asking for a sandbox slot while a landing waits for one.
 //
 // Shares (docs/adr/0001): live runs split the sandbox slots equally between them, up to each
 // run's demand. A run registers (`joinPool`: `runs/<id>.run`, written whole and renamed in) with
