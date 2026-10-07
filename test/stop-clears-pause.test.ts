@@ -102,3 +102,42 @@ test("a stop before the pause is read leaves the record unpaused", async () => {
   });
   assert.ok(!writes.some((p) => p !== undefined), "no paused record after a stop");
 });
+
+test("a resume read after a stop during a pause says no pause lifted", async () => {
+  let since: number | undefined;
+  const host: { check(ticket: string): Promise<void>; failed: unknown } = { check: async () => {}, failed: undefined };
+  const said: string[] = [];
+  const handling = createPauseHandling({ record: () => {}, say: (line) => void said.push(line), ref: (id) => id, releaseAwake: () => {}, holdAwake: async () => {}, refresh: () => {} });
+  const told: Change[] = [];
+  let passEnds!: () => void;
+  const passEnding = new Promise<void>((resolve) => (passEnds = resolve));
+  let started = false;
+  const done = createSchedule<T, G, string, string>({ tickets: [{ id: "1" }] }).run({
+    workers: 1,
+    pause: { read: () => (since === undefined ? undefined : { since }), pollMs: 5 },
+    attempt: async (t) => {
+      started = true;
+      await passEnding;
+      return { kind: "green", green: { issue: t.id } };
+    },
+    land: async () => ({ kind: "merged" }),
+    host,
+    tell: (c) => {
+      told.push(c);
+      handling.told(c);
+    },
+  });
+
+  await until(() => started, "the ticket to start");
+  since = 1_790_000_000;
+  await until(() => told.some((c) => c.kind === "paused"), "the pause to be told");
+  host.failed = new Error("STOPPED before writing to the base branch: .git/config changed while sandboxes ran");
+  await until(() => told.some((c) => c.kind === "pause stopped"), "the stop to end the pause");
+  // `sandcastle resume` while the ticket in flight finishes: the polls read it before the schedule ends.
+  since = undefined;
+  await sleep(50);
+  passEnds();
+  await done;
+  assert.ok(!told.some((c) => c.kind === "resumed"), "no resume told after the stop ended the pause");
+  assert.ok(!said.some((line) => line.startsWith("Resumed")), "the log says no paused ticket goes on");
+});
