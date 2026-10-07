@@ -19,6 +19,29 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   only type annotations, `satisfies`, `as` and `import type` (as `sandcastle init` writes it)
   needs nothing. An `enum`, a `namespace` or a constructor parameter property no longer loads:
   `sandcastle` names the file and the place; replace it with a plain object or field.
+- **A branch that ended red before this version is gated and repaired on its next run, not
+  implemented again**: its red result was not recorded then. Run `sandcastle requeue <ticket>`
+  first to have it implemented afresh.
+
+### Added
+
+- **`sandcastle usage`** prints the plan's 5-hour and weekly usage between runs, read-only: the
+  newest reading a run recorded (under 10 minutes old), else one request to the usage endpoint.
+  With an API key in use it says the sandboxes spend API credits, not a plan.
+- **`sandcastle report --changelog [--since <ref>]`** lists every ticket the runs landed since a
+  ref (the latest tag by default), across runs, with the agents' suggested changelog lines grouped
+  Added, Changed, Fixed and Upgrading, and the tickets with none listed apart.
+- **The status view has a TOKENS column**: each ticket's tokens in/out, cache counted in "in",
+  the pass running now included. CPU and MEM become one CPU/MEM column. From 100 columns both
+  show, from 80 only TOKENS, below 80 neither; an ended run's rows keep their figures.
+- **The closing summary shows Codex's plan usage** beside Claude's when cross-review ran on a
+  ChatGPT plan.
+- **`sandcastle queue --lint` lists `Touches:` paths not on the base branch**, and globs that
+  match nothing, so a typo is caught before a run.
+- **`sandcastle doctor` names triage labels mapped in `docs/agents/triage-labels.md` but missing
+  on GitHub**, with the `gh label create` command; `/sandcastle queue` creates one before applying it.
+- **`pnpm test:weights`** measures the suite one file at a time and prints a `WEIGHTS` block for
+  `test/shard.ts`.
 
 ### Changed
 
@@ -36,6 +59,26 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   a leg of its own instead of ahead of the test files: 412 s became 246 s on a 15-core Mac. CI's
   macOS status job runs it under both bashes side by side, not one after the other: its four
   minutes made it the slowest job of every pull request.
+- **The run estimate prices gate and landing times from runs at a similar concurrency**, and
+  says when it has no history at this one. A ticket requeued in the same run is priced from its
+  resolve, review and gates, not its whole first attempt.
+- **Inside Herdr a run reuses the previous run's status pane** when it is still there, so the
+  view stays where you put it instead of opening a new tab each run.
+- **A run's start tells you not to commit, pull or merge on the base branch in its checkout
+  until it ends**: the guard cannot tell your commit from a sandbox's, and stops the run.
+- **The pool warning and `sandcastle size` price each figure at the 90th percentile of recent
+  samples**, so one outlier pass no longer sets every later warning, and `size` shows the sample
+  count. The pool warning no longer fires from an agent figure that counts page cache.
+- **A ticket sent back after a landing conflict resolves once the green branches that share its
+  files have landed**, and a conflict caused by a landing that finished mid-resolve sends it back
+  once more instead of ending it.
+- **The settings row and the closing summary name the usage pause** (`usage pause at 90%`)
+  beside the usage guard.
+- **Agents limit every test they run by hand** (`timeout 300`) and pick a heredoc delimiter the
+  edited file cannot contain, after a single-file run hung a pass for 15 minutes.
+- **`test/full-check.sh` names its log directory at the start and prints each leg as it ends.**
+- **The skill reads `.sandcastle/logs/run.json`** for a run's state instead of scraping the status
+  table, and points at `sandcastle usage`.
 
 ### Fixed
 
@@ -50,6 +93,28 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   restore a stale website. The site now describes pause/resume, subscription usage and opt-in
   usage pause, CPU and memory controls, partly-done tickets and filed follow-ups, and corrects
   the cost FAQ, Herdr click hints and Linux requirements against the last three releases.
+- **A stop during a pause ends the run at once**, its parked tickets listed under Runnable now,
+  instead of leaving it paused until the window resets. A ticket waiting for another's fix parks
+  through a pause instead of holding its sandbox slot.
+- **A person's `sandcastle pause` is no longer overwritten by the run's own usage pause**: the
+  control file's writes take a short lock.
+- **A pass re-run after hitting the plan's limit is no longer taken for another limit hit** when
+  it fails early for another reason, on the pause path and the crash path alike.
+- **A guard stop is announced the moment it holds** (`STOPPED landing: ...`), its ticket notes and
+  unfiled follow-ups name what moved (`main moved while sandboxes ran`), and a waiting ticket names
+  how its blocker ended.
+- **A branch stopped while its gates ran goes straight to the gates on re-run**, not to a whole
+  implement session.
+- **A drain turn no longer re-gates a base commit the previous turn's verify or last landing
+  passed**, and says `green at <sha> already (verified this run)`.
+- **A closed, moved or lost Herdr status pane no longer turns the run's whole Herdr view off**:
+  the sidebar and the end notification carry on.
+- **A run killed without its exit handler keeps its record**: the next run appends it to
+  `history.jsonl` first.
+- **The test suite gives every file the same environment** (canonical `TMPDIR`, the running node
+  on `PATH`, no host `HERDR_*` or kit settings), and fails on a real home-directory path in a
+  tracked file, so sandbox gates catch what only the pre-push check did.
+- **A released changelog section that differs from its tag fails the tests.**
 
 ## [0.8.0] - 2026-10-06
 
