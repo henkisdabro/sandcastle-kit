@@ -16,8 +16,10 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { createFollowUpBook, fileFollowUps } = await import("../src/burndown.ts");
 type FiledFollowUp = import("../src/burndown.ts").FiledFollowUp;
+type Places = import("../src/burndown.ts").Places;
 
 const direct = async (fn: () => string) => fn();
+const anyPath = () => true;
 const named = (title: string, evidence: string, from: string, phase: string) => ({ title, evidence, from, phase });
 
 const recording = (o: { failFirst?: boolean } = {}) => {
@@ -38,14 +40,14 @@ const recording = (o: { failFirst?: boolean } = {}) => {
     },
   };
 };
-const book = (tracker: ReturnType<typeof recording>["tracker"], o: { dryRun?: boolean; seen?: Set<string>; places?: Map<string, string> } = {}) => {
+const book = (tracker: ReturnType<typeof recording>["tracker"], o: { dryRun?: boolean; seen?: Set<string>; places?: Places } = {}) => {
   const records: FiledFollowUp[][] = [];
-  const made = createFollowUpBook({ update: (f) => void records.push(f.followUps) }, { tracker, dryRun: o.dryRun ?? false, write: direct, seen: o.seen, places: o.places });
+  const made = createFollowUpBook({ update: (f) => void records.push(f.followUps) }, { tracker, dryRun: o.dryRun ?? false, write: direct, exists: anyPath, seen: o.seen, places: o.places });
   return { book: made, last: () => records[records.length - 1] ?? [] };
 };
 
 const IMPLEMENT = named("Website mock still shows the old banner", "site/index.html:212 draws the old banner", "7", "implement");
-const REVIEW = named("Landing page mock is stale", "same mock, ./site/index.html:212 was not updated", "7", "review");
+const REVIEW = named("Mock banner is stale on the landing page", "same mock, ./site/index.html:212 was not updated", "7", "review");
 
 test("two passes of one ticket naming the same path:line under different titles file one issue and comment on it", async () => {
   const { made, comments, tracker } = recording();
@@ -68,7 +70,7 @@ test("the place may be named in the title of the second and the evidence of the 
   const { made, comments, tracker } = recording();
   const first = named("Stale mock", "see site/index.html:212", "7", "implement");
   const second = named("site/index.html:212 is out of date", "", "7", "review");
-  await fileFollowUps(tracker, [first, second], { dryRun: false, write: direct });
+  await fileFollowUps(tracker, [first, second], { dryRun: false, write: direct, exists: anyPath });
   assert.deepEqual(made, ["Stale mock"]);
   assert.equal(comments.length, 1);
   assert.match(comments[0].text, /\(no evidence given\)/);
@@ -97,8 +99,9 @@ test("another line of the same file is another finding", async () => {
 test("a host:port or a word:number is not a place", async () => {
   const { made, comments, tracker } = recording();
   const { book: b } = book(tracker);
-  b.push(named("First", "serves on http://example.com:8080 only", "7", "implement"));
-  b.push(named("Second", "serves on http://example.com:8080 only; see also step:3", "7", "review"));
+  // Titles that overlap, and every path a file: only the match itself keeps these apart.
+  b.push(named("Server port hard-coded", "serves on http://example.com:8080 only", "7", "implement"));
+  b.push(named("Hard-coded server port again", "serves on http://example.com:8080 only; see also step:3", "7", "review"));
   await b.file();
   assert.equal(made.length, 2);
   assert.deepEqual(comments, []);
@@ -106,7 +109,7 @@ test("a host:port or a word:number is not a place", async () => {
 
 test("a later turn of the run comments on the issue an earlier turn filed", async () => {
   const seen = new Set<string>();
-  const places = new Map<string, string>();
+  const places: Places = new Map();
   const { made, comments, tracker } = recording();
   const one = book(tracker, { seen, places });
   one.book.push(IMPLEMENT);
