@@ -807,8 +807,8 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
   /**
    * A worker's sandbox slot, leased before it takes a ticket (slot first): the ticket it then takes is the head of
    * the queue at the moment the slot is granted, so a requeued or released ticket, first in line, gets the next free
-   * slot. `wanted()` turns false while the wait is no longer wanted (the run was paused or stopped): the wait then
-   * ends with no slot. Without it (a test that has no pool) a worker takes its ticket at once.
+   * slot. `wanted()` turns false while the wait is no longer wanted (the run was paused or stopped, or no ticket is
+   * queued for it): the wait then ends with no slot. Without it (a test that has no pool) a worker takes its ticket at once.
    */
   slot?(wanted: () => boolean): Promise<Slot | undefined>;
   /** The run's concurrency, the most its demand for slots is ever told as; `workers` when not given. */
@@ -1388,7 +1388,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
                 }
                 asking++;
                 try {
-                  held.slot = await work.slot(() => (sync(), pausedSince === undefined && !stop.startsNothing));
+                  // Not wanted once nothing is queued: a worker whose ticket went off to wait for its resolve kept its slot and
+                  // took the ticket this one asked for, and a run with no demand left beside a hungry run is never granted one.
+                  held.slot = await work.slot(() => (sync(), pipelines.size > 0 && pausedSince === undefined && !stop.startsNothing));
                 } finally {
                   asking--;
                 }

@@ -97,7 +97,8 @@ state.
   than workers already asking, none while the run is paused (no ticket starts; a wait in progress ends,
   as `wanted()` turns false) and none once the run starts nothing (each queued ticket ends as not begun,
   with no slot). A worker whose ticket goes off to wait for its resolve keeps the slot and takes the next
-  head. A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
+  head; a worker still asking then ends its wait once nothing is queued (`wanted()` again), or a run with no
+  demand left beside a hungry run would wait for ever (`test/schedule-slot-stale-ask.test.ts`). A ticket's wait for a slot is therefore zero; the wait is the run's (`createSlotWaits` in
   `src/burndown.ts`: the run record's `waitsForShare`, which the status view's next-to-start rows say,
   and the heartbeat's `waiting for a sandbox slot`). The demand is counted as before, from the push.
   `test/schedule-slot-first.test.ts`.
