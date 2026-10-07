@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -1710,7 +1710,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
   console.log(
     `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
-      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but one of the ${limit("sandboxes")} machine-wide sandbox slots is kept for landing)` : ""),
+      (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"))})` : ""),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};

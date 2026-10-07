@@ -620,6 +620,15 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
 export const pipelineWorkers = (concurrency: number, tickets: number, pool: number, landing: boolean) =>
   Math.min(concurrency, tickets, landing ? Math.max(1, pool - 1) : Infinity);
 
+/**
+ * What the start line says of the slot `pipelineWorkers` leaves. It is left in the run's worker
+ * count, not in the pool: when another run cuts this run's share below 2, the share holds one
+ * slot at most and a ticket may take it (a ticket already running is never taken back, ADR 0001).
+ * A landing still goes first when a slot frees (`slotTurn`).
+ */
+export const landingSlotNote = (pool: number) =>
+  `one of the ${pool} machine-wide sandbox slots is kept for landing, while this run's share is 2 or more - below that, tickets may use it, and a landing goes first when a slot frees`;
+
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };
 
