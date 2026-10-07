@@ -127,7 +127,7 @@ const scenario = (rng: () => number): Scenario => {
 
 /** What happened, in order: the ports' calls, the stops as they arrive, and what was told. */
 type Event =
-  | { kind: "attempt"; id: string; n: 1 | 2 }
+  | { kind: "attempt"; id: string; n: number }
   | { kind: "check"; id: string }
   | { kind: "land"; id: string }
   | { kind: "stop"; safety: boolean }
@@ -185,7 +185,8 @@ const play = async (seed: number) => {
     attempt: (t, at) => {
       log.push({ kind: "attempt", id: t.id, n: at.n });
       return later(`attempt ${t.id}#${at.n}`, (): Attempted<G, O> => {
-        const end = s.attempts[t.id][at.n - 1];
+        // A scenario scripts two attempts; a third (#398's exception) repeats the second's.
+        const end = s.attempts[t.id][Math.min(at.n, 2) - 1];
         const cause = (c: StopCause) => (stopped(c.kind === "tampered"), c);
         switch (end) {
           case "green":
@@ -281,11 +282,11 @@ const check = ({ s, start, log, endings, stop }: Awaited<ReturnType<typeof play>
   }
   for (const c of told) if (c.kind === "ended") assert.ok(start.includes(c.id), `#${c.id} ended, yet the run never took it in`);
 
-  // A first attempt, then each further one only after a requeue of its own told before it: a first conflict or red, and
+  // A first attempt, then each further one (numbered in turn) only after a requeue of its own told before it: a first conflict or red, and
   // again only a conflict a landing caused after the resolve began (the scenario's landings after the script merge).
   for (const id of start) {
     const ns = log.flatMap((e) => (e.kind === "attempt" && e.id === id ? [e.n] : []));
-    assert.ok(ns.every((n, i) => n === (i === 0 ? 1 : 2)), `#${id} attempts: ${ns.join(", ")}`);
+    assert.ok(ns.every((n, i) => n === i + 1), `#${id} attempts: ${ns.join(", ")}`);
     const requeues = told.filter((c) => c.kind === "requeued" && c.id === id).length;
     assert.ok(requeues <= Math.max(0, ns.length), `#${id} is requeued ${requeues} times over ${ns.length} attempts`);
     for (let i = 1; i < ns.length; i++) {

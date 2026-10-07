@@ -307,11 +307,12 @@ test("a second conflict that a landing during the resolve caused sends the ticke
   const pipeline: Pipeline = async (issue, attempt) => {
     if (issue.id === "2" && attempt === 1) await new Promise((r) => setTimeout(r, 40));
     if (issue.id === "3") await baseMerged;
-    if (issue.id === "2" && attempt === 2 && ++twos === 1) {
+    if (issue.id === "2" && attempt >= 2) twos++;
+    if (issue.id === "2" && attempt === 2) {
       mergeBaseIn(root, "2", { "shared.txt": "one\ntwo\n" });
       mergedIn();
       while (!mergeOrder(root).includes("3")) await new Promise((r) => setTimeout(r, 5));
-    } else if (issue.id === "2" && attempt === 2) {
+    } else if (issue.id === "2" && attempt === 3) {
       // The third try merges 3 in as well.
       mergeBaseIn(root, "2", { "other.txt": "three\ntwo\n" });
     }

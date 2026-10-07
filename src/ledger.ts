@@ -301,7 +301,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
   // Requeued, and its second attempt never began: its first landing stands, or, withdrawn since,
   // that - recorded as a ticket withdrawn before it started, never as the green the first pipeline
   // left. Either way the record no longer promises a second attempt.
-  const unstarted = c.requeued !== undefined && e.attempts === 1;
+  const unstarted = c.requeued !== undefined && (e.attempts === 1 || e.unstarted === true);
   const record = unstarted && said.record ? { ...(landed.kind === "withdrawn" ? withdrawnRecord(landed.reason) : said.record), requeued: null } : said.record;
   // A dry run lands nothing: every branch it gated green reads as one it would merge.
   return { ...said, record, ...(c.dryRun && g.status === "green" && { outcome: { kind: "green", text: "dry run: gated green, would merge" } }) };
@@ -448,7 +448,7 @@ export const createLedger = (d: {
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);
     // Sent back, and its second attempt never began: withdrawn since, its first pipeline's line goes too.
-    if (ending.kind === "landing" && ending.attempts === 1 && requeuedAs.delete(id) && ending.landed.kind === "withdrawn") d.dropFirst(id);
+    if (ending.kind === "landing" && (ending.attempts === 1 || ending.unstarted === true) && requeuedAs.delete(id) && ending.landed.kind === "withdrawn") d.dropFirst(id);
   };
   return {
     entries: entries as ReadonlyMap<string, Entry>,
