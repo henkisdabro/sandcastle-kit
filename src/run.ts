@@ -1140,9 +1140,9 @@ export const landOnlyHead = (root: string, base: string, id: string): string | u
 /**
  * The recorded reviewed head of a branch that never recorded a green one (stopped while its
  * gates ran, say) when it sits on it, or past it by merge commits only, and has work not on base;
- * otherwise undefined. A tip whose gates ended red (`red`) is never one: that branch needs the
- * implementer, and the record cannot tell a red result from a stop. Like `landOnlyHead`, a missing
- * or doubtful record means "run it in full".
+ * otherwise undefined. A branch whose gates went red since its review (`red`) is never one: that
+ * branch needs the implementer, not another gate run. Like `landOnlyHead`, a missing or doubtful
+ * record means "run it in full".
  */
 export const reviewedOnlyHead = (root: string, base: string, id: string): string | undefined => {
   const branch = `agent/issue-${id}`;

@@ -1186,6 +1186,9 @@ export const createPipeline = (ctx: PipelineContext) => {
         console.log(`${ref(issue.id)}: ${base} has not moved since ${redAtLanding.failure.name} went red at landing - no gate run; the repair starts from that output.`);
         gated = { gates: redAtLanding.gates, failure: redAtLanding.failure, failures: [redAtLanding.failure] };
       } else gated = await timed(issue.id, "gates", () => gate(sandbox, issue.id));
+      // Recorded now, not at the end: a run stopped during the repair that follows would otherwise leave
+      // the tip looking reviewed with no gate result, and a re-run would only gate it again.
+      if (gated.failure) noteHead(issue.id, branch, { red: sh("git", ["rev-parse", branch], project.root) });
       // The forced red is named as such everywhere it shows: "ruff red" for a
       // gate that passed sent a reader looking for a ruff failure.
       let forced = false;
@@ -1380,7 +1383,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       const { unmet: unmetNote, changelog: changelogNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
       if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
-      // A red result is told apart from a stop mid-gates, which never gets here: only the second re-runs from its review.
+      // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {
         issue: issue.id,

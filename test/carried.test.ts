@@ -288,3 +288,19 @@ test("a reviewed branch keeps its agents' unmet line and changelog lines for the
   assert.equal(o.unmet, "The second module still uses the old rule.");
   assert.deepEqual(o.changelog, ["Added: a key"]);
 });
+
+test("a branch stopped during the repair of a red gate still gets implement", async () => {
+  const h = harness();
+  h.agents.impl = implementing("a.txt");
+  h.agents.review = () => "";
+  // A repair that commits nothing, then the run is stopped while the gates run again: the tip is still the reviewed one.
+  h.agents.repair = () => "";
+  h.gates.push(red("FAIL: first"), new Error("the run was stopped"));
+  await assert.rejects(h.attempt(), /the run was stopped/);
+  assert.deepEqual(h.events, ["impl", "review", "gate", "repair", "gate"]);
+  assert.equal(readHeads(h.root)[ID]?.reviewed, h.tip(BRANCH));
+  h.agents.impl = implementing("again.txt");
+  h.gates.push(GREEN);
+  await h.attempt();
+  assert.equal(h.events[0], "impl", `a red result is for the implementer: ${h.events.join(", ")}`);
+});
