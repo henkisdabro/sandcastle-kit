@@ -38,6 +38,10 @@
 //                    container runtime's VM and the sandboxes' measured peak memory, with
 //                    the figure that set each, the current limits and advice on the
 //                    runtime's CPU and memory; read-only, writes nothing; no model calls
+//   usage            the plan's usage, read-only: the newest reading the run record or history
+//                    holds (under 10 minutes old) with its age, else one request to the plan's
+//                    usage endpoint; with ANTHROPIC_API_KEY in use, says the sandboxes spend API
+//                    credits, not a plan. Exits 1 when the usage is unknown; no model calls
 //   report           the last run's closing summary: done, needs you, needs fixing,
 //                    runnable now, local state, next step; no model calls
 //   status [s] [all] the live status view (refresh every s seconds, 0 = once);
@@ -108,11 +112,11 @@ import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { closingReport, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
 import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
-import { cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
+import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
-import { checkUsageSettings, resumeClock, usagePauseWords } from "./usage.ts";
+import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor } from "./doctor.ts";
@@ -199,6 +203,14 @@ try {
   process.chdir(root);
 
   switch (command) {
+    case "usage": {
+      if (args.length) throw new OperatorError(`Unknown argument "${args[0]}" for sandcastle usage: it takes none.`);
+      const project = await loadProject(root);
+      const shown = await usageCommand({ env: claudeCredentials(project), recorded: recordedUsage(join(root, ".sandcastle/logs")) });
+      for (const line of shown.lines) console.log(line);
+      process.exitCode = shown.known ? 0 : 1;
+      break;
+    }
     case "run": {
       // Parsed before anything that needs config or Docker, so a bad argument is refused for free.
       // An argument overrides the variable of the same name; burndown() reads them all at call time.

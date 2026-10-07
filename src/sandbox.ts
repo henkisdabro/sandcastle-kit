@@ -290,6 +290,12 @@ export const apiKeySpend = (files: string[]): ApiKeySpend | undefined => {
   return { file: keyFiles.at(-1)!, files: keyFiles, ...(oauth ? { oauth } : {}) };
 };
 
+/** The Claude credentials of the project's two files as `credentials` merges them, with none of its checks: a read-only command needs no GitHub token or a valid shape to say what the sandboxes would spend. */
+export const claudeCredentials = (project: Project): Record<string, string | undefined> => {
+  const [user, local] = credentialFiles(project).map(readEnv);
+  return { ANTHROPIC_API_KEY: local!.ANTHROPIC_API_KEY || user!.ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: local!.CLAUDE_CODE_OAUTH_TOKEN || user!.CLAUDE_CODE_OAUTH_TOKEN };
+};
+
 /** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
 export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
 
