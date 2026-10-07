@@ -317,6 +317,8 @@ export type LandContext = {
   gitVersion?: string;
   /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
   reds?: Map<string, RedLanding>;
+  /** Told each landing that reached its merge, with its whole time and its wait for a sandbox slot: the run's `landing` timings line. */
+  timed?: (issue: string, took: { elapsed: number; slotWaitMs: number }, landed: Landed) => void;
 };
 
 /** What a red landing gate ran on and said: the branch head and base tip it merged, the gates it ran and the failure it hit. */
@@ -375,7 +377,8 @@ export const isAncestor = (root: string, ancestor: string, of: string) => {
   }
 };
 
-export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> => {
+/** `at.slotWaited`: told how long the landing waited for its sandbox slot, once it has it. */
+export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void }): Promise<Landed> => {
   const { project, tracker, base, gateNames, reports, run, dryRun, opener, withdrawal, host, landed } = ctx;
   const ref = tracker.ref;
   const root = project.root;
@@ -513,6 +516,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
     try {
       const wanted = ctx.slotWanted ?? { n: 0 };
       let waiting = true;
+      const asked = Date.now();
       wanted.n++;
       try {
         // Priority: `slotTurn` holds back only the pipelines that have not asked the pool yet, and the pool
@@ -520,6 +524,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
         result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () => {
           wanted.n--;
           waiting = false;
+          at?.slotWaited?.(Date.now() - asked);
           return landInSandbox(
             project,
             { branch: o.branch, head: o.head!, message: mergeSubject(o.branch, ref(o.issue), !!o.unmet), squash, run: ctx.runId },
@@ -653,6 +658,12 @@ export const landingSlotNote = (pool: number) =>
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };
 
+/** The endings of a landing that never came to a merge: it is not timed (`LandContext.timed`). */
+const NO_MERGE: ReadonlySet<Landed["kind"]> = new Set(["taken-back", "withdrawn", "closed-earlier", "held", "skipped", "dry-run"]);
+
+/** Whether a landing's ending left the branch merged: the `ok` of its timings line. */
+export const didMerge = (landed: Landed) => landed.kind === "merged" || landed.kind === "partly-done" || landed.kind === "close-failed";
+
 /**
  * The scheduler's land and host ports over one `LandContext`: `landOne`, and the `.git` check
  * before it. A refused write or a failed check still throws, and stops the run; anything else (a
@@ -661,12 +672,24 @@ export type Waiting = Landable & { carried?: boolean };
  */
 export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
   land: async (o) => {
+    const since = Date.now();
+    let slotWaitMs = 0;
+    let landed: Landed;
     try {
-      return await landOne(ctx, o);
+      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms) });
     } catch (error) {
       if (error instanceof OperatorError) throw error;
-      return { kind: "not-landed", reason: errorLine(error) };
+      landed = { kind: "not-landed", reason: errorLine(error) };
     }
+    // A landing decided without a merge (the ticket taken back, a hold, a moved branch, a dry run) is no landing to time.
+    if (!NO_MERGE.has(landed.kind)) {
+      try {
+        ctx.timed?.(o.issue, { elapsed: Date.now() - since, slotWaitMs }, landed);
+      } catch {
+        /* a timings line is a record: it may not cost a landing its ending */
+      }
+    }
+    return landed;
   },
   host: {
     check: (id) => ctx.host.check(`before landing ${ctx.tracker.ref(id)}`),

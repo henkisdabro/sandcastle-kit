@@ -798,8 +798,9 @@ export type Work<T, G extends Green, O, B = unknown> = LandPorts<G> & {
    * goes on from that phase. A paused run holds no ticket's sandbox at a juncture, and a ticket that
    * has not begun waits before its attempt does. `paused()` reads the pause now: an attempt that waits
    * for a machine-wide slot stops waiting when the run is paused, and reaches its first juncture instead.
+   * `resolveWaitMs`: how long a sent-back ticket's resolve waited for the tickets ahead of it (`resolveTurn`; the time parked by a pause is left out), for the record of the attempt's start.
    */
-  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<G, O>>;
+  attempt(ticket: T, at: { n: number; again?: Again; last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number }): Promise<Attempted<G, O>>;
   /** Progress for the record and the views. A throw here is dropped: it must not cost a ticket. */
   tell(change: Change<G, O, B>): void;
 };
@@ -889,6 +890,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const resolveSaid = new Map<string, string>();
       // The list a resolve wait last saw, and when it last changed: said once it has held for RESOLVE_SETTLE_MS.
       const resolveSeen = new Map<string, { key: string; at: number }>();
+      // How long each sent-back ticket's resolve waited, from the end of that wait to the attempt that follows it.
+      const resolveWaited = new Map<string, number>();
       const clock = work.now ?? Date.now;
       const failures: unknown[] = [];
       const settles: (() => void)[] = [];
@@ -1200,7 +1203,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       };
       const aheadOf = (t: T) => Object.values(ahead(t)).flat();
       // Returns when none is ahead of the ticket's resolve, or the run starts nothing; a pause parks it as at the start.
-      const resolveTurn = async (t: T) => {
+      // The time it waited for the tickets ahead is the result (a pause's parked time is no part of it).
+      const resolveTurn = async (t: T): Promise<number> => {
+        let waited = 0;
         try {
           for (sync(); !stop.startsNothing; sync()) {
             if (pausedSince !== undefined) {
@@ -1224,7 +1229,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const timer = setTimeout(wake, 1000);
               settles.push(() => (clearTimeout(timer), wake()));
             });
+            waited += clock() - at;
           }
+          return waited;
         } finally {
           resolving.delete(t.id);
           resolveSeen.delete(t.id);
@@ -1236,7 +1243,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // is ahead of it (or the run starts nothing: the attempt then ends it as not begun), ahead of the queue as before.
       const waitToResolve = (t: T) => {
         void resolveTurn(t).then(
-          () => {
+          (waitedMs) => {
+            resolveWaited.set(t.id, (resolveWaited.get(t.id) ?? 0) + waitedMs);
             // A closed queue means a worker or the landing worker failed: the run rejects with that, nothing would take it.
             if (!pipelines.closed) pipelines.push({ ticket: t, rank: REQUEUED });
           },
@@ -1256,6 +1264,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         if (resolves && !stop.startsNothing && aheadOf(t).length) return waitToResolve(t);
         working++;
         running.add(t.id);
+        const resolveWaitMs = resolveWaited.get(t.id);
+        resolveWaited.delete(t.id);
         try {
           if (stop.startsNothing) return await notBegun(t, stop.headline!);
           if (resolves) {
@@ -1267,7 +1277,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           // attempt before the first of them found nothing begun: the ticket ends as not begun, and a requeued one keeps its landing.
           let stepped = false;
           try {
-            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined) });
+            r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => ((stepped ||= phase !== "start"), juncture(t.id, phase, park)), paused: () => (sync(), pausedSince !== undefined), ...(resolveWaitMs ? { resolveWaitMs } : {}) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
             if (error instanceof StoppedWhileParked) {

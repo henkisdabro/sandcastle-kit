@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -57,7 +57,7 @@ import { OperatorError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -964,8 +964,9 @@ export const createPipeline = (ctx: PipelineContext) => {
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
   // `at.slotWaitMs`: how long the attempt waited for its machine-wide sandbox slot, which it took before this
-  // pipeline began: the first `setup` step records it as its `waitMs`.
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; slotWaitMs?: number }): Promise<Outcome> => {
+  // pipeline began: the first `setup` step records it as its `waitMs`. `at.resolveWaitMs`: a sent-back ticket's wait for
+  // the tickets ahead of its resolve, which came before the attempt too, and goes into the same `waitMs`.
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; slotWaitMs?: number; resolveWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -988,7 +989,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       open(branch),
       requeuedAs.get(issue.id),
       undefined,
-      at?.slotWaitMs,
+      at?.resolveWaitMs ? (at.slotWaitMs ?? 0) + at.resolveWaitMs : at?.slotWaitMs,
     ).catch(async (error) => {
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
@@ -2236,6 +2237,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     landed: new Map(),
     slotWanted,
     reds,
+    timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };
 
   const results: PromiseSettledResult<Outcome>[] = [];
@@ -2328,7 +2330,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // One attempt of a ticket (schedule.ts runs it): the usage check and the tracker's word before
   // it, then its pipeline in a sandbox slot. A landing that waits for a slot goes first (`slotTurn`).
-  const attempt = async (issue: Issue, { last, juncture, paused }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean }): Promise<Attempted<Outcome, Outcome>> => {
+  const attempt = async (issue: Issue, { last, juncture, paused, resolveWaitMs }: { last(): boolean; juncture(phase: string, park?: Park): Promise<void>; paused(): boolean; resolveWaitMs?: number }): Promise<Attempted<Outcome, Outcome>> => {
     await pausing.waitOutPause(usagePause !== undefined, paused, juncture);
     const line = await usageStop(env, undefined, () => planUsage.find((u) => u.provider === "claude"));
     noteReading();
@@ -2385,7 +2387,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         slotWaited.set(issue.id, (slotWaited.get(issue.id) ?? 0) + slotWaitMs);
         // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
         await juncture("start", parkable());
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, slotWaitMs });
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, resolveWaitMs, slotWaitMs });
       } finally {
         give();
       }
