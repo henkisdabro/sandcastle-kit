@@ -354,6 +354,16 @@ export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
 };
 
 /**
+ * The failing tests across a red run's gates, for the end-of-run verify's excerpt and summary: at most
+ * `FAILING_TESTS_SHOWN` names, and `more` when the output named others. Each gate is read whole first: a list
+ * cut at the limit inside `failingTests` could not say there were more.
+ */
+export const verifyFailing = (failures: GateRun["failures"]) => {
+  const all = [...new Set(failures.flatMap((f) => failingTests(f.output, Infinity)))];
+  return { tests: all.slice(0, FAILING_TESTS_SHOWN), more: all.length > FAILING_TESTS_SHOWN };
+};
+
+/**
  * The file a failing test's id names, or undefined when it names none. pytest's "path::test",
  * vitest's and jest's "FAIL path" and node:test's summary "path::name" do; node:test's bare "name",
  * Go's "TestName" and cargo's "mod::name" do not, and a guess from a test's title would call a

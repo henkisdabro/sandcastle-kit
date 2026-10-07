@@ -47,7 +47,7 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
-  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -563,6 +563,9 @@ export const render = (f: Facts, plain = false): string => {
   // run's image is built before any ticket lands, so a Dockerfile a merged ticket changed is not in it: the verify
   // gated the merged tree on the old image, and only a rebuild shows how the new one does.
   const verifyImage = typeof f.verify?.image === "string" && f.verify.image ? ` on image ${f.verify.image}` : "";
+  // The tests the red verify named (a file in a repository: only strings count).
+  const verifyTests = Array.isArray(f.verify?.failing) ? f.verify!.failing.filter((t): t is string => typeof t === "string" && !!t) : [];
+  const verifyFailing = verifyTests.length ? ` - failing: ${verifyTests.join(", ")}${f.verify?.failingMore === true ? ", and more" : ""}` : "";
   const newDockerfiles = Array.isArray(f.verify?.dockerfiles) ? f.verify!.dockerfiles.filter((d): d is string => typeof d === "string" && !!d) : [];
   const startingImage = newDockerfiles.length
     ? ` Merged work changed ${newDockerfiles.join(", ")}, so this ran on the run's starting image - rebuild and run sandcastle gates to check the new one.`
@@ -605,7 +608,7 @@ export const render = (f: Facts, plain = false): string => {
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
-        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line})${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
+        : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
