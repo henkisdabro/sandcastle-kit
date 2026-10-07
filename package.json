@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && bash test/status.test.sh && node --import ./test/hermetic-env.ts --import ./test/no-stray.ts --test --test-timeout=300000 test/*.test.ts'",
     "test:shard": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && files=$(node test/shard.ts) && node --import ./test/hermetic-env.ts --import ./test/no-stray.ts --test --test-timeout=300000 $files'",
+    "test:file": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && node --import ./test/hermetic-env.ts --import ./test/no-stray.ts --test --test-timeout=120000 --test-force-exit \"$@\"' test:file",
     "test:weights": "bash test/in-temp.sh bash -c 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false && node --import ./test/hermetic-env.ts --import ./test/no-stray.ts --test --test-concurrency=1 --test-timeout=300000 --test-reporter=./test/weights-reporter.ts test/*.test.ts'"
   },
   "engines": {

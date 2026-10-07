@@ -77,7 +77,7 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
 
 test("the test scripts in package.json and test/run-shards.sh preload it beside the stray-output guard", () => {
   const { scripts } = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")) as { scripts: Record<string, string> };
-  for (const name of ["test", "test:shard", "test:weights"]) assert.match(scripts[name]!, /--import \.\/test\/hermetic-env\.ts --import \.\/test\/no-stray\.ts --test /, name);
+  for (const name of ["test", "test:shard", "test:file", "test:weights"]) assert.match(scripts[name]!, /--import \.\/test\/hermetic-env\.ts --import \.\/test\/no-stray\.ts --test /, name);
   assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /--import \.\/test\/hermetic-env\.ts --import \.\/test\/no-stray\.ts --test /);
 });
 
