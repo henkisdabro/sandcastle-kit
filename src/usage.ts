@@ -581,6 +581,98 @@ export const watchUsage = ({
 };
 
 // ---------------------------------------------------------------------------
+// `sandcastle usage`: the plan's usage between runs, read-only.
+//
+// The newest reading the run record (`logs/run.json`) or the history (`logs/history.jsonl`) holds is the
+// answer while it is fresh (as young as the guard's own, `AGENT_READING_FRESH_SECONDS`): it costs no request.
+// Otherwise one request goes to the endpoint with `usageToken`'s credential, as the guard's does - the
+// endpoint is rate-limited, so never a second. Sandboxes that spend an API key have no plan to read.
+// ---------------------------------------------------------------------------
+
+/** The history lines looked at, newest last: a reading is as old as its run, so the tail is where a fresh one is. */
+const HISTORY_TAIL = 50;
+
+/**
+ * The newest reading of each provider that the project's run record and history hold (`logs` is its
+ * `.sandcastle/logs`); a file that is missing or does not parse holds none.
+ */
+export const recordedUsage = (logs: string): UsageReading[] => {
+  const records: unknown[] = [];
+  const parse = (text: string) => {
+    try {
+      records.push(JSON.parse(text));
+    } catch {
+      /* a half-written line is no record */
+    }
+  };
+  try {
+    parse(readFileSync(join(logs, "run.json"), "utf8"));
+  } catch {
+    /* no run yet */
+  }
+  try {
+    readFileSync(join(logs, "history.jsonl"), "utf8").split("\n").filter(Boolean).slice(-HISTORY_TAIL).forEach(parse);
+  } catch {
+    /* no history yet */
+  }
+  const newest = new Map<UsageProvider, UsageReading>();
+  for (const record of records) {
+    for (const u of readPlanUsages((record as { usage?: unknown } | null)?.usage)) {
+      if (!u.windows || u.at === undefined) continue;
+      const held = newest.get(u.provider);
+      if (!held || u.at > held.at) newest.set(u.provider, u as UsageReading);
+    }
+  }
+  return [...newest.values()];
+};
+
+const ageWords = (seconds: number) => {
+  const s = Math.max(0, Math.floor(seconds));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+};
+
+const recordedLine = (u: UsageReading, now: number) => {
+  const window = (label: string, w: PlanWindow) =>
+    w.resetsAt > now ? `${label} ${w.percent}% - resets ${resumeClock(w.resetsAt)}` : `${label} reset since (was ${w.percent}%)`;
+  return `Plan usage (${u.provider === "codex" ? "Codex" : "Claude"}): ${window("5h", u.windows.fiveHour)} · ${window("week", u.windows.week)} (read ${ageWords(now - u.at)}, from the run record)`;
+};
+
+/**
+ * What `sandcastle usage` prints, and whether it knows the plan's usage. `env` holds the sandboxes' Claude
+ * credentials (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`); `recorded` is `recordedUsage`'s answer. An API key
+ * is told first, whatever a record holds: it says nothing of what these sandboxes spend. A fresh Claude reading
+ * is printed and nothing is asked; with none, the endpoint is asked once, and a failure says why and
+ * is not retried. Codex's newest reading is added whenever the record has one, with its age.
+ */
+export const usageCommand = async ({
+  env,
+  recorded,
+  readers = hostLoginReaders,
+  now = Date.now,
+}: {
+  env: Record<string, string | undefined>;
+  recorded: UsageReading[];
+  readers?: LoginReaders;
+  now?: () => number;
+}): Promise<{ lines: string[]; known: boolean }> => {
+  const seconds = Math.floor(now() / 1000);
+  const credential = usageToken(env, process.platform, readers, now());
+  if (credential?.source === "api key") {
+    return { lines: ["Plan usage: the sandboxes spend ANTHROPIC_API_KEY (API credits, no plan), so there is no plan usage to read. Nothing was asked."], known: true };
+  }
+  const codex = recorded.filter((u) => u.provider === "codex").map((u) => recordedLine(u, seconds));
+  const claude = recorded.find((u) => u.provider === "claude");
+  if (claude && seconds - claude.at < AGENT_READING_FRESH_SECONDS) return { lines: [recordedLine(claude, seconds), ...codex], known: true };
+  const stale = claude ? [`The newest reading on record is older than ${AGENT_READING_FRESH_SECONDS / 60} minutes: ${recordedLine(claude, seconds)}`] : [];
+  const unknown = (why: string) => ({ lines: [`Plan usage: unknown (${why}).`, ...stale, ...codex], known: false });
+  if (!credential) return unknown("no reading on record, and the sandboxes have no CLAUDE_CODE_OAUTH_TOKEN to ask the plan's endpoint with");
+  if (!("token" in credential)) return unknown("no reading on record, and the Claude Code login has expired; any use of Claude Code on this machine refreshes it");
+  const windows = await read(credential.token);
+  if (!Array.isArray(windows)) return unknown(`no reading on record, and ${windows.why}`);
+  return { lines: [`Plan usage: ${describe(windows)} (read just now, from the usage endpoint). Read for ${usageWhose(credential.source)}.`, ...codex], known: true };
+};
+
+// ---------------------------------------------------------------------------
 // USAGE_PAUSE: wait out a plan window instead of running into it.
 //
 // With `USAGE_PAUSE=<percent>` (or `usagePause` in the project config) the run takes the soft pause of

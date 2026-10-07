@@ -646,6 +646,7 @@ before each ticket and can stop the queue - though once an agent has reported, t
 the same numbers while the newest is under 10 minutes old, and makes no request. `USAGE_PAUSE`
 ([Pausing a run](#-pausing-a-run)) acts on them too. With an API key there is no plan to show: no row, and
 the settings row says `API credits`. A record from an older kit, or a run with no Claude model, has no `usage` and draws no row.
+Between runs, `sandcastle usage` prints the same reading from the record, or asks the endpoint once when none is fresh.
 
 **Codex's usage, with cross-review.** With `CROSS_REVIEW=1` and Codex signed in with a ChatGPT plan
 (`~/.codex/auth.json`'s ChatGPT sign-in, not an API key, and no `CODEX_API_KEY` in the sandboxes'
@@ -1202,6 +1203,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle resume` | Continues a paused run: each paused ticket goes on from its next phase, in the same run; a pause for the plan's usage ends before its time too. `No run is live.` when none is; `is not paused` when it is not | ➖ no |
 | `sandcastle cap [N \| off] [--project <name>]` | Caps the live run's share of the machine's sandbox slots at N (at most its concurrency), or lifts the cap; bare, prints the run's demand, share, slots held and cap. The run keeps the slots it holds; the cap ends with the run. `--project` acts on another project's run from any directory ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
+| `sandcastle usage` | Prints the plan's usage between runs, read-only: the newest reading the run record (`logs/run.json`) or the history holds while it is under 10 minutes old, with its age (Codex's too, when the record has one), and no request. With none that fresh it makes one request to the plan's usage endpoint with the credential the `USAGE_CHECK` guard would use, and says why when that fails (exit 1, as with no credential to ask with). With `ANTHROPIC_API_KEY` in use it says the sandboxes spend API credits, not a plan, and asks nothing | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once | ➖ no |
 | `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, archives their logs, and drops the `backup.git` copy of a branch already on the base; lists unmerged ones, which `--all` deletes too, without asking (their backup copy goes with them). Refuses while a run is live | ➖ no |
 
