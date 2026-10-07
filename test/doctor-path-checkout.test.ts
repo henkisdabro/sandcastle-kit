@@ -10,8 +10,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
+import { dockerStub } from "./docker-stub.ts";
 
 const KIT = join(import.meta.dirname, "..");
+const docker = dockerStub();
 const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-pathkit-")));
 /** A directory with `bin/sandcastle` and the given extra files, and a PATH directory linking to the script. */
 const onPath = (files: Record<string, string>) => {
@@ -33,7 +35,7 @@ const doctor = (pathDir?: string) => {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PATH: pathDir ? `${pathDir}${delimiter}${base}` : base, XDG_CONFIG_HOME: scratch(), GIT_CEILING_DIRECTORIES: tmpdir() },
+    env: { ...process.env, PATH: docker.first(pathDir ? `${pathDir}${delimiter}${base}` : base), XDG_CONFIG_HOME: scratch(), GIT_CEILING_DIRECTORIES: tmpdir() },
   }).stdout;
 };
 const fix = /^FIX\s+`sandcastle` on PATH points at this kit/m;
