@@ -90,3 +90,52 @@ test("no source file holds a raw invisible character", () => {
   }
   assert.deepEqual(found, []);
 });
+
+// A real home directory in a tracked file (`/Users/<name>`, `/home/<name>`) is a leak, and the
+// outbound scan in test/full-check.sh (`home_paths`) is where the rule comes from: it runs on a
+// contributor's machine before a push, never in a sandbox gate, so an agent's fixture with one
+// passed every gate and landed. Run here, the same rule fails the gate. `home` must start a path
+// (a repo path such as `site/home/index.html` is no home); the placeholder homes are fine, and a
+// line naming one is skipped whole, as `grep -v` does there.
+const HOME_PATH = "(/Users|(^|[^A-Za-z0-9_.-])/home)/[a-z]";
+const PLACEHOLDER_HOME = "/home/(user|node|agent)\\b";
+const homePathHits = (paths: string[], read: (path: string) => string): string[] => {
+  const real = new RegExp(HOME_PATH);
+  const placeholder = new RegExp(PLACEHOLDER_HOME);
+  return paths.flatMap((p) => {
+    const body = read(p);
+    if (body.includes("\0")) return []; // an image or other binary
+    return body
+      .split("\n")
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => real.test(line) && !placeholder.test(line))
+      .map(({ line, n }) => `${p}:${n}: ${line.trim()}`);
+  });
+};
+
+test("a home-directory path names its file and line", () => {
+  // Built from parts: this file is itself scanned.
+  const alice = "/" + "Users/alice/x";
+  const linux = "/" + "home/bob/.config";
+  const files: Record<string, string> = {
+    "test/fixture.ts": `const a = 1;\nconst p = "${alice}";\n`,
+    "docs/x.md": `see ${linux}\n`,
+    "ok.md": "/home/user/x, /home/node/y and site/home/index.html and /Users/<name>\n",
+  };
+  assert.deepEqual(homePathHits(Object.keys(files), (p) => files[p]), [`test/fixture.ts:2: const p = "${alice}";`, `docs/x.md:1: see ${linux}`]);
+});
+
+test("a binary file is not read for home paths", () => {
+  assert.deepEqual(homePathHits(["a.gif"], () => "\0/" + "Users/alice/x"), []);
+});
+
+test("the home-path rule is the one test/full-check.sh scans with", () => {
+  const scan = text("test/full-check.sh");
+  assert.ok(scan.includes(`'${HOME_PATH}'`), "test/full-check.sh's home_paths drifted from HOME_PATH");
+  assert.ok(scan.includes(`'${PLACEHOLDER_HOME}'`), "test/full-check.sh's home_paths drifted from PLACEHOLDER_HOME");
+});
+
+test("no tracked file names a real home directory", () => {
+  // The rule's source is home_paths in test/full-check.sh.
+  assert.deepEqual(homePathHits(tracked, text), []);
+});
