@@ -133,8 +133,10 @@ test("a landing that changes a git hook leaves a record the next base check stil
     await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
     // The ticket's change: a hook the image cannot run, committed to the base.
     writeFileSync(join(root, ".hookred"), "");
-    writeFileSync(join(root, "hook.txt"), "the hook\n");
-    git(root, "add", "hook.txt");
+    // A hook file in the diff: a landing that touched none would keep the hook checks covered.
+    mkdirSync(join(root, ".githooks"), { recursive: true });
+    writeFileSync(join(root, ".githooks/pre-commit"), "the hook\n");
+    git(root, "add", ".githooks/pre-commit");
     git(root, "commit", "-q", "-m", "ticket: change the pre-commit hook");
     noteGreenCommit(project, "sandcastle-fixture:t", plan, git(root, "rev-parse", "main"));
     const { lines, result } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-2").then(() => undefined, (e: unknown) => e));

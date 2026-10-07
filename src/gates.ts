@@ -11,8 +11,9 @@
 import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import type { HookTest, Project } from "./config.ts";
+import { protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -501,7 +502,8 @@ const hooksCovered = (root: string, key: string) => {
 // the check and fan agents out on a base known to be red.
 // `hooks` says the green result covered the hook tests and the git-hook probe as well as the gates: only the base check
 // runs them, so a landing's or verify's record (gates alone) leaves the next base check its hook checks, which a
-// commit that changed a hook file would otherwise have skipped.
+// commit that changed a hook file would otherwise have skipped - unless `noteGreenCommit` finds the record before it
+// covered them and no file they read changed.
 // `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
@@ -525,12 +527,62 @@ const recordedRun = (root: string): string | undefined => {
   }
 };
 
+// A package manifest or lockfile, by name: the project's setup (a `pnpm install`) reads one, and the sandbox the hook
+// checks run in is set up from it, so a change to one re-checks the hooks as a change to a hook file does.
+const MANIFEST = /^(package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|pyproject\.toml|poetry\.lock|uv\.lock|pdm\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|Cargo\.(toml|lock)|go\.(mod|sum|work)|Gemfile(\.lock)?|composer\.(json|lock)|mix\.(exs|lock)|pom\.xml|build\.gradle(\.kts)?|gradle\.lockfile|[^/]*\.csproj|packages\.lock\.json|deno\.(json|jsonc|lock))$/;
+
+// Whether any file changed between two commits is one the hook tests or the git-hook probe read: the hooks directory
+// (`core.hooksPath`, `.husky`, `.git-hooks`, the default protected set), the files the lean plan's kept hooks run, the
+// package manifests and lockfiles, and `protectedPaths`. A conservative list, not a trace: anything it does not name
+// but a hook reads is a miss the maintainer chose to accept. A diff that cannot be read says yes.
+const hookInputsChanged = (project: Project, planFile: string, from: string, to: string): boolean => {
+  let changed: string[];
+  try {
+    changed = sh("git", ["diff", "--name-only", from, to], project.root).split("\n").filter(Boolean);
+  } catch {
+    return true;
+  }
+  const dirs = [".husky/", ".git-hooks/"];
+  try {
+    // `--local`: the host's own hooks are switched off through the environment, which a plain read would answer with.
+    const configured = sh("git", ["config", "--local", "--get", "core.hooksPath"], project.root);
+    const rel = isAbsolute(configured) ? relative(project.root, configured) : posix.normalize(configured);
+    if (configured && rel && !rel.startsWith("..") && !isAbsolute(rel)) dirs.push(`${rel.replace(/\/+$/, "")}/`);
+  } catch {
+    // no core.hooksPath set
+  }
+  let commands: string[] = [];
+  try {
+    commands = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks?: Hook[] }).hooks?.map((h) => h.command) ?? [];
+  } catch {
+    return true;
+  }
+  return changed.some(
+    (f) => dirs.some((d) => f.startsWith(d)) || MANIFEST.test(posix.basename(f)) || protectedAmong(project, [f]).length > 0 || commands.some((c) => c.includes(f)),
+  );
+};
+
 /**
  * A commit the run's own gates passed on - a landing's merge, which the base now names - is the green
  * base the next turn's check would otherwise gate again, in the one gate slot, minutes later.
+ * The record covers the hook tests and the git-hook probe too (so the next check opens no base sandbox) only when
+ * the record before it did, at a commit it names, on this image and config, and nothing the hook checks read changed
+ * since (`hookInputsChanged`). Anything else - no earlier record, an older kit's without a commit - re-checks.
  */
-export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing") =>
-  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, false, { commit, by });
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing") => {
+  let hooks = false;
+  try {
+    const prev = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));
+    hooks =
+      prev.hooks === true &&
+      typeof prev.commit === "string" &&
+      prev.key === baseKey(project, image, planFile, prev.commit) &&
+      !hookInputsChanged(project, planFile, prev.commit, commit);
+  } catch {
+    // no record, or an unreadable one: the hooks are checked
+  }
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by });
+};
 
 /**
  * Whether the green-base record already proves the base's tip on this image and plan: the commit, and whose gates
