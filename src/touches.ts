@@ -122,6 +122,42 @@ export const expandTouches = (root: string, ref: string, patterns: string[]): st
   return out;
 };
 
+/** How far from a path the word "new" may stand, on its line, for the ticket to be saying the path is new. */
+const NEW_WITHIN = 40;
+
+/** Whether `body`, outside its `Touches:` lines, names `path` with the word "new" beside it on the same line. */
+const namedAsNew = (body: string, path: string): boolean => {
+  const prose = body.split("\n").filter((l) => !/^[ \t]*touches:/i.test(l));
+  for (const line of prose) {
+    for (let at = line.indexOf(path); at >= 0; at = line.indexOf(path, at + 1)) {
+      const near = line.slice(Math.max(0, at - NEW_WITHIN), at + path.length + NEW_WITHIN);
+      if (/\bnew\b/i.test(near)) return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * The `Touches:` entries of `body` that name nothing at `ref`: a plain path with no file or
+ * directory there, and a glob matching no file. `expandTouches` keeps the first (a new file can
+ * still overlap) and drops the second, so neither shows in a queue's listing; this says them, for
+ * `queue --lint` to ask "a new file, or a typo?". A plain path the body names elsewhere beside the
+ * word "new" (the ticket says it is a new file) is left out. `[]` when `ref` has no tree to read.
+ */
+export const missingTouches = (root: string, ref: string, body: string): string[] => {
+  const r = git(root, ["ls-tree", "-r", "--name-only", "-z", ref]);
+  if (r.status !== 0) return [];
+  const tree = r.stdout.toString("utf8").split("\0").filter(Boolean);
+  return parseTouches(body).filter((pattern) => {
+    if (isGlob(pattern)) {
+      const re = globToRegExp(pattern);
+      return !tree.some((f) => re.test(f));
+    }
+    if (tree.some((f) => covers(pattern, f))) return false;
+    return !namedAsNew(body, pattern.replace(/\/$/, ""));
+  });
+};
+
 // Sizes of every blob at a commit, from one `git ls-tree -r -l`. Keyed by the commit, not the ref
 // name: the base branch moves as tickets land, and a ref name would keep serving the old tree. A
 // few are kept, as a run reads the base's tip and a ticket's head at most.
