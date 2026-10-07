@@ -7,6 +7,14 @@ separate pane or terminal). For a run that has ended, `sandcastle report` prints
 summary: hand it back as run.md's "Close the run" step says. Done when the user has the snapshot
 and, for every row that needs them, its cause read from the log.
 
+To check one ticket, or where the run stands, read `.sandcastle/logs/run.json` instead of parsing
+`sandcastle status 0`'s table (box-drawing rows that change with the pane's width): `tickets` is
+keyed by ticket id and each entry's `state` is one of the states below (`merged`, `red`, `held`,
+`queued` ...), `stage` is the run line's text while the run is live, and `exitCode` appears once
+the run has exited cleanly (a pid that is gone with no `exitCode` is a run that was killed). Read it
+once per question. To wait for the run to end, run `sandcastle wait` (run.md's step 3 says how),
+never a loop of `sleep` and `grep`; the table is for the user's eyes.
+
 While a run is live, every ticket it holds is shown from the run's own record
 (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run: working, ready
 to land, need you, queued, blocked, merged. The states:

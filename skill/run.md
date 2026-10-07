@@ -54,8 +54,12 @@ This continues SKILL.md: run its "Before every action" first.
      run again or a stop holds: no progress, the same ticket conflicting or left partly done in two
      turns running, a red merged base, a usage limit or a stopped run, 20 turns at most.
    - **How long.** Once the project has run before, the run prints a rough estimate at its start
-     (detached: in `.sandcastle/logs/run-output.log`); quote that once it is going, as the only
-     estimate you give.
+     (detached: in `.sandcastle/logs/run-output.log`). After `--detach` returns (step 2), read the
+     log once for the line starting `Estimate` and quote it, as the only estimate you give. Do not
+     poll for it or sleep and grep: if it is not there yet (the run is still setting up, or the
+     project has no history to estimate from), tell the user so, give no estimate of your own, and
+     carry on with step 3; the status view's bottom shows the log's last lines, and a later
+     question can read the log again.
 2. **Start it detached.** It takes hours, and a command run as your own background task has a time
    cap, dies with your session and has no terminal - so from the project root run
    `<env vars> sandcastle run --detach` (the same arguments as `sandcastle run`), never in a pane
@@ -80,15 +84,17 @@ This continues SKILL.md: run its "Before every action" first.
    For a user who wants the run in their own terminal, give them the attached command to run
    there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
    person's terminal alone in a Herdr tab it adopts that tab.
-3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - this text then
-   ends with a note saying so - skip this step: the mod submits a prompt when the run's process
+3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - the mod appends a
+   note saying so to the end of the sandcastle skill's own text (SKILL.md), not to this file, so
+   look for it there; a note seen earlier in the session still holds after the conversation is
+   compacted, even when it is no longer in view - skip this step: the mod submits a prompt when the run's process
    is gone, and that prompt is your cue for step 4. It follows the run this session started
    wherever its project lives (a second clone, a package of a monorepo), by the session id the
    run records; a run that `--detach` refused gets no prompt, so step 2's check still matters. A
    paused run (pause.md) is still live, so the mod sends no end prompt until the run ends: silence
    during a pause is not a sign it has stopped.
 
-   With no such note, the detached run is not your own process, so your harness never tells you
+   With no such note in SKILL.md's text (and none seen earlier in the session), the detached run is not your own process, so your harness never tells you
    it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
    run is live, then prints the closing summary and exits with the run's exit code. A harness caps
