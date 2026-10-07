@@ -321,10 +321,12 @@ export const blockerTicket = (b: Blocker): string | undefined => (b.kind === "gi
 
 /**
  * The words after the ticket's name in the status view. A blocker still in flight lands in this
- * run, which is when its dependant starts; any other is not this run's to land. One that has
- * `landed` is no blocker any more and is left out, never called "not in this run".
+ * run, which is when its dependant starts; one that was in this run and ended without landing is
+ * named by `ended` (its id to the state it ended in: `stopped`, `gate red`); any other is not this
+ * run's to land. One that has `landed` is no blocker any more and is left out. A blocker that is in
+ * the run is never called "not in this run".
  */
-export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: ReadonlySet<string> = new Set()): string => {
+export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: ReadonlySet<string> = new Set(), ended: ReadonlyMap<string, string> = new Map()): string => {
   on = on.filter((b) => {
     const id = blockerTicket(b);
     return id === undefined || !landed.has(id);
@@ -336,9 +338,20 @@ export const blockedNote = (on: Blocker[], inFlight: Set<string>, landed: Readon
     const id = blockerTicket(b);
     return id !== undefined && inFlight.has(id);
   };
+  const wordOf = (b: Blocker) => {
+    const id = blockerTicket(b);
+    return id === undefined || here(b) ? undefined : ended.get(id);
+  };
   const lands = on.filter(here).map(refLabel);
-  const away = on.filter((b) => !here(b)).map(refLabel);
-  return `waits for ${[lands.length && `${lands.join(", ")} (lands this run)`, away.length && `${away.join(", ")} (not in this run)`].filter(Boolean).join(", ")}`;
+  // One group per state, in the order each first appears.
+  const words = [...new Set(on.map(wordOf).filter((w): w is string => w !== undefined))];
+  const away = on.filter((b) => !here(b) && wordOf(b) === undefined).map(refLabel);
+  const groups = [
+    lands.length && `${lands.join(", ")} (lands this run)`,
+    ...words.map((w) => `${on.filter((b) => wordOf(b) === w).map(refLabel).join(", ")} (${w})`),
+    away.length && `${away.join(", ")} (not in this run)`,
+  ];
+  return `waits for ${groups.filter(Boolean).join(", ")}`;
 };
 
 /**

@@ -38,7 +38,7 @@ to land, need you, queued, blocked, merged. The states:
 - **`queued`** (next to start, how many are ahead, or `waits for the run's share` while other
   runs hold their part of the machine's sandbox slots), **`blocked`** (what it waits for, and
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
-  lands - or `(not in this run)`), **`merged`**, **`no change`**, **`skipped`** (not started
+  lands - `(stopped)`, `(gate red)` or another state when the blocker ended in this run without landing - or `(not in this run)` when it was never this run's), **`merged`**, **`no change`**, **`skipped`** (not started
   because the run stopped early).
 - **`paused`** - parked between two phases while a person has the run paused (`sandcastle
   pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
@@ -49,6 +49,11 @@ landing` (then `PAUSED since 15:40` once nothing is in flight). When the snapsho
 the pause in what you tell the user: since when, which tickets are still finishing (green
 branches keep landing), and that `sandcastle resume` (the resume action, pause.md) carries it on.
 Do not call a paused run hung, finished or stuck.
+
+A live run whose `.git` guard tripped (the base branch moved, say) reads `STOPPED landing` in its run
+cell the moment it happens, and the run's output printed `STOPPED landing: ...` then: it finishes
+what is in flight and lands nothing more, and each ticket it did not start says what moved (`not
+started: main moved while sandboxes ran`). Tell the user the run is stopped, not working, and why.
 
 A live run that spends a subscription on a Claude model also has a `usage` row in the header: the
 plan's 5-hour and weekly windows, each with its percentage and reset time, and how long ago an agent

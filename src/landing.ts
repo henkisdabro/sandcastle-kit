@@ -20,7 +20,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
-import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, largeFiles, protectedChanges, tipOf } from "./guard.ts";
+import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
@@ -238,7 +238,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
           check("before writing to the base branch");
         } catch (error) {
           if (!(error instanceof OperatorError)) throw error;
-          failed ??= new LandingStop(error.message, { cause: error });
+          failed ??= new LandingStop(error.message, guardWords(error), { cause: error });
           throw failed;
         }
         const prev = expected.base;
@@ -253,6 +253,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
               failed ??= new LandingStop(
                 `${base} moved to ${tip.slice(0, 12)} while the kit wrote to it, and not by that write: ${why}. ` +
                   `Nothing more lands. Check \`git log ${prev.slice(0, 12)}..${base}\` before running again.`,
+                { what: `${base} moved while the kit wrote to it`, detail: `(not by that write: ${why})` },
               );
               // Thrown from `finally` on purpose: the stop wins over the write's own result or error.
               throw failed;
@@ -355,7 +356,7 @@ export type Landed =
   | { kind: "dry-run" };
 
 /** The sandbox that redoes a landing could not start under the `.git` check: the run stops. */
-export class LandingStop extends OperatorError {}
+export class LandingStop extends GuardStop {}
 
 export const isAncestor = (root: string, ancestor: string, of: string) => {
   try {
@@ -500,7 +501,7 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       }
     } catch (error) {
       // The .git check stops the run, as before landing.
-      if (error instanceof OperatorError) throw new LandingStop(error.message, { cause: error });
+      if (error instanceof OperatorError) throw new LandingStop(error.message, guardWords(error), { cause: error });
       const reason = `could not land it in a sandbox: ${errorLine(error)}`;
       console.log(`${ref(o.issue)}: ${reason}.`);
       return { kind: "not-landed", reason };

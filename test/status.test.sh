@@ -264,6 +264,30 @@ hasnt 'PAUSED'
 row '#123' queued 'next to start'
 
 # ---------------------------------------------------------------------------
+SCENARIO="run whose landing the guard stopped"
+# The `.git` guard tripped (the base moved under the run): nothing more lands, but tickets in flight
+# finish. The run record's `stopped` says so while the run is still live, and the run cell reads
+# STOPPED at once - not only after the run has ended.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running", "concurrency": 3,
+  "stopped": "STOPPED before landing #121: main moved while sandboxes ran (abc1234 by a person, 2 minutes ago: quick fix)",
+  "issues": ["120","121"],
+  "tickets": {
+    "120": { "state": "review", "since": $((now - 120)), "started": $((now - 900)) },
+    "121": { "state": "stopped", "since": $((now - 60)), "note": "finished before the run stopped - lands on a later run" }
+  } }
+EOF
+render "120 121"
+has 'state +STOPPED landing · '
+has 'since +[0-9:]+ · lands nothing more'
+hasnt 'running · '
+# A record whose `stopped` is empty stops nothing.
+sed -i.bak 's/"stopped": "[^"]*",/"stopped": "",/' "$L/run.json"
+render "120 121"
+hasnt 'STOPPED +landing'
+has 'state +running'
+
+# ---------------------------------------------------------------------------
 SCENARIO="run paused for plan usage"
 # USAGE_PAUSE: the run paused itself when a window reached the threshold. The cell names the cause and when it
 # resumes in place of when it paused: `PAUSED - weekly usage 95%, resumes Wed 06:01`, with the tickets still

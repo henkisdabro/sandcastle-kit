@@ -19,13 +19,13 @@
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
-import { largeFilesNote } from "./guard.ts";
+import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
 import { overrunLine, overrunNoted } from "./report.ts";
 import { HANDED_BACK, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
-import type { Again, Change, Ending } from "./schedule.ts";
+import type { Again, Change, Ending, StopCause } from "./schedule.ts";
 import { refOf } from "./tracker.ts";
 
 /** What the ledger reads of a pipeline's result: burndown's own `Outcome` is one. */
@@ -448,6 +448,12 @@ export const createLedger = (d: {
   };
   return {
     entries: entries as ReadonlyMap<string, Entry>,
+    /**
+     * How a ticket of the run that ended without landing reads in the note of what waits for it,
+     * from the state its ending is recorded as - also for one the stop left unstarted, whose record
+     * waits for the run's last words: `stopped`, `gate red`, `not started`. Never "not in this run".
+     */
+    endedAs: (id: string): string => stateWord(entries.get(id)?.said.record?.state),
     /** The line each requeued ticket's second attempt carries, by ticket. */
     requeuedAs: requeuedAs as ReadonlyMap<string, string>,
     requeued,
@@ -527,3 +533,33 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
   }
   return l;
 };
+
+/**
+ * How a stop's cause reads in the notes of the tickets it left unstarted and in the closing
+ * summary. A `.git` stop says what moved (`main moved while sandboxes ran`), so a ticket never
+ * started because the base moved does not read as tampering with the shared `.git`.
+ */
+export const causeWords = (c: StopCause, ref: (id: string) => string): string => {
+  switch (c.kind) {
+    case "plan limit":
+      return `${ref(c.ticket)} hit the plan's usage limit`;
+    case "usage limit":
+      return c.line;
+    case "tampered":
+    case "host failed":
+      return guardWords(c.error).what;
+  }
+};
+
+/**
+ * The line printed once, as a safety stop first holds (the scheduler's `stopped landing`): the
+ * cause with what a person needs to check it, and what the run does from here.
+ */
+export const stoppedLine = (c: StopCause, ref: (id: string) => string): string => {
+  const { what, detail } = c.kind === "tampered" || c.kind === "host failed" ? guardWords(c.error) : { what: causeWords(c, ref), detail: "" };
+  return `STOPPED landing: ${what}${detail ? ` ${detail}` : ""} - the run finishes what is in flight and lands nothing more.`;
+};
+
+/** A ticket state in the words of a waiting ticket's note. */
+const stateWord = (state: string | undefined): string =>
+  state === undefined ? "did not land" : state === "red" ? "gate red" : state === "nochange" ? "no change" : state === "skipped" ? "not started" : state;
