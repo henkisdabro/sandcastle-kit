@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -15,7 +15,7 @@ import { quietly } from "./quiet.ts";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { createPipeline, ticketTime } = await import("../src/burndown.ts");
+const { createPipeline, takeStartSlot, ticketTime } = await import("../src/burndown.ts");
 const { stepTimes, withQueued } = await import("../src/gates.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 
@@ -57,6 +57,46 @@ const firstSetup = async (slotWaitMs: number | undefined) => {
   await quietly(() => pipeline({ id: "7", title: "seven", body: "" } as Parameters<typeof pipeline>[0], { juncture: async () => {}, slotWaitMs })).catch((e: unknown) => assert.match(String(e), /no sandbox in this test/));
   return steps;
 };
+
+/** A machine-wide pool on a fake clock: each ask for a slot takes the next wait in `waits`, and a null wait ends in a pause (no slot). */
+const fakePool = (waits: (number | null)[], parkedMs = 0) => {
+  let clock = 0;
+  const asks = [...waits];
+  return {
+    now: () => clock,
+    take: async () => {
+      const w = asks.shift();
+      clock += w ?? 5 * MIN;
+      return w !== null;
+    },
+    park: async () => {
+      clock += parkedMs;
+    },
+  };
+};
+
+test("an attempt's start counts the time a fake pool held its slot back", async () => {
+  const pool = fakePool([2 * 60 * MIN]);
+  assert.equal(await takeStartSlot(pool.take, pool.park, pool.now), 2 * 60 * MIN);
+  const free = fakePool([0]);
+  assert.equal(await takeStartSlot(free.take, free.park, free.now), 0);
+});
+
+test("a pause that ended a wait for a slot leaves its time parked out of the slot wait, and the waits on either side in", async () => {
+  // 5 min of waiting, a pause of an hour, then 10 more min before the slot came.
+  const pool = fakePool([null, 10 * MIN], 60 * MIN);
+  assert.equal(await takeStartSlot(pool.take, pool.park, pool.now), 15 * MIN);
+});
+
+test("the attempt hands its start's slot wait to the pipeline and to the summary line", () => {
+  // burndown() needs Docker, so no test drives it: its wiring of the helpers tested here is held by its source.
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  assert.match(src, /const slotWaitMs = await takeStartSlot\(take, /);
+  assert.match(src, /slotWaited\.set\(issue\.id, \(slotWaited\.get\(issue\.id\) \?\? 0\) \+ slotWaitMs\)/);
+  assert.match(src, /pipeline\(issue, \{ juncture: [^\n]*, slotWaitMs \}\)/);
+  assert.match(src, /times = withQueued\(times, queuedMs\)/);
+  assert.match(src, /const time = ticketTime\(took\.get\(o\.issue\), slotWaited\.get\(o\.issue\)\)/);
+});
 
 test("the attempt's wait for its sandbox slot reaches the setup step, the first step of the ticket", async () => {
   assert.deepEqual(await firstSetup(2 * 60 * MIN), [{ phase: "setup", queuedMs: 2 * 60 * MIN }]);

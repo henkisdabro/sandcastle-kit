@@ -718,6 +718,22 @@ export const ticketTime = (workMs: number | undefined, slotWaitMs: number | unde
   return `${work && ` ${work},`} waited ${long} for a slot`;
 };
 
+/**
+ * An attempt's start: its sandbox slot, taken again after each pause that ended a wait for one (`take` answers
+ * false; `park` waits out the pause). Returns the time spent waiting for the slot, the time parked left out:
+ * the slot is taken before the ticket's first step, so no step's timer would hold the wait.
+ */
+export const takeStartSlot = async (take: () => Promise<boolean>, park: () => Promise<void>, now: () => number = Date.now): Promise<number> => {
+  let waitMs = 0;
+  for (;;) {
+    const asked = now();
+    const got = await take();
+    waitMs += now() - asked;
+    if (got) return waitMs;
+    await park();
+  }
+};
+
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
 export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close">;
 
@@ -2228,8 +2244,6 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // The ticket's sandbox slot, which it gives back while it waits out a pause and takes again on the resume.
     // A wait for one ends when the run is paused (false): the ticket then waits at its start for the resume.
     let lease: SlotLease | undefined;
-    // The time the attempt's start waited for its slot. A wait after a pause is in the time parked, so it is not counted here.
-    let slotWaitMs = 0;
     const take = async () => {
       await slotTurn(slotWanted);
       lease = await leaseSlot("sandboxes", `${project.name} ${ref(issue.id)}`, waitNote, undefined, paused);
@@ -2252,13 +2266,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     });
     const result = await (async () => {
       try {
-        for (;;) {
-          const asked = Date.now();
-          const got = await take();
-          slotWaitMs += Date.now() - asked;
-          if (got) break;
-          await juncture("start", { suspend: async () => {}, resume: async () => {} });
-        }
+        // The start's wait for its slot. A slot taken again on a resume is in the time parked, so it is not counted here.
+        const slotWaitMs = await takeStartSlot(take, () => juncture("start", { suspend: async () => {}, resume: async () => {} }));
         slotWaited.set(issue.id, (slotWaited.get(issue.id) ?? 0) + slotWaitMs);
         // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
         await juncture("start", parkable());
