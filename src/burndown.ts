@@ -2387,11 +2387,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
 
   // A sandbox slot of the machine pool, for a worker's next ticket (the schedule's `slot`) or a ticket's own after a
   // pause. A landing that waits for a slot goes first (`slotTurn`). `giveUp` ends a wait that is no longer wanted.
+  // `keep`: beside another run the tickets leave the last slot of the run's share to landing, as `pipelineWorkers`
+  // leaves one of the machine's for a run alone; a dry run lands nothing.
   const sandboxSlot = async (label: string, giveUp: () => boolean): Promise<SlotLease | undefined> => {
     await slotTurn(slotWanted);
     const wait = slotWaits.begin();
     try {
-      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp);
+      return await leaseSlot("sandboxes", `${project.name} ${label}`, wait.onWait, undefined, giveUp, false, !DRY_RUN);
     } finally {
       wait.end();
     }

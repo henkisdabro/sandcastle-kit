@@ -1502,8 +1502,11 @@ below its share wants one; with no one wanting one, a free slot is taken as usua
 a run over its share keeps every slot it holds and shrinks as its tickets finish, so a second run
 that starts while the first fills the pool waits for tickets to end (often tens of minutes) and then
 fills up, and when a run ends the others grow back. A landing comes out of the run's own share,
-and still goes before a new ticket within it. Gate slots have no shares: they go to the longest
-wait. The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
+and still goes before a new ticket within it: while the share is 2 or more, the run's tickets hold
+one slot fewer than the share, which is kept for landing (a run alone keeps one of the machine's
+slots the same way); at a share of 1 the slot is a ticket's, and a landing waits for it to free.
+Gate slots have no shares: they go to the longest wait.
+The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
 Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
 tickets next to start say `waits for the run's share`. A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
