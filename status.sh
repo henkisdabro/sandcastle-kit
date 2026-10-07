@@ -490,12 +490,12 @@ run_alive() {
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
-WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; RUN_PAUSED=0
 load_run() {
-  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""
   TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; RUN_PAUSED=0
-  local f=logs/run.json pid="" paused="" pool="" issues="" waiting="" active="" tickets="" free="" typical="" eta=""
+  local f=logs/run.json pid="" paused="" pool="" issues="" waiting="" active="" tickets="" free="" typical="" eta="" last_tokens=""
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
   # older kit's entry has no kind, and its line under "outcome".
@@ -536,6 +536,7 @@ load_run() {
       (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // ""), (.value.tokens // "" | tostring)] | join("\u001f")))",
     @sh "free=\(lines([((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max))",
     @sh "typical=\(lines((.typical // {}) | to_entries[] | "\(.key)|\(.value)"))",
+    @sh "last_tokens=\(lines((.tickets // {}) | to_entries[] | select(.value.tokens | type == "string") | "\(.key)|\(.value.tokens)"))",
     @sh "eta=\(lines(
       (.typical.issue // null) as $t
       | if $t == null or (.stage // "") != "running" then empty else
@@ -546,6 +547,8 @@ load_run() {
         | ($now + $n * (.typical["landing gates"] // 0)) as $l
         | ([$p, $l] | max) | floor end))"
   ' "$f" 2>/dev/null)"
+  # An ended run's rows are inferred from git and the logs, but its per-ticket tokens are still the record's.
+  LAST_TOKENS="$last_tokens"
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
   [ "$paused" = 1 ] && RUN_PAUSED=1
@@ -1322,6 +1325,7 @@ render() {
     fi
 
     cpu_cols
+    fields_of "$n" "$LAST_TOKENS" '|' && tokens_cell "${F[1]:-}"
     activity=$(log_activity "$log")
     [ "$kept_wt" = 1 ] && activity="worktree kept (uncommitted files) - $activity"
     [ -n "$activity_note" ] && activity="$activity_note"

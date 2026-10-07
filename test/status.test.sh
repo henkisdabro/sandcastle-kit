@@ -551,6 +551,14 @@ hasnt 'TOKENS'
 hasnt 'CPU/MEM'
 hasnt 'tokens = in/out'
 row '#131' impl
+# Once the run has ended its rows come from git and the logs, but each ticket's tokens are still the record's.
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "finishedAt": "$started", "exitCode": 0, "models": "m",
+  "issues": ["131","132"], "tickets": { "131": { "state": "merged", "tokens": "3.1M in / 42k out" }, "132": { "state": "merged" } } }
+EOF
+COLS=120; render ""
+has '^│ +#131 .*│ +- +│ +3\.1M/42k +│'
+has '^│ +#132 .*│ +- +│ +- +│'
 COLS="$COLS_WAS"
 
 # ---------------------------------------------------------------------------
