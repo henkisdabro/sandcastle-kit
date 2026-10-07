@@ -2201,6 +2201,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         return poolValues();
       case "paused":
       case "resumed":
+      case "pause stopped":
         return pausing.told(c);
       case "blocked":
         return bookkeep(c.id, () => run.ticket(c.id, { note: blockedNote(c.on, new Set(c.inFlight), new Set(c.landed), new Map(c.ended.map((id) => [id, ledger.endedAs(id)]))) }));

@@ -973,7 +973,7 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
   const now = ports.now ?? Date.now;
   const clockOf = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
   return {
-    /** The `paused` and `resumed` changes; any other is not this handler's. */
+    /** The `paused`, `resumed` and `pause stopped` changes; any other is not this handler's. */
     told(c: Change<unknown, unknown>): void {
       if (c.kind === "paused") {
         // The tickets still finishing; once none is, the machine may sleep (the demand is 0 by then too).
@@ -1004,6 +1004,13 @@ export const createPauseHandling = (ports: PauseHandlingPorts) => {
             ? `Resumed: the plan's usage window has reset; each paused ticket goes on from its next phase.`
             : "Resumed: each paused ticket goes on from its next phase.",
         );
+        said = undefined;
+        forUsage = undefined;
+        void ports.holdAwake();
+        ports.refresh();
+      } else if (c.kind === "pause stopped") {
+        // A stop ended the pause: tickets in flight finish, and the Herdr sidebar and tab bar read this record meanwhile.
+        ports.record(undefined);
         said = undefined;
         forUsage = undefined;
         void ports.holdAwake();
