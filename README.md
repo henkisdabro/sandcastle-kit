@@ -1427,9 +1427,12 @@ and the kit narrows what can cross it:
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
-  says so). Worktrees share `.git/config`, so a branch given an upstream in one (`git worktree add`
-  from a remote branch, `git push -u`, `git branch -u`, `gh pr create` from a local branch) stops
-  the run too: use `--no-track`, or `git push origin HEAD:<branch>`.
+  says so). Worktrees share `.git/config`, which is compared by key: an upstream
+  (`branch.<name>.remote` and `.merge`) that another worktree gives its own branch (`git worktree add`
+  from a remote branch, `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run
+  prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
+  values, except for keys that run a program): a remote, a hook path, an `include`, `rebase` or
+  `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
   `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare

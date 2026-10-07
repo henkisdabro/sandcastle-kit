@@ -26,10 +26,11 @@ This continues SKILL.md: run its "Before every action" first.
      from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
      nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
      same. Check `sandcastle status` (is a run live?) before any git write to the base in that
-     checkout, yours included. Another worktree shares `.git/config`, which the guard watches whole:
-     a branch given an upstream there (`git worktree add ... origin/<x>`, `git push -u`,
-     `git branch -u`, `gh pr create` from a local branch) stops the run too. Use `--no-track`, or
-     push with `git push origin HEAD:<branch>`.
+     checkout, yours included. Another worktree shares `.git/config`, which the guard reads by key:
+     an upstream for your own branch there (`git worktree add ... origin/<x>`, `git push -u`,
+     `git branch -u`, `gh pr create` from a local branch) is let through with one line, but any other
+     change stops the run - a remote, a hook path, an `include`, a `rebase` or `pushRemote` setting,
+     or an upstream on the base or an `agent/issue-*` branch.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. `sandcastle usage`
      prints the plan's usage now, read-only (never a script of your own against `src/usage.ts`). Offer
@@ -235,7 +236,8 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
 - **Run STOPPED** in the heading: the run landed nothing after the stop (the heading says how many
   merged before it), and it names what moved. For a moved base branch, show the user the commits
   it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
-  or `.git/info/`, stop and have them inspect it.
+  or `.git/info/`, stop and have them inspect it (the stop names the keys that changed, and for
+  a key that is not a command, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` before blaming the branch.

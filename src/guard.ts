@@ -83,7 +83,9 @@ export const pinHostGitConfig = (root: string) => {
 // kit moves both with its own writes - `begin`, `settle` and `forget` in landing.ts - so a branch
 // it deleted itself (a landed branch) is never "restored". Every pipeline and the landing worker
 // check the same two objects, hence the sharing in `gitFingerprint`.
-export type Fingerprint = { files: Record<string, string>; base: string; branches: Record<string, string>; flying: Set<string> };
+// `config` is `.git/config` as the list of its `key\nvalue` entries (null when git cannot read it as
+// config), kept beside its hash so a change can be told apart by key: see `configChange`.
+export type Fingerprint = { files: Record<string, string>; config: { path: string; entries: string[] | null }; base: string; branches: Record<string, string>; flying: Set<string> };
 
 const AGENT_BRANCH = /^agent\/issue-/;
 
@@ -123,9 +125,25 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const info = inside("info").filter((f) => f !== join(dir, "info", "refs"));
   const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
   const files: Record<string, string> = {};
-  for (const f of paths) files[f] = createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  for (const f of paths) files[f] = hashOf(f);
+  // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
+  // otherwise leave the entries newer than the hash, and the change would never be compared.
+  const configPath = join(dir, "config");
+  let entries: string[] | null = null;
+  for (let attempt = 0; attempt < 3 && !entries; attempt++) {
+    try {
+      const listed = sh("git", ["config", "--file", configPath, "-z", "--list"], project.root).split("\0").filter(Boolean);
+      const again = hashOf(configPath);
+      if (again === files[configPath]) entries = listed;
+      else files[configPath] = again;
+    } catch {
+      break;
+    }
+  }
   return {
     files,
+    config: { path: configPath, entries },
     base: tipOf(project.root, `refs/heads/${project.baseBranch}`),
     branches: share?.branches ?? agentBranches(project.root),
     flying: share?.flying ?? new Set(),
@@ -134,6 +152,60 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
 
 const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =>
   [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f]).sort();
+
+// What a change to `.git/config` is, told by key. A person's own work in another worktree of the
+// repo (`git worktree add` from a remote branch, `git push -u`, `git branch -u`, `gh pr create`)
+// gives a branch an upstream: `branch.<name>.remote` and `.merge`, which run no program. That alone,
+// for a branch that is neither the base nor a ticket's, is benign. `rebase` and `pushRemote` are not
+// listed (conservative, as the ticket decided), and neither is any other key: it stops the run.
+// The values are held too: a remote is a plain name or `.` (a value with `:` or `/` is a URL or a
+// path, and `ext::` runs a program), a merge is a ref. A key's values are compared as a list, in order.
+const UPSTREAM_KEY = /^branch\.(.+)\.(remote|merge)$/;
+const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
+
+// Keys whose values are not shown: they run a program or load more config, and the value is the
+// sandbox's to choose. The others show old and new (a URL's credentials hidden).
+const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
+
+const shown = (value: string | null) => {
+  if (value === null) return "(no value)";
+  const text = clean(value).replace(/\/\/[^/@\s]*@/g, "//***@");
+  return JSON.stringify(text.length > 100 ? `${text.slice(0, 100)}...` : text);
+};
+
+const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"]) => {
+  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"] };
+  // A key with no value (`[core] bare`, true) is not one with an empty value (`bare =`, false).
+  const values = (entries: string[]) => {
+    const by = new Map<string, (string | null)[]>();
+    for (const e of entries) {
+      const at = e.indexOf("\n");
+      const key = at < 0 ? e : e.slice(0, at);
+      by.set(key, [...(by.get(key) ?? []), at < 0 ? null : e.slice(at + 1)]);
+    }
+    return by;
+  };
+  const was = values(before);
+  const is = values(now);
+  const benign: string[] = [];
+  const words: string[] = [];
+  let allBenign = true;
+  for (const key of [...new Set([...was.keys(), ...is.keys()])].sort()) {
+    const old = was.get(key) ?? [];
+    const next = is.get(key) ?? [];
+    if (old.length === next.length && old.every((v, i) => v === next[i])) continue;
+    const upstream = UPSTREAM_KEY.exec(key);
+    const valid = next.every((v) => v !== null && (upstream?.[2] === "remote" ? PLAIN_REMOTE.test(v) : /^refs\/\S+$/.test(v)));
+    if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
+    else allBenign = false;
+    const name = clean(key);
+    if (COMMAND_KEY.test(key)) words.push(`${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`);
+    else if (!old.length) words.push(`${name} added: ${next.map(shown).join(", ")}`);
+    else if (!next.length) words.push(`${name} removed (was ${old.map(shown).join(", ")})`);
+    else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
+  }
+  return { benign: allBenign ? benign : [], words };
+};
 
 // Names, subjects and paths are the sandbox's to choose: shown without
 // control characters, so a planted subject cannot rewrite the terminal.
@@ -357,13 +429,31 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   const now = gitFingerprint(project);
   const base = project.baseBranch;
   const root = project.root;
-  const changed = changedFiles(before.files, now.files);
+  let changed = changedFiles(before.files, now.files);
+  let configWords: string[] = [];
+  if (changed.includes(now.config.path)) {
+    const { benign, words } = configChange(project, before.config.entries, now.config.entries);
+    configWords = words;
+    // No key differs but the bytes do (a comment, spacing, an order across keys): git reads the same
+    // config, so nothing to say. Unreadable config (null entries) always has a word.
+    if (benign.length || !words.length) {
+      changed = changed.filter((f) => f !== now.config.path);
+      // The new state is the run's expectation from here on, so the line is said once and a later
+      // change is judged against it.
+      before.files[now.config.path] = now.files[now.config.path];
+      before.config = now.config;
+    }
+    if (benign.length) {
+      console.log(`${benign.map(clean).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
+    }
+  }
   if (changed.length) {
     const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
+    const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
     throw new GuardStop(
-      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git. ` +
+      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys} ` +
         `Inspect \`git -C ${root} config --local --list\` and .git/info/ before running any other git command there.`,
-      { what: "the shared .git changed while sandboxes ran", detail: `(${names})` },
+      { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`})` },
     );
   }
   const rewritten = rewrittenWorktrees(project);
