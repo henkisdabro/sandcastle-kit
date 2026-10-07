@@ -298,7 +298,7 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
       rec.baselineFrom === "agent-anon"
         ? `Agent baseline: ${gib2(m.agentAnonMib! / 1024)} GiB, the anonymous memory read during agent passes; ${plus} is ${gib2(rec.baselineGib)} GiB.`
         : rec.baselineFrom === "agent-peak"
-          ? `Agent baseline: ${gib2(m.agentMib! / 1024)} GiB, \`memory.peak\` read before the first gate pass; ${plus} is ${gib2(rec.baselineGib)} GiB.`
+          ? `Agent baseline: ${gib2(m.agentMib! / 1024)} GiB, \`memory.peak\` read before the first gate pass; ${plus} is ${gib2(rec.baselineGib)} GiB. That figure includes page cache, and agents run the project's test suite themselves, so it may sit above the gate figure; it switches to anonymous memory once a run records agent samples, and no pool warning is given until then.`
           : `Agent baseline: no agent baseline measured yet, priced at the gate figure (${gib2(rec.baselineGib)} GiB).`;
     lines.push(
       `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days.`,
@@ -347,9 +347,10 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
  * A warning when the pool's limits, priced as `recommend` prices them (`maxGates` sandboxes at the
  * gate figure, the rest at the agent baseline), need more than the VM's memory less the headroom:
  * one line naming what they need, what the VM has, the recommendation and the key (or the
- * environment variable that overrides it) to set. Only when the gate figure is the anonymous memory
- * read during gates: `memory.peak` counts page cache, and a pool it said did not fit ran clean, so
- * until a run records anon figures doctor keeps its info pointer and the start line says nothing.
+ * environment variable that overrides it) to set. Only when the gate figure and the agent baseline are
+ * the anonymous memory read during passes: `memory.peak` counts page cache, and a pool it said did not
+ * fit ran clean, so until a run records anon figures doctor keeps its info pointer and the start line
+ * says nothing.
  * Nothing when the runtime cannot be asked, rather than an error: doctor and the start line have no
  * use for one.
  */
@@ -366,7 +367,9 @@ export const poolWarnings = (readers: Readers, env: Record<string, string | unde
   const memory = Number(info.MemTotal);
   if (!(cpus >= 1) || !(memory > 0)) return [];
   const rec = recommend(memory, cpus, readers.peaks?.() ?? [], readers.now?.() ?? Date.now());
-  if (rec.gateFrom !== "anon") return [];
+  // Both figures must be anonymous memory: a `memory.peak` agent baseline counts page cache, so a pool it priced
+  // past the VM may still run clean (an agent beside an anon gate priced at the gate figure is anon too).
+  if (rec.gateFrom !== "anon" || rec.baselineFrom === "agent-peak") return [];
   const sandboxes = current("sandboxes", env, machine);
   const gates = current("gates", env, machine);
   // A gate runs inside a sandbox, so more gates than sandboxes never run at once.

@@ -233,9 +233,9 @@ test("a pool at the recommendation that still does not fit is told to grow the V
   assert.match(one, /needs about 2\.75 GiB \(1 gate x 2\.75 GiB \+ 0 x 0\.88 GiB\), above the 2 GiB/);
   assert.match(one, /neither limit is above it, so give the VM more memory\./);
   assert.ok(!one.includes("set \""), one);
-  // A cache-inclusive agent baseline (3500 -> 3850 MiB = 3.76 GiB) heavier than the anon gate (1000 -> 1100 MiB = 1.07 GiB):
+  // An anon agent baseline (3500 -> 3850 MiB = 3.76 GiB) heavier than the anon gate (1000 -> 1100 MiB = 1.07 GiB):
   // 7.8 GiB usable recommends 2 gates + floor((7.8 - 2.15) / 3.76) = 3 sandboxes, and 3 with 1 gate needs 8.59 GiB.
-  const heavy = measuredOn(12, 9.8, { peakMib: 4000, anonMib: 1000, agentMib: 3500 });
+  const heavy = measuredOn(12, 9.8, { peakMib: 4000, anonMib: 1000, agentAnonMib: 3500 });
   const [three] = poolWarnings(heavy, {}, { maxSandboxes: 3, maxGates: 1 });
   assert.match(three, /recommends maxSandboxes 3 and maxGates 2/);
   assert.match(three, /neither limit is above it, so lower maxSandboxes further or give the VM more memory\./);

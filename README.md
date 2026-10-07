@@ -1525,10 +1525,10 @@ records that it was written this way (`sampled`): the anonymous figures of an ol
 reading taken after the gates, are not used, and a figure under 256 MiB is a sandbox at rest and does not
 count either, so those runs are priced from the peak until a newer run has recorded them. A VM whose memory
 less the headroom is under one gate figure is told it cannot fit one gate sandbox; the pool keeps 1 and 1. When the gate figure is
-`anonMib` and the effective limits, priced the same way (`min(maxGates, maxSandboxes)` gates at the
+`anonMib`, the agent baseline is not the cache-inclusive `agentMib` and the effective limits, priced the same way (`min(maxGates, maxSandboxes)` gates at the
 gate figure, the other sandboxes at the agent baseline), need more than the VM's memory less the
 headroom, doctor and the run's start line warn, naming both numbers and the `config.json` key (or the
-`SANDCASTLE_MAX_*` variable that overrides it). From `memory.peak` alone or the assumed figures nothing
+`SANDCASTLE_MAX_*` variable that overrides it). From `memory.peak` alone (the gate's or the agent baseline's) or the assumed figures nothing
 is warned (a pool it priced past the VM ran clean: page cache is reclaimed), and doctor keeps its `info` pointer. The pool's shares divide whatever limit you set; nothing about them
 changes. `size` shows the current limits beside the
 recommendation (environment, then `config.json`, then the defaults) and says when they already
