@@ -61,7 +61,9 @@ export const withObjectsOnly = <T>(root: string, revs: string[], use: (git: (arg
     writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
     // A SHA-256 repository's objects are unreadable to a SHA-1 one: the format is the one setting written, and the kit writes it.
     if (ids.some((id) => id.length === 64)) writeFileSync(join(dir, "config"), "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = sha256\n");
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_DIR: dir, GIT_ALTERNATE_OBJECT_DIRECTORIES: objects, GIT_NO_REPLACE_OBJECTS: "1" };
+    // Quoted: the variable is a colon-separated list, so a project path with a `:` would name two missing stores.
+    const alternate = `"${objects.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+    const env: NodeJS.ProcessEnv = { ...process.env, GIT_DIR: dir, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate, GIT_NO_REPLACE_OBJECTS: "1" };
     for (const name of REPO_VARS) delete env[name];
     const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8", cwd: dir, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT }).trim();
     return use(git, ids);
@@ -82,6 +84,8 @@ const mergeIn = (git: (args: string[]) => string, ours: string, theirs: string):
   }
   // `<tree>\0<conflicted path>\0...`; with -z the tree id is NUL-terminated and the runner trims only the ends.
   const [tree, ...rest] = out.split("\0");
+  // Git exits 1 for some failures too (a commit it cannot read): with no tree id, that is no answer, not a clean merge.
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(tree)) throw new Error(`git merge-tree gave no tree: ${out.slice(0, 200)}`);
   return { tree, conflicted: new Set(rest.filter(Boolean)) };
 };
 

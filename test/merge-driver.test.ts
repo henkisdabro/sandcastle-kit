@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -174,4 +174,29 @@ test("every host merge-tree in src/ runs through the throwaway git directory's r
   // The pipeline's check before review and gates is `mergeTree`'s caller, not a git call of its own.
   const burndown = readFileSync(join("src", "burndown.ts"), "utf8");
   assert.match(burndown, /const conflictBefore = [\s\S]*?\[\.\.\.mergeTree\(project\.root, /);
+});
+
+test("a project whose path holds a colon or a quote still has its conflict found", () => {
+  // GIT_ALTERNATE_OBJECT_DIRECTORIES is a colon-separated list: unquoted, `a:b` names two stores that do not exist.
+  for (const name of ['with:colon', 'with"quote\\slash']) {
+    const { root, base, seven } = setup();
+    const moved = join(tmp, `${name}${n++}`);
+    renameSync(root, moved);
+    assert.deepEqual([...mergeTree(moved, base, seven).conflicted], ["shared.txt"], name);
+  }
+});
+
+test("a merge-tree that exits 1 with no tree id is no answer, not a clean merge", () => {
+  const { root, base, seven } = setup();
+  // Git exits 1 for a merge it could not start too ("not something we can merge"), with nothing on stdout.
+  const bin = mkdtempSync(join(tmp, "bin-"));
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = merge-tree ]; then echo "fatal: not something we can merge" >&2; exit 1; fi\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    assert.throws(() => mergeTree(root, base, seven), /no tree/);
+  } finally {
+    process.env.PATH = path;
+  }
 });
