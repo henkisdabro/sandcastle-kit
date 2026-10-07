@@ -98,6 +98,11 @@ done < <(grep -oE "${GIT}stash([[:space:]]+[^[:space:];&|]+)?([[:space:]]|\$)" <
 grep -qE "${GIT}push([[:space:]]|\$)" <<<"$CMD" && deny "git push" "" "To test remote handling, build a bare origin under the temp dir and use git fetch, and use git -C <absolute path> for a scratch repository's own plumbing."
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
 grep -qE "${GIT}worktree[[:space:]]+(prune|repair)" <<<"$CMD" && deny "git worktree prune or repair (git worktree remove --force is allowed)"
+# worktree add writes a record, with the container's path, into the shared .git; a pass killed before its
+# cleanup leaves it there. In a scratch repository's own .git it harms nothing.
+while IFS= read -r m; do
+  scratch_only "$m" || deny "git worktree add in the shared repository" "" "To compare against the base, read it: git show <base>:<path>, or git archive <base> | tar -x -C <temp dir>. A scratch repository under the temp dir takes git -C <absolute path> worktree add."
+done < <(grep -oE "${GIT}worktree[[:space:]]+add([[:space:]]|\$)" <<<"$CMD")
 grep -qE "${GIT}branch[[:space:]]([^;&|\`]*[[:space:]])?(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]][^;&|\`]*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
 if grep -qE '(^|[;&|(`])[[:space:]]*(rm|mv)[[:space:]]' <<<"$CMD"; then
   for dir in "$COMMON" "$PROJECT_COMMON"; do

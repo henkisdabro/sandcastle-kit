@@ -1444,8 +1444,8 @@ and the kit narrows what can cross it:
   by hand is dropped at the next run's start (or by `sandcastle clean`), so the backup does not grow.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `stash`
-  (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune` and `repair`,
-  deleting an `agent/*` branch, `rm` or `mv` inside the shared `.git`, and writes to it. Project hooks
+  (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune`, `repair` and
+  `add` (a scratch repository's own is allowed), deleting an `agent/*` branch, `rm` or `mv` inside the shared `.git`, and writes to it. Project hooks
   still run, and `reset --hard`, `clean`, `checkout .`, `stash list` and `worktree remove --force` stay
   allowed, as do `update-ref`, `gc`, `prune` and `stash` run as `git -C <absolute path>` in a scratch
   repository outside the project (`push` stays refused everywhere). It reduces accidents and is not a

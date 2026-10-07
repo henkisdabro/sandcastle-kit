@@ -45,8 +45,8 @@ see the whole set, and fix all of them.
   configuration.
 - **Stay inside the ticket.** If the failure comes from code this branch did not touch and cannot be
   fixed without scope creep, commit nothing and say so {{KIT_SAY}}.
-  That includes a failure that also fails on `{{TARGET_BRANCH}}` (check in a scratch worktree,
-  `git worktree add --detach <temp dir> {{TARGET_BRANCH}}`, removed with `git worktree remove --force <temp dir>`):
+  That includes a failure that also fails on `{{TARGET_BRANCH}}` (check against an export of it,
+  `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`; the guard refuses `git worktree add`):
   it is not this branch's, so it gets no commit. Several branches fixing one test, each its own way,
   conflict at landing.
 - **A problem outside the ticket is not lost in prose.** For each one you found - the failure from
