@@ -1,7 +1,7 @@
 // The end-of-run verify is proof that the merged base is green, so it is skipped when the green-base record already
-// names the base's tip on the same image and plan, and the summary says whose gates proved it. A landing's merge of a
-// branch that held the base is such a tip (the ticket's own gates ran on that tree). Run for real against a fake
-// docker; no Docker or network.
+// names the base's tip on the same image and plan, and the summary says whose gates proved it. Only a proof from a
+// gate-only sandbox counts (test/verify-skip-gate-only-proof.test.ts); a fast-forward's ticket gates do not. Run for
+// real against a fake docker; no Docker or network.
 //
 //   pnpm test:file test/verify-skip-green-base.test.ts
 
@@ -96,7 +96,7 @@ const facts = (verify: Facts["verify"]): Facts => ({
 });
 const regated = (verify: Facts["verify"]) => render(facts(verify), true).split("\n").find((l) => l.startsWith("Merged main"));
 
-test("a fast-forward landing's merge is a base the verify names the ticket's gates for, and a later commit is not", async () => {
+test("a landing's record names the ticket's gates and where they ran, and a later commit is no proof", async () => {
   const root = makeProject();
   await inProject(root, async (project, plan) => {
     const head = git(root, "rev-parse", "agent/issue-427");
@@ -113,16 +113,20 @@ test("a fast-forward landing's merge is a base the verify names the ticket's gat
       withdrawal: () => undefined,
       host: createHostGit(project, gitFingerprint(project)),
       gate: async () => assert.fail("a fast-forward is not gated again at landing"),
-      greenBase: (commit, by) => noteGreenCommit(project, IMAGE, plan, commit, by),
+      greenBase: (commit, by, kind) => noteGreenCommit(project, IMAGE, plan, commit, by, kind),
       landed: new Map(),
     };
     assert.equal(greenProofOfBase(project, IMAGE, plan), undefined, "no record yet: the verify runs");
     const landed = await quietly(() => landOne(ctx, { issue: "427", branch: "agent/issue-427", status: "green", commits: 1, repairs: 0, head }));
     assert.equal(landed.result.kind, "merged");
     const tip = git(root, "rev-parse", "main");
-    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "#427" });
-
-    // Another image or plan is not the record's proof.
+    // A fast-forward's gates ran in the ticket's own sandbox: the record names them, and the verify still runs.
+    const record = JSON.parse(readFileSync(join(root, ".sandcastle/.run/base-gates.json"), "utf8"));
+    assert.deepEqual([record.commit, record.by, record.kind], [tip, "#427", "ticket-sandbox"]);
+    assert.equal(greenProofOfBase(project, IMAGE, plan), undefined);
+    // From a landing sandbox the same record is a proof - but not on another image or plan.
+    noteGreenCommit(project, IMAGE, plan, tip, "#427", "landing-sandbox");
+    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "#427", kind: "landing-sandbox" });
     assert.equal(greenProofOfBase(project, "sandcastle-fixture:other", plan), undefined);
     writeFileSync(join(root, "g.txt"), "g\n");
     git(root, "add", "g.txt");
@@ -131,26 +135,26 @@ test("a fast-forward landing's merge is a base the verify names the ticket's gat
   });
 });
 
-test("the verify and the base check record whose gates they were, and an older kit's record names no one", async () => {
+test("the verify and the base check record whose gates they were, and an older kit's record is no proof", async () => {
   const root = makeProject();
   await inProject(root, async (project, plan) => {
     const record = join(root, ".sandcastle/.run/base-gates.json");
     await quietly(() => requireGreenBase(project, IMAGE, plan, true, "run-1"));
     const tip = git(root, "rev-parse", "main");
-    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "the base check" });
+    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "the base check", kind: "base" });
     await quietly(() => verifyBase(project, IMAGE, plan, "run-1"));
-    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "verify" });
-    const { commit: _c, by: _b, ...old } = JSON.parse(readFileSync(record, "utf8"));
+    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip, by: "verify", kind: "verify" });
+    const { commit: _c, by: _b, kind: _k, ...old } = JSON.parse(readFileSync(record, "utf8"));
     writeFileSync(record, JSON.stringify(old) + "\n");
-    assert.deepEqual(greenProofOfBase(project, IMAGE, plan), { commit: tip });
+    assert.equal(greenProofOfBase(project, IMAGE, plan), undefined, "an older kit's record names no kind: the verify runs");
   });
 });
 
 test("the summary says whose gates proved a merged base the verify did not run again", () => {
   const sha = "0123456789abcdef0123456789abcdef01234567";
   assert.equal(
-    regated({ green: true, line: "", image: IMAGE, skipped: { commit: sha, by: "#427" } }),
-    `Merged main re-gated: green at 0123456 already on image ${IMAGE} (gated with #427) - not run again.`,
+    regated({ green: true, line: "", image: IMAGE, skipped: { commit: sha, by: "#427", kind: "landing-sandbox" } }),
+    `Merged main re-gated: green at 0123456 already on image ${IMAGE} (gated with #427 in its landing sandbox) - not run again.`,
   );
   assert.equal(verifySkippedLine("main", { commit: sha, by: "the base check" }), "Merged main re-gated: green at 0123456 already (gated by the base check) - not run again");
   assert.equal(verifySkippedLine("main", { commit: sha }), "Merged main re-gated: green at 0123456 already (gated before) - not run again");
@@ -159,7 +163,8 @@ test("the summary says whose gates proved a merged base the verify did not run a
 test("burndown asks the record before the verify, and a landing tells it whose gates ran", () => {
   const burndown = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(burndown, /verifySkipped = greenProofOfBase\(gateProject, image, planFile\);\n[\s\S]{0,400}if \(verifySkipped\)[\s\S]{0,200}else \{[\s\S]{0,300}verifyBase\(gateProject, image, planFile, runId\)/);
-  assert.match(burndown, /greenBase: \(commit, by\) => noteGreenCommit\(gateProject, image, planFile, commit, by\)/);
+  assert.match(burndown, /greenBase: \(commit, by, kind\) => noteGreenCommit\(gateProject, image, planFile, commit, by, kind\)/);
   const landing = readFileSync(join(import.meta.dirname, "../src/landing.ts"), "utf8");
-  assert.equal([...landing.matchAll(/ctx\.greenBase\?\.\([^;]*ref\(o\.issue\)\);/g)].length, 2);
+  assert.equal([...landing.matchAll(/ctx\.greenBase\?\.\([^;]*ref\(o\.issue\), "ticket-sandbox"\);/g)].length, 1);
+  assert.equal([...landing.matchAll(/ctx\.greenBase\?\.\([^;]*ref\(o\.issue\), "landing-sandbox"\);/g)].length, 1);
 });

@@ -47,7 +47,7 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
-  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -476,12 +476,13 @@ const changelogLines = (all: { id: string; line: string }[]): string[] => {
 
 /**
  * The verify's line when it did not run: the green-base record already named the merged tip, so the gates that proved
- * it are the ones to name - a ticket's (`gated with #427`), or the base check's or an earlier verify's (`gated by ...`).
+ * it are the ones to name - a landing's, merged in a sandbox (`gated with #427 in its landing sandbox`), or the base
+ * check's or an earlier verify's (`gated by ...`). Only gate-only sandboxes are such a proof (`greenProofOfBase`).
  * `image` (` on image <tag>`) goes with the green, not after "not run again": those gates ran on it.
  */
-export const verifySkippedLine = (base: string, proof: { commit: string; by?: string }, image = "") => {
+export const verifySkippedLine = (base: string, proof: { commit: string; by?: string; kind?: string }, image = "") => {
   const by = typeof proof.by === "string" && proof.by ? proof.by : "";
-  const said = by ? `gated ${by.startsWith("#") ? "with" : "by"} ${by}` : "gated before";
+  const said = by ? `gated ${by.startsWith("#") ? "with" : "by"} ${by}${by.startsWith("#") ? " in its landing sandbox" : ""}` : "gated before";
   return `Merged ${base} re-gated: green at ${String(proof.commit).slice(0, 7)} already${image} (${said}) - not run again`;
 };
 

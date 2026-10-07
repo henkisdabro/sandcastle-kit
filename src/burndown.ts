@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, greenProofOfBase, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, greenProofOfBase, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2346,7 +2346,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(gateProject, image, planFile),
-    greenBase: (commit, by) => noteGreenCommit(gateProject, image, planFile, commit, by),
+    greenBase: (commit, by, kind) => noteGreenCommit(gateProject, image, planFile, commit, by, kind),
     runId,
     withdrawal,
     host,
@@ -2722,11 +2722,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
-  let verifySkipped: { commit: string; by?: string } | undefined;
+  let verifySkipped: { commit: string; by?: string; kind: ProofKind } | undefined;
   let newDockerfiles: string[] = [];
   if (merged.length > 1 || regenerated > 0) {
-    // Verify is proof that the merged base is green: a landing's gates, or those of a branch that held the base, may
-    // have run on exactly this tip, and the green-base record says so (it names no tip after a failed note: then it runs).
+    // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
+    // check or an earlier verify may have gated exactly this tip, and the green-base record says so. A fast-forward's
+    // ticket gates ran in the agent's own sandbox, so they are no proof (it names no tip after a failed note: then it runs).
     verifySkipped = greenProofOfBase(gateProject, image, planFile);
     let gated: { gates: Gate[]; failures: GateRun["failures"] } = { gates: [], failures: [] };
     if (verifySkipped) console.log(`${verifySkippedLine(base, verifySkipped)}.`);
