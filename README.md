@@ -372,6 +372,11 @@ safety stop) keeps what its agents named in the run record as they arrive, and f
 stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
 nothing more to the tracker, and the summary lists each as one to file by hand.
 
+A reviewer that names a known gap in prose ("left alone", "remains", "a gap", "not fixed") and ends its
+message with neither a `<followup>` nor an `<unmet>` line has lost it, so the kit reads each review's
+message for such a sentence (not one that says nothing is left, such as "nothing remains") and, for a
+merged ticket, lists the sentence under Needs you: `the reviewer named a gap it did not file`.
+
 ## 📋 Queue: what agents work on
 
 The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
