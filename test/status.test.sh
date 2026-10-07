@@ -608,6 +608,15 @@ done <"$TMP/live"
 [[ "$last" == └*┘ ]] || { echo "FAIL [$SCENARIO] the frame does not end in its bottom border: $last"; fails=$((fails+1)); }
 
 # ---------------------------------------------------------------------------
+SCENARIO="live loop, no terminal"
+# An agent's tool runs the live view with no terminal and no size given: it drew
+# its frame and then died on an unset TERM_COLS under set -u.
+env -u TERM_COLS -u TERM_ROWS PATH="$FAKE:$PATH" SANDCASTLE_PROJECT="$REPO" SANDCASTLE_BIN="$FAKE/sandcastle" \
+  SANDCASTLE_BASE=main SANDCASTLE_NAME=fixture XDG_CACHE_HOME="$TMP/cache" STATUS_FRAMES=1 \
+  "${STATUS_BASH:-bash}" "$KIT/status.sh" 1 >"$TMP/live-notty" 2>&1 </dev/null
+if grep -q 'unbound variable' "$TMP/live-notty"; then echo "FAIL [$SCENARIO] $(grep -m1 'unbound variable' "$TMP/live-notty")"; fails=$((fails+1)); fi
+
+# ---------------------------------------------------------------------------
 SCENARIO="links, inside Herdr"
 # Each ticket links to its latest log (OSC 8) for the Herdr plugin's Ctrl-click. A
 # link has no width: with the links taken out, every line still fits the pane and
