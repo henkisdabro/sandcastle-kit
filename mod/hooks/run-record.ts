@@ -311,10 +311,12 @@ export type RunRecord = {
   followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
   /**
    * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
+   * `failing`: the tests a red verify named, at most five (`failingMore`: it named others), read from the node:test, pytest, jest and similar output; absent when none were named.
    * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
-   * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it.
+   * `gatedTree`: a red verify's tree is exactly one a landing's own gates passed - the ticket's ref; the red is the sandbox's, not the merge's.
+   * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it and `kind` where they ran.
    */
-  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;

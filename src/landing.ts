@@ -20,7 +20,7 @@ import { posix } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
-import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
+import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
@@ -164,6 +164,20 @@ export type HostGit = {
 const parentsOf = (root: string, c: string) => sh("git", ["rev-list", "--parents", "-n", "1", c], root).split(" ").slice(1);
 const treeOf = (root: string, c: string) => sh("git", ["rev-parse", `${c}^{tree}`], root);
 
+/**
+ * The ticket whose landing left `tip`'s exact tree (the last such landing), or undefined. A landing's tree is
+ * the one its gates passed (`landingMade` checks it), so a red verify on that tree is red because of the sandbox
+ * it ran in, not because tickets met: the closing summary says so instead of "together".
+ */
+export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>): string | undefined => {
+  try {
+    const want = treeOf(root, tip);
+    return [...landed].filter(([, r]) => treeOf(root, r.commit) === want).map(([id]) => id).pop();
+  } catch {
+    return undefined;
+  }
+};
+
 /** A landing merge or squash of `head`: on the previous tip, with exactly the gated head's tree. */
 export const landingMade =
   (root: string, head: string, mode: "merge" | "squash") =>
@@ -295,8 +309,8 @@ export type LandContext = {
   dryRun: boolean;
   /** Opens a sandbox on a branch, for redoing a conflict confined to generated files. */
   opener: Opener;
-  /** Told the commit a landing's gates passed on once it is the base's tip, and the ticket whose gates they were: the next turn's base check, and the end-of-run verify, need not gate it again. */
-  greenBase?: (commit: string, by: string) => void;
+  /** Told the commit a landing's gates passed on once it is the base's tip, the ticket whose gates they were and where they ran: the next turn's base check need not gate it again, and the end-of-run verify need not either unless the gates ran in the ticket's own sandbox (a fast-forward). */
+  greenBase?: (commit: string, by: string, kind: ProofKind) => void;
   /** The run's start time, which a landing sandbox's peak memory is filed under. */
   runId?: string;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
@@ -492,7 +506,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     // The ticket's own gates ran on this tree (the branch holds the base's tip, so the merge adds
     // no content), and the base now names it: the next turn's check need not gate it again.
     try {
-      ctx.greenBase?.(after, ref(o.issue));
+      ctx.greenBase?.(after, ref(o.issue), "ticket-sandbox");
     } catch {
       /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
     }
@@ -587,7 +601,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       record(before, result.commit);
       // The gates ran in the sandbox on exactly this tree (a squash keeps it), and the base now names it.
       try {
-        ctx.greenBase?.(result.commit, ref(o.issue));
+        ctx.greenBase?.(result.commit, ref(o.issue), "landing-sandbox");
       } catch {
         /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
       }

@@ -138,7 +138,7 @@ test("a landing that changes a git hook leaves a record the next base check stil
     writeFileSync(join(root, ".githooks/pre-commit"), "the hook\n");
     git(root, "add", ".githooks/pre-commit");
     git(root, "commit", "-q", "-m", "ticket: change the pre-commit hook");
-    noteGreenCommit(project, "sandcastle-fixture:t", plan, git(root, "rev-parse", "main"));
+    noteGreenCommit(project, "sandcastle-fixture:t", plan, git(root, "rev-parse", "main"), "#1", "landing-sandbox");
     const { lines, result } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-2").then(() => undefined, (e: unknown) => e));
     assert.ok(!ran(lines), lines.join("\n"));
     assert.match(skipped(lines) ?? "", /gates not re-run; running the hook tests/);

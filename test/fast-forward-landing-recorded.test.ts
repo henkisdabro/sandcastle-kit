@@ -81,7 +81,7 @@ test("a drain turn after a single fast-forward landing with no earlier hook-chec
       withdrawal: () => undefined,
       host: createHostGit(project, gitFingerprint(project)),
       gate: async () => assert.fail("a fast-forward is not gated again at landing"),
-      greenBase: (commit) => noteGreenCommit(project, IMAGE, plan, commit),
+      greenBase: (commit, by, kind) => noteGreenCommit(project, IMAGE, plan, commit, by, kind),
       landed: new Map(),
     };
     const landed = await quietly(() => landOne(ctx, { issue: "1", branch: "agent/issue-1", status: "green", commits: 1, repairs: 0, head }));

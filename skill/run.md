@@ -108,7 +108,7 @@ This continues SKILL.md: run its "Before every action" first.
    With no such note in SKILL.md's text (and none seen earlier in the session), the detached run
    is not your own process, so your harness never tells you it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
-   run is live, then prints the closing summary and exits with the run's exit code. A harness caps
+   run is live, then prints the closing summary and exits with the run's exit code (1 when the merged base ended red: do not push it). A harness caps
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
@@ -138,7 +138,7 @@ This continues SKILL.md: run its "Before every action" first.
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
-      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push.
+      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge: say that, and still do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
@@ -205,7 +205,7 @@ This continues SKILL.md: run its "Before every action" first.
 Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
 not in a batch after the last one. So the summary's merged count includes tickets that landed
 mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
-tickets merged, unless the last landing's own gates already proved that very commit, which the line says), and a ticket's gates passing on its own branch says nothing about the base it
+tickets merged, unless a clean gate-only sandbox already proved that very commit - the last landing's merge gated in its landing sandbox, or the base check - which the line says; a fast-forward's gates ran in the ticket's own sandbox and never skip it), and a ticket's gates passing on its own branch says nothing about the base it
 lands on. Two cases follow from that:
 
 - **`red together with #N`** (under Needs fixing) is a branch green alone but red once merged with

@@ -742,7 +742,9 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   what `sandcastle report` prints and exits with the run's own exit code (recorded in
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
   time cap is met by starting it again. With no run live it prints the last summary at once and
-  exits with the recorded code (0 when there is none).
+  exits with the recorded code (0 when there is none). A run whose last turn left the merged base
+  red (`RED TOGETHER` in the summary, or red on the tree a ticket's own gates passed) exits **1**, at every autonomy level, so a harness does not
+  read success on a base the summary says not to push.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
   live: `No run is live.`
@@ -924,10 +926,10 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release under a `--- <time>, run pid <pid> ---` line per turn; the screen names each file once |
-| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
+| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`): the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
-| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit and whose gates proved it, so the verify does not run again on a base tip a landing's gates just proved; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, unless the record before it covered both and nothing they read changed in between: a diff touching no hook directory, kept hook script, package manifest, lockfile or protected path), and the update record `kit-updated` |
+| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit, whose gates proved it and where they ran, so the verify does not run again on a base tip a landing merged in a sandbox, the base check or an earlier verify just proved - never on a fast-forward's, whose gates ran in the ticket's own sandbox; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, unless the record before it covered both and nothing they read changed in between: a diff touching no hook directory, kept hook script, package manifest, lockfile or protected path), and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
 
@@ -1229,7 +1231,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight [--api-key]` | One "Reply OK" from every model, in the project image. Asks first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 yes, briefly |
 | `sandcastle run [--detach] [--api-key]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)) | 💸 yes |
-| `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code; with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
+| `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code (1 when the merged base ended red); with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle pause` | Holds the live run at the next safe juncture ([Pausing a run](#-pausing-a-run)): no new ticket or agent pass starts, passes in flight finish and their sandboxes close (branches kept), green branches still land, and the run gives its sandbox slots to other runs and lets the machine sleep. `No run is live.` when none is; `already paused` when it is. A pause the run took for the plan's usage (`USAGE_PAUSE`) becomes yours: it stays until `resume` | ➖ no |
 | `sandcastle resume` | Continues a paused run: each paused ticket goes on from its next phase, in the same run; a pause for the plan's usage ends before its time too. `No run is live.` when none is; `is not paused` when it is not | ➖ no |
@@ -1444,8 +1446,8 @@ and the kit narrows what can cross it:
   by hand is dropped at the next run's start (or by `sandcastle clean`), so the backup does not grow.
 - 🚧 **Git guard.** A Claude Code managed hook (`container/`, mounted read-only at
   `/etc/claude-code`, above any project setting) refuses `git update-ref`, `gc`, `prune`, `stash`
-  (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune` and `repair`,
-  deleting an `agent/*` branch, `rm` or `mv` inside the shared `.git`, and writes to it. Project hooks
+  (its list is shared by every worktree), `push`, `reflog expire`, `worktree prune`, `repair` and
+  `add` (a scratch repository's own is allowed), deleting an `agent/*` branch, `rm` or `mv` inside the shared `.git`, and writes to it. Project hooks
   still run, and `reset --hard`, `clean`, `checkout .`, `stash list` and `worktree remove --force` stay
   allowed, as do `update-ref`, `gc`, `prune` and `stash` run as `git -C <absolute path>` in a scratch
   repository outside the project (`push` stays refused everywhere). It reduces accidents and is not a

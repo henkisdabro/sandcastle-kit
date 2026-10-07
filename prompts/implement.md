@@ -8,8 +8,9 @@ so in the commit message.
 {{KIT_DRY_RUN}}**Your `.git` is shared with other agents working at the same moment. Never run `git worktree
 prune`, `git worktree repair`, `git gc` or `git prune`**, and never edit anything under `.git/`
 by hand. From inside this container no other agent's worktree path exists, so a prune deletes
-their records mid-run. A scratch worktree you add (to compare against `{{TARGET_BRANCH}}`, say) is
-removed with `git worktree remove --force <path>` and nothing else. A scratch repository to test a
+their records mid-run. `git worktree add` in the project is refused: to compare
+against `{{TARGET_BRANCH}}`, read it with `git show {{TARGET_BRANCH}}:<path>` or
+`git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`. A scratch repository to test a
 change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
 plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
