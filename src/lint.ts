@@ -7,7 +7,7 @@
 import type { Project } from "./config.ts";
 import { blockerProblems, refsOf, stripCode } from "./blockers.ts";
 import { protectedAmong, protectedWarning } from "./guard.ts";
-import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { expandTouches, missingTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
 /** A ticket declaring more files than this is likely to meet others at landing. */
@@ -91,6 +91,12 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   const problems = await blockerProblems(project, tracker, queued);
   for (const t of queued) {
     if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) problems.push(`${refOf(t.id)} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
+  }
+
+  // A plain path no file matches is kept by expandTouches (it may be a new file) and an empty glob is dropped: neither shows above.
+  for (const t of queued) {
+    const absent = missingTouches(project.root, project.baseBranch, t.body ?? "");
+    if (absent.length) problems.push(`${refOf(t.id)} names paths not on ${project.baseBranch}: ${absent.join(", ")} - new files (say so under ## Fix) or typos?`);
   }
 
   // A ticket whose work lies in a protected path ends held whatever the agent does: said before it costs a pipeline.

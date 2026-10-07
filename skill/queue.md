@@ -76,7 +76,8 @@ comments, and the gates can prove it.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
-   `Touches:`, wide tickets, hot and unmergeable files, and a rough turn count. It is advice, so
+   `Touches:`, wide tickets, hot and unmergeable files, `Touches:` paths missing from the base
+   branch (a new file said to be new under `## Fix`, or a typo), and a rough turn count. It is advice, so
    quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags.
    A ticket it lists under protected paths will always be held for a human merge: say so, and offer
    to unqueue it (or to leave the protected file to the user) rather than spend a pipeline on it.
