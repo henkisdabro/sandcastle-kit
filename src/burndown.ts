@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, greenProofOfBase, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, greenProofOfBase, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2724,6 +2724,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   let verify: Gate[] | undefined;
   let verifySkipped: { commit: string; by?: string; kind: ProofKind } | undefined;
   let newDockerfiles: string[] = [];
+  let verifyFailingTests: ReturnType<typeof verifyFailing> | undefined;
   if (merged.length > 1 || regenerated > 0) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
     // check or an earlier verify may have gated exactly this tip, and the green-base record says so. A fast-forward's
@@ -2737,10 +2738,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
     }
     verify = gated.gates;
+    const verifyRed = verifyFailing(gated.failures);
+    verifyFailingTests = verifyRed;
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
     const at = sh("git", ["rev-parse", "--short", base], project.root);
     if (writeGateLog(join(project.root, VERIFY_LOG), `# gates on the merged ${base} at ${at}, ${new Date().toISOString()}: ${gateLine(verify)}`, gated.failures)) {
+      // The last lines are often an assertion dump and the package manager's exit: the failing tests' names come first.
+      if (verifyRed.tests.length) console.log(`\n--- verify failing tests: ${verifyRed.tests.join(", ")}${verifyRed.more ? ", and more" : ""}`);
       for (const f of gated.failures) console.log(`\n--- verify ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
       console.log(`Full output: ${VERIFY_LOG}`);
     }
@@ -2781,7 +2786,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     dryRunCheck,
   });
