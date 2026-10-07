@@ -41,7 +41,9 @@ const LEGACY_ACTIVE_FIELDS = ["phase", "since"];
 /** Every jq program status.sh runs on the run record: `jq ... '<program>' "$f"` or `logs/run.json`. */
 const runRecordPrograms = (): string[] => {
   const calls = [...status.matchAll(/\bjq\b[^'\n]*(?:\\\n[^'\n]*)?'([^']*)'\s*(?:2>\/dev\/null\s*)?("\$f"|logs\/[\w.]+|<<<)/g)];
-  return calls.filter((m) => m[2] === '"$f"' || m[2] === "logs/run.json").map((m) => m[1]);
+  // One jq can read many fields as `@sh "NAME=\(...)"` lines: each is a program of its own here, so
+  // the collections one walks do not excuse a field another reads.
+  return calls.filter((m) => m[2] === '"$f"' || m[2] === "logs/run.json").flatMap((m) => m[1].split(/\n\s*@sh "/));
 };
 
 /** The `.a.b` chains of a jq program, outside a longer word, a `$variable` or a closing bracket. */

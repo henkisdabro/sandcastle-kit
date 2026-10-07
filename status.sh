@@ -39,34 +39,62 @@ BASE="${SANDCASTLE_BASE:-$(git rev-parse --abbrev-ref HEAD)}"
 # Shown as cores so it can be read against the host straight away.
 NCPU="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)"
 
-# macOS (BSD) and Linux (GNU) spell these differently; try BSD, then GNU.
-mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
-utc_to_epoch() { date -j -u -f '%Y-%m-%dT%H:%M:%S' "$1" '+%s' 2>/dev/null || date -u -d "$1" '+%s' 2>/dev/null || echo 0; }
-epoch_fmt() { date -r "$1" "$2" 2>/dev/null || date -d "@$1" "$2" 2>/dev/null; }
+# macOS (BSD) and Linux (GNU) spell these differently. Which one this is, is asked once: trying
+# one spelling and then the other on every call started two processes where one does, on each
+# of a frame's dozens of calls.
+if stat -c %Y / >/dev/null 2>&1; then # portability-ok: the probe; BSD's spelling is the else
+  mtime_of() { stat -c %Y "$1" 2>/dev/null || echo 0; } # portability-ok: only where the probe found GNU
+else
+  mtime_of() { stat -f %m "$1" 2>/dev/null || echo 0; }
+fi
+if date -j -u -f '%s' 0 '+%s' >/dev/null 2>&1; then
+  utc_to_epoch() { date -j -u -f '%Y-%m-%dT%H:%M:%S' "$1" '+%s' 2>/dev/null || echo 0; }
+  epoch_fmt() { date -r "$1" "$2" 2>/dev/null; }
+else
+  utc_to_epoch() { date -u -d "$1" '+%s' 2>/dev/null || echo 0; } # portability-ok: only where BSD's failed
+  epoch_fmt() { date -d "@$1" "$2" 2>/dev/null; } # portability-ok: only where BSD's failed
+fi
+# Whether $1 is a whole line of $2, compared as text. In bash itself: a `grep -qx` for it started a
+# process on every ticket of every frame.
+has_line() { [[ $'\n'"$2"$'\n' == *$'\n'"$1"$'\n'* ]]; }
+# The first line of $2 whose first field, split at $3, is $1: the line into LINE and its fields
+# into F, as awk -F splits them (read "${F[i]:-}": a missing one is unset). Status 1 when no line
+# has it. In bash: a `printf | awk` for each lookup started two processes per ticket per frame.
+NL=$'\n'
+fields_of() {
+  local rest="$2$NL"
+  LINE=""; F=()
+  while [ -n "$rest" ]; do
+    LINE="${rest%%"$NL"*}"; rest="${rest#*"$NL"}"
+    if [ "${LINE%%"$3"*}" = "$1" ]; then IFS="$3" read -r -a F <<<"$LINE"; return 0; fi
+  done
+  LINE=""
+  return 1
+}
 
 # "Sand": the frame in dark, muted browns and its text in lighter sand, so the
 # state colours, which carry meaning, stand out against it. 24-bit where the terminal says it
 # has it (COLORTERM); the 256-colour palette has almost no dark browns, so
 # elsewhere the nearest of its colours.
 if [ "${COLORTERM:-}" = truecolor ] || [ "${COLORTERM:-}" = 24bit ]; then
-  sand() { printf '\e[38;2;%sm' "$1"; }
+  sand() { printf -v "$1" '\e[38;2;%sm' "$2"; }
 else
-  sand() { printf '\e[38;5;%sm' "$2"; }
+  sand() { printf -v "$1" '\e[38;5;%sm' "$3"; }
 fi
 bold=$'\e[1m'; off=$'\e[0m'
-rule=$(sand '74;58;42' 58)       # frame lines: wet sand
-mute=$(sand '146;124;94' 137)    # activity text, labels
-head=$(sand '205;184;148' 180)   # column headings, numbers: dry sand
-accent=$(sand '192;164;120' 180)  # base branch, clock, stage
-wht=$(sand '232;214;180' 223)    # ticket ids
+sand rule '74;58;42' 58       # frame lines: wet sand
+sand mute '146;124;94' 137    # activity text, labels
+sand head '205;184;148' 180   # column headings, numbers: dry sand
+sand accent '192;164;120' 180  # base branch, clock, stage
+sand wht '232;214;180' 223    # ticket ids
 grn=$'\e[38;5;77m'        # merged
 ylw=$'\e[38;5;221m'       # working
 cyn=$'\e[38;5;80m'        # ready to land
 blu=$'\e[38;5;111m'       # queued, not started
-gry=$(sand '94;78;60' 95)        # nothing there: damp sand
+sand gry '94;78;60' 95        # nothing there: damp sand
 hot=$'\e[38;5;203m'       # needs you; a container working hard (red, clear of the sand)
 # The logo: dry sand at the top, wet sand at the base, specks of shell.
-moon=$(sand '232;214;180' 223); dusk=$(sand '205;184;148' 180); night=$(sand '160;134;98' 137); deep=$(sand '112;92;66' 95); star=$(sand '74;58;42' 58)
+sand moon '232;214;180' 223; sand dusk '205;184;148' 180; sand night '160;134;98' 137; sand deep '112;92;66' 95; sand star '74;58;42' 58
 # No colour when NO_COLOR is set (non-empty, no-color.org) or stdout is not a
 # terminal. Top level on purpose: the live loop calls render inside $(...),
 # where stdout is always a pipe, so the check there would always strip colour.
@@ -124,10 +152,12 @@ vstrip() {
   done
   VS="$VS$s"
 }
-vis() { vstrip "$1"; printf '%s' "${#VS}"; }
+# $1 cut to $2 visible columns, ending in … when it was longer, into FIT: no subshell, as the live
+# view fits every line of every frame.
 fit() {
   local s="$1" w="$2" out="" n=0 esc
-  if [ "$(vis "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
+  vlen "$s"
+  if [ "$VN" -le "$w" ]; then FIT="$s"; return 0; fi
   while [ -n "$s" ] && [ "$n" -lt $(( w - 1 )) ]; do
     if [ "${s:0:2}" = "${ESC}]" ]; then
       # A link's URL can hold an "m"; it ends at ESC \, not at the first m.
@@ -140,7 +170,7 @@ fit() {
   done
   # A cut through a link's text would leave it open over the rest of the line.
   case "$out" in *"${ESC}]8"*) out="${out}${ESC}]8;;${ST}";; esac
-  printf '%s…%s' "$out" "$off"
+  FIT="${out}…${off}"
 }
 
 # ---------------------------------------------------------------------------
@@ -149,14 +179,14 @@ fit() {
 # The helpers return in REPLY rather than print, so a frame of a few hundred
 # cells costs no subshell per cell.
 
-# Visible width into VN, as vis gives it, without a subshell.
+# Visible width into VN, without a subshell.
 vlen() { vstrip "$1"; VN=${#VS}; }
 # A coloured string aligned in $2 columns (l, c or r), cut with … when longer.
 align() {
   local s="$1" w="$2" l
   [ "$w" -le 0 ] && { REPLY=""; return 0; }
   vlen "$s"
-  if [ "$VN" -gt "$w" ]; then REPLY=$(fit "$s" "$w"); return 0; fi
+  if [ "$VN" -gt "$w" ]; then fit "$s" "$w"; REPLY="$FIT"; return 0; fi
   case "${3:-l}" in
     r) printf -v REPLY '%*s%s' $(( w - VN )) '' "$s";;
     c) l=$(( (w - VN) / 2 )); printf -v REPLY '%*s%s%*s' "$l" '' "$s" $(( w - VN - l )) '';;
@@ -309,7 +339,7 @@ load_container_stats() {
 
   while IFS='|' read -r name cpu mem; do
     [ -z "$name" ] && continue
-    n=$(printf '%s' "$map" | awk -F'|' -v k="$name" '$1==k{print $2; exit}')
+    n=""; fields_of "$name" "$map" '|' && n="${F[1]:-}"
     [ -z "$n" ] && continue
     # "275.8MiB / 11.73GiB" -> "276M"
     mem=$(printf '%s' "${mem%%/*}" \
@@ -377,7 +407,7 @@ load_queue() {
   [ "$errf" = /dev/null ] || rm -f "$errf"
   return 0
 }
-in_queue() { grep -qx "$1" <<<"$QUEUE"; }
+in_queue() { has_line "$1" "$QUEUE"; }
 # Whether a readable log ends saying the plan allowance is spent (run.ts logSaysLimit). A `! error`
 # or `! exit N` line quotes a failed tool's output, which can say "usage limit" too, so it is skipped.
 # No grep -q at the end: under pipefail, an early exit can fail the pipeline through a writer's SIGPIPE.
@@ -403,7 +433,8 @@ log_ids() {
 # A ticket as a person names it: "#12", a suffixed branch "#12" (its suffix is
 # shown apart), or a slug such as "checkout-03" as it is.
 legacy_id() { [[ "$1" =~ ^[0-9]+(-[a-z]+)*$ ]]; }
-disp() { if legacy_id "$1"; then printf '#%s' "${1%%-*}"; else printf '%s' "$1"; fi; }
+# A ticket id as the view shows it, into DISP: no subshell, as every row shows one.
+disp() { if legacy_id "$1"; then DISP="#${1%%-*}"; else DISP="$1"; fi; }
 
 # Machine-wide slots (pool.ts): one lock file per slot, holding its owner's
 # pid first (then token, run and label, which this ignores). Counts live ones only; the limits come from the CLI.
@@ -464,75 +495,86 @@ TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; RUN_PAUSED=
 load_run() {
   WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""
   TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; RUN_PAUSED=0
-  local f=logs/run.json pid
+  local f=logs/run.json pid="" paused="" pool="" issues="" waiting="" active="" tickets="" free="" typical="" eta=""
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
   # shows it, and one whose run is not the recorded run is a leftover. An
   # older kit's entry has no kind, and its line under "outcome".
   [ -f logs/outcomes.json ] && OUTCOMES=$(jq -r 'to_entries[] | "\(.key)|\(.value.run // "")|\(.value.kind // "")|\(.value.text // .value.outcome // "")"' logs/outcomes.json 2>/dev/null)
   [ -f "$f" ] || return 0
-  # The criterion each partly-done ticket left unmet ("id US text" lines): kept for a run that has ended too.
-  UNMETS=$(jq -r '(.tickets // {}) | to_entries[] | select(.value.unmet) | [.key, (.value.unmet | tostring | gsub("[\\n\\r]+"; " "))] | join("\u001f")' "$f" 2>/dev/null)
-  RUN_STARTED=$(jq -r '.startedAt // empty' "$f" 2>/dev/null)
-  pid=$(jq -r 'if .finishedAt then empty else (.pid // empty) end' "$f" 2>/dev/null)
+  # The whole record in one jq: one call per field read the file a dozen times a frame. Each field
+  # is still its own: one that a newer or older kit wrote in another shape empties only itself, and
+  # a field's lines are what `jq -r` printed for it alone. Assignments, quoted by @sh, for eval.
+  #   UNMETS   the criterion each partly-done ticket left unmet ("id US text" lines): kept for a
+  #            run that has ended too.
+  #   paused   1 while a person has the run paused (`sandcastle pause`): no ticket starts until
+  #            `sandcastle resume`.
+  #   pool     this run's demand and share of the machine pool, live values the run rewrites; an
+  #            older kit's record has neither. The cap (`sandcastle cap`) is a person's, and
+  #            absent when there is none.
+  #   free     sandboxes the run has yet to fill: queued tickets that fit in them start at once,
+  #            so none of them is "behind" another. A ticket that is landing holds no slot: its
+  #            merge runs on the host, or in the landing worker's own box.
+  #   eta      when the run ends: the queued tickets at a typical issue's length each, the working
+  #            ones at what is left of theirs (a minute at least), over the sandboxes the run uses
+  #            at once. Only once there is a typical issue - from earlier runs, or this run's first
+  #            finished one. A ticket that is landing is neither queued nor working here, so the
+  #            figure is when the last pipeline ends. Tickets land as they go green, on one worker,
+  #            one landing gate after another: the tickets not yet landed times a ticket's usual
+  #            landing gates (`typical["landing gates"]`, none for a ticket that landed without
+  #            one) is a floor on the end, which the landing queue, not the pipelines, can set.
+  eval "$(jq -r --argjson now "$now_s" '
+    def lines(f): [(f)? | if type == "string" then . else tojson end] | join("\n") | sub("\n+$"; "");
+    @sh "UNMETS=\(lines((.tickets // {}) | to_entries[] | select(.value.unmet) | [.key, (.value.unmet | tostring | gsub("[\\n\\r]+"; " "))] | join("\u001f")))",
+    @sh "RUN_STARTED=\(lines(.startedAt // empty))",
+    @sh "pid=\(lines(if .finishedAt then empty else (.pid // empty) end))",
+    @sh "paused=\(lines(if (.paused | type) == "object" then 1 else 0 end))",
+    @sh "pool=\(lines([(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")))",
+    @sh "issues=\(lines((.issues // [])[] | tostring))",
+    @sh "waiting=\(lines((.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"))",
+    @sh "active=\(lines((.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"))",
+    @sh "tickets=\(lines((.tickets // {}) | to_entries[] | [.key, (.value.state // ""), (.value.since // "" | tostring),
+      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // "")] | join("\u001f")))",
+    @sh "free=\(lines([((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max))",
+    @sh "typical=\(lines((.typical // {}) | to_entries[] | "\(.key)|\(.value)"))",
+    @sh "eta=\(lines(
+      (.typical.issue // null) as $t
+      | if $t == null or (.stage // "") != "running" then empty else
+        ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
+        | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))) | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
+        | ([(.tickets // {})[] | select((.state // "") | IN("queued", "setup", "implement", "resolve", "review", "cross-review", "gates", "repair", "ready", "landing"))] | length) as $n
+        | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) as $p
+        | ($now + $n * (.typical["landing gates"] // 0)) as $l
+        | ([$p, $l] | max) | floor end))"
+  ' "$f" 2>/dev/null)"
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
-  # A person has the run paused (`sandcastle pause`): no ticket starts until `sandcastle resume`.
-  [ "$(jq -r 'if (.paused | type) == "object" then 1 else 0 end' "$f" 2>/dev/null)" = 1 ] && RUN_PAUSED=1
-  # This run's demand and share of the machine pool, live values the run rewrites; an older kit's record has neither.
-  # The cap (`sandcastle cap`) is a person's, and absent when there is none.
-  read -r POOL_DEMAND POOL_SHARE POOL_CAP < <(jq -r '[(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring)] | join(" ")' "$f" 2>/dev/null)
+  [ "$paused" = 1 ] && RUN_PAUSED=1
+  read -r POOL_DEMAND POOL_SHARE POOL_CAP <<<"$pool"
   [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
   [[ "$POOL_CAP" =~ ^[0-9]+$ ]] || POOL_CAP=""
-  RUN_ISSUES=$(jq -r '(.issues // [])[] | tostring' "$f" 2>/dev/null)
-  WAITING=$(jq -r '(.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"' "$f" 2>/dev/null)
-  ACTIVE=$(jq -r '(.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"' "$f" 2>/dev/null)
-  TICKETS=$(jq -r '(.tickets // {}) | to_entries[] | [.key, (.value.state // ""), (.value.since // "" | tostring),
-      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // "")] | join("\u001f")' "$f" 2>/dev/null)
+  RUN_ISSUES="$issues"; WAITING="$waiting"; ACTIVE="$active"; TICKETS="$tickets"; TYPICAL="$typical"; RUN_ETA="$eta"
   if [ -n "$TICKETS" ]; then
     RECORD=1
     TICKET_IDS=$(printf '%s\n' "$TICKETS" | cut -d"$US" -f1 | sort -V)
   fi
-  # Sandboxes the run has yet to fill: queued tickets that fit in them start
-  # at once, so none of them is "behind" another. A ticket that is landing holds
-  # no slot: its merge runs on the host, or in the landing worker's own box.
-  FREE=$(jq -r '[((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max' "$f" 2>/dev/null)
+  FREE="$free"
   [[ "$FREE" =~ ^[0-9]+$ ]] || FREE=0
-  TYPICAL=$(jq -r '(.typical // {}) | to_entries[] | "\(.key)|\(.value)"' "$f" 2>/dev/null)
-  # When the run ends: the queued tickets at a typical issue's length
-  # each, the working ones at what is left of theirs (a minute at least), over
-  # the sandboxes the run uses at once. Only once there is a typical issue -
-  # from earlier runs, or this run's first finished one. A ticket that is
-  # landing is neither queued nor working here, so the figure is when the last
-  # pipeline ends. Tickets land as they go green, on one worker, one landing gate
-  # after another: the tickets not yet landed times a ticket's usual landing gates
-  # (`typical["landing gates"]`, none for a ticket that landed without one) is a floor
-  # on the end, which the landing queue, not the pipelines, can set.
-  RUN_ETA=$(jq -r --argjson now "$(date +%s)" '
-    (.typical.issue // null) as $t
-    | if $t == null or (.stage // "") != "running" then empty else
-      ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
-      | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair")))
-          | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
-      | ([(.tickets // {})[] | select((.state // "") | IN("queued", "setup", "implement", "resolve", "review", "cross-review", "gates", "repair", "ready", "landing"))] | length) as $n
-      | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) as $p
-      | ($now + $n * (.typical["landing gates"] // 0)) as $l
-      | ([$p, $l] | max) | floor end' "$f" 2>/dev/null)
   return 0
 }
 # "phase|since" for an issue an older live run is working on, or empty.
-active_of() { printf '%s\n' "$ACTIVE" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3; exit}'; }
-in_record() { [ "$RECORD" = 1 ] && grep -qx "$1" <<<"$TICKET_IDS"; }
-ticket_of() { printf '%s\n' "$TICKETS" | awk -F"$US" -v k="$1" '$1==k{print; exit}'; }
+active_of() { fields_of "$1" "$ACTIVE" '|' || return 0; printf '%s|%s\n' "${F[1]:-}" "${F[2]:-}"; }
+in_record() { [ "$RECORD" = 1 ] && has_line "$1" "$TICKET_IDS"; }
 # Seconds a step usually takes in this project (run.json's `typical`), or empty.
-typical_of() { printf '%s\n' "$TYPICAL" | awk -F'|' -v k="$1" '$1==k{print $2; exit}'; }
+typical_of() { fields_of "$1" "$TYPICAL" '|' || return 0; printf '%s\n' "${F[1]:-}"; }
 
 # Seconds as the AGE column shows them.
+# Into AGO, not printed: every row has one, and a subshell each cost the frame a process.
 ago() {
   # The frame's clock is read before run.json, so a state written in between is a second "ahead".
-  if   [ "$1" -lt 1 ]; then printf '0s'
-  elif [ "$1" -lt 60 ]; then printf '%ss' "$1"
-  elif [ "$1" -lt 3600 ]; then printf '%sm' "$(( $1 / 60 ))"
-  else printf '%sh' "$(( $1 / 3600 ))"; fi
+  if   [ "$1" -lt 1 ]; then AGO=0s
+  elif [ "$1" -lt 60 ]; then AGO="$1s"
+  elif [ "$1" -lt 3600 ]; then AGO="$(( $1 / 60 ))m"
+  else AGO="$(( $1 / 3600 ))h"; fi
 }
 # A run's length: "48m", "1h12m".
 dur() {
@@ -549,13 +591,14 @@ dur() {
 # finished branch of the run read as re-queued.
 requeued() {
   local updated merged landing
-  landing=$(git log "$BASE" -1 --format='%ct %s' --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
+  disp "$1"
+  landing=$(git log "$BASE" -1 --format='%ct %s' --fixed-strings --grep="Merge agent/issue-$1 (closes $DISP)" --grep="Merge agent/issue-$1 (part of $DISP)" 2>/dev/null)
   merged="${landing%% *}"
   [ -z "$merged" ] && return 0
   # A partly-done landing leaves its ticket open and in the queue by design, and its own comment moves
   # the issue after the merge: neither is a person putting it back, so it reads as partly done.
   case "$landing" in *"(part of "*) return 1;; esac
-  updated=$(printf '%s\n' "$QUEUE_UPDATED" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
+  updated=""; fields_of "$1" "$QUEUE_UPDATED" '|' && updated="${F[1]:-}"
   [ -n "$updated" ] && [ "$updated" -gt "$merged" ]
 }
 
@@ -564,13 +607,13 @@ requeued() {
 # issue body's open dependencies. Empty when nothing holds it back.
 blocked_on() {
   local on
-  on=$(printf '%s\n' "$WAITING" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
-  [ -z "$on" ] && on=$(printf '%s\n' "$QUEUE_DEPS" | awk -F'|' -v k="$1" '$1==k{print $2; exit}')
+  on=""; fields_of "$1" "$WAITING" '|' && on="${F[1]:-}"
+  [ -z "$on" ] && fields_of "$1" "$QUEUE_DEPS" '|' && on="${F[1]:-}"
   printf '%s' "$on"
 }
 
 # "run|kind|text" for a branch slug, from OUTCOMES.
-outcome_of() { printf '%s\n' "$OUTCOMES" | awk -F'|' -v k="$1" '$1==k{print $2 "|" $3 "|" $4; exit}'; }
+outcome_of() { fields_of "$1" "$OUTCOMES" '|' || return 0; printf '%s|%s|%s\n' "${F[1]:-}" "${F[2]:-}" "${F[3]:-}"; }
 # A branch the kit held for a person (at landing, or a conflict resolution it
 # would not trust) that a person has since merged by hand: its tip is on the
 # base, so it has no commits over it, as a hand-back has none. Only the
@@ -686,7 +729,7 @@ paused_cell() {
   for pair in $fin; do
     id="${pair%%=*}"; st="${pair#*=}"
     case "$st" in implement) word=impl;; cross-review) word=codex;; ready) word=landing;; *) word="$st";; esac
-    list="${list}${sep}$(disp "$id")${word:+ $word}"; sep=", "
+    disp "$id"; list="${list}${sep}${DISP}${word:+ $word}"; sep=", "
   done
   plain="PAUSED since ${when}"
   # The cell's text room: its share of the pane (half below 170 columns, a fifth from there) less the bars,
@@ -931,7 +974,8 @@ usage_row() {
       USAGE_GREY=0; [ "$age" -gt 900 ] && USAGE_GREY=1
       usage_window 5h "$p5" "$r5" +%H:%M; w5="$REPLY"
       usage_window week "$pw" "$rw" '+%a %H:%M'; ww="$REPLY"
-      items=("${mute}${name}${off}  ${w5}" "$ww" "${mute}($(ago "$age") ago)${off}")
+      ago "$age"
+      items=("${mute}${name}${off}  ${w5}" "$ww" "${mute}(${AGO} ago)${off}")
     else
       # Claude's reading comes from any agent's stream, Codex's from the cross-review pass's.
       who="agent's"; [ "$prov" = codex ] && who="cross-review's"
@@ -952,7 +996,8 @@ usage_row() {
 # criterion unmet is "part of" its ticket, not "closes" it.
 landed_commits() {
   local p
-  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $(disp "$1"))" --grep="Merge agent/issue-$1 (part of $(disp "$1"))" 2>/dev/null)
+  disp "$1"
+  p=$(git log "$BASE" -1 --format=%P --fixed-strings --grep="Merge agent/issue-$1 (closes $DISP)" --grep="Merge agent/issue-$1 (part of $DISP)" 2>/dev/null)
   case "$p" in
     # --no-merges, as the kit counts a branch's own commits: a base merge or a resolution is not one.
     *' '*) git rev-list --count --no-merges "${p%% *}..${p#* }" 2>/dev/null || echo -;;
@@ -969,7 +1014,8 @@ emit() {
   [ "$age" = "-" ] && age_c="$gry"
   [ "$commits" = "-" ] && cmt_c="$gry"
   [ "$mem" = "-" ] && mem_c="$gry"
-  local id_cell="${bold}${wht}$(disp "$n")${off}" lf url
+  disp "$n"
+  local id_cell="${bold}${wht}${DISP}${off}" lf url
   if [ "$LINKS" = 1 ]; then
     lf=$(ls -t logs/agent-issue-"$n"-*-"$n".log 2>/dev/null | head -1)
     if [ -n "$lf" ]; then
@@ -1031,8 +1077,8 @@ render() {
   # the longest ticket shown ("helpers-01" is longer than "#1234"), up to 16;
   # a longer one is cut to it. It is never narrower than its own heading
   # (6 characters).
-  local id d longest=6 i sum=0 avail
-  for id in $issues $QUEUE $TICKET_IDS; do d=$(disp "$id"); [ "${#d}" -gt "$longest" ] && longest=${#d}; done
+  local id longest=6 i sum=0 avail
+  for id in $issues $QUEUE $TICKET_IDS; do disp "$id"; [ "${#DISP}" -gt "$longest" ] && longest=${#DISP}; done
   [ "$longest" -gt 16 ] && longest=16
   WIN="$cols"
   # In a narrow pane MEM gives its width to ACTIVITY, where the notes are:
@@ -1054,10 +1100,11 @@ render() {
 
   # 1. The live run's tickets, as its record has them.
   for n in $TICKET_IDS; do
-    IFS="$US" read -r _ tstate since started order note requeued <<<"$(ticket_of "$n")"
+    fields_of "$n" "$TICKETS" "$US"
+    IFS="$US" read -r _ tstate since started order note requeued <<<"$LINE"
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
-    age=$(ago $(( now_s - since ))); age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
+    ago $(( now_s - since )); age="$AGO"; age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
     commits=$(git rev-list --count "${BASE}..agent/issue-$n" 2>/dev/null || echo -)
     stat_for "$n"; cpu_cols
     case "$tstate" in
@@ -1100,9 +1147,9 @@ render() {
         typ=$(typical_of "$tstate")
         if [[ "$typ" =~ ^[0-9]+$ ]] && [ "$typ" -gt 0 ]; then
           if [ $(( now_s - since )) -gt $(( typ * 3 )) ]; then
-            age_col="$hot"; act_col="$hot"; activity="3x over, usually $(ago "$typ") - $activity"
+            ago "$typ"; age_col="$hot"; act_col="$hot"; activity="3x over, usually $AGO - $activity"
           elif [ $(( now_s - since )) -gt $(( typ * 2 )) ]; then
-            age_col="$hot"; activity="usually $(ago "$typ") - $activity"
+            ago "$typ"; age_col="$hot"; activity="usually $AGO - $activity"
           fi
         fi;;
     esac
@@ -1123,7 +1170,7 @@ render() {
   # 2. Queued tickets with no log yet and nothing in the record.
   for q in $QUEUE; do
     in_record "$q" && continue
-    grep -qx "$q" <<<"$issues" && continue
+    has_line "$q" "$issues" && continue
     n="$q"; age="-"; commits="-"; cpu="-"; mem="-"; cpu_col="$gry"; age_col="$gry"; act_col="$mute"; key=0
     # Held back by an open dependency, not waiting for a sandbox.
     on=$(blocked_on "$q")
@@ -1137,7 +1184,7 @@ render() {
       # label reads as in flight otherwise, long after the run has ended.
       state="queued"
       if [ "$RUN_LIVE" = 0 ]; then activity="for the next run"
-      elif [ "$RECORD" = 0 ] && grep -qx "$q" <<<"$RUN_ISSUES"; then activity="in this run - waiting for a sandbox"; key=1
+      elif [ "$RECORD" = 0 ] && has_line "$q" "$RUN_ISSUES"; then activity="in this run - waiting for a sandbox"; key=1
       else activity="not in this run"; fi
     fi
     style_of "$state"
@@ -1159,9 +1206,9 @@ render() {
     if [ -n "$act" ]; then
       phase="${act%%|*}"; since="${act#*|}"
       case "$phase" in implement) phase="impl";; cross-review) phase="codex";; esac
-      age=$(ago $(( now_s - since )))
+      ago $(( now_s - since )); age="$AGO"
     else
-      age=$(ago $(( now_s - mtime )))
+      ago $(( now_s - mtime )); age="$AGO"
     fi
     key="$mtime"; age_col="$head"
 
@@ -1192,14 +1239,15 @@ render() {
       [ "$phase" != gates ] && quiet=$(( now_s - mtime ))
     elif ! git show-ref -q --verify "refs/heads/agent/issue-$n"; then
       # A landed branch is deleted at landing (merge or squash), so its subject on the base is the proof.
-      landed_subj=$(git log "$BASE" -1 --format=%s --fixed-strings --grep="Merge agent/issue-$n (closes $(disp "$n"))" --grep="Merge agent/issue-$n (part of $(disp "$n"))" 2>/dev/null)
+      disp "$n"
+      landed_subj=$(git log "$BASE" -1 --format=%s --fixed-strings --grep="Merge agent/issue-$n (closes $DISP)" --grep="Merge agent/issue-$n (part of $DISP)" 2>/dev/null)
       if [ -n "$landed_subj" ]; then
         state="merged"; activity_note="landed on $BASE"
         # A criterion left undone: the ticket stays open, which the row must not hide.
         case "$landed_subj" in *"(part of "*)
           activity_note="partly done, ticket open"
           # The agent's own line, as the closing summary reads it (needsDecision in src/autonomy.ts).
-          unmet=$(printf '%s\n' "$UNMETS" | awk -F"$US" -v k="$n" '$1==k{print $2; exit}')
+          unmet=""; fields_of "$n" "$UNMETS" "$US" && unmet="${F[1]:-}"
           if printf '%s' "$unmet" | grep -Eiq '(^|[^[:alnum:]_])(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)([^[:alnum:]_]|$)'; then
             activity_note="partly done - needs a person's decision"
           fi;;
@@ -1220,7 +1268,7 @@ render() {
       oc_state=""; [ -n "$oc" ] && [ "$oc_run" = "$RUN_STARTED" ] && oc_state=$(outcome_state "$oc_kind")
       if [ -n "$oc_state" ]; then
         state="$oc_state"; activity_note="$oc_text"
-      elif [ "$RUN_LIVE" = 1 ] && grep -qx "$n" <<<"$RUN_ISSUES"; then
+      elif [ "$RUN_LIVE" = 1 ] && has_line "$n" "$RUN_ISSUES"; then
         # This run's branch under an older orchestrator, which records no
         # outcome until landing: finished, and landing decides the rest.
         state="finished"; activity_note="this run - landing decides it when the run ends"
@@ -1243,7 +1291,7 @@ render() {
     # Back on the queue after an earlier run: it is queued, not done. Never a
     # ticket of the live run - that run is handling it.
     if { [ "$grp" = merged ] || [ "$grp" = idle ] || [ "$grp" = "left over" ]; } && in_queue "$n" && requeued "$n" \
-      && ! { [ "$RUN_LIVE" = 1 ] && grep -qx "$n" <<<"$RUN_ISSUES"; }; then
+      && ! { [ "$RUN_LIVE" = 1 ] && has_line "$n" "$RUN_ISSUES"; }; then
       state="queued"
       # Its old log's last line is history; say what happens next instead.
       if [ "$RUN_LIVE" = 1 ]; then activity_note="not in this run"; else activity_note="for the next run"; fi
@@ -1373,7 +1421,7 @@ render() {
     if [ -n "$tail_lines" ]; then
       rep ─ $(( WIN > 16 ? WIN - 16 : 0 )); put "${rule}── run output ──${REPLY}${off}"
       while IFS= read -r tl; do
-        tl=$(fit "$tl" "$WIN"); put "${mute}${tl}${off}"
+        fit "$tl" "$WIN"; tl="$FIT"; put "${mute}${tl}${off}"
       done <<<"$tail_lines"
     fi
   fi
@@ -1419,7 +1467,7 @@ render() {
         [ "$sep" = 1 ] && put "$sep_line"
         put "$rendered"; used=$(( used + cost )); pp="$prio"
       else
-        hidden=$((hidden+1)); hidden_list="${hidden_list}${group}|$(disp "$n")
+        hidden=$((hidden+1)); disp "$n"; hidden_list="${hidden_list}${group}|${DISP}
 "
       fi
     done <<<"$sorted"
@@ -1614,7 +1662,7 @@ while true; do
   # cursor happens to be and corrupts the screen.
   frame=$(render 2>>"${STATUS_ERRLOG:-/dev/null}" | while IFS= read -r l; do
     if [[ "$TERM_COLS" =~ ^[0-9]+$ ]]; then
-      l=$(fit "$l" "$TERM_COLS"); printf '%s' "$l"; vlen "$l"; [ "$VN" -lt "$TERM_COLS" ] && printf '\033[K'
+      fit "$l" "$TERM_COLS"; l="$FIT"; printf '%s' "$l"; vlen "$l"; [ "$VN" -lt "$TERM_COLS" ] && printf '\033[K'
     else printf '%s\033[K' "$l"; fi
     printf '\n'
   done)

@@ -58,7 +58,7 @@ test("the groups carry the status view's glyphs and colours", () => {
     assert.equal(g.colour, cube(Number(code)), `${g.group} colour`);
     assert.ok(status.includes(`${g.glyph} ${g.label} `), `the legend says "${g.glyph} ${g.label}"`);
   }
-  const sand = (name: string) => hex(status.match(new RegExp(`\\b${name}=\\$\\(sand '([\\d;]+)'`))?.[1] ?? "");
+  const sand = (name: string) => hex(status.match(new RegExp(`\\bsand ${name} '([\\d;]+)'`))?.[1] ?? "");
   assert.deepEqual(SAND, { top: sand("moon"), mid: sand("dusk"), base: sand("deep"), name: sand("head"), stage: sand("accent"), muted: sand("mute") });
 });
 
@@ -163,7 +163,7 @@ test("the band is the castle's three rows, the run beside its walls, each row cu
   // The castle is the status view's own, row for row and colour for colour.
   for (const [row, colour] of [["top", "moon"], ["mid", "dusk"], ["base", "deep"]] as const) {
     assert.ok(status.includes(`\${${colour}}${CASTLE[row]}\${off}`), `status.sh draws the castle's ${row} as ${CASTLE[row]}`);
-    const rgb = status.match(new RegExp(`\\b${colour}=\\$\\(sand '([\\d;]+)'`))?.[1] ?? "";
+    const rgb = status.match(new RegExp(`\\bsand ${colour} '([\\d;]+)'`))?.[1] ?? "";
     assert.equal(SAND[row], hex(rgb), `the castle's ${row} is ${colour}`);
   }
   // A frame of the build moves nothing beside it.

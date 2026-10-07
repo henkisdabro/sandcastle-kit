@@ -36,6 +36,6 @@ test("the record type declares both values outside the settings group, and the v
   assert.ok(fields("RunRecord").includes("demand") && fields("RunRecord").includes("share"));
   assert.ok(!fields("RunSettings").includes("demand") && !fields("RunSettings").includes("share"));
   const status = readFileSync(join(kit, "status.sh"), "utf8");
-  assert.match(status, /jq -r '\[\(\.demand \/\/ ""/);
+  assert.match(status, /\[\(\.demand \/\/ ""/);
   assert.match(status, /\(\.share \/\/ ""/);
 });
