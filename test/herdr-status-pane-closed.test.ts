@@ -16,7 +16,8 @@ import type { Project } from "../src/config.ts";
 import { quietly } from "./quiet.ts";
 
 // `gone`: the status pane (p9) is answered as Herdr answers a closed pane, for a report about it;
-// `broken`: the same calls fail with another error. Anything else is answered as usual.
+// `broken`: the same calls fail with another error; `garbled`: with words over two lines, not JSON.
+// Anything else is answered as usual.
 const FAKE = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 mode=$(cat "$FAKE_MODE")
@@ -31,6 +32,10 @@ case "$1 $2" in
     fi
     if [ "$3" = p9 ] && [ "$mode" = broken ]; then
       printf '%s\\n' '{"error":{"code":"server_busy","message":"the server is busy"}}' >&2
+      exit 1
+    fi
+    if [ "$3" = p9 ] && [ "$mode" = garbled ]; then
+      printf '%s\\n' 'thread main panicked' 'at src/server.rs:12' >&2
       exit 1
     fi
     printf '%s\\n' '{}' ;;
@@ -50,7 +55,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-statusgone-c
 (process.stdout as { isTTY?: boolean }).isTTY = false;
 const { openSandboxView, viewRecord } = await import("../src/herdr.ts");
 
-const open = async (answer: "ok" | "gone" | "broken") => {
+const open = async (answer: "ok" | "gone" | "broken" | "garbled") => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-statusgone-"));
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const log = join(root, "calls.log");
@@ -97,4 +102,11 @@ test("another herdr error turns the view off once, in one line with herdr's mess
   });
   assert.deepEqual(later, []);
   assert.equal(run.calls().length, before, "no herdr call after the view went off");
+});
+
+test("an error herdr gives in words over several lines is told on one", async () => {
+  const run = await open("garbled");
+  run.answer();
+  const said = await run.say(() => run.view.phase("12", "implement"));
+  assert.deepEqual(said, ["Herdr sandbox view off for this run (thread main panicked at src/server.rs:12)."]);
 });

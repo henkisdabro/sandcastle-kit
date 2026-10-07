@@ -84,7 +84,8 @@ export const runsBareShell = (pane: string) => bareShell(foreground(pane));
 
 /** What herdr said went wrong, cut to its `message` when it answered with its JSON error, and to 160 characters. */
 export const herdrMessage = (error: unknown) => {
-  const text = String((error as { stderr?: string }).stderr || (error as Error)?.message || error).trim();
+  // One line: anything else herdr or node says (a panic, `Command failed: ...` and its output) spans several.
+  const text = String((error as { stderr?: string }).stderr || (error as Error)?.message || error).replace(/\s+/g, " ").trim();
   try {
     const message = JSON.parse(text)?.error?.message;
     if (typeof message === "string" && message.trim()) return message.trim().slice(0, 160);
@@ -619,7 +620,7 @@ export const openSandboxView = (
   // A pane the operator closed by hand is forgotten. Left to `safe`, its pane_not_found on
   // the next minute's report switched every other pane's reporting off too.
   const gone = (pane: string, error: unknown) => {
-    if (!/pane_not_found/.test(String((error as { stderr?: string }).stderr ?? ""))) return false;
+    if (!paneNotFound(error)) return false;
     shown.delete(pane);
     const slot = slots.find((s) => s.pane === pane);
     if (slot) Object.assign(slot, { closed: true, issue: undefined });
