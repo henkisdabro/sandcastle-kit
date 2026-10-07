@@ -372,6 +372,11 @@ safety stop) keeps what its agents named in the run record as they arrive, and f
 stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
 nothing more to the tracker, and the summary lists each as one to file by hand.
 
+A reviewer that names a known gap in prose ("left alone", "remains", "a gap", "not fixed") and ends its
+message with neither a `<followup>` nor an `<unmet>` line has lost it, so the kit reads each review's
+message for such a sentence (not one that says nothing is left, such as "nothing remains") and, for a
+merged ticket, lists the sentence under Needs you: `the reviewer named a gap it did not file`.
+
 ## 📋 Queue: what agents work on
 
 The queue is every open ticket marked `ready-for-agent` (a GitHub label, or a ticket file's `Status:`;
@@ -898,7 +903,9 @@ A queued ticket with a branch from an earlier run builds on that branch:
   ticket's files are its branch's changed files plus its `Touches:` line; a ticket that shares such a
   file with one in flight shows as blocked, "waits for #N: both change <file> (git cannot merge it)",
   and starts when that ticket lands or leaves the run. Tickets that share only mergeable files start
-  together, the start naming them, and landing (with one requeue) resolves the overlap.
+  together, and landing (with one requeue) resolves the overlap. The start names each such file once
+  with its tickets (README.md and CHANGELOG.md, which nearly every ticket touches, are one count),
+  and writes every pair to `logs/file-shares.log`.
 - A ticket closed, unqueued or sent to a human mid-run is left alone, and a run that died between
   merging and closing is finished by the next one.
 
@@ -914,6 +921,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
+| `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release; the screen names each file once |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
@@ -1449,7 +1457,9 @@ and the kit narrows what can cross it:
   a file over 50 MB is held the same way: GitHub refuses a push with one over 100 MB, and a file
   that size stays in the history for good. A ticket whose work lies in a protected path therefore
   always ends held, so `sandcastle queue --lint` and `sandcastle requeue` warn about one (its `Touches:`
-  line, or a kept branch, names the path): merge it by hand rather than queue it.
+  line, or a kept branch, names the path): merge it by hand rather than queue it. A run still starts
+  one whose `Touches:` line names the path, and says so in its start plan (`#N will be held for a
+  person to merge (paths)`); its `needs a human` line at landing names the paths too.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.

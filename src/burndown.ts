@@ -24,14 +24,14 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, pruneBackup } from "./guard.ts";
+import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -60,7 +60,7 @@ import {
   carriedBranch, carriedMergeLine, createHostGit, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, isAncestor, type LandContext, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
-import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileWaitNote, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
+import { type Attempted, type Change, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
 import { holdForUsage, readPause } from "./detach.ts";
 import { expandTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { blockerChain } from "./lint.ts";
@@ -102,6 +102,8 @@ type Outcome = {
   changelogDropped?: number;
   /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
   unmet?: string;
+  /** What a reviewer said in prose about a gap it filed neither as a `<followup>` nor as an `<unmet>` line (`gapOf`), for the closing summary. */
+  gap?: string;
 };
 
 /**
@@ -351,6 +353,39 @@ const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
     const title = (at > 0 ? said.slice(0, at) : said).trim();
     return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
+// A reviewer that names a known gap in prose and files it as neither a `<followup>` nor an `<unmet>` line
+// loses it: nobody reads the message. The words that name one, as a person writes them ("left alone",
+// "remains", "a gap", "not fixed"); the wording of the prompts alone did not hold.
+const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaining|gaps?|not\s+(?:fixed|addressed|handled)|unfixed|unaddressed|still\s+(?:fails?|broken|wrong))\b/i;
+// What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
+// issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
+// every review prompt asks for, which would otherwise list nearly every merged ticket.
+const GAP_NEGATED =
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
+// The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
+// fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
+const sentencesOf = (text: string): string[] => {
+  const prose = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "").replace(/<(\w+)>[\s\S]*?<\/\1>/g, "");
+  const units: string[] = [];
+  let open = false;
+  for (const raw of prose.split("\n")) {
+    const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
+    if (!line) open = false;
+    else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
+    else {
+      units.push(line);
+      open = true;
+    }
+  }
+  return units.flatMap((u) => u.split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)).map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim());
+};
+// The gap sentences of a reviewer's final message, when it filed none: a message with a `<followup>` or an
+// `<unmet>` line has said it the way the kit reads. Several sentences are one note.
+const gapOf = (text: string): string | undefined => {
+  if (followUpsOf(text).length || unmetOf(text)) return undefined;
+  const said = sentencesOf(text).filter((s) => GAP_WORDS.test(s) && !GAP_NEGATED.test(s));
+  return said.length ? cutAtWord([...new Set(said)].join(" "), UNGATED_MAX) : undefined;
+};
 // The phase a pass's name says, in the words a person reads in the filed ticket.
 const phaseOf = (name: string) =>
   name.startsWith("impl-") ? "implement" : name.startsWith("review-codex-") ? "cross-review" : name.startsWith("review-") ? "review" : name.split("-")[0];
@@ -582,12 +617,12 @@ export const refreshFiles = (project: Project, ticket: Issue, files: TicketFiles
 
 /**
  * The run record's side of the file hold. `start`: each ticket `createSchedule` parked behind a file
- * is said and put on `waiting` (before the run record exists), and each pair that starts together
- * sharing a mergeable file is named. `tell`: what the scheduler tells of the hold as the run goes -
+ * is said and put on `waiting` (before the run record exists), and the mergeable files that tickets
+ * starting together share are named, one line per file (`fileShareSummary`; the pair list goes to `log`). `tell`: what the scheduler tells of the hold as the run goes -
  * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
  * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
  */
-export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void }) => {
+export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void; log?(line: string): void }) => {
   // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
   const started = new Set<string>();
   // The status view's queue position (`order`) follows the scheduler's start queue: a requeued ticket
@@ -610,15 +645,25 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
     } else if (on.length) o.waiting.push({ issue: id, on });
     write(run);
   };
+  // One line per file, not per pair: the pairs of a wide run number in the dozens. The pairs go to the log.
+  const sayShares = (pairs: { id: string; share: FileShare }[]) => {
+    const lines = fileShareSummary(o.ref, pairs);
+    if (!lines.length) return;
+    o.say("  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
+    for (const line of lines) o.say(`    ${line}`);
+    for (const { id, share } of pairs) o.log?.(fileShareLine(o.ref, id, share));
+  };
   return {
     start(candidates: readonly Start<{ id: string }>[]) {
+      const pairs: { id: string; share: FileShare }[] = [];
       for (const { ticket, file, shares } of candidates) {
         if (file) {
           o.waiting.push({ issue: ticket.id, on: [o.ref(file.with)] });
           o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
         }
-        for (const share of shares ?? []) o.say(`  ${fileShareLine(o.ref, ticket.id, share)}`);
+        for (const share of shares ?? []) pairs.push({ id: ticket.id, share });
       }
+      sayShares(pairs);
     },
     tell(run: Record, c: HoldChange | { kind: "requeued"; id: string }) {
       switch (c.kind) {
@@ -628,7 +673,7 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
         case "started":
           started.add(c.id);
           o.say(`  ${o.ref(c.id)} ${c.after.kind === "blockers" ? "released: its last blocker has landed; it starts at the next free slot" : `starts: ${o.ref(c.after.freed)} is done with the file they both change`}`);
-          for (const share of c.shares) o.say(`  ${fileShareLine(o.ref, c.id, share)}`);
+          sayShares(c.shares.map((share) => ({ id: c.id, share })));
           run.ticket(c.id, { state: "queued", note: null, ...(c.after.kind === "blockers" && { order: released++ - AHEAD }) });
           write(run, { stage: "running" });
           return;
@@ -1114,6 +1159,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       const ownNow = () => ownCommits(base, branch, project.root);
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
       const ungated: string[] = [];
+      // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
+      const gaps: string[] = [];
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -1248,6 +1295,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           for (const r of [review, cross]) {
             const u = r && ungatedOf(r.stdout);
             if (u) ungated.push(u);
+            const g = r && gapOf(r.stdout);
+            if (g) gaps.push(g);
             noteChangelog(r?.stdout);
             const m = r && unmetOf(r.stdout);
             if (m) unmet.push(m);
@@ -1468,6 +1517,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           reviewCommits += ownNow() - beforeAfter;
           const u = ungatedOf(after.stdout);
           if (u) ungated.push(u);
+          const g = gapOf(after.stdout);
+          if (g) gaps.push(g);
           noteChangelog(after.stdout, true);
           const m = unmetOf(after.stdout);
           if (m) unmet.push(m);
@@ -1500,6 +1551,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         carried,
         unreviewed,
         ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+        gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         changelog: changelogNote,
         changelogDropped: changelogDropped || undefined,
         unmet: unmetNote,
@@ -1624,7 +1676,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       }
     },
   });
-  const holds = createHoldRecord({ waiting, ref, say: (line) => console.log(line) });
+  const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
+  const holds = createHoldRecord({
+    waiting,
+    ref,
+    say: (line) => console.log(line),
+    log: (line) => {
+      mkdirSync(dirname(sharesLog), { recursive: true });
+      appendFileSync(sharesLog, `${line}\n`);
+    },
+  });
   const candidates = schedule.start.map((c) => c.ticket);
   const issues = schedule.start.flatMap((c) => (c.wait ? [] : [c.ticket]));
   const dependants = schedule.start.flatMap((c) => (c.wait === "blockers" ? [c.ticket] : []));
@@ -1657,6 +1718,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const later = parked.find((p) => p.ticket.id === i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
+  // A Touches line naming a path the kit always holds: the work is still wanted and runs, only its merge is a
+  // person's. Said now, since the reason was otherwise news only at the end of the run.
+  for (const line of protectedPlanLines(project, candidates, ref)) console.log(`  ${line}`);
   // After the header, with the ticket list and the shared-file lines: they are indented under it.
   sayWaits();
   holds.start(schedule.start);
@@ -2202,6 +2266,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(tokens ? { tokens: tokenBrief(tokens) } : {}),
           ...(value.failing?.length ? { failing: value.failing } : {}),
           ...(value.ungated ? { ungated: value.ungated } : {}),
+          ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),

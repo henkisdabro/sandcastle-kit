@@ -495,6 +495,8 @@ export const render = (f: Facts, plain = false): string => {
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
+  // Likewise merged, with a gap a reviewer named in prose and filed nowhere (no `<followup>`, no `<unmet>`).
+  const gapped = merged.filter((id) => f.tickets[id].gap);
   // Held work a person has merged by hand: on the base already, so not theirs to merge or redo; the push closes it.
   const byHand = ids(["held"]).filter((id) => f.mergedByHand?.includes(id));
   const held = ids(["held"]).filter((id) => !byHand.includes(id));
@@ -567,7 +569,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated, ...gapped]).size + (f.baseRed ?? []).length + filingFailed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage ? `${toTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
@@ -675,6 +677,12 @@ export const render = (f: Facts, plain = false): string => {
         const note = f.tickets[id].ungated ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
         return `- ${name(id)} - merged - check by hand: ${note}${more}`;
+      }),
+      // The reviewer's own sentence, cut at the cap like an ungated note.
+      ...gapped.map((id) => {
+        const note = f.tickets[id].gap ?? "";
+        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+        return `- ${name(id)} - merged - the reviewer named a gap it did not file: ${note}${more}`;
       }),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
@@ -810,6 +818,7 @@ export const render = (f: Facts, plain = false): string => {
   if (partlyDecide.length) next.push(`Decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is settled, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
+  if (gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.

@@ -443,7 +443,8 @@ export const createLedger = (d: {
     if (view) d.bookkeep(id, () => d.view.landed(id, view.landed, view.word));
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
-    if (view && ending.kind === "landing") d.say(`${d.ref(id)}: ${view.word}.`);
+    // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
+    if (view && ending.kind === "landing") d.say(`${d.ref(id)}: ${view.word}${record?.state === "held" && record.note ? `: ${record.note}` : ""}.`);
     // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);
