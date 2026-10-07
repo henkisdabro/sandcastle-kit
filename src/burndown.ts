@@ -25,7 +25,7 @@
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
@@ -209,14 +209,23 @@ const tags = (text: string) => {
 
 // A spent plan allowance fails every issue after it the same way, each one
 // after paying for a sandbox and an install. The first one stops the queue.
-const hitLimit = (root: string, issue: string) => {
+// Only what each log's latest pass wrote counts (`passStarts`), as in `passHitLimit`: a re-run that fails early would
+// otherwise read the limit message of the pass before it and stop the queue for the wrong reason.
+export const hitLimit = (root: string, issue: string) => {
   const logs = join(root, ".sandcastle/logs");
   if (!existsSync(logs)) return false;
   return readdirSync(logs)
     // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
     .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-    .some((f) => logSaysLimit(readFileSync(join(logs, f), "utf8")));
+    .some((f) => {
+      const log = readFileSync(join(logs, f));
+      const from = passStarts.get(f) ?? 0;
+      return logSaysLimit(log.subarray(log.length < from ? 0 : from).toString("utf8"));
+    });
 };
+
+// Where each agent log's latest pass began, by the log's file name (they all live in .sandcastle/logs): Sandcastle appends a re-run to the same log.
+export const passStarts = new Map<string, number>();
 
 // How many bytes a pass's readable log holds before the pass starts. Sandcastle appends to the same log when a pass runs
 // again, so what the pass itself wrote is what follows this offset.
@@ -775,6 +784,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       const parkedBefore = parkedInStep;
       for (;;) {
         const logFrom = logSize(opts.logging);
+        if (opts.logging?.type === "file" && typeof opts.logging.path === "string") passStarts.set(basename(opts.logging.path), logFrom);
         try {
           const r = await sampling(sandbox, "agent", () => sandbox.run(opts))
             .then((r) => {
