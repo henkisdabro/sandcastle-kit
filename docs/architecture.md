@@ -83,7 +83,7 @@ state.
   flight is parked until that one lands or leaves the run. It is decided for the start as the
   schedule is made (`start`: the candidates in start order, each with its wait, before the run
   record exists) and told as the run goes (`started`, `waits`, `next run`). Mergeable shares are
-  only named. A ticket in flight has its branch's files read again before each comparison; a run
+  only named: one line per shared file listing its tickets (`fileShareSummary`; README.md and CHANGELOG.md are one count), the pair list in `.sandcastle/logs/file-shares.log`. A ticket in flight has its branch's files read again before each comparison; a run
   that starts nothing tells each parked ticket it waits for the next run; a dry run (no `files`)
   holds nothing.
 - **The fix board** (`createFixBoard`, `FixBoard`). Which ticket is repairing which failure

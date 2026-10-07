@@ -191,7 +191,7 @@ test("two tickets declaring one HTML page start together, and the start names th
   const out = await runFlow(r.project, [ticket("1", "page.html"), ticket("2", "page.html")]);
   assert.equal(out.peak, 2);
   assert.deepEqual(out.events.slice(0, 2), ["start 1", "start 2"]);
-  assert.deepEqual(out.said, ["#1 and #2 both change page.html - if they conflict at landing, the later one is sent back once and its merge resolved"]);
+  assert.deepEqual(out.said, ["tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:", "page.html: #1 #2"]);
 });
 
 test("a lockfile from the branch diff alone, with no Touches line, still serialises", async () => {
