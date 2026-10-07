@@ -342,7 +342,7 @@ function frame(t, cols, changed = new Set()) {
   tw.push(Math.max(10, avail - tw.reduce((a, b) => a + b, 0)));
   const tal = [...tw.map((_, i) => (i === 1 ? 'l' : 'c')).slice(0, -1), 'l'];
   const tbars = bars(tw);
-  const heads = ['TICKET', 'STATE', 'AGE', 'COMMITS', ...extra.map((c) => (c === 'cpu' ? 'CPU/MEM' : 'TOKENS'))].slice(0, tw.length - 1);
+  const heads = ['TICKET', 'STATE', 'TIME', 'COMMITS', ...extra.map((c) => (c === 'cpu' ? 'CPU/MEM' : 'TOKENS'))].slice(0, tw.length - 1);
   put(junction(win, '├', '┤', '─', prevBars, tbars));
   put(cellsLine(tw, [...heads, 'ACTIVITY'].map((h) => [[h, 'head b']]), tal));
   put(junction(win, '├', '┤', '─', tbars, tbars));
@@ -362,7 +362,8 @@ function frame(t, cols, changed = new Set()) {
       [[r.id, 'wht b']],
       [[`${glyph} ${r.state}`, stateCls]],
       // A step past twice its usual time: the age turns red, the note says what usual is.
-      idle ? [['-', 'gry']] : [[ago(Math.min(t, END) - r.since), r.note.startsWith('usually') ? 'hot' : 'head']],
+      // A finished row shows its whole length, first start to end; a working one, the time in its state.
+      idle ? [['-', 'gry']] : [[ago(['merged', ...NEEDS].includes(r.state) ? r.since - r.started : Math.min(t, END) - r.since), r.note.startsWith('usually') ? 'hot' : 'head']],
       idle ? [['-', 'gry']] : [[String(r.commits), 'head']],
       ...extra.map((c) => {
         if (c === 'cpu') return cpu === '-' ? [['-', 'gry']] : [[cpu, hot ? 'hot' : 'head'], [`/${mem}`, 'head']];
@@ -404,7 +405,7 @@ function frame(t, cols, changed = new Set()) {
   for (let r = 0; r < 8; r += per) put(cellsLine(ow, legend.slice(r, r + per), Array(per).fill('c')));
   put(junction(win, '├', '┤', '─', lbars, []));
   // The notes joined by " · " into as few lines as they fit, as wrap_items does.
-  const notes = ['ready = gates green, waits for the landing worker', 'age = time in state (red: twice the usual)'];
+  const notes = ['ready = gates green, waits for the landing worker', 'time = in state while working, start to end once finished (red: twice the usual)'];
   if (wide >= 1) notes.push('tokens = in/out, cache included');
   if (wide >= 2) notes.push('CPU in cores of 8');
   const noteLines = [];

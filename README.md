@@ -633,7 +633,7 @@ Claude Code login or no token at all leaves it without one for now, and with an 
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
-The ticket table's columns are TICKET, STATE, AGE (time in the state, red at twice the usual), COMMITS,
+The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again; `-` while queued or blocked), COMMITS,
 **CPU/MEM** and **TOKENS**, then ACTIVITY. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
 and memory, the CPU half red when the sandbox takes most of the machine's cores, a greyed `-`
 when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M/42k`, **in** over
@@ -685,7 +685,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 
 | State | Means |
 |---|---|
-| `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. AGE turns red at twice the step's usual time in this project, and the note starts `3x over, usually 5m` (in red) at three times it |
+| `setup` `impl` `resolve` `review` `codex` `gates` `repair` | Working. `resolve` is a re-run's conflicted base merge being resolved, with its own log (`agent-issue-<id>-resolve-<id>.log`) and its own line in `timings.jsonl`. `gates` names the gate running (`2/7 pytest`) or says it waits for a machine-wide gates slot; its output is in `.sandcastle/logs/agent-issue-<id>-gates-<id>.log`. TIME turns red at twice the step's usual time in this project, and the note starts `3x over, usually 5m` (in red) at three times it |
 | `ready` | Implemented, reviewed, gates green: waits for the landing worker, which lands each ticket as it goes green. `human merge: .github/` means it will be held for a person instead |
 | `landing` | Being merged; the run line counts landing down (`landing 6/25`) |
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push" until the merge is on `origin`'s base branch); `uncommitted`: the agent's work is in its kept worktree, not committed |
@@ -1611,8 +1611,8 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `conflict resolution changed <files>, which merged cleanly` | The short resolver prompt of a re-run's base merge edited files git had merged without a conflict, so the kit held the ticket for a person (see [Re-runs](#-re-runs)); nothing was landed. Diff the branch against the base for the named files and check that no line another ticket landed there was lost. If the edits are sound, `sandcastle land <n>` lands the branch; if not, fix it on the branch first, or `sandcastle requeue <n>` with a note to try again. |
 | A branch conflicts at landing | The run sends it back once, in the same run: once the green branches that share its files have landed, its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued (unless a ticket that landed after the resolve began caused it: then it goes back once more): its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |
-| `usually 5m` in the status view, AGE in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
-| `3x over, usually 5m`, note and AGE in red | The step has run over three times its usual time. Nothing stops an agent pass that keeps producing output short of its idle timeout, so read its log (a test command that hangs and restarts burns tokens the whole while). |
+| `usually 5m` in the status view, TIME in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |
+| `3x over, usually 5m`, note and TIME in red | The step has run over three times its usual time. Nothing stops an agent pass that keeps producing output short of its idle timeout, so read its log (a test command that hangs and restarts burns tokens the whole while). |
 | `quiet 14m` in the status view | That sandbox's log has been silent for 14 minutes. Often a long think or a slow test; read the log's last lines before assuming it hung. |
 
 ## 🤖 If you are an AI coding agent reading this

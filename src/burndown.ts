@@ -1912,7 +1912,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     if (issue) {
       if (!isTicketState(phase)) throw new Error(`"${phase}" is a step of the run, not a state of ticket ${issue}`);
       // The record first: the view's workspace count reads it.
-      run.ticket(issue, { state: phase, ...(phase === "setup" ? { started: Math.floor(since / 1000) } : {}), ...(note ? { note } : {}) });
+      // `started` is the ticket's first start, kept through a requeued second attempt: the status view's TIME for a finished ticket is its whole wall time.
+      const first = phase === "setup" && typeof run.tickets()[issue]?.started !== "number";
+      run.ticket(issue, { state: phase, ...(first ? { started: Math.floor(since / 1000) } : {}), ...(note ? { note } : {}) });
       view.phase(issue, phase);
     } else run.update({ stage: phase });
     let ok = false;

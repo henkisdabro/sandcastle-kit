@@ -22,7 +22,7 @@ While a run is live, every ticket it holds is shown from the run's own record
 to land, need you, queued, blocked, merged. The states:
 
 - **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running,
-  `2/7 pytest`, or `waiting for a gates slot`), `repair`, `landing`. AGE in red and `usually 5m`
+  `2/7 pytest`, or `waiting for a gates slot`), `repair`, `landing`. TIME in red and `usually 5m`
   mean the step has taken twice its usual time, and `3x over, usually 5m` (the note in red too)
   three times; `quiet Nm` means an agent's log has been silent
   that long. Read the log before calling either hung.
