@@ -9,6 +9,59 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **The run names a ticket that waits long for a sandbox slot.** The heartbeat line names one
+  that has waited longer than a typical ticket takes, the closing summary's line for a ticket names
+  a wait of three minutes or more (`8m, waited 2h for a slot`), and the wait is recorded as
+  `waitMs` on the ticket's first `setup` line in `timings.jsonl`.
+- **A ticket whose `Touches:` line names a path the kit always holds for a person to merge is
+  named in the start plan** (`#N will be held for a person to merge (paths)`), and its live "needs
+  a human" line carries the reason instead of leaving it to the closing summary.
+- **The closing summary lists a merged ticket whose reviewer named a known gap in prose**
+  ("left alone", "remains", "not fixed") without a `<followup>` or `<unmet>` line, under Needs you
+  with the reviewer's sentence.
+
+### Changed
+
+- **The status view's AGE column is now TIME.** A working ticket still shows its time in the
+  current state (red at twice the usual); a finished ticket shows its whole length, first start to
+  end.
+- **The start plan names each mergeable file that tickets share once, with its tickets**, instead
+  of a line for every pair. README.md and CHANGELOG.md are one count, and the full pair list goes
+  to `.sandcastle/logs/file-shares.log`.
+- **The slot kept for landing is kept only while the run's share of the machine pool is 2 or
+  more**, and the start line says so. Below that, tickets may use it, and a landing still goes
+  first when a slot frees.
+
+### Fixed
+
+- **A ticket no longer waits hours for a sandbox slot while later tickets of the same run
+  start**: a freed slot goes to the run's longest-waiting ticket, not whichever worker asked at that
+  moment.
+- **A ticket waiting for a machine-wide slot says why once, then every 15 minutes**, instead of a
+  line each time the reason flips between "share" and "in use".
+- **A requeued ticket waiting to resolve its conflict no longer holds a pipeline worker**, so the
+  tickets queued behind it start while it waits.
+- **A landing's or verify's green record no longer lets the next turn's base check skip the hook
+  tests and the git-hook probe.** A ticket that changed a commit hook and landed green could have
+  had every agent commit of the next turn refused; the base check now skips only the gates.
+- **A drain turn after a single fast-forward landing no longer gates the base again**; it still
+  runs the hook tests and the git-hook probe.
+- **Follow-ups that a ticket's implement and review passes give for the same `path:line` are filed
+  once**; the later one becomes a comment on the first issue.
+- **A ticket the run put back and ran again keeps its first start time** in the run record, and a
+  third send-back after a conflict records three attempts, not two.
+- **A stop that arrives during a pause, before a ticket's first step, ends that ticket as not
+  started** instead of parked; a requeued ticket keeps the ending of its first landing.
+- **A guard stop during a pause clears "paused" in the Herdr sidebar and tab bar at once**,
+  instead of when the tickets still in flight finish.
+- **With `herdr.panes: "all"`, closing the status pane no longer turns the whole Herdr view off**
+  when the first ticket claims a sandbox pane: the run says once that the status pane closed, and
+  the sidebar, tab bar and notifications carry on.
+- **A ticket held behind another held ticket no longer reads "(lands this run)" once the run
+  stops**; it says the blocker did not land.
+
 ## [0.9.0] - 2026-10-07
 
 ### Upgrading
