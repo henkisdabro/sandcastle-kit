@@ -24,6 +24,8 @@ import { type GateRun, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
+import { mergeTree, mergeTreeSupported } from "./resolution.ts";
+import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, readHeads } from "./run.ts";
@@ -311,6 +313,8 @@ export type LandContext = {
   landed: Map<string, { files: string[]; commit: string }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
+  /** `git --version`'s output, injected by a test to simulate a git older than 2.38 (the conflict precheck then does not run). */
+  gitVersion?: string;
   /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
   reds?: Map<string, RedLanding>;
 };
@@ -490,6 +494,21 @@ export const landOne = async (ctx: LandContext, o: Landable): Promise<Landed> =>
       /* a skipped re-gate is an optimisation: nothing here may fail a landing that has landed */
     }
   } else {
+    // Git's own merge of the base tip and the gated head, on the host, before a sandbox slot is taken: a
+    // branch that no longer merges would otherwise wait for a slot and start a sandbox to find that out.
+    // A conflict confined to generated files is left to the sandbox, which regenerates them; so is a
+    // check that cannot run (git older than 2.38, or a git call that failed).
+    let conflicted: string[] = [];
+    try {
+      if (mergeTreeSupported(root, ctx.gitVersion)) conflicted = [...mergeTree(root, before, o.head!).conflicted];
+    } catch {
+      conflicted = [];
+    }
+    if (conflicted.length && !regensFor(conflicted, project.generated)) {
+      // Named with the landed ticket it collides with, as the sandbox's conflict is.
+      const other = since().filter(([, r]) => conflicted.some((f) => r.files.includes(f))).map(([id]) => id);
+      return { kind: "conflict", files: conflicted, with: other };
+    }
     let result: Awaited<ReturnType<typeof landInSandbox>>;
     try {
       const wanted = ctx.slotWanted ?? { n: 0 };
