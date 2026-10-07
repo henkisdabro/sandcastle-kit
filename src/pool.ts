@@ -38,6 +38,8 @@
 // its share wants one, and never loses one it holds. A run with slots and no registration is from an
 // older kit: it is counted as wanting its concurrency (its run record's), or the slots it holds.
 // A run that starts beside others says how the pool is split (`startLines`), and its estimate divides by its share.
+// Beside another run, a run's ticket pipelines (`keep`) leave the last slot of its share, at 2 or more, to its
+// landings (`keptForLanding`).
 // The gates pool has no shares.
 //
 // A cap (`sandcastle cap`) is a person's limit on one run's share, in that run's registration, so it
@@ -221,8 +223,11 @@ export const releaseLock = (file: string, mine: string) => {
 
 const held = new Map<string, string>();
 // This process's own waits, with what the entry files do not say: the pool and whether the wait asked for priority.
-type OwnWait = Wait & { pool: PoolName; priority: boolean; order: number };
+// `hidden`: its entry file is out of the waits directory while the slot kept for landing holds it back (`keptForLanding`).
+type OwnWait = Wait & { pool: PoolName; priority: boolean; order: number; label: string; hidden?: boolean };
 const waiting = new Set<OwnWait>();
+// The sandbox slots this process holds for ticket pipelines (`leaseSlot`'s `keep`): what the slot kept for landing caps.
+let keeping = 0;
 let joined: Joined | undefined;
 process.on("exit", () => {
   for (const [file, mine] of held) releaseLock(file, mine);
@@ -563,15 +568,32 @@ const overShare = (pool: PoolName, ms: Member[], seen: Seen) => {
   return waits(pool, seen).some((w) => w.run !== RUN_ID && !ms.find((m) => m.run === w.run)?.registered);
 };
 
+/**
+ * Beside another run, while this run's share is 2 or more, its ticket pipelines (`keep`) hold no more than
+ * share - 1 sandbox slots: the last of the share is kept for a landing, as `pipelineWorkers` keeps one of the
+ * machine's slots for a run alone. Read at each look, as the share moves with every run's demand. At a share of 1
+ * nothing is kept: the run's one slot is a ticket's, and a landing goes first when it frees.
+ */
+const keptForLanding = (ms: Member[]) => {
+  if (!joined) return false;
+  const me = ms.find((m) => m.run === RUN_ID);
+  if (!me || me.share < 2) return false;
+  if (!ms.some((m) => m.run !== RUN_ID && (m.held > 0 || m.demand > 0))) return false;
+  return keeping >= me.share - 1;
+};
+
 let sequence = 0;
 // Written whole, then renamed in: a reader never sees an entry half-written.
-const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
+const writeWait = (wait: OwnWait) => {
   mkdirSync(WAITS, { recursive: true });
+  writeFileSync(`${wait.file}.tmp`, `${wait.pid} ${wait.run} ${wait.since} ${wait.label}\n`);
+  renameSync(`${wait.file}.tmp`, wait.file);
+};
+const beginWait = (pool: PoolName, label: string, priority: boolean): OwnWait => {
   const since = clock();
   const file = join(WAITS, `${pool}-${since}-${RUN_ID}-${sequence++}.wait`);
-  writeFileSync(`${file}.tmp`, `${process.pid} ${RUN_ID} ${since} ${label}\n`);
-  renameSync(`${file}.tmp`, file);
-  const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority, order: sequence - 1 };
+  const wait = { file, pid: process.pid, run: RUN_ID, since, pool, priority, order: sequence - 1, label };
+  writeWait(wait);
   waiting.add(wait);
   return wait;
 };
@@ -630,12 +652,13 @@ export type SlotLease = { release(): void };
  * run's share; `pollMs` is how often a wait looks again. With `giveUp`, asked at each look while no
  * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  * `priority` puts this wait before the run's other waits for the pool (the ones that did not ask for
- * it), without changing which run is served.
+ * it), without changing which run is served. `keep` is a ticket pipeline's sandbox slot: beside another run it
+ * leaves the last slot of the run's share to a landing (`keptForLanding`), and waits with the reason `share`.
  */
-export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean): Promise<SlotLease>;
-export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean): Promise<SlotLease | undefined>;
-export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs = 5000, giveUp?: () => boolean, priority = false): Promise<SlotLease | undefined> {
-  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, (lease) => lease);
+export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
+export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
+export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs = 5000, giveUp?: () => boolean, priority = false, keep = false): Promise<SlotLease | undefined> {
+  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, keep, (lease) => lease);
 }
 
 /**
@@ -643,18 +666,27 @@ export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReas
  * on a free slot `withSlot`'s `fn` starts before the call returns, with no microtask between, as it did
  * before there were leases (a test holds the slot and queues behind it in one go, and relies on it).
  */
-async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
+async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, keep: boolean, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
   const wait = beginWait(pool, label, priority);
   let slot: ReturnType<typeof tryAcquire>;
   try {
     let told: WaitReason | undefined;
     let printedAt: number | undefined;
-    let yielded: "run" | "priority" | "earlier" | undefined;
+    let yielded: "run" | "priority" | "earlier" | "kept" | undefined;
     const attempt = (): WaitReason | undefined => {
       const seen: Seen = new Map();
       const ms = pool === "sandboxes" ? members(pool, seen) : [];
       yielded = undefined;
       if (overShare(pool, ms, seen)) return "share";
+      // Out of the waits directory while kept: another run below its share would otherwise leave a free slot to
+      // this older wait, which cannot take it, and both would wait until one of this run's tickets ended.
+      const kept = keep && pool === "sandboxes" && keptForLanding(ms);
+      if (kept !== !!wait.hidden) {
+        if (kept) rmSync(wait.file, { force: true });
+        else writeWait(wait);
+        wait.hidden = kept;
+      }
+      if (kept) return (yielded = "kept"), "share";
       if (olderWait(pool, countedFrom(wait), ms, seen)) return (yielded = "run"), "slots";
       if (priorityAhead(wait)) return (yielded = "priority"), "slots";
       if (earlierAhead(wait)) return (yielded = "earlier"), "slots";
@@ -669,7 +701,8 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       if (printedAt === undefined || clock() - printedAt >= REPRINT_MS) {
         printedAt = clock();
         const me = why === "share" ? myShare() : undefined;
-        const reason = why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
+        const reason = yielded === "kept" ? `this run's share is ${me?.share ?? 0} and its tickets hold ${keeping}: one slot of it is kept for landing`
+          : why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
           : yielded === "run" ? "another run has waited longer"
           : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
           : yielded === "earlier" ? "an earlier wait of this run goes first"
@@ -687,11 +720,13 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
   }
   const taken = slot;
   held.set(taken.file, taken.mine);
+  if (keep) keeping++;
   let released = false;
   return await use({
     release() {
       if (released) return;
       released = true;
+      if (keep) keeping--;
       held.delete(taken.file);
       releaseLock(taken.file, taken.mine);
     },
@@ -699,8 +734,8 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
 }
 
 /** Waits for a slot, runs `fn`, frees the slot. */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false): Promise<T> =>
-  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, async (lease) => {
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false, keep = false): Promise<T> =>
+  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, keep, async (lease) => {
     try {
       return await fn();
     } finally {

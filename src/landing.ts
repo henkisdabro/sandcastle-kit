@@ -647,13 +647,14 @@ export const pipelineWorkers = (concurrency: number, tickets: number, pool: numb
   Math.min(concurrency, tickets, landing ? Math.max(1, pool - 1) : Infinity);
 
 /**
- * What the start line says of the slot `pipelineWorkers` leaves. It is left in the run's worker
- * count, not in the pool, so it is one of the machine's slots, not of the run's share: beside another
- * run the workers can fill the share, at 2 as at 1 (a ticket already running is never taken back,
- * ADR 0001). A landing still goes first when a slot frees (`slotTurn`).
+ * What the start line says of the slot `pipelineWorkers` leaves. Alone, it is one of the machine's slots, left in
+ * the run's worker count. Beside another run it is one of the run's share, while the share is 2 or more: the pool
+ * holds the run's ticket pipelines to share - 1 at each lease (`leaseSlot`'s `keep`). At a share of 1 the run's one
+ * slot is a ticket's, and a landing goes first when a slot frees (`slotTurn`); a ticket already running is never
+ * taken back (ADR 0001).
  */
 export const landingSlotNote = (pool: number) =>
-  `one of the ${pool} machine-wide sandbox slots is kept for landing while no other run takes a share of them - beside one, tickets may fill this run's share, and a landing goes first when a slot frees`;
+  `one of the ${pool} machine-wide sandbox slots is kept for landing - beside another run, one of this run's share while it is 2 or more, and at a share of 1 a landing goes first when a slot frees`;
 
 /** A green outcome waiting to land; a carried branch (one with work from an earlier run) goes first. */
 export type Waiting = Landable & { carried?: boolean };

@@ -69,15 +69,18 @@ export const mine = () => slotsByRun("sandboxes").get(RUN_ID) ?? 0;
 const tickets: Ticket[] = [];
 type Ticket = { taken: boolean; why: string[]; release: () => void; done: Promise<void> };
 
-/** One of this run's tickets: asks for a sandbox slot, and holds it until `release()`. */
-export const ticket = (label: string): Ticket => {
+/**
+ * One of this run's tickets: asks for a sandbox slot, and holds it until `release()`. `keep` is a ticket pipeline's
+ * lease in a run that lands (it leaves a slot of the share to landing), `priority` a landing's.
+ */
+export const ticket = (label: string, o: { keep?: boolean; priority?: boolean } = {}): Ticket => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const t: Ticket = { taken: false, why: [], release, done: undefined as never };
   t.done = withSlot("sandboxes", label, async () => {
     t.taken = true;
     await gate;
-  }, (why) => t.why.push(why), POLL);
+  }, (why) => t.why.push(why), POLL, o.priority ?? false, o.keep ?? false);
   t.done.catch(() => {});
   tickets.push(t);
   return t;
