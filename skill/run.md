@@ -87,15 +87,15 @@ This continues SKILL.md: run its "Before every action" first.
 3. **Arrange to hear when it ends.** In Claude Code with the kit's mod loaded - the mod appends a
    note saying so to the end of the sandcastle skill's own text (SKILL.md), not to this file, so
    look for it there; a note seen earlier in the session still holds after the conversation is
-   compacted, even when it is no longer in view - skip this step: the mod submits a prompt when the run's process
-   is gone, and that prompt is your cue for step 4. It follows the run this session started
+   compacted, even when it is no longer in view - skip this step: the mod submits a prompt when
+   the run's process is gone, and that prompt is your cue for step 4. It follows the run this session started
    wherever its project lives (a second clone, a package of a monorepo), by the session id the
    run records; a run that `--detach` refused gets no prompt, so step 2's check still matters. A
    paused run (pause.md) is still live, so the mod sends no end prompt until the run ends: silence
    during a pause is not a sign it has stopped.
 
-   With no such note in SKILL.md's text (and none seen earlier in the session), the detached run is not your own process, so your harness never tells you
-   it finished. Right after starting it, run `sandcastle wait` as a background command your
+   With no such note in SKILL.md's text (and none seen earlier in the session), the detached run
+   is not your own process, so your harness never tells you it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
    run is live, then prints the closing summary and exits with the run's exit code. A harness caps
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass

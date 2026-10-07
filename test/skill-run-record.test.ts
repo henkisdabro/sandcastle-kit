@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { DERIVED_STATES, WORDS } from "../mod/hooks/run-record.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
@@ -38,4 +39,16 @@ test("the mod's note is appended to the skill's text, which is the file run.md n
   const register = read("mod", "hooks", "register.tsx");
   assert.match(register, /text: out\.text \+ NOTE/);
   assert.match(register, /skip `sandcastle wait` in step 3 of the run action/);
+});
+
+test("status.md names the record's state wherever it differs from the view's word, and the states the record never holds", () => {
+  // A host agent reads run.json's `state`; the list below the paragraph is in the view's words, so
+  // an agent that waits for `gate red` in the record waits for ever unless the difference is named.
+  const paragraph = status.match(/To check one ticket.*?Read it once per question\./)?.[0] ?? "";
+  for (const [state, word] of Object.entries(WORDS)) assert.ok(paragraph.includes(`\`${state}\` (\`${word}\`)`), `${state} -> ${word}`);
+  for (const derived of ["stalled", "orphaned", "left over"]) {
+    assert.ok((DERIVED_STATES as readonly string[]).includes(derived), derived);
+    assert.ok(paragraph.includes(`\`${derived}\``), derived);
+  }
+  assert.match(paragraph, /the record never holds them/);
 });
