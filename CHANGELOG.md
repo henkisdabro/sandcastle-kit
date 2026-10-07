@@ -32,6 +32,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   seconds, took about 0.4 s against 0.8-1.2 s. A project whose `package.json` says
   `"type": "commonjs"` still has its config loaded as an ES module. The kit has one dependency
   fewer, and tsx's cache in the temp directory is gone.
+- **The kit's own checks wait less on the status view's test.** `test/full-check.sh` runs it as
+  a leg of its own instead of ahead of the test files: 412 s became 246 s on a 15-core Mac. CI's
+  macOS status job runs it under both bashes side by side, not one after the other: its four
+  minutes made it the slowest job of every pull request.
 
 ### Fixed
 

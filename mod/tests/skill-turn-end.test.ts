@@ -10,6 +10,9 @@ const queue = (...ids: string[]) => JSON.stringify(ids.map((id) => ({ id, title:
 const RESULT = { stderr: "", isStdoutTruncated: false, isStderrTruncated: false };
 const START = { surface: "terminal", isInteractive: true, cwd: "/work" } as const;
 const SKILL = { skill: "sandcastle", text: "the skill" };
+// The fields every turn end carries besides its answer: Claude Code's types require them, though
+// the mod reads only `agentId`.
+const ENDED = { durationMs: 1000, isAborted: false, turnId: "turn-1", reason: "answer" } as const;
 const KEY = "ready:/work";
 
 /** A set-up project with no run alive, a fresh entry, and a queue the test changes between reads. */
@@ -56,7 +59,7 @@ test("the skill's turn ending reads the count again, after the labelling the tur
   expect(w.store.get(KEY)).toMatchObject({ ids: ["1"] });
   // The skill labels a ticket during its turn; the turn ends, and the next look reads it.
   w.out = queue("1", "2");
-  await $.turn.complete({ answer: "labelled" });
+  await $.turn.complete({ ...ENDED, answer: "labelled" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(2);
   expect(w.store.get(KEY)).toMatchObject({ ids: ["1", "2"] });
@@ -65,16 +68,16 @@ test("the skill's turn ending reads the count again, after the labelling the tur
 test("a turn that did not use the skill reads nothing, and the skill's end is read once", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
-  await $.turn.complete({ answer: "an ordinary turn" });
+  await $.turn.complete({ ...ENDED, answer: "an ordinary turn" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(0);
   await $.skill.prompt(SKILL);
   await w.clock.advance(15000);
-  await $.turn.complete({ answer: "done" });
+  await $.turn.complete({ ...ENDED, answer: "done" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(2);
   // Later turns of the session are not the skill's: the age rule alone decides again.
-  await $.turn.complete({ answer: "another" });
+  await $.turn.complete({ ...ENDED, answer: "another" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(2);
 });
@@ -86,11 +89,11 @@ test("a subagent's turn ending inside the skill's turn reads nothing; the skill'
   await w.clock.advance(15000);
   expect(w.reads).toBe(1);
   // Triage reads tickets through subagents before it labels: their ends are not the skill's.
-  await $.turn.complete({ answer: "read the tickets", agentId: "agent-1" });
+  await $.turn.complete({ ...ENDED, answer: "read the tickets", agentId: "agent-1" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(1);
   w.out = queue("1", "2");
-  await $.turn.complete({ answer: "labelled" });
+  await $.turn.complete({ ...ENDED, answer: "labelled" });
   await w.clock.advance(15000);
   expect(w.reads).toBe(2);
   expect(w.store.get(KEY)).toMatchObject({ ids: ["1", "2"] });

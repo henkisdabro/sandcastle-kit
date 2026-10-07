@@ -254,7 +254,10 @@ test("the mod's own tests pass", { skip }, (t) => {
 // error in the mod fails here instead of going unseen.
 const modTypes = existsSync(join(root, "mod", "tsconfig.json")) ? false : "no mod/tsconfig.json: run `claude --plugin-dir mod` once";
 
+// The mod imports its own files with a `.ts` extension, as src/ does for Node's type stripping, and
+// Claude Code loads them so; the tsconfig that session generates does not allow it, so the flag
+// is given here.
 test("the mod type-checks against Claude Code's types", { skip: modTypes }, () => {
-  const r = spawnSync(join(root, "node_modules", ".bin", "tsc"), ["-p", "mod", "--noEmit"], { cwd: root, encoding: "utf8" });
+  const r = spawnSync(join(root, "node_modules", ".bin", "tsc"), ["-p", "mod", "--noEmit", "--allowImportingTsExtensions"], { cwd: root, encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
