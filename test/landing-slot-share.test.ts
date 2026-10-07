@@ -1,5 +1,5 @@
 // The slot a run keeps for landing (src/landing.ts `pipelineWorkers`, `landingSlotNote`; src/pool.ts
-// shares): the start line says it is kept only while the run's share is 2 or more, and at a share of
+// shares): the start line says it is kept only while no other run takes a share, and at a share of
 // 1 the pool holds nothing back from tickets - the run's one slot is a ticket's. Expected figures
 // are worked by hand: 6 slots split between four runs of demand 5 is 2, 2, 1, 1 (the earlier
 // registrations get the odd slots). No Docker, no model.
@@ -14,11 +14,11 @@ const { landingSlotNote, pipelineWorkers } = await import("../src/landing.ts");
 
 afterEach(cleanup);
 
-test("the start line says the slot kept for landing is kept only while the run's share is 2 or more", () => {
+test("the start line says the slot kept for landing is kept only while no other run takes a share", () => {
   const note = landingSlotNote(3);
   assert.equal(
     note,
-    "one of the 3 machine-wide sandbox slots is kept for landing, while this run's share is 2 or more - below that, tickets may use it, and a landing goes first when a slot frees",
+    "one of the 3 machine-wide sandbox slots is kept for landing while no other run takes a share of them - beside one, tickets may fill this run's share, and a landing goes first when a slot frees",
   );
   // The count it leaves is the pool's one less (never fewer than one worker).
   assert.equal(pipelineWorkers(5, 20, 3, true), 2);

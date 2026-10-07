@@ -31,8 +31,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The start plan names each mergeable file that tickets share once, with its tickets**, instead
   of a line for every pair. README.md and CHANGELOG.md are one count, and the full pair list goes
   to `.sandcastle/logs/file-shares.log`, under a line per turn naming its time and the run's pid.
-- **The slot kept for landing is kept only while the run's share of the machine pool is 2 or
-  more**, and the start line says so. Below that, tickets may use it, and a landing still goes
+- **The start line says the slot kept for landing is kept only while no other run takes a share
+  of the machine's slots.** Beside one, tickets may fill the run's share, and a landing still goes
   first when a slot frees.
 - **The start plan says `up to N at a time`.** Beside another project's live run, the plain
   figure sat above `this run's share is 1` and an estimate for one at a time, as though the run
