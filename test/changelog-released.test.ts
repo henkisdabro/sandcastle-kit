@@ -19,6 +19,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 test("every released version's section of CHANGELOG.md equals its tag's", (t) => {
   if (!isWorkTreeRoot(root)) return t.skip("not a git work tree (a copy without .git): no tags to compare with");
+  // CI must have the tags (a shallow checkout would pass with nothing compared); a copy of the files in a fresh
+  // repository outside CI, as full-check's Linux leg makes, has no history to compare with.
+  if (!releaseTags(root).length && !process.env.CI) return t.skip("no vX.Y.Z tag here and not CI: nothing to compare with");
   assert.notEqual(releaseTags(root).length, 0, "no vX.Y.Z tag in this repository: fetch them (`git fetch --tags`; in CI, actions/checkout needs fetch-depth: 0)");
   const problems = releasedSectionProblems(root, "CHANGELOG.md", readFileSync(join(root, "CHANGELOG.md"), "utf8"));
   assert.deepEqual(problems, [], `a released section changed after its tag:\n${problems.join("\n")}`);
