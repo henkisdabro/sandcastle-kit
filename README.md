@@ -342,7 +342,8 @@ merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base 
 that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
-the sources when the merged base is gated again at the end of the run.
+the sources: the landing's gates run on that commit, and the merged base is gated again at the end of the run unless
+those gates already ran on its tip.
 
 ### 🧩 A criterion left undone
 
@@ -702,7 +703,8 @@ the kit's own writes are the only moves it accepts. So a dependant of a ticket i
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
-locally and not yet pushed, and the merged base branch is gated once more. A dry run lands nothing
+locally and not yet pushed, and the merged base branch is gated once more - unless the last landing's own gates
+already ran on that very commit, which the closing summary then says. A dry run lands nothing
 and ends by checking that its tickets and the tracker are unchanged.
 
 > [!TIP]
@@ -925,7 +927,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
-| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, and only its own record skips both), and the update record `kit-updated` |
+| `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit and whose gates proved it, so the verify does not run again on a base tip a landing's gates just proved; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, and only its own record skips both), and the update record `kit-updated` |
 | `worktrees/` | Live sandbox worktrees; `sandcastle clean` removes leftovers |
 | `triage/` | The skill's triage and audit results, so a compacted chat loses nothing |
 

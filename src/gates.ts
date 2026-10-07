@@ -505,13 +505,16 @@ const hooksCovered = (root: string, key: string) => {
 // `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
-export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false) => {
+// `proof` is the commit that result is of and whose gates proved it (a ticket's `#427`, "the base check", "verify"): the
+// end-of-run verify says it when it skips for this record, and a record without one is an older kit's.
+export type GreenProof = { commit: string; by: string };
+export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false, proof?: GreenProof) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
   // The key names the commit, so the hook files: a gates-only result at the key a base check recorded in full says nothing less.
   const covered = hooks || hooksCovered(root, key);
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, ...(proof ? { commit: proof.commit, by: proof.by } : {}) }) + "\n");
 };
 
 const recordedRun = (root: string): string | undefined => {
@@ -526,8 +529,25 @@ const recordedRun = (root: string): string | undefined => {
  * A commit the run's own gates passed on - a landing's merge, which the base now names - is the green
  * base the next turn's check would otherwise gate again, in the one gate slot, minutes later.
  */
-export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string) =>
-  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true);
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing") =>
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, false, { commit, by });
+
+/**
+ * Whether the green-base record already proves the base's tip on this image and plan: the commit, and whose gates
+ * ran on it (`by`; a record from an older kit names no one). The end-of-run verify is proof that the merged base is
+ * green, so it is skipped when this answers, and only then: a missing record, or one at another commit (a landing's
+ * failed note is swallowed), leaves the verify to run. The key is the record's own test, as the base check's is.
+ */
+export const greenProofOfBase = (project: Project, image: string, planFile: string): { commit: string; by?: string } | undefined => {
+  const commit = sh("git", ["rev-parse", project.baseBranch], project.root);
+  if (!baseCacheHit(project.root, baseKey(project, image, planFile, commit))) return undefined;
+  try {
+    const by = JSON.parse(readFileSync(baseRecord(project.root), "utf8")).by;
+    return { commit, ...(typeof by === "string" && by ? { by } : {}) };
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * The gates on the merged base at the end of a run (`gateBase`, no hook tests). What they say of the
@@ -538,7 +558,7 @@ export const verifyBase = async (project: Project, image: string, planFile: stri
   const gated = await gateBase(project, image, planFile, "verify", false, runId);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
-  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head);
+  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify");
   else noteBaseResult(project.root, "", false);
   return gated;
 };
@@ -617,7 +637,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green, true);
+  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check" });
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,

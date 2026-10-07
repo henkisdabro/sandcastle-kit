@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, greenProofOfBase, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -48,7 +48,7 @@ import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownComm
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
-import { closingReport, summary } from "./report.ts";
+import { closingReport, summary, verifySkippedLine } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
@@ -2256,7 +2256,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     run,
     dryRun: DRY_RUN,
     opener: sandboxOpener(gateProject, image, planFile),
-    greenBase: (commit) => noteGreenCommit(gateProject, image, planFile, commit),
+    greenBase: (commit, by) => noteGreenCommit(gateProject, image, planFile, commit, by),
     runId,
     withdrawal,
     host,
@@ -2633,11 +2633,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // -------------------------------------------------------------------------
 
   let verify: Gate[] | undefined;
+  let verifySkipped: { commit: string; by?: string } | undefined;
   let newDockerfiles: string[] = [];
   if (merged.length > 1 || regenerated > 0) {
-    // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
-    setDemand(1);
-    const gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
+    // Verify is proof that the merged base is green: a landing's gates, or those of a branch that held the base, may
+    // have run on exactly this tip, and the green-base record says so (it names no tip after a failed note: then it runs).
+    verifySkipped = greenProofOfBase(gateProject, image, planFile);
+    let gated: { gates: Gate[]; failures: GateRun["failures"] } = { gates: [], failures: [] };
+    if (verifySkipped) console.log(`${verifySkippedLine(base, verifySkipped)}.`);
+    else {
+      // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
+      setDemand(1);
+      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
+    }
     verify = gated.gates;
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
@@ -2683,7 +2691,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     dryRunCheck,
   });
