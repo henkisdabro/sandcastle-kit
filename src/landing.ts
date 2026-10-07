@@ -327,7 +327,8 @@ export type LandContext = {
    * commit that landed it. A conflict, or a merged tree that is red, is attributed to these
    * rather than to branches, which a squash deletes.
    */
-  landed: Map<string, { files: string[]; commit: string }>;
+  /** `clean`: merged and gated in a landing sandbox, a gate-only one, rather than fast-forwarded on its ticket's own gates. */
+  landed: Map<string, { files: string[]; commit: string; clean?: true }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
   /** The wait before the one retry of a close that failed (ms; default `CLOSE_RETRY_MS`). */
@@ -465,11 +466,11 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // The landed tickets this branch has never seen: the base gained them after it forked.
   const since = () => [...landed].filter(([, r]) => !isAncestor(root, r.commit, o.head!));
   // Recorded as the landing happens, while the files and the commit are at hand.
-  const record = (before: string, after: string) => {
+  const record = (before: string, after: string, clean?: true) => {
     try {
-      landed.set(o.issue, { commit: after, files: sh("git", ["diff", "--name-only", before, after], root).split("\n").filter(Boolean) });
+      landed.set(o.issue, { commit: after, files: sh("git", ["diff", "--name-only", before, after], root).split("\n").filter(Boolean), ...(clean && { clean }) });
     } catch {
-      landed.set(o.issue, { commit: after, files: [] });
+      landed.set(o.issue, { commit: after, files: [], ...(clean && { clean }) });
     }
   };
   const before = tip();
@@ -603,7 +604,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
     }
     if (result.kind === "merged") {
-      record(before, result.commit);
+      record(before, result.commit, true);
       // The gates ran in the sandbox on exactly this tree (a squash keeps it), and the base now names it.
       try {
         ctx.greenBase?.(result.commit, ref(o.issue), "landing-sandbox");

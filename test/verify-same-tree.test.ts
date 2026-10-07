@@ -59,6 +59,13 @@ test("a red verify on a tree a landing's gates passed says the sandbox differs, 
   assert.doesNotMatch(next, /together/);
 });
 
+test("a red verify on a tree a landing sandbox gated points at a flaky test, not the sandbox or the merge", () => {
+  const line = regated({ green: false, line: "test=FAIL", cleanTree: "#451" })!;
+  assert.match(line, /^Merged main re-gated: RED on the tree #451's landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge \(test=FAIL\)/);
+  assert.doesNotMatch(line, /TOGETHER|the difference is the sandbox/);
+  assert.match(nextStep({ green: false, line: "test=FAIL", cleanTree: "#451" })!, /run `sandcastle gates` again to see whether a test is flaky/);
+});
+
 test("a red verify on a new tree keeps RED TOGETHER", () => {
   assert.match(regated({ green: false, line: "test=FAIL" })!, /^Merged main re-gated: RED TOGETHER \(test=FAIL\)/);
   assert.match(nextStep({ green: false, line: "test=FAIL" })!, /merged together, the gates are red/);
@@ -90,5 +97,11 @@ test("the run compares the verified tree with its landings and records the match
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
   assert.match(src, /landingOfTree\(project\.root, `refs\/heads\/\$\{base\}`, landed\)/);
   assert.match(src, /gatedTree: verifyTreeOf/);
+  assert.match(src, /cleanTree: verifyCleanTreeOf/);
+  assert.match(src, /if \(same && landed\.get\(same\)\?\.clean\) verifyCleanTreeOf = ref\(same\);/);
+  // A landing merged in a sandbox says so where it is recorded; a fast-forward does not.
+  const landing = readFileSync(new URL("../src/landing.ts", import.meta.url), "utf8");
+  assert.match(landing, /record\(before, result\.commit, true\);/);
+  assert.match(landing, /^\s+record\(before, after\);$/m);
   assert.match(src, /^\s+landed,$/m);
 });
