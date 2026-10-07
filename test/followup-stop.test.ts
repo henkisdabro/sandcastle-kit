@@ -149,7 +149,7 @@ const run = (o: { dryRun?: boolean; seen?: Set<string>; create?: () => string } 
 };
 
 const summary = async (project: Project) => render(await gather(project, () => undefined), true);
-const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("##", out.indexOf("## Needs you") + 3));
+const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("\n## ", out.indexOf("## Needs you") + 3));
 
 test("a follow-up is in the run record, unfiled, as soon as the agent's pass has ended - before the run files anything", async () => {
   const { pipelineSaying, recorded, made } = run();

@@ -367,7 +367,7 @@ for it and files nothing itself: it ends its final message with a `<followup>tit
 evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
 project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
 body naming the source ticket and the phase; a title already filed in the run is filed once, and a follow-up that names the same `path:line` in its title as one already filed for the same source ticket is a comment on that issue, not a second one (so is one whose place is only in its evidence, or a file with no line, when the titles also share two significant words). A ticket
-file goes beside its source ticket's. The closing summary lists each under Needs you as `filed for
+file goes beside its source ticket's. The closing summary lists each under Needs you, in its `To triage` group, as `filed for
 triage`. A dry run files none and lists them instead. A run that stops before its end (a crash, or a
 safety stop) keeps what its agents named in the run record as they arrive, and files them as it
 stops, so the summary lists them; after a safety stop (the shared `.git` changed) the kit writes
@@ -832,8 +832,8 @@ a pause the run took itself, so the pause is a wait for the next window, not a s
 Every run ends with a closing summary, in the order you act on it: **Done**; **Needs you** (held
 branches, merged tickets the reviewer says no gate proves, merged tickets left open with a criterion
 undone, the agents' follow-ups the kit filed for triage and other `needs-triage` issues opened during
-the run, counted in the header as "to triage" - as are a dry run's follow-ups, which a real run would
-file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
+the run, under a `### To triage` sub-heading after the rest and counted in the header as "to triage" - as
+are a dry run's follow-ups, which a real run would file - and a follow-up the kit failed to file, which you file by hand and the header counts as "need
 you"); **Needs
 fixing** (red, conflicted, crashed or unlanded branches, with the files or tests and causes several
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**

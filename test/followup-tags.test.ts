@@ -281,7 +281,7 @@ const summary = async (record: object, issues: object[] = []) => {
     process.env.PATH = path;
   }
 };
-const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("##", out.indexOf("## Needs you") + 3));
+const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("\n## ", out.indexOf("## Needs you") + 3));
 
 test("the closing summary lists the filed follow-ups under Needs you as filed for triage, each once", async () => {
   const out = await summary(

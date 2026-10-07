@@ -569,6 +569,16 @@ export const render = (f: Facts, plain = false): string => {
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
   const h = (decorated: string, bare: string) => (plain ? bare : decorated);
+  const followUpLine = (u: FiledFollowUp) => {
+    const from = `from ${refOf(u.from)} (${u.phase})`;
+    return u.id
+      ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
+      : u.failed
+        ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
+        : f.dryRun
+          ? `- ${u.title} - ${from}: a real run files it for triage`
+          : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
+  };
   const section = (heading: string, lines: string[]) => out.push("", heading, ...(lines.length ? lines : ["none"]));
 
   // Headline. A killed run wrote no end: "now" would be whenever the report
@@ -699,16 +709,12 @@ export const render = (f: Facts, plain = false): string => {
       }),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
-      ...followUps.map((u) => {
-        const from = `from ${refOf(u.from)} (${u.phase})`;
-        return u.id
-          ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
-          : u.failed
-            ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
-            : f.dryRun
-              ? `- ${u.title} - ${from}: a real run files it for triage`
-              : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
-      }),
+      // Filing failed or never happened in a real run: a person files it by hand, so it is theirs, not triage's.
+      ...followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).map((u) => followUpLine(u)),
+      // The rest are for triage, under a heading of their own so the headline's `need you` and `to triage` each
+      // match a group of bullets.
+      ...(toTriage ? ["### To triage"] : []),
+      ...followUps.filter((u) => u.id || (!u.failed && f.dryRun)).map((u) => followUpLine(u)),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
     ],
   );
