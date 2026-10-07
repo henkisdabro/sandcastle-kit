@@ -24,8 +24,9 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { PlanUsage, PlanWindow, UsagePaused } from "../mod/hooks/run-record.ts";
+import type { PlanUsage, PlanWindow, RunRecord, UsagePaused } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
+import type { Change } from "./schedule.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
 
@@ -849,6 +850,93 @@ export const createUsagePause = (threshold: number, ports: UsagePausePorts): Usa
       const pause = usageLimitPauseFor(usage, now, provider, Math.min(threshold, USAGE_RED));
       if (pause) ports.hold(pause, now);
       return pause !== undefined || standing !== undefined;
+    },
+  };
+};
+
+/** What the run's pause handling does to the world, so a test drives it with fakes: the run record, the machine's keep-awake, the view and the log. */
+export type PauseHandlingPorts = {
+  /** Writes (or, with undefined, clears) the run record's `paused`. */
+  record(paused: RunRecord["paused"]): void;
+  /** One line to the run's log. */
+  say(line: string): void;
+  /** A ticket's name in the tracker's words. */
+  ref(id: string): string;
+  /** Lets the machine sleep: nothing is in flight. */
+  releaseAwake(): void;
+  /** Holds the machine awake again after a release; nothing when none was. */
+  holdAwake(): Promise<void>;
+  /** Redraws the status view. */
+  refresh(): void;
+  /** Milliseconds since the epoch. */
+  now?(): number;
+};
+
+/**
+ * The run's side of a pause, told by the scheduler: the `paused` and `resumed` changes write the record, say what the
+ * run waits for (once, and again when that changes) and release or re-take keep-awake. `end` is the run's close with its
+ * last ticket landed while paused: not paused any more, and awake for the verify and the summary. `waitOutPause` is
+ * an attempt's wait, before the guard decides, for a pause the latest reading has just asked for.
+ */
+export const createPauseHandling = (ports: PauseHandlingPorts) => {
+  // Said once per pause: the first time the scheduler tells it, and again when what it waits for changes.
+  let said: string | undefined;
+  // What the run is paused for when it took the pause itself, to say how it ended.
+  let forUsage: UsagePaused | undefined;
+  const now = ports.now ?? Date.now;
+  const clockOf = (seconds: number) => new Date(seconds * 1000).toTimeString().slice(0, 5);
+  return {
+    /** The `paused` and `resumed` changes; any other is not this handler's. */
+    told(c: Change<unknown, unknown>): void {
+      if (c.kind === "paused") {
+        // The tickets still finishing; once none is, the machine may sleep (the demand is 0 by then too).
+        ports.record({ since: c.since, finishing: c.finishing, ...c.usage });
+        const finishing = c.finishing.length ? `finishing ${c.finishing.map(ports.ref).join(", ")}` : "nothing is in flight";
+        const cause = c.usage ? JSON.stringify(c.usage) : "person";
+        if (said === undefined) {
+          ports.say(
+            c.usage
+              ? `[${clockOf(c.since)}] paused for plan usage (${usagePauseWords(c.usage)}): no new ticket or agent pass starts; ${finishing}. It resumes by itself at ${resumeClock(c.usage.resumesAt)}, a minute after the window resets, or at \`sandcastle resume\`.`
+              : `[${clockOf(c.since)}] paused by \`sandcastle pause\`: no new ticket or agent pass starts; ${finishing}.`,
+          );
+        } else if (said !== cause) {
+          ports.say(
+            c.usage
+              ? `The pause now waits for ${usagePauseWords(c.usage)}: it resumes at ${resumeClock(c.usage.resumesAt)}.`
+              : "The pause is a person's now (`sandcastle pause`): it stays until `sandcastle resume`.",
+          );
+        }
+        said = cause;
+        forUsage = c.usage;
+        if (!c.finishing.length) ports.releaseAwake();
+        ports.refresh();
+      } else if (c.kind === "resumed") {
+        ports.record(undefined);
+        ports.say(
+          forUsage && now() / 1000 >= forUsage.resumesAt
+            ? `Resumed: the plan's usage window has reset; each paused ticket goes on from its next phase.`
+            : "Resumed: each paused ticket goes on from its next phase.",
+        );
+        said = undefined;
+        forUsage = undefined;
+        void ports.holdAwake();
+        ports.refresh();
+      }
+    },
+    /** The run's close: a pause still told is cleared and the machine held awake. */
+    async end(): Promise<void> {
+      if (said === undefined) return;
+      ports.record(undefined);
+      said = undefined;
+      await ports.holdAwake();
+    },
+    /**
+     * While the run is paused for plan usage, the attempt reaches its first juncture and waits there for the resume. A pause the
+     * latest reading has just asked for is read before the guard decides: the guard's stop is for a run that is not waiting out
+     * the window (it would otherwise win a race of a second against the schedule's own poll).
+     */
+    async waitOutPause(usageGuard: boolean, paused: () => boolean, juncture: (phase: string, park: { suspend(): Promise<void>; resume(): Promise<void> }) => Promise<void>): Promise<void> {
+      while (usageGuard && paused()) await juncture("start", { suspend: async () => {}, resume: async () => {} });
     },
   };
 };
