@@ -130,7 +130,8 @@ const namedAsNew = (body: string, path: string): boolean => {
   const prose = body.split("\n").filter((l) => !/^[ \t]*touches:/i.test(l));
   for (const line of prose) {
     for (let at = line.indexOf(path); at >= 0; at = line.indexOf(path, at + 1)) {
-      const near = line.slice(Math.max(0, at - NEW_WITHIN), at + path.length + NEW_WITHIN);
+      // The path itself is left out of the window: `src/new-ui.ts` does not call itself new.
+      const near = `${line.slice(Math.max(0, at - NEW_WITHIN), at)} ${line.slice(at + path.length, at + path.length + NEW_WITHIN)}`;
       if (/\bnew\b/i.test(near)) return true;
     }
   }

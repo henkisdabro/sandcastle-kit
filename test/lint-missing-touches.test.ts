@@ -62,3 +62,8 @@ test("existing files and directories are not listed", async () => {
   const text = await lint({ "01-a.md": ticket("A", "src/app.ts, src/") });
   assert.match(text, /problems: none/);
 });
+
+test("a path with 'new' in its own name is not taken as called new", async () => {
+  const text = await lint({ "01-a.md": ticket("A", "src/new-ui.ts", "## Fix\n\n- Edit src/new-ui.ts to fix it.") });
+  assert.match(text, /names paths not on main: src\/new-ui\.ts - /);
+});
