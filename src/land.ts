@@ -15,6 +15,7 @@ import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
+import { withObjectsOnly } from "./resolution.ts";
 import { gatesLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
@@ -75,7 +76,8 @@ let mergeTreeNoticed = false;
 export const plainMergeNote = (root: string, c: string, b: string, h: string): string | undefined => {
   let tree: string;
   try {
-    tree = sh("git", ["merge-tree", "--write-tree", b, h], root).split("\n")[0];
+    // In a throwaway git directory, as every host merge-tree: a merge driver the sandbox left in the shared `.git` must not run.
+    tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi])).split("\n")[0];
   } catch (error) {
     const message = String((error as Error).message ?? error);
     if (/usage|unknown option|write-tree/i.test(message)) {

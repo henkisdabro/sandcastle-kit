@@ -41,7 +41,7 @@ The ticket ledger: one place that turns each ending (`src/schedule.ts`) into eve
 
 ## `src/resolution.ts`
 
-`mergeTree` and `mergeTreeSupported` (the one `git merge-tree --write-tree` call and its git 2.38 gate, which `landOne`'s conflict precheck shares); `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines
+`withObjectsOnly`, through which every host `git merge-tree` runs: a temp git directory with no config, no `info/` and no refs, borrowing the shared object store as an alternate (`GIT_ALTERNATE_OBJECT_DIRECTORIES`), removed in a `finally`. A sandbox can write the shared `.git` while its ticket runs, and a merge driver in `.git/config` mapped by `.git/info/attributes` would otherwise run on the host at the next merge-tree, before any fingerprint check; the objects git writes stay in the temp directory too. `mergeTree` and `mergeTreeSupported` (git's own merge through it, and its git 2.38 gate, which `landOne`'s conflict precheck and the pipeline's `conflictBefore` share; `plainMergeNote` in `src/land.ts` runs its merge through it too; `test/merge-driver.test.ts` plants a driver and holds all four); `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines
 
 ## `src/schedule.ts`
 
