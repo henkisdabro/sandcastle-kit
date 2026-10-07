@@ -1,6 +1,6 @@
 // The closing summary with the run record's `usage` holding a list: Claude's entry gives the `Plan usage at the
-// end:` line it always gave, and Codex's reading, which only the status view and the sidebar show, adds
-// nothing to it and takes nothing from it. Facts only: a temp repository, no Docker, no network.
+// end:` line it always gave, and Codex's reading, when cross-review has one, adds a `Codex plan usage at the end:`
+// line beside it. With no Codex reading the summary is unchanged. Facts only: a temp repository, no Docker, no network.
 //
 //   node --test test/report-usage-codex.test.ts
 
@@ -52,15 +52,26 @@ const summary = async (usage: unknown) => {
   return render(await gather(project), true);
 };
 
-test("Claude's line stands when the record's usage is a list with Codex's reading beside it", async () => {
+test("a cross-review run's Codex reading gets a line beside Claude's, which stands as it was", async () => {
   const out = (await summary([claude, codex])).split("\n");
-  assert.ok(out.includes("Plan usage at the end: 5h 21%, week 97%"), out.join("\n"));
-  assert.equal(out.some((l) => /codex/i.test(l) && l.includes("usage")), false);
-  assert.equal((await summary([claude])).includes("Plan usage at the end: 5h 21%, week 97%"), true);
+  const at = out.indexOf("Plan usage at the end: 5h 21%, week 97%");
+  assert.notEqual(at, -1, out.join("\n"));
+  assert.equal(out[at + 1], "Codex plan usage at the end: 5h 100%, week 16%");
 });
 
-test("a record with no Claude reading says nothing of the plan, Codex's alone included", async () => {
-  for (const usage of [[codex], [{ provider: "claude" }, codex], [{ provider: "claude" }, { provider: "codex" }]]) {
-    assert.equal((await summary(usage)).includes("Plan usage"), false, JSON.stringify(usage));
+test("a record with no Codex reading has no Codex line, and the summary is as it was", async () => {
+  for (const usage of [[claude], [claude, { provider: "codex" }], claude]) {
+    const out = (await summary(usage)).split("\n");
+    assert.ok(out.includes("Plan usage at the end: 5h 21%, week 97%"), JSON.stringify(usage));
+    assert.equal(out.some((l) => /codex/i.test(l) && l.includes("usage")), false, JSON.stringify(usage));
   }
+});
+
+test("Codex's reading stands alone when Claude has none, and no reading at all says nothing of the plan", async () => {
+  for (const usage of [[codex], [{ provider: "claude" }, codex]]) {
+    const out = (await summary(usage)).split("\n");
+    assert.ok(out.includes("Codex plan usage at the end: 5h 100%, week 16%"), JSON.stringify(usage));
+    assert.equal(out.some((l) => l.startsWith("Plan usage")), false, JSON.stringify(usage));
+  }
+  assert.equal((await summary([{ provider: "claude" }, { provider: "codex" }])).includes("lan usage"), false);
 });

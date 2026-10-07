@@ -661,7 +661,8 @@ prints no rate limits, so each cross-review pass's command prints the last `rate
 recorded as its closing line once Codex has ended (the session lives in the sandbox's `~/.codex/sessions`
 and goes with it: it is never copied to the host's `~/.codex`), and the run reads that line from the pass's
 `.jsonl` like Claude's: the line updates when a cross-review pass ends, not during it. The Herdr token joins
-the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line stays Claude's.
+the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line is
+Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside it.
 
 | State | Means |
 |---|---|
