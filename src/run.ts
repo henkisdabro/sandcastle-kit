@@ -721,8 +721,12 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
       landing.set(key, (landing.get(key) ?? 0) + l.ms!);
       continue;
     }
-    // A landing's own line holds its landing gates' time already: left out, or it counts them twice.
-    if (l.phase === LANDING) continue;
+    // A landing's own line holds its landing gates' time already: left out, or it counts them twice. It
+    // does say the ticket landed: a fast-forward's, with no gates, is a landing of 0.
+    if (l.phase === LANDING) {
+      landing.set(key, landing.get(key) ?? 0);
+      continue;
+    }
     byPhase.set(l.phase!, [...(byPhase.get(l.phase!) ?? []), l.ms!]);
     byIssue.set(key, (byIssue.get(key) ?? 0) + l.ms!);
   }
@@ -731,7 +735,9 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
   const issue = median([...byIssue.values(), ...extra]);
   if (issue !== undefined) out.issue = Math.round(issue / 1000);
   if (landing.size) {
-    const landMs = median([...byIssue.keys()].map((key) => landing.get(key) ?? 0));
+    // Over the tickets that landed: one held, red or from before landings were timed has no landing to count, and
+    // counting it as 0 made the median 0 when most of a window had none.
+    const landMs = median([...landing.values()]);
     if (landMs !== undefined) out[LANDING_GATES] = Math.round(landMs / 1000);
   }
   return out;
