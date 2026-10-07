@@ -28,7 +28,8 @@ This continues SKILL.md: run its "Before every action" first.
      same. Check `sandcastle status` (is a run live?) before any git write to the base in that
      checkout, yours included.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
-     repair that turns it green a second review - more allowance, fewer red branches. Offer
+     repair that turns it green a second review - more allowance, fewer red branches. `sandcastle usage`
+     prints the plan's usage now, read-only (never a script of your own against `src/usage.ts`). Offer
      `USAGE_CHECK=1` if the plan is close to its limit (it applies only when the sandboxes spend
      `CLAUDE_CODE_OAUTH_TOKEN`, and with `ANTHROPIC_API_KEY`, alone or beside it, it says it does not apply; it reads usage
      with the host's Claude Code login, read-only, else that token; a `claude setup-token` token gets
