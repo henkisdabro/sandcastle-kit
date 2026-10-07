@@ -41,7 +41,8 @@ const IMAGE = "sandcastle-fixture:t";
 
 // A project whose base check has run in full (gates and hook checks), then a commit of `file` lands on main and its
 // green record is written; what the next turn's base check prints and whether the probe ran again is returned.
-const turnAfterLanding = async (name: string, file: string, hooksPath?: string) => {
+// `tracked` is committed with the first commit, before the base check.
+const turnAfterLanding = async (name: string, file: string, hooksPath?: string, tracked: Record<string, string> = {}) => {
   const root = join(dir, name);
   process.env.SANDCASTLE_TEST_REPO = root;
   mkdirSync(join(root, ".sandcastle"), { recursive: true });
@@ -53,7 +54,11 @@ const turnAfterLanding = async (name: string, file: string, hooksPath?: string) 
   if (hooksPath) git(root, "config", "core.hooksPath", hooksPath);
   writeFileSync(join(root, ".gitignore"), ".sandcastle/\n.probed\n");
   writeFileSync(join(root, ".sandcastle/config.ts"), `export default { name: "fixture", setup: [], gates: [{ name: "test", command: "check-red" }] };\n`);
-  git(root, "add", ".gitignore");
+  for (const [f, body] of Object.entries(tracked)) {
+    mkdirSync(join(root, dirname(f)), { recursive: true });
+    writeFileSync(join(root, f), body);
+  }
+  git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "init");
   const cwd = process.cwd();
   process.chdir(root);
@@ -98,3 +103,11 @@ for (const [name, file, hooksPath] of [
     assert.equal(t.probed, true);
   });
 }
+
+test("a changed script a kept Claude Code hook runs still gets the full hook check on the next turn", async () => {
+  // Outside every protected path and hook directory: only the lean plan's kept hook names it.
+  const settings = { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node tools/guard.mjs" }] }] } };
+  const t = await turnAfterLanding("recheck-kept-hook", "tools/guard.mjs", undefined, { ".claude/settings.json": JSON.stringify(settings) });
+  assert.ok(t.lines.includes("gates not re-run; running the hook tests and the git-hook probe"), t.lines);
+  assert.equal(t.probed, true);
+});

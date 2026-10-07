@@ -667,7 +667,8 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
-  // A landing's or verify's green record covers the gates, not the hook tests or the git-hook probe.
+  // A landing's or verify's green record covers the gates, and the hook tests and the git-hook probe only when
+  // `noteGreenCommit` carried them over from the record before it.
   const gatesGreen = cached && baseCacheHit(project.root, key);
   if (gatesGreen) {
     const commit = sh("git", ["rev-parse", "--short", base]);
