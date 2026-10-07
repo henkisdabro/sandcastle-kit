@@ -39,6 +39,13 @@ export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: strin
  */
 export const needsDecision = (unmet: string): boolean => /\b(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)\b/i.test(unmet);
 
+/**
+ * The exit code a run's last turn earns on its own: 1 when the merged base was re-gated and is red, whatever the
+ * autonomy level, else undefined (the process's code stays as it is). The summary says "do not push", and
+ * `sandcastle wait` hands the code to a harness that reads only that.
+ */
+export const redBaseExit = (facts: Pick<Facts, "verify"> | undefined): 1 | undefined => (facts?.verify?.green === false ? 1 : undefined);
+
 /** Why no further turn should follow a turn, or undefined when one may: the cause `drain` prints. */
 export const noRerunCause = (facts: Facts): string | undefined => {
   if (facts.dryRun) return "the run was a dry run";

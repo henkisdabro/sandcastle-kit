@@ -108,7 +108,7 @@ This continues SKILL.md: run its "Before every action" first.
    With no such note in SKILL.md's text (and none seen earlier in the session), the detached run
    is not your own process, so your harness never tells you it finished. Right after starting it, run `sandcastle wait` as a background command your
    harness reports back on when it exits (`run_in_background` in Claude Code): it blocks while the
-   run is live, then prints the closing summary and exits with the run's exit code. A harness caps
+   run is live, then prints the closing summary and exits with the run's exit code (1 when the merged base ended red: do not push it). A harness caps
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
