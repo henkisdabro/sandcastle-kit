@@ -474,8 +474,11 @@ export const createLanding = <G extends Green>(
   };
 };
 
-/** What a ticket's first attempt collided with at landing: its second attempt carries it. */
+/** What a ticket's first attempt collided with, at landing or in its pipeline: its second attempt carries it. */
 export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[] };
+
+/** A branch that no longer merges onto the base: the files git could not merge, and the landed tickets that changed them. */
+export type Conflict = { files: string[]; with: string[] };
 
 /** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
 export type Withdrawn = { kind: "withdrawn"; reason: string };
@@ -489,6 +492,12 @@ export type Attempted<G, O> =
    * `causes`: the `.git` check after it failed - the run stops, and the ticket keeps its own ending.
    */
   | { kind: "pipeline"; outcome: O; causes?: StopCause[] }
+  /**
+   * Its branch no longer merged onto the base before its review or its gates, so its pipeline stopped there: the
+   * requeue-once rule sends it back as it does a landing's conflict, and `outcome` is its ending when it does not.
+   * `causes` as for `pipeline`.
+   */
+  | { kind: "conflict"; outcome: O; conflict: Conflict; causes?: StopCause[] }
   /** `causes`: a plan limit its agent hit, a `.git` check that failed after it. */
   | { kind: "crashed"; error: unknown; causes?: StopCause[] }
   /** Its pipeline ran, then the `.git` check after it failed: the run stops. */
@@ -518,6 +527,12 @@ export class StoppedWhileParked extends Error {
 export type Ending<G, O> =
   | { kind: "landing"; green: G; landed: Landed; attempts: number; again?: Again; unstarted?: true }
   | { kind: "pipeline"; outcome: O; attempts: number }
+  /**
+   * Its branch no longer merged onto the base before its review or its gates (`conflict`), and it was not sent back:
+   * a second conflict (`again` is the first, and `conflict.with` then names the tickets of both), or a run that starts
+   * nothing. `unstarted`: it was sent back and its next attempt never began - `withdrawn` when the tracker took it back meanwhile.
+   */
+  | { kind: "conflict"; outcome: O; conflict: Conflict; attempts: number; again?: Again; unstarted?: true; withdrawn?: string }
   /** `green` when the land port threw, rather than the pipeline. */
   | { kind: "crashed"; error: unknown; attempts: number; green?: G }
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
@@ -856,10 +871,11 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       // Attempts that began, by ticket.
       const attempts = new Map<string, number>();
       // What a requeued ticket's last attempt collided with: its next carries it, and a second collision is final unless
-      // a landing after its resolve began caused it (`requeue`).
+      // a landing after its resolve began caused it (`sendBack`).
       const first = new Map<string, Again>();
-      // A ticket landing sent back, until its second attempt begins: if that never begins, this landing is its ending.
-      const sentBack = new Map<string, { green: G; landed: Landed }>();
+      // A ticket sent back, until its second attempt begins: if that never begins, the landing or the pipeline's conflict
+      // that sent it back is its ending.
+      const sentBack = new Map<string, { green: G; landed: Landed } | { outcome: O; conflict: Conflict }>();
       // The files a ticket sent back after a conflict collided on: its second attempt waits for the green branches that touch them.
       const conflicted = new Map<string, string[]>();
       // Sent-back tickets whose second attempt waits for those landings: in no pipeline, and no one waits for them.
@@ -1102,30 +1118,31 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       };
 
       /**
-       * The requeue-once rule, decided here and nowhere else: a first conflict or red at landing
-       * sends the ticket back for a second attempt that carries what it collided with. Not when the
-       * run starts nothing (the second attempt would never begin, and the record would promise it),
-       * nor when the pipelines are closed (a worker failed: nothing would take it) - both checked
-       * before anything is told, so a requeue told is a requeue pushed, and nothing is undone.
-       * Told before the push: no view shows a queued ticket the record does not know about.
+       * The requeue-once rule, decided here and nowhere else: a first conflict or red at landing, or a
+       * first conflict its pipeline found before its review or gates, sends the ticket back for a second
+       * attempt that carries what it collided with. Not when the run starts nothing (the second attempt
+       * would never begin, and the record would promise it), nor when the pipelines are closed (a worker
+       * failed: nothing would take it) - both checked before anything is told, so a requeue told is a
+       * requeue pushed, and nothing is undone. Told before the push: no view shows a queued ticket the
+       * record does not know about. `back` is what the ticket ends on if its next attempt never begins.
        */
-      const requeue = (g: G, landed: Landed): boolean => {
-        if (landed.kind !== "conflict" && landed.kind !== "red") return false;
-        const t = byId.get(g.issue);
+      const sendBack = (issue: string, met: Extract<Landed, { kind: "conflict" | "red" }>, back: { green: G; landed: Landed } | { outcome: O; conflict: Conflict }): boolean => {
+        const t = byId.get(issue);
         if (!t || stop.startsNothing || pipelines.closed) return false;
         // A second conflict is final, unless a landing that finished after the resolve began caused it: the
         // resolve could not have merged that one, so it is no fault of the resolve and the ticket is sent back again.
-        if (first.has(t.id) && !(landed.kind === "conflict" && landed.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
-        const again: Again = landed.kind === "red" ? { kind: "red", with: landed.with, gates: landed.gates, ...(landed.failing && { failing: landed.failing }) } : { kind: "conflict", with: landed.with };
+        if (first.has(t.id) && !(met.kind === "conflict" && met.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
+        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with };
         first.set(t.id, again);
-        if (landed.kind === "conflict") conflicted.set(t.id, landed.files);
-        sentBack.set(t.id, { green: g, landed });
+        if (met.kind === "conflict") conflicted.set(t.id, met.files);
+        sentBack.set(t.id, back);
         tell({ kind: "requeued", id: t.id, again });
         inPipeline++;
         pipelines.push({ ticket: t, rank: REQUEUED });
         demand();
         return true;
       };
+      const requeue = (g: G, landed: Landed): boolean => (landed.kind === "conflict" || landed.kind === "red") && sendBack(g.issue, landed, { green: g, landed });
 
       const landing = createLanding(work, stop, {
         settled: async (g, got) => {
@@ -1161,9 +1178,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         const back = sentBack.get(t.id);
         sentBack.delete(t.id);
         if (!back) return end(t.id, { kind: "not begun", why });
+        const done = attempts.get(t.id) ?? 1;
+        if ("conflict" in back) return end(t.id, { kind: "conflict", ...back, attempts: done, unstarted: true, ...(why.kind === "withdrawn" && { withdrawn: why.reason }) });
         const landed: Landed = why.kind === "withdrawn" ? { kind: "withdrawn", reason: why.reason } : back.landed;
         // `unstarted` only says more than `attempts: 1` does once a third attempt, or later, is the one that never began.
-        const done = attempts.get(t.id) ?? 1;
         return end(t.id, { kind: "landing", green: back.green, landed, attempts: done, ...(done > 1 && { unstarted: true as const }) });
       };
       // What a sent-back ticket's resolve waits for: the green branches queued to land that share a file with it, and the
@@ -1274,6 +1292,14 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             case "pipeline":
               for (const c of r.causes ?? []) stop.add(c);
               return await end(t.id, { kind: "pipeline", outcome: r.outcome, attempts: n });
+            case "conflict": {
+              for (const c of r.causes ?? []) stop.add(c);
+              if (sendBack(t.id, { kind: "conflict", ...r.conflict }, { outcome: r.outcome, conflict: r.conflict })) return;
+              const again = first.get(t.id);
+              // A second collision names the tickets of both attempts, as a landing's does.
+              const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
+              return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }) });
+            }
             case "crashed":
               for (const c of r.causes ?? []) stop.add(c);
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });

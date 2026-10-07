@@ -32,7 +32,9 @@ import { refOf } from "./tracker.ts";
 export type Finished = {
   issue: string;
   branch: string;
-  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held";
+  status: "green" | "gate-failed" | "nochange" | "merged-earlier" | "held" | "conflict";
+  /** What its branch no longer merged onto the base with, before its review or gates (`conflict`). */
+  conflict?: { files: string[]; with: string[] };
   /** Why the kit held a finished branch for a person (`held`). */
   heldNote?: string;
   /**
@@ -169,7 +171,9 @@ export const pipelineOutcome = (o: Pick<Finished, "status" | "gates" | "heldNote
           ? { kind: "merged", text: o.status }
           : o.status === "held"
             ? { kind: "held", text: `needs a human: ${o.heldNote ?? "held"}` }
-            : { kind: "no change", text: o.status };
+            : o.status === "conflict"
+              ? { kind: "conflict", text: "merge conflict before landing" }
+              : { kind: "no change", text: o.status };
 
 /** A ticket its label refuses, found as it would have started: skipped, saying why. */
 export const refusedRecord = (reason: string): TicketRecord => ({ state: "skipped", note: reason.replace(/^NOT STARTED: /, "not started: ") });
@@ -323,6 +327,9 @@ const describePipeline = (o: Finished, c: Context): Said => {
         return { state: "red", note: `${o.gates.filter((g) => !g.pass).map((g) => g.name).join(", ")} red${repaired}` };
       case "held":
         return { state: "held", note: o.heldNote ?? "held for a human" };
+      // The scheduler ends such a branch as a `conflict` (`describeConflict`): this is the pipeline's own word for it.
+      case "conflict":
+        return { state: "conflict", note: `no longer merges onto ${c.base}${o.conflict ? `: ${conflictLine(o.conflict)}` : ""}`, ...(o.conflict && { files: o.conflict.files }) };
       case "nochange":
         if (uncommitted) return { state: "uncommitted", note: `work left uncommitted in ${c.kept}` };
         if (held) return { state: "held", note: "handed back - for a human" };
@@ -334,6 +341,31 @@ const describePipeline = (o: Finished, c: Context): Said => {
     outcome: o.handedBack ? { kind: "held", text: HANDED_BACK } : pipelineOutcome(o, uncommitted),
     ...(held && { view: NEEDS_A_HUMAN }),
     tracker: comment(notLandedComment(c.report, undefined)),
+  };
+};
+
+/**
+ * A branch that no longer merged onto the base before its review or gates, and was not sent back (again). Said as a
+ * landing's conflict is, but as found before landing: nothing was reviewed or gated for a merge that could not land.
+ * Sent back and never begun again, it keeps this ending (or, withdrawn since, is said as withdrawn), and the record
+ * no longer promises a second attempt.
+ */
+const describeConflict = (e: Extract<TicketEnding, { kind: "conflict" }>, c: Context): Said => {
+  const { outcome: o, conflict } = e;
+  const unstarted = c.requeued !== undefined && e.unstarted === true;
+  if (e.withdrawn !== undefined)
+    return {
+      record: { ...withdrawnRecord(e.withdrawn), ...(unstarted && { requeued: null }) },
+      outcome: { kind: "withdrawn", text: `withdrawn: ${e.withdrawn}` },
+      view: { word: "withdrawn", landed: true },
+      tracker: comment(notLandedComment(c.report, undefined)),
+    };
+  const line = e.again ? againNoteOf({ kind: "conflict", ...conflict }) : conflictLine(conflict);
+  return {
+    record: { state: "conflict", note: e.again ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
+    outcome: { kind: "conflict", ...(conflict.with.length ? { with: conflict.with } : {}), text: `merge conflict before landing: ${line}` },
+    view: { word: "merge conflict", landed: false },
+    tracker: comment(notLandedComment(c.report, { branch: o.branch, base: c.base, files: conflict.files, with: conflict.with })),
   };
 };
 
@@ -354,6 +386,8 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       return describeLanding(e, c);
     case "pipeline":
       return describePipeline(e.outcome, c);
+    case "conflict":
+      return describeConflict(e, c);
     case "crashed":
       return {
         // The land port threw (`green`), or the pipeline did: each says its error as it always has.
@@ -444,12 +478,14 @@ export const createLedger = (d: {
     // The landing worker's only voice in the run's output: without it, a run that spends its last
     // half hour landing prints nothing between the last agent pass and the closing summary.
     // A hold carries its reason: "needs a human" alone sent the reader to run.json for the paths.
-    if (view && ending.kind === "landing") d.say(`${d.ref(id)}: ${view.word}${record?.state === "held" && record.note ? `: ${record.note}` : ""}.`);
+    // A conflict found before landing ends the ticket as finally as one at landing: said the same way.
+    if (view && (ending.kind === "landing" || ending.kind === "conflict")) d.say(`${d.ref(id)}: ${view.word}${record?.state === "held" && record.note ? `: ${record.note}` : ""}.`);
     // A hand-back is as final as a landing, and nothing else prints it before the closing summary. A
     // conflict-resolution hold (status `held`) is excluded: burndown prints that one as it holds it.
     if (ending.kind === "pipeline" && ending.outcome.status !== "held" && record?.state === "held") d.say(`${d.ref(id)}: ${record.note}.`);
     // Sent back, and its second attempt never began: withdrawn since, its first pipeline's line goes too.
     if (ending.kind === "landing" && (ending.attempts === 1 || ending.unstarted === true) && requeuedAs.delete(id) && ending.landed.kind === "withdrawn") d.dropFirst(id);
+    if (ending.kind === "conflict" && ending.unstarted === true && requeuedAs.delete(id) && ending.withdrawn !== undefined) d.dropFirst(id);
   };
   return {
     entries: entries as ReadonlyMap<string, Entry>,
@@ -497,7 +533,7 @@ export type Landings = {
   merged: string[];
   /** Merged by regenerating generated files in a sandbox: a tree no gate has seen. */
   regenerated: number;
-  /** Conflicted, red once merged, failed to land, or not merged. */
+  /** Conflicted (at landing, or before it), red once merged, failed to land, or not merged. */
   notLanded: number;
   /** Held at landing, taken back by a person, or handed back through the tracker's hold label. */
   needsHuman: number;
@@ -509,6 +545,11 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
   const l: Landings = { merged: [], regenerated: 0, notLanded: 0, needsHuman: 0, withdrawn: 0 };
   for (const { id, ending: e } of entries) {
     if (e.kind === "pipeline" && e.outcome.handedBack) l.needsHuman++;
+    // A conflict found before landing is not landed as one found at landing is.
+    if (e.kind === "conflict") {
+      if (e.withdrawn !== undefined) l.withdrawn++;
+      else l.notLanded++;
+    }
     if (e.kind !== "landing") continue;
     const landed: Landed = e.landed;
     switch (landed.kind) {

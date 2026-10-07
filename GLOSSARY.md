@@ -33,18 +33,21 @@ Where one ticket of a run stands, as the run record holds it - one of a closed s
 _Avoid_: status, phase (for the whole set)
 
 **Requeued**:
-A fact about a ticket's second attempt after a conflict or a red at landing, not a ticket state:
+A fact about a ticket's second attempt after a conflict or a red at landing, or a conflict its
+pipeline found before its review or gates, not a ticket state:
 the ticket is queued again, and the fact stays with it through that attempt.
 _Avoid_: using it as a ticket state
 
 **Attempt**:
 One pass of a ticket through the pipeline - implement, review, gates, repair - in a sandbox of its
-own. A ticket that conflicts or goes red at landing is requeued for a second attempt; a run gives
+own. A ticket that conflicts or goes red at landing, or whose branch its pipeline finds no longer
+merges before review or the gates, is requeued for a second attempt; a run gives
 a ticket two, and one more for each conflict that a landing after its resolve began caused.
 _Avoid_: try, retry, run (one `sandcastle run` is the whole run)
 
 **Ending**:
-How one ticket's part in a run ends - at landing, in its pipeline, crashed, stopped, never begun,
+How one ticket's part in a run ends - at landing, in its pipeline, a conflict found before landing,
+crashed, stopped, never begun,
 or still waiting - exactly one per ticket the run took in. Its ticket state and outcome line are
 recorded from it.
 _Avoid_: last word, result, outcome (the status view's line for it)
