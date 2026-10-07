@@ -381,6 +381,16 @@ export const stepTimes = (elapsed: number, result: unknown): { ms: number; waitM
   const waitMs = typeof w === "number" && w > 0 ? Math.min(Math.round(w), elapsed) : 0;
   return { ms: elapsed - waitMs, ...(waitMs ? { waitMs } : {}) };
 };
+
+/**
+ * A step's times with a wait that came before it began added to `waitMs`: a ticket takes its machine-wide
+ * sandbox slot before its `setup` step starts, so `elapsed` never held that wait, and a ticket that stood two
+ * hours for a slot once had `waitMs: null` on its setup line and nothing anywhere to show the stall.
+ */
+export const withQueued = (times: { ms: number; waitMs?: number }, queued: number | undefined): { ms: number; waitMs?: number } => {
+  const q = typeof queued === "number" && queued > 0 ? Math.round(queued) : 0;
+  return q ? { ms: times.ms, waitMs: (times.waitMs ?? 0) + q } : times;
+};
 /**
  * The phase of a landing gate's timings line (a tree merged in the landing worker's sandbox). Apart from
  * `gates`, a ticket's own passes: landings run one after another on one worker, so they are summed on

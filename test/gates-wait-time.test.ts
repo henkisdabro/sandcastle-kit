@@ -61,7 +61,7 @@ test("typicalTimes reads the run time of a gates line, not the wait", () => {
 test("a step's timings line and this run's usual issue time leave out the gates slot wait", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(src, /times = stepTimes\(Date\.now\(\) - since, result\)/);
-  assert.match(src, /phase, \.\.\.\(times \?\? \{ ms: Date\.now\(\) - since \}\), ok/);
+  assert.match(src, /phase, \.\.\.\(times \?\? withQueued\(\{ ms: Date\.now\(\) - since \}, queuedMs\)\), ok/);
   assert.match(src, /waited\.set\(issue, \(waited\.get\(issue\) \?\? 0\) \+ times\.waitMs\)/);
   assert.match(src, /typicalTimes\(project, \[\.\.\.took\]\.map\(\(\[id, ms\]\) => ms - \(waited\.get\(id\) \?\? 0\)\)\)/);
 });

@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, runGates as gatesIn, noteGreenCommit, verifyBase, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -704,7 +704,35 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
 type Note = { issue: string; kind: "hold"; text: string };
 
 /** One step of a run or a ticket, timed into logs/timings.jsonl and the run record (burndown's `timed`). */
-export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined) => Promise<T>;
+export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined, queuedMs?: number) => Promise<T>;
+
+/** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
+export const SLOT_WAIT_SHOWN = 3 * 60_000;
+
+/** The summary line's time for a ticket: its work, and a wait of `SLOT_WAIT_SHOWN` or more for a machine-wide sandbox slot (not in that work). */
+export const ticketTime = (workMs: number | undefined, slotWaitMs: number | undefined): string => {
+  const work = workMs === undefined ? "" : workMs < 60_000 ? `${Math.round(workMs / 1000)}s` : `${Math.round(workMs / 60_000)}m`;
+  if (slotWaitMs === undefined || slotWaitMs < SLOT_WAIT_SHOWN) return work && ` ${work}`;
+  const m = Math.round(slotWaitMs / 60_000);
+  const long = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ""}`;
+  return `${work && ` ${work},`} waited ${long} for a slot`;
+};
+
+/**
+ * An attempt's start: its sandbox slot, taken again after each pause that ended a wait for one (`take` answers
+ * false; `park` waits out the pause). Returns the time spent waiting for the slot, the time parked left out:
+ * the slot is taken before the ticket's first step, so no step's timer would hold the wait.
+ */
+export const takeStartSlot = async (take: () => Promise<boolean>, park: () => Promise<void>, now: () => number = Date.now): Promise<number> => {
+  let waitMs = 0;
+  for (;;) {
+    const asked = now();
+    const got = await take();
+    waitMs += now() - asked;
+    if (got) return waitMs;
+    await park();
+  }
+};
 
 /** A ticket's sandbox as its pipeline uses it: `run` is every agent pass, `exec` every git command in it. */
 export type PipelineBox = Pick<Sandbox, "worktreePath" | "exec" | "run" | "close">;
@@ -854,7 +882,9 @@ export const createPipeline = (ctx: PipelineContext) => {
   };
 
   // `at.juncture`: the scheduler's, awaited before each agent pass (see `juncture` below). Without it, nothing is held.
-  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean }): Promise<Outcome> => {
+  // `at.slotWaitMs`: how long the attempt waited for its machine-wide sandbox slot, which it took before this
+  // pipeline began: the first `setup` step records it as its `waitMs`.
+  return async (issue: Issue, at?: { juncture(phase: string, park?: Park): Promise<void>; paused?(): boolean; slotWaitMs?: number }): Promise<Outcome> => {
     const branch = `agent/issue-${issue.id}`;
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
@@ -876,6 +906,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     let sandbox = await timed(issue.id, "setup", () =>
       open(branch),
       requeuedAs.get(issue.id),
+      undefined,
+      at?.slotWaitMs,
     ).catch(async (error) => {
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
@@ -1847,13 +1879,15 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
+  // Each issue's waits for a machine-wide sandbox slot at the start of an attempt: outside `took`, named in the summary.
+  const slotWaited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
   // Each issue's step, and when it started, go to run.json's tickets: the
   // status view cannot tell a gate run from the review before it by the logs
   // alone, and a log's age is how long since its last line, not how long the
   // issue has been at this step.
-  const timed = async <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined): Promise<T> => {
+  const timed = async <T>(issue: string, phase: TicketState | Stage, fn: () => Promise<T> | T, note?: string, model?: () => string | undefined, queuedMs?: number): Promise<T> => {
     const since = Date.now();
     active.set(issue, { phase, since });
     if (issue) {
@@ -1871,7 +1905,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     try {
       const result = await fn();
       times = stepTimes(Date.now() - since, result);
+      // Only the wait inside the step is in `took`; the slot wait before it never was (see `withQueued`).
       if (issue && times.waitMs) waited.set(issue, (waited.get(issue) ?? 0) + times.waitMs);
+      times = withQueued(times, queuedMs);
       tokens = runTokens(result);
       gateTimes = gateMs(result);
       peakMib = peakOf(result);
@@ -1891,7 +1927,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       active.delete(issue);
       const m = model?.();
       const line = {
-        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? { ms: Date.now() - since }), ok,
+        ts: new Date().toISOString(), run: runId, project: project.name, issue, phase, ...(times ?? withQueued({ ms: Date.now() - since }, queuedMs)), ok,
         ...(carriedAtStart.has(issue) ? { carried: true } : {}),
         ...(m ? { model: m } : {}),
         ...(tokens ? { tokens } : {}),
@@ -2230,10 +2266,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     });
     const result = await (async () => {
       try {
-        while (!(await take())) await juncture("start", { suspend: async () => {}, resume: async () => {} });
+        // The start's wait for its slot. A slot taken again on a resume is in the time parked, so it is not counted here.
+        const slotWaitMs = await takeStartSlot(take, () => juncture("start", { suspend: async () => {}, resume: async () => {} }));
+        slotWaited.set(issue.id, (slotWaited.get(issue.id) ?? 0) + slotWaitMs);
         // A pause that came while the ticket waited for its slot: it starts nothing, and holds no slot meanwhile.
         await juncture("start", parkable());
-        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused });
+        return await pipeline(issue, { juncture: (phase, park) => juncture(phase, parkable(park)), paused, slotWaitMs });
       } finally {
         give();
       }
@@ -2461,7 +2499,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const o = r.value;
     const state = final[o.issue]?.state === "red" ? "gate red" : (final[o.issue]?.state ?? o.status);
     const repaired = repairWords(o);
-    const time = took.has(o.issue) ? ` ${minutes(took.get(o.issue)!)}` : "";
+    const time = ticketTime(took.get(o.issue), slotWaited.get(o.issue));
     const cost = spent.has(o.issue) ? `  tokens ${tokenLine(spent.get(o.issue)!)}` : "";
     console.log(`  ${ref(o.issue)} ${state.padEnd(10)} commits=${o.commits} (review=${o.reviewCommits})${repaired} ${gateLine(o.gates)}${time}  ${o.branch}${cost}`);
   }
