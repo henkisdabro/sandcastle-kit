@@ -664,11 +664,13 @@ export const usageCommand = async ({
   const claude = recorded.find((u) => u.provider === "claude");
   if (claude && seconds - claude.at < AGENT_READING_FRESH_SECONDS) return { lines: [recordedLine(claude, seconds), ...codex], known: true };
   const stale = claude ? [`The newest reading on record is older than ${AGENT_READING_FRESH_SECONDS / 60} minutes: ${recordedLine(claude, seconds)}`] : [];
-  const unknown = (why: string) => ({ lines: [`Plan usage: unknown (${why}).`, ...stale, ...codex], known: false });
-  if (!credential) return unknown("no reading on record, and the sandboxes have no CLAUDE_CODE_OAUTH_TOKEN to ask the plan's endpoint with");
-  if (!("token" in credential)) return unknown("no reading on record, and the Claude Code login has expired; any use of Claude Code on this machine refreshes it");
+  // A stale reading is printed below the line, so the line must not say there is none.
+  const none = claude ? "no fresh reading on record" : "no reading on record";
+  const unknown = (why: string) => ({ lines: [`Plan usage: unknown (${none}, and ${why}).`, ...stale, ...codex], known: false });
+  if (!credential) return unknown("the sandboxes have no CLAUDE_CODE_OAUTH_TOKEN to ask the plan's endpoint with");
+  if (!("token" in credential)) return unknown("the Claude Code login has expired; any use of Claude Code on this machine refreshes it");
   const windows = await read(credential.token);
-  if (!Array.isArray(windows)) return unknown(`no reading on record, and ${windows.why}`);
+  if (!Array.isArray(windows)) return unknown(windows.why);
   return { lines: [`Plan usage: ${describe(windows)} (read just now, from the usage endpoint). Read for ${usageWhose(credential.source)}.`, ...codex], known: true };
 };
 

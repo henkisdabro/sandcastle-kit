@@ -143,3 +143,12 @@ test("it takes no arguments and has a help entry", () => {
   assert.match(help.stdout, /^  usage {12}the plan's usage, read-only/m, help.stdout);
   assert.equal(p.asked(), 0);
 });
+
+test("a stale reading the endpoint cannot replace is shown as stale, and the line does not say there is none", () => {
+  const p = project({ env: OAUTH, runRecord: { usage: [claude(nowSeconds() - 20 * 60, 33, 44)] }, answer: { status: 429, body: {} } });
+  const r = p.run();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^Plan usage: unknown \(no fresh reading on record, and the usage endpoint answered HTTP 429, rate-limited\)\./m, r.stdout);
+  assert.match(r.stdout, /^The newest reading on record is older than 10 minutes: Plan usage \(Claude\): 5h 33% .* \(read 20m ago, from the run record\)$/m, r.stdout);
+  assert.equal(p.asked(), 1);
+});
