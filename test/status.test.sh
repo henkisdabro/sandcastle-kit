@@ -41,7 +41,7 @@ cat >"$FAKE/docker" <<'EOF'
 case "$1" in
   ps) echo c1 ;;
   inspect) printf '/sandcastle-c1|/tmp/cache|%s/.sandcastle/worktrees/agent-issue-101\n' "$FAKE_DOCKER" ;;
-  stats) echo 'sandcastle-c1|150.00%|275.8MiB / 11.73GiB' ;;
+  stats) echo "${FAKE_STATS:-sandcastle-c1|150.00%|275.8MiB / 11.73GiB}" ;;
 esac
 EOF
 chmod +x "$FAKE/sandcastle" "$FAKE/docker"
@@ -133,12 +133,12 @@ hasnt 'ISSUE'
 has '^│ settings +autonomy (0 1 \[2\] 3 drain|2) · turn 2/2 +│'
 hasnt '\((next|last) run\)'
 row '#101' impl 'Bash|\$ pnpm test'
-row '#102' gates '3x over, usually 1m - 2/3'
+row '#102' gates '3x over, usually 1m'
 row '#103' ready 'gates green'
 row '#104' 'gate red' 'pytest red'
 row '#105' queued 'next to start'
 row '#106' queued '1 ahead of it'
-row '#107' blocked 'waits for #103 \(this run\)'
+row '#107' blocked 'waits for #103'
 row '#108' held '.github/'
 row '#109' conflict 'with #103'
 row '#110' merged
@@ -190,7 +190,7 @@ EOF
 render "105 106"
 has 'this run +wants 4 · share 3'
 row '#105' queued 'next to start'
-row '#106' queued "waits for the run's share"
+row '#106' queued "waits for the run's"
 sed -i.bak 's/"demand": 4, "share": 3,//' "$L/run.json"
 render "105 106"
 has 'sandboxes +[█░ ]*[0-9]+/[0-9]+'
@@ -238,7 +238,7 @@ has 'finishing +#120 review, #121 landing'
 hasnt 'running · '
 hasnt 'ends ~'
 row '#120' review
-row '#122' paused 'before review at a1b2c3d'
+row '#122' paused 'before review at a1b'
 row '#123' queued 'waits for the resume'
 # Nothing in flight: the cell says only that it is paused.
 sed -i.bak 's/"finishing": \["120", "121"\]/"finishing": []/' "$L/run.json"
@@ -358,7 +358,7 @@ cat >"$L/run.json" <<EOF
   "issues": ["113"], "tickets": { "113": { "state": "uncommitted", "since": $now, "note": "work left uncommitted in .sandcastle/worktrees/agent-issue-113" } } }
 EOF
 render "113"
-row '#113' uncommitted 'work left uncommitted in'
+row '#113' uncommitted 'work left uncommit'
 has '! +uncommitted'
 hasnt 'no change'
 git_ branch -q -D agent/issue-113
@@ -460,24 +460,26 @@ row '#109' conflict
 row '#110' merged
 # Its commits are what it landed, not the 0 its merged branch has left over the base.
 has '^│ +#110 +│ . merged +│[^│]+│ +1 +│'
-has 'CPU in cores'
+has 'tokens = in/out, cache included'
 row '#111' withdrawn
-row '#112' held 'handed back'
+row '#112' held 'needs a human: hand'
 row '#113' uncommitted
 row '#114' 'gate red' 'red when merged'
 row '#115' 'gate red' 'red again'
 row '#116' 'gate red' 'test red with'
 row '#117' held 'needs a human'
-row '#118' merged 'partly done, ticket open'
+row '#118' merged 'partly done, ticket'
 has '^│ +#118 +│ . merged +│[^│]+│ +1 +│'
 git_ branch -q -D agent/issue-112 agent/issue-113 agent/issue-114 agent/issue-115 agent/issue-116 agent/issue-117 # only this scenario's
 # An older kit's entry carries no kind: its line is shown, and no state is taken from it.
-row '#103' 'left over' 'earlier run: gate red'
+row '#103' 'left over' 'earlier run: gate'
 has 'next run.*implement +next-model/high|implement +next-model/high.*next run'
 hasnt 'old-model'
-# Below 80 columns the CPU column goes, and the legend line explaining it with it.
+# Below 80 columns the TOKENS column goes, and the legend line explaining it with it.
 COLS_WAS="$COLS"; COLS=60; render ""
 hasnt 'CPU in cores'
+hasnt 'tokens = in/out'
+hasnt 'TOKENS'
 row '#110' merged
 COLS="$COLS_WAS"
 
@@ -488,9 +490,68 @@ cat >"$L/run.json" <<EOF
 { "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
   "issues": ["101"], "tickets": { "101": { "state": "implement", "since": $now, "started": $now } } }
 EOF
+# CPU and memory share one column, from 100 columns.
+COLS_WAS="$COLS"; COLS=120
 FAKE_DOCKER="$REPO" render "101"
 row '#101' impl
-has '^│ +#101 .*│ +1\.5c +│'
+has '^│ +#101 .*│ +1\.5c/276M +│'
+has 'CPU/MEM'
+has 'CPU in cores'
+# A GiB figure under 10 keeps its decimal.
+FAKE_STATS='sandcastle-c1|100.00%|2.1GiB / 11.73GiB' FAKE_DOCKER="$REPO" render "101"
+has '^│ +#101 .*│ +1\.0c/2\.1G +│'
+FAKE_STATS='sandcastle-c1|100.00%|12.4GiB / 31.00GiB' FAKE_DOCKER="$REPO" render "101"
+has '^│ +#101 .*│ +1\.0c/12G +│'
+# A ticket with no container has a grey dash for both halves.
+render "101"
+has '^│ +#101 .*│ +- +│ +- +│'
+COLS="$COLS_WAS"
+
+# ---------------------------------------------------------------------------
+SCENARIO="tokens per ticket"
+# The TOKENS column shows what the run's record holds of each ticket - its finished passes and the one
+# running - as in/out, cache counted in "in"; a ticket with none yet, or a figure that is no tokens, has a dash.
+branch 131 1; log 131 impl 'working'
+branch 132 1; log 132 review 'reading'
+branch 133 1; log 133 impl 'starting'
+branch 134 1; log 134 impl 'odd'
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running", "concurrency": 3,
+  "issues": ["131","132","133","134"], "tickets": {
+    "131": { "state": "implement", "since": $now, "started": $now, "tokens": "3.1M in / 42k out" },
+    "132": { "state": "review", "since": $now, "started": $now, "tokens": "980k in / 1.2M out" },
+    "133": { "state": "implement", "since": $now, "started": $now },
+    "134": { "state": "implement", "since": $now, "started": $now, "tokens": "plenty" } } }
+EOF
+COLS_WAS="$COLS"
+# 100 columns and up: both columns.
+COLS=120; render "131 132 133 134"
+has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +CPU/MEM +│ +TOKENS +│ +ACTIVITY +│'
+has '^│ +#131 .*│ +- +│ +3\.1M/42k +│'
+has '^│ +#132 .*│ +- +│ +980k/1\.2M +│'
+has '^│ +#133 .*│ +- +│ +- +│'
+has '^│ +#134 .*│ +- +│ +- +│'
+# The legend says what the figure counts.
+has 'tokens = in/out, cache included'
+has 'CPU in cores'
+# 80 to 99: TOKENS alone, which is what a person watching the plan's allowance needs.
+for COLS in 80 90 99; do
+  render "131 132 133 134"
+  has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +TOKENS +│ +ACTIVITY +│'
+  hasnt 'CPU/MEM'
+  hasnt 'CPU in cores'
+  has '^│ +#131 .*│ +3\.1M/42k +│'
+  has '^│ +#132 .*│ +980k/1\.2M +│'
+  has 'tokens = in/out, cache included'
+done
+# Below 80: neither, and no legend for them.
+COLS=70; render "131 132 133 134"
+has '^│ +TICKET +│ +STATE +│ +AGE +│ +COMMITS +│ +ACTIVITY +│'
+hasnt 'TOKENS'
+hasnt 'CPU/MEM'
+hasnt 'tokens = in/out'
+row '#131' impl
+COLS="$COLS_WAS"
 
 # ---------------------------------------------------------------------------
 SCENARIO="a state written after the frame's clock"

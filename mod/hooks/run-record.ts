@@ -145,6 +145,7 @@ export type TicketRecord = {
   note?: string | null;
   title?: string;
   commits?: number;
+  /** In and out as `tokenBrief` writes them (`3.1M in / 42k out`): the finished passes plus the one running, rewritten on the usage row's tick. */
   tokens?: string;
   minutes?: number;
   /** Test ids a red gate named. */

@@ -1203,6 +1203,16 @@ export const tokenLine = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRea
 /** The status view's run line has no room for the cached share. */
 export const tokenBrief = (t: Tokens) => `${k(t.input + t.cacheWrite + t.cacheRead)} in / ${k(t.output)} out`;
 
+/**
+ * What the usage watch calls with a ticket's running pass's tokens so far: the ticket's `tokens` in the run record
+ * becomes what its finished passes spent (`spent`, the run's own count of the results' figures) plus that live figure.
+ * A pass that has ended is in `spent` and no longer live (`UsageWatch.settle`), so it is never in both.
+ */
+export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: { tokens: string }): void }, spent: Map<string, Tokens>) =>
+  (issue: string, live: Tokens) => {
+    if (!run.finished) run.ticket(issue, { tokens: tokenBrief(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
+  };
+
 // ---------------------------------------------------------------------------
 // Log archive. A log whose branch is gone, merged, or shipped by an equivalent
 // patch is history, and moving it out keeps the status view down to live

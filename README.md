@@ -627,6 +627,19 @@ Claude Code login or no token at all leaves it without one for now, and with an 
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
+The ticket table's columns are TICKET, STATE, AGE (time in the state, red at twice the usual), COMMITS,
+**CPU/MEM** and **TOKENS**, then ACTIVITY. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
+and memory, the CPU half red when the sandbox takes most of the machine's cores, a greyed `-`
+when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M/42k`, **in** over
+**out** - summed over its finished passes and the one running now. In counts what the closing summary's
+`in` does, cache reads and writes included, so the column adds up to the header's `tokens` row; out is the
+output. The legend line under the table says so (`tokens = in/out, cache included`). The run adds the
+running pass's usage to the ticket's `tokens` in `logs/run.json` as it reads that pass's agent log, on the
+usage row's 15-second tick, so a pass shows its cost while it works and the view only reads the record; a
+Codex cross-review pass has no figure until it ends. A ticket that has not run a pass yet shows a greyed
+`-`. From 100 columns both columns show; from 80 to 99 only TOKENS, the figure a person watching the
+plan's allowance needs; below 80 neither, and ACTIVITY takes the room.
+
 **The plan's usage.** A run does not have to guess how close it is to the plan's allowance. While
 the sandboxes spend a subscription (`CLAUDE_CODE_OAUTH_TOKEN`, no `ANTHROPIC_API_KEY`) and at least
 one of implement, review and repair runs on a Claude model, a **usage** row under the settings shows

@@ -86,6 +86,6 @@ test("an ended run's partly-done landing reads partly done, not queued for the n
 
 test("the run record's unmet says the remainder needs a person's decision, as the summary does", () => {
   const out = frame({ 5: "which of the two formats to keep is the maintainer's decision" }, [5, 6]);
-  assert.match(out, /#5 +│ . merged .*partly done - needs a person's decision/);
+  assert.match(out, /#5 +│ . merged .*partly done - needs a person/);
   assert.doesNotMatch(out, /#5 .*for the next run/);
 });
