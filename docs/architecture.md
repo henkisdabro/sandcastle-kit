@@ -58,9 +58,11 @@ state.
   second attempt does not begin at once: it waits until no green branch that shares a file with it
   is queued to land and no ticket still in its pipeline has touched the files it conflicted on,
   then merges the base and resolves once (each landing ahead of it would have conflicted the resolve
-  again; the wait holds no sandbox slot and is not in the run's demand, and ends at a stop; a pause
+  again; the wait holds no sandbox slot and no pipeline worker - the worker that takes the ticket
+  hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
+  once nothing is ahead of it - and is not in the run's demand, and ends at a stop; a pause
   parks it as at the start; the run says `resolve waits` and `resolve starts`,
-  `test/schedule-resolve-wait.test.ts`). A second conflict is still final, unless it names a ticket
+  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`). A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
 - **Release of dependants.** The tickets held for a blocker that starts in this run: when one lands
