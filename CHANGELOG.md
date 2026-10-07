@@ -20,7 +20,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   a human" line carries the reason instead of leaving it to the closing summary.
 - **The closing summary lists a merged ticket whose reviewer named a known gap in prose**
   ("left alone", "remains", "not fixed") without a `<followup>` or `<unmet>` line, under Needs you
-  with the reviewer's sentence.
+  with the reviewer's sentence. A sentence that says nothing is left ("the remaining tests pass",
+  "covers the gap the ticket describes") is not taken for one.
 
 ### Changed
 
@@ -29,7 +30,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   end.
 - **The start plan names each mergeable file that tickets share once, with its tickets**, instead
   of a line for every pair. README.md and CHANGELOG.md are one count, and the full pair list goes
-  to `.sandcastle/logs/file-shares.log`.
+  to `.sandcastle/logs/file-shares.log`, under a line per turn naming its time and the run's pid.
 - **The slot kept for landing is kept only while the run's share of the machine pool is 2 or
   more**, and the start line says so. Below that, tickets may use it, and a landing still goes
   first when a slot frees.

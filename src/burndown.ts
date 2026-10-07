@@ -359,9 +359,11 @@ const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
 const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaining|gaps?|not\s+(?:fixed|addressed|handled)|unfixed|unaddressed|still\s+(?:fails?|broken|wrong))\b/i;
 // What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
 // issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
-// every review prompt asks for, which would otherwise list nearly every merged ticket.
+// every review prompt asks for, which would otherwise list nearly every merged ticket. Also "the remaining tests
+// pass", "every remaining criterion is met" and a test that "covers the gap the ticket describes": a first run
+// flagged each of these as a gap.
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b/i;
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
 // fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
 const sentencesOf = (text: string): string[] => {
@@ -1736,12 +1738,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     },
   });
   const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
+  let sharesHeaded = false;
   const holds = createHoldRecord({
     waiting,
     ref,
     say: (line) => console.log(line),
     log: (line) => {
       mkdirSync(dirname(sharesLog), { recursive: true });
+      // The log is appended to across runs: without a header no pair could be told from another turn's.
+      if (!sharesHeaded) appendFileSync(sharesLog, `--- ${new Date().toISOString()}, run pid ${process.pid} ---\n`);
+      sharesHeaded = true;
       appendFileSync(sharesLog, `${line}\n`);
     },
   });
