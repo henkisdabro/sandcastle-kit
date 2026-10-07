@@ -101,7 +101,7 @@ export const queueLabel = (root: string, label: string): { state: "ok" | "missin
   return { state: found ? "ok" : "missing", fix };
 };
 
-/** The triage roles the queue action applies by hand (the kit creates the other two's labels itself), and what each label means. */
+/** The triage roles the queue action applies by hand (the kit creates `needs-triage`'s label itself, and the queue label has its own check), and what each label means. */
 const ROLE_MEANINGS: Record<string, string> = {
   "needs-info": "Waiting on reporter for more information",
   "ready-for-human": "Requires human implementation",

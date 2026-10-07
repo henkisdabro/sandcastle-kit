@@ -70,8 +70,9 @@ comments, and the gates can prove it.
    `docs/agents/triage-labels.md` maps it to), check it exists (`gh label list --search <name>`)
    and create a missing one with `gh label create`, using the mapping's meaning for that role as its
    description - `gh issue edit --add-label` fails on a label GitHub does not have. The files
-   tracker has no labels to create: a status is just text. A hard ticket can carry `model:`/`effort:` labels (GitHub) for a stronger
-   implementer; offer it, and add it only on a yes.
+   tracker has no labels to create: a status is just text. A hard ticket can carry
+   `model:`/`effort:` labels (GitHub) for a stronger implementer; offer it, and add it only on a
+   yes.
 5. **Report**: a table of what was labelled, what was decided, and what was left and why, built
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
