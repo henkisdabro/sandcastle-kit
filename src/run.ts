@@ -140,10 +140,12 @@ let released = false;
 /**
  * The start line that tells the operator the base is the run's. The guard cannot tell a person's
  * commit on the base from a sandbox's, so one made mid-run stops the run (pipelines in flight
- * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run.
+ * finish, nothing more lands) and the tokens spent on them buy nothing until a re-run. Worktrees share
+ * `.git/config`, which the guard fingerprints whole, so the routine ways of giving a branch an upstream
+ * there stop it too: a person told to use another worktree did, and stopped a drain run (#451).
  */
 export const baseIsTheRunsLine = (base: string) =>
-  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run.`;
+  `Do not commit, pull or merge on ${base} in this checkout until the run ends (use another worktree): the guard cannot tell your commit from a sandbox's, and stops the run. Worktrees share .git/config, so a branch given an upstream there (\`git worktree add\` from a remote branch, \`git push -u\`, \`gh pr create\`) stops it too: use --no-track, or \`git push origin HEAD:<branch>\`.`;
 
 export const keepAwake = async (): Promise<string> => {
   if ((process.env.KEEP_AWAKE ?? (machineSettings().keepAwake === false ? "0" : "1")) === "0") {
@@ -741,9 +743,11 @@ export const typicalTimes = (project: Project, extra: number[] = []) => {
 export const firstSlotWait = (project: Project, record: RunRecord, nowMs = Date.now()): number | undefined => {
   const typical = typicalTimes(project).issue;
   if (typical === undefined) return undefined;
-  const left = Object.values(record.tickets ?? {}).flatMap((t) =>
-    t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof t.started === "number" ? [Math.max(typical - (nowMs / 1000 - t.started), 60)] : [],
-  );
+  // From the current attempt's start: a requeued second attempt is a pipeline of its own.
+  const left = Object.values(record.tickets ?? {}).flatMap((t) => {
+    const from = t.attemptStarted ?? t.started;
+    return t.state && GROUPS[t.state] === "working" && t.state !== "landing" && typeof from === "number" ? [Math.max(typical - (nowMs / 1000 - from), 60)] : [];
+  });
   return left.length ? Math.min(...left) : undefined;
 };
 

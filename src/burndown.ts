@@ -359,9 +359,11 @@ const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
 const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaining|gaps?|not\s+(?:fixed|addressed|handled)|unfixed|unaddressed|still\s+(?:fails?|broken|wrong))\b/i;
 // What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
 // issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
-// every review prompt asks for, which would otherwise list nearly every merged ticket.
+// every review prompt asks for, which would otherwise list nearly every merged ticket. Also "the remaining tests
+// pass", "every remaining criterion is met" and a test that "covers the gap the ticket describes": a first run
+// flagged each of these as a gap.
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b/i;
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
 // fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
 const sentencesOf = (text: string): string[] => {
@@ -728,10 +730,15 @@ export type Timed = <T>(issue: string, phase: TicketState | Stage, fn: () => Pro
 /**
  * The `started` a step's run.json write carries: at the ticket's first `setup` only, kept through a
  * requeued second attempt or a resume, as the status view's TIME for a finished ticket is
- * `since - started`, its whole wall time, not its last attempt's.
+ * `since - started`, its whole wall time, not its last attempt's. `attemptStarted` is every `setup`'s:
+ * the ETA counts a working ticket's time left from it, and from the first start a second attempt after a
+ * long first one read as overdue.
  */
-export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number } =>
-  phase === "setup" && typeof prior?.started !== "number" ? { started: Math.floor(sinceMs / 1000) } : {};
+export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number; attemptStarted?: number } => {
+  if (phase !== "setup") return {};
+  const at = Math.floor(sinceMs / 1000);
+  return typeof prior?.started === "number" ? { attemptStarted: at } : { started: at, attemptStarted: at };
+};
 
 /** A wait the per-ticket summary line names: shorter ones are every busy run's ordinary queueing. */
 export const SLOT_WAIT_SHOWN = 3 * 60_000;
@@ -1736,12 +1743,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     },
   });
   const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
+  let sharesHeaded = false;
   const holds = createHoldRecord({
     waiting,
     ref,
     say: (line) => console.log(line),
     log: (line) => {
       mkdirSync(dirname(sharesLog), { recursive: true });
+      // The log is appended to across runs: without a header no pair could be told from another turn's.
+      if (!sharesHeaded) appendFileSync(sharesLog, `--- ${new Date().toISOString()}, run pid ${process.pid} ---\n`);
+      sharesHeaded = true;
       appendFileSync(sharesLog, `${line}\n`);
     },
   });
@@ -1751,8 +1762,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
   // `order` in run.json: the place in the start list; a released or requeued ticket is given an earlier one when it is (`createHoldRecord`).
   const order = new Map(candidates.map((t, at) => [t.id, at] as const));
-  const sayWaits = () => {
-    for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
+  // `inRun`: tickets whose plan line already names their blockers; a line of their own here said it twice.
+  const sayWaits = (inRun = new Set<string>()) => {
+    for (const w of waiting) if (!inRun.has(w.issue)) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   };
   if (issues.length === 0) {
     sayWaits();
@@ -1767,21 +1779,24 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
   const capped = workers < Math.min(CONCURRENCY, candidates.length);
+  // "up to": another project's live run can cut this run's share below it, which the split line under the
+  // ticket list and the estimate give; a bare "2 at a time" above "this run's share is 1" read as two stories.
   console.log(
-    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
+    `${candidates.length} ticket(s)${dependants.length ? ` (${dependants.length} start as their blockers land)` : ""}${parked.length ? ` (${parked.length} wait for a file git cannot merge)` : ""}, up to ${workers} at a time${DRY_RUN ? " [DRY RUN]" : ""} - ${MODELS_LINE}:` +
       (capped ? ` (CONCURRENCY=${CONCURRENCY}, but ${landingSlotNote(limit("sandboxes"))})` : ""),
   );
   for (const i of candidates) {
     const o = overrides.get(i.id) ?? {};
     const own = implementNote(o);
     const later = parked.find((p) => p.ticket.id === i.id);
-    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
+    const blockers = waiting.find((w) => w.issue === i.id)?.on.join(", ") || "a blocker";
+    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? ` - waits for ${blockers} in this run` : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   // A Touches line naming a path the kit always holds: the work is still wanted and runs, only its merge is a
   // person's. Said now, since the reason was otherwise news only at the end of the run.
   for (const line of protectedPlanLines(project, candidates, ref)) console.log(`  ${line}`);
   // After the header, with the ticket list and the shared-file lines: they are indented under it.
-  sayWaits();
+  sayWaits(new Set(dependants.map((d) => d.id)));
   holds.start(schedule.start);
   // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
   const spend = projectApiKeySpend(project);

@@ -24,7 +24,7 @@ case "$1 $2" in
   "pane get") printf '%s\\n' '{"result":{"pane":{"tab_id":"t1","workspace_id":"w1"}}}' ;;
   "tab get") printf '{"result":{"tab":{"pane_count":1,"label":"%s"}}}\\n' "$FAKE_LABEL" ;;
   "pane layout") printf '%s\\n' '{"result":{"layout":{"panes":[{"pane_id":"p1","rect":{"width":200}}]}}}' ;;
-  "pane split") printf '%s\\n' '{"result":{"pane":{"pane_id":"p2"}}}' ;;
+  "pane split") printf '{"result":{"pane":{"pane_id":"%s"}}}\\n' "\${FAKE_SPLIT:-p2}" ;;
   *) printf '%s\\n' '{}' ;;
 esac
 `;
@@ -150,6 +150,30 @@ test("a sandbox pane closed by hand is forgotten, and the view keeps reporting",
   // The view is still on: the workspace goes on hearing about the run.
   run.view.landed("12", true, "merged");
   assert.ok(run.calls().filter((c) => c.startsWith("workspace report-metadata")).length >= 2, run.calls().join("\n"));
+});
+
+test("a free sandbox pane closed by hand before any report is forgotten at the next claim, which opens another", () => {
+  const tickets: Record<string, TicketRecord> = { "12": { state: "merged" }, "13": { state: "implement" } };
+  // The status pane is the fake's first split, p2; the sandbox panes get ids of their own.
+  const run = adopt("3", () => tickets);
+  process.env.FAKE_SPLIT = "p5";
+  run.view.claim("12", "Add CSV export");
+  // Finished, its pane kept for the next ticket; then closed by hand, which no report has found yet.
+  run.view.finish("12", "merged", false);
+  process.env.FAKE_GONE = "p5";
+  process.env.FAKE_SPLIT = "p6";
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => void said.push(a.join(" "));
+  try {
+    run.view.claim("13", "Fix date parsing");
+  } finally {
+    console.log = log;
+    delete process.env.FAKE_GONE;
+    delete process.env.FAKE_SPLIT;
+  }
+  assert.deepEqual(said, [], "no 'view off' warning for one closed pane");
+  assert.ok(run.calls().some((c) => c.startsWith("pane rename p6 #13")), run.calls().join("\n"));
 });
 
 test("askingInPane: the run's pane reads as blocked while it waits for an answer, then is released", async () => {

@@ -107,7 +107,7 @@ test("a run killed with SIGTERM ends its command's descendants too, and removes 
 
 test("the test scripts and run-shards.sh run through in-temp.sh", () => {
   const scripts = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")).scripts as Record<string, string>;
-  for (const name of ["test", "test:shard", "test:weights"]) assert.match(scripts[name]!, /^bash test\/in-temp\.sh /, name);
+  for (const name of ["test", "test:shard", "test:file", "test:weights"]) assert.match(scripts[name]!, /^bash test\/in-temp\.sh /, name);
   assert.match(readFileSync(join(KIT, "test/run-shards.sh"), "utf8"), /exec bash .*in-temp\.sh/);
 });
 

@@ -26,7 +26,10 @@ This continues SKILL.md: run its "Before every action" first.
      from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
      nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
      same. Check `sandcastle status` (is a run live?) before any git write to the base in that
-     checkout, yours included.
+     checkout, yours included. Another worktree shares `.git/config`, which the guard watches whole:
+     a branch given an upstream there (`git worktree add ... origin/<x>`, `git push -u`,
+     `git branch -u`, `gh pr create` from a local branch) stops the run too. Use `--no-track`, or
+     push with `git push origin HEAD:<branch>`.
    - **What it spends.** A red gate gets a repair pass (`repair.attempts`, default 1), and a
      repair that turns it green a second review - more allowance, fewer red branches. `sandcastle usage`
      prints the plan's usage now, read-only (never a script of your own against `src/usage.ts`). Offer

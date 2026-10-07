@@ -633,7 +633,7 @@ Claude Code login or no token at all leaves it without one for now, and with an 
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 
-The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again; `-` while queued or blocked), COMMITS,
+The ticket table's columns are TICKET, STATE, TIME (a working ticket's time in its state, red at twice the usual; a finished ticket's whole length, start to end, kept from its first start if the run put it back and ran it again, and after the run from its record; `-` while queued or blocked), COMMITS,
 **CPU/MEM** and **TOKENS**, then ACTIVITY. CPU/MEM is the ticket's sandbox now - `1.0c/2.1G`, CPU in cores
 and memory, the CPU half red when the sandbox takes most of the machine's cores, a greyed `-`
 when the ticket has no container. TOKENS is what the ticket has cost so far - `3.1M/42k`, **in** over
@@ -921,7 +921,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/agent-issue-<id>-<phase>-<id>.log` and `.jsonl` | Each agent pass's readable log (a failed tool result shows as one `! error: ...` or `! exit N: ...` line; its closing `Tokens processed (all turns)` is every turn's input and cache tokens added up, not a context size), and its raw stream beside it; `-gates-` is the orchestrator's gate output. Moved to `logs/archive/` by the next run or `sandcastle clean` once the branch is merged. The archive keeps each file for 14 days, and a raw `.jsonl` stream for only 2 (the readable `.log` stays); the same moves delete older ones, by file modification time |
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
-| `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release; the screen names each file once |
+| `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release under a `--- <time>, run pid <pid> ---` line per turn; the screen names each file once |
 | `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
@@ -1069,7 +1069,7 @@ holds the status view alone):
 ┌ you ───────────────────────────────────┐   tab "sandcastle my-app"
 │ your agent / shell                     │   ┌ sandcastle my-app ───────┬ #12 Add rate limiter ──┐
 │ $ sandcastle run                       │   │ #12 ● review   3m  2 ... │ Bash(pnpm test)        │
-│ 2 ticket(s), 2 at a time ...            │   │ #15 ● impl     1m  0 ... │                        │
+│ 2 ticket(s), up to 2 at a time ...     │   │ #15 ● impl     1m  0 ... │                        │
 │ Gates on main: lint=pass test=pass     │   │ #18 ○ queued   not in .. ├ #15 Fix date parsing ──┤
 │ [impl-12] Started ...                  │   │                          │ Edit(src/date.ts)      │
 └────────────────────────────────────────┘   └──────────────────────────┴────────────────────────┘
@@ -1425,7 +1425,9 @@ and the kit narrows what can cross it:
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
-  says so).
+  says so). Worktrees share `.git/config`, so a branch given an upstream in one (`git worktree add`
+  from a remote branch, `git push -u`, `git branch -u`, `gh pr create` from a local branch) stops
+  the run too: use `--no-track`, or `git push origin HEAD:<branch>`.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
   `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare

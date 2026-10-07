@@ -36,6 +36,8 @@ test("a requeued ticket's second setup keeps the first start", () => {
   ]);
   assert.equal(t?.started, T0 / 1000);
   assert.equal(t?.state, "resolve");
+  // The ETA's start is the second attempt's: from the first, a long first attempt read the second as overdue.
+  assert.equal(t?.attemptStarted, (T0 + 1_200_000) / 1000);
 });
 
 test("a step other than setup never writes a start", () => {

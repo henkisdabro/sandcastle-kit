@@ -150,7 +150,14 @@ test("a review that says nothing is left, or only mentions a tag, flags no gap",
     // The platform sentence the review prompt asks every reviewer for.
     "macOS remains unaffected: the change is TypeScript only. Linux behaviour remains untouched.",
     "Reviewed; all good.",
+    // Each flagged as a gap by a first run.
+    "The remaining tests pass.",
+    "Every remaining criterion is met.",
+    "The test covers the gap the ticket describes.",
   ]) assert.equal(await gapOfReview(`${clean}\n`), undefined, clean);
+  // The same words that do name a gap still do.
+  assert.equal(await gapOfReview("The remaining issue is that the link step reads the old name.\n"), "The remaining issue is that the link step reads the old name.");
+  assert.equal(await gapOfReview("A gap is left: the README still names AGE.\n"), "A gap is left: the README still names AGE.");
   // Words inside a fence or a tag are no prose of the reviewer's.
   assert.equal(await gapOfReview("Fine.\n\n```\na gap remains in this quoted log\n```\n<ungated>a gap remains: check the page by hand</ungated>\n"), undefined);
 });

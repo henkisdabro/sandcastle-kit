@@ -15,6 +15,15 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   differences you considered and how the test covers them.
 - **Prove it with a test.** A fix gets a test in `test/` that fails without it, using a temp git
   repo, a fake `gh` on `PATH` and made-up fixtures - never Docker, a model call or the network.
+- **Run one test file with `pnpm test:file test/<name>.test.ts`**, not a bare `node --test`: it
+  loads the preloads `pnpm test` does (a test that prints outside `quietly` passes by hand and fails
+  the suite otherwise), limits each test to two minutes and exits when the file is done, so a red
+  test that leaves a poll or a pool wait alive cannot hang the pass. A test that takes pool slots
+  goes through `test/pool-sim.ts`, whose probe it needs.
+- **`burndown()` needs Docker, so no test drives it.** Put logic you add there in an exported helper
+  a test calls, and hold the call site with a source-match test (as `test/ticket-first-start.test.ts`
+  does). Before you edit a line of `burndown()` or `timed`, `grep -rn` `test/` for a phrase of it:
+  some tests pin its text, and fail only in the full suite.
 - **A test that starts the kit as a child process** uses `runKit`, `runNode`, `startKit` or
   `startNode` from `test/cli-spawn.ts` (`process.execPath` with the launcher's V8 flags and a time
   limit; `test/cli-spawn.test.ts` refuses a test file that names the launcher's preload), never

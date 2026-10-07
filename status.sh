@@ -490,10 +490,10 @@ run_alive() {
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
 US=$'\x1f'
-WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""
+WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""; ENDED_TICKETS=""
 TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; RUN_PAUSED=0
 load_run() {
-  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""
+  WAITING=""; RUN_LIVE=0; RUN_ISSUES=""; RUN_STARTED=""; OUTCOMES=""; ACTIVE=""; UNMETS=""; LAST_TOKENS=""; ENDED_TICKETS=""
   TICKETS=""; TICKET_IDS=""; RECORD=0; TYPICAL=""; RUN_ETA=""; FREE=0; POOL_DEMAND=""; POOL_SHARE=""; POOL_CAP=""; RUN_PAUSED=0
   local f=logs/run.json pid="" paused="" pool="" issues="" waiting="" active="" tickets="" free="" typical="" eta="" last_tokens=""
   # What each branch's last run decided: "slug|run|kind|text" lines. A row
@@ -541,14 +541,15 @@ load_run() {
       (.typical.issue // null) as $t
       | if $t == null or (.stage // "") != "running" then empty else
         ([(.tickets // {})[] | select(.state == "queued")] | length) as $q
-        | ([(.tickets // {})[] | select(.started != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))) | ([$t - ($now - .started), 60] | max)] | add // 0) as $a
+        | ([(.tickets // {})[] | (.attemptStarted // .started) as $s | select($s != null and ((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))) | ([$t - ($now - $s), 60] | max)] | add // 0) as $a
         | ([(.tickets // {})[] | select((.state // "") | IN("queued", "setup", "implement", "resolve", "review", "cross-review", "gates", "repair", "ready", "landing"))] | length) as $n
         | ($now + ($q * $t + $a) / ([(.concurrency // 1), 1] | max)) as $p
         | ($now + $n * (.typical["landing gates"] // 0)) as $l
         | ([$p, $l] | max) | floor end))"
   ' "$f" 2>/dev/null)"
-  # An ended run's rows are inferred from git and the logs, but its per-ticket tokens are still the record's.
-  LAST_TOKENS="$last_tokens"
+  # An ended run's rows are inferred from git and the logs, but its per-ticket tokens are still the record's,
+  # and so are its finished tickets' starts and ends (TIME).
+  LAST_TOKENS="$last_tokens"; ENDED_TICKETS="$tickets"
   [ -n "$pid" ] && run_alive "$pid" || return 0
   RUN_LIVE=1
   [ "$paused" = 1 ] && RUN_PAUSED=1
@@ -579,10 +580,19 @@ ago() {
   elif [ "$1" -lt 3600 ]; then AGO="$(( $1 / 60 ))m"
   else AGO="$(( $1 / 3600 ))h"; fi
 }
-# A run's length: "48m", "1h12m".
-dur() {
-  if [ "$1" -lt 3600 ]; then printf '%sm' "$(( $1 / 60 ))"
-  else printf '%sh%02dm' "$(( $1 / 3600 ))" "$(( $1 % 3600 / 60 ))"; fi
+# A run's length: "48m", "1h12m". Into DUR, as ago into AGO: every finished row has one.
+dur_v() {
+  if [ "$1" -lt 3600 ]; then DUR="$(( $1 / 60 ))m"
+  else printf -v DUR '%sh%02dm' "$(( $1 / 3600 ))" "$(( $1 % 3600 / 60 ))"; fi
+}
+dur() { dur_v "$1"; printf '%s' "$DUR"; }
+# A finished ticket's TIME, into FIN: its whole length, first start to end (`since` is when it entered its
+# end state), as "how long ago" reads the same for a quick ticket and a slow one. False for a working
+# state, or a record with no start. $1 state, $2 since, $3 started.
+finished_time() {
+  case "$1" in merged|held|red|conflict|nochange|uncommitted|crashed|"not landed"|withdrawn|stopped|skipped) ;; *) return 1;; esac
+  [[ "$2" =~ ^[0-9]+$ && "$3" =~ ^[0-9]+$ ]] && [ "$2" -ge "$3" ] || return 1
+  if [ $(( $2 - $3 )) -lt 60 ]; then ago $(( $2 - $3 )); FIN="$AGO"; else dur_v $(( $2 - $3 )); FIN="$DUR"; fi
 }
 # A merged issue that is open and labelled again was re-queued after its
 # merge - or it only looks that way: landing merges before it closes the
@@ -1129,16 +1139,8 @@ render() {
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
     ago $(( now_s - since )); age="$AGO"; age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
-    # A finished row's TIME is its whole length, first start to end (`since` is when it entered its end
-    # state): "how long ago" would read the same for a quick ticket and a slow one. A row with no
-    # start in the record keeps time in state.
-    case "$tstate" in
-      merged|held|red|conflict|nochange|uncommitted|crashed|"not landed"|withdrawn|stopped|skipped)
-        if [[ "$started" =~ ^[0-9]+$ ]] && [ "$since" -ge "$started" ]; then
-          if [ $(( since - started )) -lt 60 ]; then ago $(( since - started )); age="$AGO"
-          else printf -v age '%s' "$(dur $(( since - started )))"; fi
-        fi;;
-    esac
+    # A finished row's TIME is its whole length; a row with no start in the record keeps time in state.
+    finished_time "$tstate" "$since" "$started" && age="$FIN"
     commits=$(git rev-list --count "${BASE}..agent/issue-$n" 2>/dev/null || echo -)
     stat_for "$n"; cpu_cols; tokens_cell "$tokens"
     case "$tstate" in
@@ -1235,12 +1237,15 @@ render() {
 
     mtime=$(mtime_of "$log")
     # TIME is how long a working row has been at its phase, from an older
-    # run's record; any other row's is how long since its log last changed.
+    # run's record; a ticket the ended run's record holds finished is its whole length, as the live
+    # view showed it; any other row's is how long since its log last changed.
     act=""; [ "$RUN_LIVE" = 1 ] && act=$(active_of "$n")
     if [ -n "$act" ]; then
       phase="${act%%|*}"; since="${act#*|}"
       case "$phase" in implement) phase="impl";; cross-review) phase="codex";; esac
       ago $(( now_s - since )); age="$AGO"
+    elif [ "$RUN_LIVE" != 1 ] && fields_of "$n" "$ENDED_TICKETS" "$US" && finished_time "${F[1]:-}" "${F[2]:-}" "${F[3]:-}"; then
+      age="$FIN"
     else
       ago $(( now_s - mtime )); age="$AGO"
     fi
@@ -1415,9 +1420,14 @@ render() {
   NOTE=()
   [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
   # The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
-  [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open): in merged here, in needs you in the closing summary${off}"
+  # Two notes for the same reason as the time note below: one line of 98 characters was cut at 80 columns.
+  [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open)${off}" \
+    && NOTE[${#NOTE[@]}]="${gry}the closing summary counts it under needs you${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
-  NOTE[${#NOTE[@]}]="${gry}time = in state while working, start to end once finished (red: twice the usual)${off}"
+  # Two short notes, not one: wrap_items cuts a note wider than the frame, and one of 81 characters
+  # lost what red means at 80 columns.
+  NOTE[${#NOTE[@]}]="${gry}time = in state; once finished, start to end${off}"
+  NOTE[${#NOTE[@]}]="${gry}red time = past twice the usual${off}"
   # Below 80 columns there is no TOKENS column to explain, and from 100 a CPU/MEM column too.
   [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}tokens = in/out, cache included${off}"
   [ "$wide" = 2 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"

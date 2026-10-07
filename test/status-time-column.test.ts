@@ -72,7 +72,7 @@ writeFileSync(
   }),
 );
 
-const raw = (() => {
+const render = (cols: string) => {
   const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], {
     encoding: "utf8",
     env: {
@@ -84,21 +84,30 @@ const raw = (() => {
       SANDCASTLE_BIN: join(FAKE, "sandcastle"),
       SANDCASTLE_BASE: "main",
       SANDCASTLE_NAME: "fixture",
-      TERM_COLS: "120",
+      TERM_COLS: cols,
       TERM_ROWS: "200",
       XDG_CACHE_HOME: join(TMP, "cache"),
     },
   });
-  return r.stdout + r.stderr;
-})();
-const frame = raw.replace(/\u001b\[[0-9;]*m/g, "");
+  return (r.stdout + r.stderr).replace(/\u001b\[[0-9;]*m/g, "");
+};
+const frame = render("120");
 const lineOf = (text: string, id: string) => text.split("\n").find((l) => new RegExp(`^.{0,40}#${id} `).test(l.replace(/\u001b\[[0-9;]*m/g, ""))) ?? "";
 const cells = (id: string) => lineOf(frame, id).split("│").map((c) => c.trim());
 
 test("the table's third column is headed TIME, and the legend says what it counts", () => {
   assert.match(frame, /^│ +TICKET +│ +STATE +│ +TIME +│ +COMMITS +│/m);
   assert.doesNotMatch(frame, /\bAGE\b/);
-  assert.match(frame, /time = in state while working, start to end once finished \(red: twice the usual\)/);
+  assert.match(frame, /time = in state; once finished, start to end/);
+  assert.match(frame, /red time = past twice the usual/);
+});
+
+// A note wider than the frame is cut, and an 81-character one lost what red means in a standard terminal.
+test("at 80 columns the legend's notes are whole", () => {
+  const narrow = render("80");
+  assert.match(narrow, /time = in state; once finished, start to end/);
+  assert.match(narrow, /red time = past twice the usual/);
+  assert.doesNotMatch(narrow.split("\n").slice(-8).join("\n"), /…/);
 });
 
 test("a merged ticket shows its length from start to end, whatever the clock", () => {

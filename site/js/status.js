@@ -331,10 +331,11 @@ function frame(t, cols, changed = new Set()) {
   const wide = cols >= 100 ? 2 : cols >= 80 ? 1 : cols >= 62 ? 0 : -1;
   // As status.sh: CPU/MEM and TOKENS from 100 columns, TOKENS alone from 80, neither below.
   const extra = wide === 2 ? ['cpu', 'tokens'] : wide === 1 ? ['tokens'] : [];
-  let min = [8, 14, 6, 9, ...extra.map((c) => (c === 'cpu' ? 11 : 10))];
+  // TIME's 7, as status.sh's, fits its heading and "1h12m".
+  let min = [8, 14, 7, 9, ...extra.map((c) => (c === 'cpu' ? 11 : 10))];
   let pct = [6, 9, 5, 6, ...extra.map(() => 7)];
   if (wide < 0) {
-    min = [8, 11, 5];
+    min = [8, 11, 7];
     pct = [6, 9, 5];
   }
   const avail = win - min.length - 2;
@@ -405,7 +406,7 @@ function frame(t, cols, changed = new Set()) {
   for (let r = 0; r < 8; r += per) put(cellsLine(ow, legend.slice(r, r + per), Array(per).fill('c')));
   put(junction(win, '├', '┤', '─', lbars, []));
   // The notes joined by " · " into as few lines as they fit, as wrap_items does.
-  const notes = ['ready = gates green, waits for the landing worker', 'time = in state while working, start to end once finished (red: twice the usual)'];
+  const notes = ['ready = gates green, waits for the landing worker', 'time = in state; once finished, start to end', 'red time = past twice the usual'];
   if (wide >= 1) notes.push('tokens = in/out, cache included');
   if (wide >= 2) notes.push('CPU in cores of 8');
   const noteLines = [];

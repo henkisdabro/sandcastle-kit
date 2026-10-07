@@ -44,6 +44,12 @@ test("a child's stderr that execFileSync passes on fails the file", () => {
   assert.match(r.stdout + r.stderr, /stderr: "child said"/);
 });
 
+test("a line printed by an exit handler the test file added fails it too", () => {
+  const r = run("exit", 'process.on("exit", () => console.log("said at exit"));');
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /"said at exit"/);
+});
+
 test("a test file that prints inside quietly passes, with the line in hand", () => {
   const r = run("quiet", 'const { lines } = await quietly(() => console.log("held"));\nif (lines.join() !== "held") throw new Error("not captured");');
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -57,7 +63,7 @@ test("a test file that prints nothing passes", () => {
 
 test("the test scripts in package.json preload the guard", () => {
   const { scripts } = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")) as { scripts: Record<string, string> };
-  for (const name of ["test", "test:shard", "test:weights"]) assert.match(scripts[name]!, /--import \.\/test\/no-stray\.ts --test /, name);
+  for (const name of ["test", "test:shard", "test:file", "test:weights"]) assert.match(scripts[name]!, /--import \.\/test\/no-stray\.ts --test /, name);
 });
 
 test("test/full-check.sh's shards preload the guard as pnpm test does", () => {

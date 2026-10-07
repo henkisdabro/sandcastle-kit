@@ -497,7 +497,8 @@ row '#101' impl
 has '^│ +#101 .*│ +1\.5c/276M +│'
 has 'CPU/MEM'
 has 'CPU in cores'
-has 'time = in state while working, start to end once finished \(red: twice the usual\)'
+has 'time = in state; once finished, start to end'
+has 'red time = past twice the usual'
 # A GiB figure under 10 keeps its decimal.
 FAKE_STATS='sandcastle-c1|100.00%|2.1GiB / 11.73GiB' FAKE_DOCKER="$REPO" render "101"
 has '^│ +#101 .*│ +1\.0c/2\.1G +│'
