@@ -507,16 +507,19 @@ const hooksCovered = (root: string, key: string) => {
 // `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
-// `proof` is the commit that result is of and whose gates proved it (a ticket's `#427`, "the base check", "verify"): the
-// end-of-run verify says it when it skips for this record, and a record without one is an older kit's.
-export type GreenProof = { commit: string; by: string };
+// `proof` is the commit that result is of, whose gates proved it (a ticket's `#427`, "the base check", "verify") and
+// where they ran (`kind`): the end-of-run verify says it when it skips for this record, and a record without one is an
+// older kit's. A `ticket-sandbox` proof is a fast-forward's: the ticket's own gates, in the sandbox its agent worked in
+// (its git identity, its caches), which a clean gate-only sandbox may not reproduce - so the verify never trusts it.
+export type ProofKind = "ticket-sandbox" | "landing-sandbox" | "base" | "verify";
+export type GreenProof = { commit: string; by: string; kind: ProofKind };
 export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false, proof?: GreenProof) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
   // The key names the commit, so the hook files: a gates-only result at the key a base check recorded in full says nothing less.
   const covered = hooks || hooksCovered(root, key);
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, ...(proof ? { commit: proof.commit, by: proof.by } : {}) }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, ...(proof ? { commit: proof.commit, by: proof.by, kind: proof.kind } : {}) }) + "\n");
 };
 
 const recordedRun = (root: string): string | undefined => {
@@ -569,7 +572,7 @@ const hookInputsChanged = (project: Project, planFile: string, from: string, to:
  * the record before it did, at a commit it names, on this image and config, and nothing the hook checks read changed
  * since (`hookInputsChanged`). Anything else - no earlier record, an older kit's without a commit - re-checks.
  */
-export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing") => {
+export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by = "an earlier landing", kind: ProofKind = "landing-sandbox") => {
   let hooks = false;
   try {
     const prev = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));
@@ -581,21 +584,26 @@ export const noteGreenCommit = (project: Project, image: string, planFile: strin
   } catch {
     // no record, or an unreadable one: the hooks are checked
   }
-  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by });
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by, kind });
 };
 
 /**
- * Whether the green-base record already proves the base's tip on this image and plan: the commit, and whose gates
- * ran on it (`by`; a record from an older kit names no one). The end-of-run verify is proof that the merged base is
- * green, so it is skipped when this answers, and only then: a missing record, or one at another commit (a landing's
- * failed note is swallowed), leaves the verify to run. The key is the record's own test, as the base check's is.
+ * Whether the green-base record already proves the base's tip on this image and plan: the commit, whose gates ran on
+ * it (`by`) and where (`kind`). The end-of-run verify is proof that the merged base is green in a clean gate-only
+ * sandbox, so it is skipped when this answers, and only for a proof from one: a landing merged in a landing sandbox,
+ * the base check or an earlier verify. A fast-forward's proof (`ticket-sandbox`: the ticket's own gates, run in the
+ * sandbox its agent worked in) and a record from an older kit (no `kind`) leave the verify to run, as does a missing
+ * record or one at another commit (a landing's failed note is swallowed). The next turn's base check reads the record
+ * with `baseCacheHit`, whatever its kind. The key is the record's own test, as the base check's is.
  */
-export const greenProofOfBase = (project: Project, image: string, planFile: string): { commit: string; by?: string } | undefined => {
+export const greenProofOfBase = (project: Project, image: string, planFile: string): { commit: string; by?: string; kind: ProofKind } | undefined => {
   const commit = sh("git", ["rev-parse", project.baseBranch], project.root);
   if (!baseCacheHit(project.root, baseKey(project, image, planFile, commit))) return undefined;
   try {
-    const by = JSON.parse(readFileSync(baseRecord(project.root), "utf8")).by;
-    return { commit, ...(typeof by === "string" && by ? { by } : {}) };
+    const record = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));
+    const kind = record.kind;
+    if (kind !== "landing-sandbox" && kind !== "base" && kind !== "verify") return undefined;
+    return { commit, ...(typeof record.by === "string" && record.by ? { by: record.by } : {}), kind };
   } catch {
     return undefined;
   }
@@ -610,7 +618,7 @@ export const verifyBase = async (project: Project, image: string, planFile: stri
   const gated = await gateBase(project, image, planFile, "verify", false, runId);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
-  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify");
+  if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify", "verify");
   else noteBaseResult(project.root, "", false);
   return gated;
 };
@@ -690,7 +698,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check" });
+  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check", kind: "base" });
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,

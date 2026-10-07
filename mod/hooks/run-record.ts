@@ -312,9 +312,9 @@ export type RunRecord = {
   /**
    * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
    * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
-   * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it.
+   * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it and `kind` where they ran.
    */
-  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; dockerfiles?: string[]; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;
