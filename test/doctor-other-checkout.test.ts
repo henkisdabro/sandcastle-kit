@@ -12,8 +12,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
+import { dockerStub } from "./docker-stub.ts";
 
 const KIT = join(import.meta.dirname, "..");
+const docker = dockerStub();
 const project = (files: Record<string, string>) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-checkout-")));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
@@ -27,7 +29,7 @@ const doctor = (root: string) =>
   runKit(["doctor"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },
+    env: { ...process.env, PATH: docker.first(process.env.PATH), XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() },
   }).stdout;
 const note = /^info This project is a different checkout of the kit/m;
 
