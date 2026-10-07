@@ -34,3 +34,13 @@ test("the pool section forbids waiting, with a slot held, on anything that needs
   const pool = a.slice(a.indexOf("## `src/pool.ts`"), a.indexOf("## `src/usage.ts`"));
   assert.match(pool, /Code that waits while holding a pool slot must not wait on anything that needs another slot/);
 });
+
+// A single-file run with no limit hung a pass for its tool's whole 15 minutes, and a python heredoc
+// ended at an `EOF` line of the file it edited and ran the rest of the script as shell.
+test("every agent that runs tests by hand limits each run and picks a heredoc delimiter the file lacks", () => {
+  for (const name of ["implement.md", "review.md", "repair.md"]) {
+    const p = read("prompts", name);
+    assert.match(p, /Every other test you run by hand \(one file, one case\) gets a limit too, `timeout 300 <command>`/, name);
+    assert.match(p, /\(`<<'PYEOF'`, not `<<'EOF'`\)/, name);
+  }
+});

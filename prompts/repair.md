@@ -14,7 +14,7 @@ without your change, `git diff > /tmp/p && git checkout -- <files>`, run it, the
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
-`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it.
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell.
 
 # The ticket
 
