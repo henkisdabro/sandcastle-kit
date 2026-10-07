@@ -40,7 +40,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason, wholeNumber } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView,
+  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -1741,9 +1741,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       if (tokens) {
         spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
         run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
+        if (issue) run.ticket(issue, { tokens: tokenBrief(spent.get(issue)!) });
       }
       return result;
     } finally {
+      // The pass is over, and its result carries its own figure (in `spent` above, with nothing in between that a
+      // tick could interleave with): what its log showed stops counting as live. A pass that threw has none, and nothing of it is kept.
+      if (issue) usageWatch?.settle(issue);
       active.delete(issue);
       const m = model?.();
       const line = {
@@ -1802,25 +1806,25 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           hold: (pause, now) => holdForUsage(project.root, process.pid, pause, now),
         });
   if (settings.usagePause !== undefined) console.log(usagePauseLine(settings.usagePause, planUsage.map((u) => u.provider)));
-  if (planUsage.length) {
-    run.update({ usage: [...planUsage] });
-    usageWatch = watchUsage({
-      logs: join(project.root, ".sandcastle/logs"),
-      run: runId,
-      providers: planUsage.map((u) => u.provider),
-      // A record the next turn replaced is not this watch's to write.
-      finished: () => run.finished,
-      write: (reading) => {
-        if (run.finished) return;
-        planUsage[planUsage.findIndex((u) => u.provider === reading.provider)] = reading;
-        run.update({ usage: [...planUsage] });
-        // A pause that cannot be written is no reason to lose the reading: the next one asks again.
-        try {
-          usagePause?.reading([...planUsage]);
-        } catch {}
-      },
-    });
-  }
+  if (planUsage.length) run.update({ usage: [...planUsage] });
+  // Also without a plan to show: a ticket's tokens, as its running pass spends them, are the status view's TOKENS column.
+  usageWatch = watchUsage({
+    logs: join(project.root, ".sandcastle/logs"),
+    run: runId,
+    providers: planUsage.map((u) => u.provider),
+    // A record the next turn replaced is not this watch's to write.
+    finished: () => run.finished,
+    tokens: { owner: logOwner, write: liveTokenWriter(run, spent) },
+    write: (reading) => {
+      if (run.finished) return;
+      planUsage[planUsage.findIndex((u) => u.provider === reading.provider)] = reading;
+      run.update({ usage: [...planUsage] });
+      // A pause that cannot be written is no reason to lose the reading: the next one asks again.
+      try {
+        usagePause?.reading([...planUsage]);
+      } catch {}
+    },
+  });
   // Written next to the prompts; the worktree hook applies it to each sandbox.
   const { plan: lean, file: planFile } = writePlan(project);
   const kept = lean.items.filter((i) => i.kept && i.kind !== "hook").map((i) => `${i.kind}:${i.id}`);

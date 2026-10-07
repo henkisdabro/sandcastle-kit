@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { PlanUsage, PlanWindow, RunRecord, UsagePaused } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
+import type { Tokens } from "./run.ts";
 import type { Change } from "./schedule.ts";
 
 export const USAGE_CHECK = process.env.USAGE_CHECK === "1";
@@ -445,11 +446,48 @@ export const showsCodexUsage = ({ crossReview, apiKey, auth }: { crossReview: bo
 export type UsageWatch = {
   /** Reads what the logs gained since the last look and writes the record when a newer reading came (not more often than the interval, unless `final`). */
   poll(final?: boolean): void;
+  /**
+   * A ticket's agent pass has ended and the run counts its tokens itself (its result's own figure): what the logs showed of
+   * the passes so far stops counting as live, and so does anything of them read later. Reads what the logs gained first.
+   */
+  settle(issue: string): void;
   /** One last look, written whatever the interval says, and no more after it. */
   stop(): void;
 };
 
-type Tail = { ino: number; offset: number; decoder: StringDecoder; carry: string; skipping: boolean; mine: boolean };
+/**
+ * One agent pass's tokens as its log shows them so far: Claude Code writes an assistant line per content block of a
+ * message, each with the message's `usage`, so a message counts once, by its id (the latest usage it showed).
+ */
+type PassTokens = { seen: Map<string, Tokens>; total: Tokens };
+
+type Tail = {
+  ino: number; offset: number; decoder: StringDecoder; carry: string; skipping: boolean; mine: boolean;
+  /** The ticket the file's pass belongs to; undefined when the watch counts no tokens or the name is no ticket's. */
+  owner?: string;
+  /** This run's passes in the file so far (each starts at a marker line), and how many of them `settle` handed to the run's own count. */
+  pass: number;
+  settled: number;
+  tokens: PassTokens;
+};
+
+const NO_PASS = (): PassTokens => ({ seen: new Map(), total: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } });
+
+/** The usage an assistant line of Claude's raw stream carries, with its message's id; undefined for any other line. */
+export const tokensFromEvent = (line: string): { id?: string; tokens: Tokens } | undefined => {
+  if (!line.includes('"type":"assistant"') || !line.includes('"usage"')) return undefined;
+  let event: { type?: unknown; message?: { id?: unknown; usage?: Record<string, unknown> | null } | null };
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const u = event?.type === "assistant" ? event.message?.usage : undefined;
+  if (!u) return undefined;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  const id = event.message?.id;
+  return { ...(typeof id === "string" ? { id } : {}), tokens: { input: n(u.input_tokens), cacheWrite: n(u.cache_creation_input_tokens), cacheRead: n(u.cache_read_input_tokens), output: n(u.output_tokens) } };
+};
 
 // A raw stream line is a whole tool result at most; one this long is not a rate-limit event.
 const LONGEST_LINE = 8 << 20;
@@ -472,6 +510,7 @@ export const watchUsage = ({
   now = Date.now,
   interval = USAGE_INTERVAL_MS,
   finished = () => false,
+  tokens,
 }: {
   logs: string;
   run: string;
@@ -481,11 +520,41 @@ export const watchUsage = ({
   now?: () => number;
   interval?: number;
   finished?: () => boolean;
+  /**
+   * The tokens each ticket's running pass has spent so far, from the same logs on the same tick: `owner` names the
+   * ticket a log file belongs to (undefined for none), and `write` gets a ticket's live figure when it changed.
+   */
+  tokens?: { owner: (name: string) => string | undefined; write: (issue: string, live: Tokens) => void };
 }): UsageWatch => {
   const tails = new Map<string, Tail>();
   let lastWrite = -Infinity;
   const pending = new Map<UsageProvider, UsageReading>();
+  // Tickets whose live figure changed since it was last written.
+  const changed = new Set<string>();
   let stopped = false;
+
+  // What the ticket's passes that `settle` has not handed over spent so far.
+  const live = (issue: string): Tokens => {
+    const sum = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+    for (const tail of tails.values()) {
+      if (tail.owner !== issue || tail.pass <= tail.settled) continue;
+      sum.input += tail.tokens.total.input;
+      sum.cacheWrite += tail.tokens.total.cacheWrite;
+      sum.cacheRead += tail.tokens.total.cacheRead;
+      sum.output += tail.tokens.total.output;
+    }
+    return sum;
+  };
+
+  const countTokens = (tail: Tail, line: string) => {
+    const found = tokensFromEvent(line);
+    if (!found) return;
+    const { seen, total } = tail.tokens;
+    const before = found.id === undefined ? undefined : seen.get(found.id);
+    if (found.id !== undefined) seen.set(found.id, found.tokens);
+    for (const key of Object.keys(total) as (keyof Tokens)[]) total[key] += found.tokens[key] - (before?.[key] ?? 0);
+    changed.add(tail.owner!);
+  };
 
   // The last reading of each provider in what `file` gained, and the file's modification time.
   const gained = (name: string, at: number): { mtime: number; readings: Map<UsageProvider, UsageReading> } | undefined => {
@@ -494,7 +563,7 @@ export const watchUsage = ({
     let tail = tails.get(name);
     // A file that shrank or changed identity is another file under the same name (archived, then started again).
     if (!tail || st.size < tail.offset || st.ino !== tail.ino) {
-      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false };
+      tail = { ino: st.ino, offset: 0, decoder: new StringDecoder("utf8"), carry: "", skipping: false, mine: false, owner: tokens?.owner(name), pass: 0, settled: 0, tokens: NO_PASS() };
       tails.set(name, tail);
     }
     if (st.size === tail.offset) return undefined;
@@ -523,7 +592,10 @@ export const watchUsage = ({
             } catch {
               tail.mine = false;
             }
+            // Each of the run's markers starts a pass, which counts from nothing.
+            if (tail.mine) Object.assign(tail, { pass: tail.pass + 1, tokens: NO_PASS() });
           } else if (tail.mine) {
+            if (tail.owner !== undefined && tail.pass > tail.settled) countTokens(tail, line);
             for (const provider of providers) {
               const reading = USAGE_READERS[provider](line, at);
               if (reading) readings.set(provider, reading);
@@ -537,8 +609,8 @@ export const watchUsage = ({
     return readings.size ? { mtime: st.mtimeMs, readings } : undefined;
   };
 
-  const poll = (final = false) => {
-    if (stopped && !final) return;
+  // What the logs gained since the last look: readings into `pending`, tickets with new tokens into `changed`.
+  const scan = () => {
     try {
       const at = Math.floor(now() / 1000);
       // Oldest write first: where several files gained a reading, the last one written is the newest.
@@ -558,16 +630,31 @@ export const watchUsage = ({
     } catch {
       /* no logs directory yet */
     }
-    if (!pending.size || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
+  };
+
+  const poll = (final = false) => {
+    if (stopped && !final) return;
+    scan();
+    if ((!pending.size && !changed.size) || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
     try {
       for (const [provider, reading] of [...pending]) {
         write(reading);
         pending.delete(provider);
       }
+      for (const issue of [...changed]) {
+        tokens?.write(issue, live(issue));
+        changed.delete(issue);
+      }
       lastWrite = now();
     } catch {
       /* the record could not be written: what is left is tried again at the next look */
     }
+  };
+
+  const settle = (issue: string) => {
+    scan();
+    for (const tail of tails.values()) if (tail.owner === issue) tail.settled = tail.pass;
+    changed.delete(issue);
   };
 
   const timer = setInterval(() => (finished() ? stop() : poll()), interval);
@@ -578,7 +665,7 @@ export const watchUsage = ({
     stopped = true;
     clearInterval(timer);
   };
-  return { poll, stop };
+  return { poll, stop, settle };
 };
 
 // ---------------------------------------------------------------------------

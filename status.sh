@@ -341,11 +341,11 @@ load_container_stats() {
     [ -z "$name" ] && continue
     n=""; fields_of "$name" "$map" '|' && n="${F[1]:-}"
     [ -z "$n" ] && continue
-    # "275.8MiB / 11.73GiB" -> "276M"
+    # "275.8MiB / 11.73GiB" -> "276M"; a GiB figure under 10 keeps a decimal: "2.1GiB" -> "2.1G"
     mem=$(printf '%s' "${mem%%/*}" \
           | awk '{v=$1; sub(/iB$/,"",v);
                   u=substr(v,length(v),1); q=substr(v,1,length(v)-1);
-                  printf "%.0f%s", q, u}')
+                  if (u == "G" && q + 0 < 10) printf "%.1f%s", q, u; else printf "%.0f%s", q, u}')
     # "1399.02%" -> "14.0c", flagged hot past 80% of the host's cores.
     cpu=$(printf '%s' "$cpu" \
           | awk -v ncpu="$NCPU" '{p=$0; sub(/%$/,"",p); c=p/100;
@@ -485,7 +485,7 @@ run_alive() {
 # from branches, logs and label times, and a green branch waiting to land read
 # as `queued` for over an hour. Inference is left for tickets outside the run,
 # and for all of them once it ends - people merge and clean up after a run.
-#   TICKETS  "id US state US since US started US order US note US requeued" lines
+#   TICKETS  "id US state US since US started US order US note US requeued US tokens" lines
 #   RECORD   1 while the live run keeps TICKETS (an older orchestrator does not)
 # Older records: RUN_ISSUES, WAITING ("issue|#dep, #dep") and ACTIVE
 # ("issue|phase|since") are what a run wrote before `tickets`.
@@ -533,7 +533,7 @@ load_run() {
     @sh "waiting=\(lines((.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"))",
     @sh "active=\(lines((.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"))",
     @sh "tickets=\(lines((.tickets // {}) | to_entries[] | [.key, (.value.state // ""), (.value.since // "" | tostring),
-      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // "")] | join("\u001f")))",
+      (.value.started // "" | tostring), (.value.order // "" | tostring), (.value.note // ""), (.value.requeued // ""), (.value.tokens // "" | tostring)] | join("\u001f")))",
     @sh "free=\(lines([((.concurrency // 1) - ([(.tickets // {})[] | select((.state // "") | IN("setup", "implement", "resolve", "review", "cross-review", "gates", "repair"))] | length)), 0] | max))",
     @sh "typical=\(lines((.typical // {}) | to_entries[] | "\(.key)|\(.value)"))",
     @sh "eta=\(lines(
@@ -701,12 +701,20 @@ log_activity() {
     | cut -c1-200
 }
 
-# CPU and memory columns from stat_for; the CPU figure is coloured only when
+# The CPU/MEM column's two halves from stat_for; the CPU figure is coloured only when
 # it is high enough to be worth noticing.
 cpu_cols() {
   cpu="$S_CPU"; mem="$S_MEM"; cpu_col="$head"
   if [ -z "$cpu" ]; then cpu="-"; mem="-"; cpu_col="$gry"
   elif [ "$S_HOT" = "1" ]; then cpu_col="$hot"; fi
+  tok="-"; tok_col="$gry"
+}
+
+# The TOKENS cell of a ticket from its record's `tokens` ("3.1M in / 42k out", what the run writes, the
+# running pass included): "3.1M/42k". Anything else, and none yet, is a grey "-".
+tokens_cell() {
+  [[ "$1" =~ ^([0-9.]+[kM]?)\ in\ /\ ([0-9.]+[kM]?)\ out$ ]] || return 0
+  tok="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"; tok_col="$head"
 }
 
 # The run cell of a run a person has paused: `PAUSED since 15:40 - finishing #12 review, #14 landing`
@@ -1017,11 +1025,10 @@ landed_commits() {
 # One row into the frame, counted in its group - or, while a live run keeps a
 # record, as outside that run ($1 = 1), so the counts add up to the run.
 emit() {
-  local age_c="$age_col" cmt_c="$head" mem_c="$head"
+  local age_c="$age_col" cmt_c="$head"
   if [ "$state" = merged ] && { [ "$commits" = 0 ] || [ "$commits" = "-" ]; }; then commits=$(landed_commits "$n"); fi
   [ "$age" = "-" ] && age_c="$gry"
   [ "$commits" = "-" ] && cmt_c="$gry"
-  [ "$mem" = "-" ] && mem_c="$gry"
   disp "$n"
   local id_cell="${bold}${wht}${DISP}${off}" lf url
   if [ "$LINKS" = 1 ]; then
@@ -1032,8 +1039,10 @@ emit() {
     fi
   fi
   CELL=("$id_cell" "${colour}${glyph} ${state}${off}" "${age_c}${age}${off}" "${cmt_c}${commits}${off}")
-  [ "$wide" -ge 1 ] && CELL[4]="${cpu_col}${cpu}${off}"
-  [ "$wide" = 2 ] && CELL[5]="${mem_c}${mem}${off}"
+  if [ "$wide" = 2 ]; then
+    if [ "$cpu" = "-" ]; then CELL[4]="${gry}-${off}"; else CELL[4]="${cpu_col}${cpu}${off}${head}/${mem}${off}"; fi
+  fi
+  [ "$wide" -ge 1 ] && CELL[wide + 3]="${tok_col}${tok}${off}"
   CELL[${#TW[@]}-1]="${act_col}${activity}${off}"
   OW=("${TW[@]}"); AL=("${TAL[@]}")
   cells_line; rendered="$REPLY"
@@ -1054,7 +1063,7 @@ emit() {
 
 render() {
   local now now_s issues n phase log age commits state glyph colour activity activity_note landed_subj rendered
-  local merged_list cols rows prio cpu mem cpu_col budget hidden key wide WIN BUF BUF_N
+  local merged_list cols rows prio cpu mem cpu_col tok tok_col tokens budget hidden key wide WIN BUF BUF_N
   local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0 c_partly=0
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text oc_kind oc_state hidden_list group summary act since
@@ -1089,14 +1098,15 @@ render() {
   for id in $issues $QUEUE $TICKET_IDS; do disp "$id"; [ "${#DISP}" -gt "$longest" ] && longest=${#DISP}; done
   [ "$longest" -gt 16 ] && longest=16
   WIN="$cols"
-  # In a narrow pane MEM gives its width to ACTIVITY, where the notes are:
-  # at 80 columns every note was cut to 30 characters. Below 80, CPU does too.
-  # wide: 2 with MEM, 1 with CPU only, 0 with neither.
+  # In a narrow pane CPU/MEM gives its width to ACTIVITY, where the notes are:
+  # at 80 columns every note was cut to 30 characters. Below 80, TOKENS does too.
+  # wide: 2 with CPU/MEM and TOKENS, 1 with TOKENS only (what a person watching the plan's allowance
+  # needs), 0 with neither.
   wide=2; [ "$cols" -lt 100 ] && wide=1; [ "$cols" -lt 80 ] && wide=0
   # STATE's minimum fits "! uncommitted", the longest state - but for the
   # narrowest panes, which cut it.
-  local -a MIN=($(( longest + 2 )) 15 6 9 7 7) PCT=(6 9 5 6 6 6)
-  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 15 6 9 7); PCT=(6 9 5 6 6); }
+  local -a MIN=($(( longest + 2 )) 15 6 9 13 12) PCT=(6 9 5 6 8 7)
+  [ "$wide" = 1 ] && { MIN=($(( longest + 2 )) 15 6 9 12); PCT=(6 9 5 6 7); }
   [ "$wide" = 0 ] && { MIN=($(( longest + 2 )) 12 6 9); PCT=(6 9 5 6); }
   avail=$(( cols - ${#MIN[@]} - 2 ))
   for (( i=0; i<${#MIN[@]}; i++ )); do
@@ -1109,12 +1119,12 @@ render() {
   # 1. The live run's tickets, as its record has them.
   for n in $TICKET_IDS; do
     fields_of "$n" "$TICKETS" "$US"
-    IFS="$US" read -r _ tstate since started order note requeued <<<"$LINE"
+    IFS="$US" read -r _ tstate since started order note requeued tokens <<<"$LINE"
     case "$tstate" in implement) state=impl;; cross-review) state=codex;; red) state="gate red";; nochange) state="no change";; *) state="$tstate";; esac
     [[ "$since" =~ ^[0-9]+$ ]] || since="$now_s"
     ago $(( now_s - since )); age="$AGO"; age_col="$head"; act_col="$mute"; activity="$note"; key="$since"
     commits=$(git rev-list --count "${BASE}..agent/issue-$n" 2>/dev/null || echo -)
-    stat_for "$n"; cpu_cols
+    stat_for "$n"; cpu_cols; tokens_cell "$tokens"
     case "$tstate" in
       setup) activity="${note:-setting up its sandbox}";;
       landing) activity="${note:-merging into $BASE}";;
@@ -1179,7 +1189,7 @@ render() {
   for q in $QUEUE; do
     in_record "$q" && continue
     has_line "$q" "$issues" && continue
-    n="$q"; age="-"; commits="-"; cpu="-"; mem="-"; cpu_col="$gry"; age_col="$gry"; act_col="$mute"; key=0
+    n="$q"; age="-"; commits="-"; cpu="-"; mem="-"; cpu_col="$gry"; tok="-"; tok_col="$gry"; age_col="$gry"; act_col="$mute"; key=0
     # Held back by an open dependency, not waiting for a sandbox.
     on=$(blocked_on "$q")
     if [ -n "$on" ]; then
@@ -1391,8 +1401,9 @@ render() {
   [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open): in merged here, in needs you in the closing summary${off}"
   NOTE[${#NOTE[@]}]="${gry}ready = gates green, waits for the landing worker${off}"
   NOTE[${#NOTE[@]}]="${gry}age = time in state (red: twice the usual)${off}"
-  # Below 80 columns there is no CPU column to explain.
-  [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
+  # Below 80 columns there is no TOKENS column to explain, and from 100 a CPU/MEM column too.
+  [ "$wide" -ge 1 ] && NOTE[${#NOTE[@]}]="${gry}tokens = in/out, cache included${off}"
+  [ "$wide" = 2 ] && NOTE[${#NOTE[@]}]="${gry}CPU in cores of ${NCPU}${off}"
   [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}${CLICK_HINT}${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
@@ -1575,8 +1586,8 @@ build_header() {
   OW=("${TW[@]}"); bars_of
   junction '├' '┤' '─' "$prev" "$BARS"; put "$REPLY"
   CELL=("${bold}${head}TICKET${off}" "${bold}${head}STATE${off}" "${bold}${head}AGE${off}" "${bold}${head}COMMITS${off}")
-  [ "$wide" -ge 1 ] && CELL[4]="${bold}${head}CPU${off}"
-  [ "$wide" = 2 ] && CELL[5]="${bold}${head}MEM${off}"
+  [ "$wide" = 2 ] && CELL[4]="${bold}${head}CPU/MEM${off}"
+  [ "$wide" -ge 1 ] && CELL[wide + 3]="${bold}${head}TOKENS${off}"
   CELL[${#TW[@]}-1]="${bold}${head}ACTIVITY${off}"
   AL=("${TAL[@]}"); cells_line; put "$REPLY"
   junction '├' '┤' '─' "$BARS" "$BARS"; put "$REPLY"
