@@ -106,6 +106,7 @@ const harness = (root: string, over: { land?: "merge" | "squash"; dryRun?: boole
     host: createHostGit(project, gitFingerprint(project)),
     gate: async () => ({ gates: [], failures: [] }),
     landed: over.landed ?? new Map(),
+    closeRetryMs: 0,
   };
   // landOne writes no verdict: the ledger records the ending, as burndown's `tell` hands it over.
   const ledger = createLedger({

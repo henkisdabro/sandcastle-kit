@@ -179,6 +179,7 @@ const runWith = async (
     host,
     gate: async () => ({ gates: [{ name: "test", pass: true }], failures: [] }),
     landed: new Map(),
+    closeRetryMs: 0,
   };
   const holds = createHoldRecord({ waiting, ref: tracker.ref, say });
 
@@ -346,11 +347,11 @@ test("a dry run releases nothing: nothing lands", async () => {
   assert.deepEqual(run.landed, []);
 });
 
-test("a ticket whose close failed is not a landed blocker: its dependant waits", async () => {
+test("a ticket whose close failed still releases its dependant: landing is the run's own fact", async () => {
   const run = await runWith([ticket("1"), ticket("2", ["1"])], { closeFails: new Set(["1"]) });
-  assert.deepEqual(run.landed, ["1"]);
-  assert.deepEqual(run.started, ["1"]);
-  assert.equal(run.states["2"].state, "blocked");
+  assert.deepEqual(run.landed, ["1", "2"]);
+  assert.deepEqual(run.started, ["1", "2"]);
+  assert.deepEqual(mergeOrder(run.root), ["1", "2"]);
 });
 
 test("a red ticket releases nothing", async () => {
