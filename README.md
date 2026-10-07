@@ -661,7 +661,8 @@ prints no rate limits, so each cross-review pass's command prints the last `rate
 recorded as its closing line once Codex has ended (the session lives in the sandbox's `~/.codex/sessions`
 and goes with it: it is never copied to the host's `~/.codex`), and the run reads that line from the pass's
 `.jsonl` like Claude's: the line updates when a cross-review pass ends, not during it. The Herdr token joins
-the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line stays Claude's.
+the providers' weekly windows, `claude wk 93% · codex wk 16%`; the closing summary's `Plan usage` line is
+Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside it.
 
 | State | Means |
 |---|---|
@@ -817,7 +818,8 @@ fixing** (red, conflicted, crashed or unlanded branches, with the files or tests
 branches share); **Runnable now / Still blocked** (blockers re-read after landing); **Local state**
 (commits not on the upstream - the tickets are closed but the code has not left your machine); and
 the **Next step**. Under the header's `Settings:` line, a run that showed the plan's usage says where
-it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going). `sandcastle report` prints it again at any time, with git and the blockers as they
+it ended: `Plan usage at the end: 5h 21%, week 97%` (`so far` for a run still going), and a cross-review run
+with a Codex reading adds `Codex plan usage at the end:` in the same shape. `sandcastle report` prints it again at any time, with git and the blockers as they
 are now. Then:
 
 - **Push** the base branch yourself when you are happy with it. The kit never pushes.

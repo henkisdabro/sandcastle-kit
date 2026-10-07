@@ -91,8 +91,13 @@ test("gathered from the run record on disk, the reading is the record's usage, a
   const project = { name: "demo", root, baseBranch: "main", label: "ready-for-agent", gates: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
   record(reading);
   assert.ok(render(await gather(project), true).split("\n").includes("Plan usage at the end: 5h 21%, week 97%"));
-  for (const junk of [{ provider: "claude", windows: "lots" }, "claude", 7, { provider: "codex", windows: reading.windows, at: 1 }]) {
+  for (const junk of [{ provider: "claude", windows: "lots" }, "claude", 7, { provider: "codex", windows: "lots" }]) {
     record(junk);
-    assert.equal(render(await gather(project), true).includes("Plan usage"), false, JSON.stringify(junk));
+    assert.equal(/plan usage/i.test(render(await gather(project), true)), false, JSON.stringify(junk));
   }
+  // An older kit's one-object form holding Codex's reading is Codex's line, never Claude's.
+  record({ provider: "codex", windows: reading.windows, at: 1 });
+  const out = render(await gather(project), true).split("\n");
+  assert.ok(out.includes("Codex plan usage at the end: 5h 21%, week 97%"), out.join("\n"));
+  assert.equal(out.some((l) => l.startsWith("Plan usage")), false, out.join("\n"));
 });

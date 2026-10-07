@@ -97,6 +97,8 @@ export type Facts = {
   settings?: RunSettings;
   /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
   usage?: PlanUsage;
+  /** The Codex plan usage the last record holds, when the run's cross-review spent a ChatGPT plan: the last reading, or none yet. */
+  codexUsage?: PlanUsage;
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
   next?: { level: Level; turn: number; tickets: string[] };
 };
@@ -383,8 +385,8 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
-    // The summary gives Claude's line; Codex's reading, when cross-review shows one, is the status view's and the sidebar's.
     usage: readPlanUsages(run.usage).find((u) => u.provider === "claude"),
+    codexUsage: readPlanUsages(run.usage).find((u) => u.provider === "codex"),
   };
 };
 
@@ -401,7 +403,11 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   const s = f.settings;
   // The plan's usage, as the last agent reported it: a fact of the run, so it stands with or without a settings group. Under an API key there is none.
   const w = f.usage?.windows;
-  const usage = w ? [`Plan usage ${f.live ? "so far" : "at the end"}: 5h ${w.fiveHour.percent}%, week ${w.week.percent}%`] : [];
+  const when = f.live ? "so far" : "at the end";
+  const usage = w ? [`Plan usage ${when}: 5h ${w.fiveHour.percent}%, week ${w.week.percent}%`] : [];
+  // A cross-review run's Codex plan, beside Claude's: the two are different accounts, so each has its own line.
+  const cw = f.codexUsage?.windows;
+  if (cw) usage.push(`Codex plan usage ${when}: 5h ${cw.fiveHour.percent}%, week ${cw.week.percent}%`);
   if (!s || typeof s !== "object") return usage;
   const count = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined);
   const plain = (v: unknown, pattern: RegExp) => (typeof v === "string" && pattern.test(v) ? v : undefined);
