@@ -631,14 +631,25 @@ export const typicalIssueMs = (typical: Record<string, number>): number | undefi
 const minutes = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`);
 
 /**
- * The run's heartbeat: the tickets working and their step, then the tickets that have waited for a
- * sandbox slot for longer than a typical issue takes (`typicalMs`; with no history nothing is named, as
- * the estimate says nothing then). No line when nothing works and no such ticket waits.
+ * The run's heartbeat: the tickets working and their step, the landings in flight (and the step each is at, once
+ * it says one), the sent-back tickets waiting to resolve, then the tickets that have waited for a sandbox slot for
+ * longer than a typical issue takes (`typicalMs`; with no history nothing is named, as the estimate says nothing
+ * then). No line when none of these is in flight.
  */
-export const heartbeatLine = (o: { now: number; clock: string; working: { ref: string; phase: string; since: number }[]; slotWaits: { ref: string; since: number }[]; typicalMs?: number }): string | undefined => {
+export const heartbeatLine = (o: {
+  now: number;
+  clock: string;
+  working: { ref: string; phase: string; since: number }[];
+  landing?: { ref: string; phase?: string; since: number }[];
+  resolving?: { ref: string; since: number }[];
+  slotWaits: { ref: string; since: number }[];
+  typicalMs?: number;
+}): string | undefined => {
   const stalled = o.typicalMs === undefined ? [] : o.slotWaits.filter((w) => o.now - w.since > o.typicalMs!);
   const parts: string[] = [];
   if (o.working.length) parts.push(`working: ${o.working.map((w) => `${w.ref} ${w.phase} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.landing?.length) parts.push(`landing: ${o.landing.map((w) => `${w.ref}${w.phase ? ` ${w.phase}` : ""} ${minutes(o.now - w.since)}`).join(", ")}`);
+  if (o.resolving?.length) parts.push(`waiting to resolve a conflict: ${o.resolving.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   if (stalled.length) parts.push(`waiting for a sandbox slot: ${stalled.map((w) => `${w.ref} ${minutes(o.now - w.since)}`).join(", ")}`);
   return parts.length ? `[${o.clock}] ${parts.join("; ")}` : undefined;
 };
@@ -1981,6 +1992,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const runId = run.startedAt;
   const timings = join(project.root, ".sandcastle/logs/timings.jsonl");
   const active = new Map<string, { phase: string; since: number }>();
+  // The heartbeat's other tickets in flight: a landing (its step, once it says one) and a sent-back ticket's wait to resolve (since it was told).
+  const landing = new Map<string, { phase?: string; since: number }>();
+  const resolving = new Map<string, number>();
   const took = new Map<string, number>();
   // Each issue's waits for a gates slot or another's fix, inside `took` but not part of its usual time.
   const waited = new Map<string, number>();
@@ -2160,8 +2174,21 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId);
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
-      wait: () => run.ticket(id, { note: "waiting for a gates slot" }),
-      gate: (i, name) => run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` }),
+      wait: () => {
+        // The heartbeat says a wait as a wait; the gate time is counted from the first gate (below).
+        const step = active.get(id) ?? landing.get(id);
+        if (step) step.phase = "gates: waiting for a gates slot";
+        run.ticket(id, { note: "waiting for a gates slot" });
+      },
+      gate: (i, name) => {
+        // The step's `since` is set before the wait for a gates slot: the gate time starts at the first gate.
+        const step = active.get(id) ?? landing.get(id);
+        if (step) {
+          step.phase = "gates";
+          if (i === 0) step.since = Date.now();
+        }
+        run.ticket(id, { note: `${i + 1}/${project.gates.length} ${name}` });
+      },
       log: gatesLog(project, id),
     }, priority);
   };
@@ -2175,6 +2202,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       now: Date.now(),
       clock: new Date().toTimeString().slice(0, 5),
       working: [...active].map(([n, a]) => ({ ref: ref(n), phase: a.phase, since: a.since })),
+      landing: [...landing].map(([n, l]) => ({ ref: ref(n), ...(l.phase ? { phase: l.phase } : {}), since: l.since })),
+      resolving: [...resolving].map(([n, since]) => ({ ref: ref(n), since })),
       slotWaits: [...slotWaits].map(([n, since]) => ({ ref: ref(n), since })),
       typicalMs: typicalIssueMs(typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0)))),
     });
@@ -2455,6 +2484,19 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     holdAwake,
     refresh: () => view.refresh(),
   });
+  // The landing worker's ports, with each landing in flight on the heartbeat's list.
+  const landingPorts = landingWork(ctx);
+  const landings: typeof landingPorts = {
+    ...landingPorts,
+    land: async (o) => {
+      landing.set(o.issue, { since: Date.now() });
+      try {
+        return await landingPorts.land(o);
+      } finally {
+        landing.delete(o.issue);
+      }
+    },
+  };
   const tell = (c: Change<Outcome, Outcome, Blocker>) => {
     fixes.told(c);
     switch (c.kind) {
@@ -2466,7 +2508,16 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
         ledger.tell(c);
         return holds.tell(run, c);
+      case "resolve waits":
+        // The heartbeat's wait counts from the first telling; a later one only changes the list.
+        if (!resolving.has(c.id)) resolving.set(c.id, Date.now());
+        return holds.tell(run, c);
+      case "resolve starts":
+        resolving.delete(c.id);
+        return holds.tell(run, c);
       case "ended":
+        // A wait the run's stop cut short is told no "resolve starts".
+        resolving.delete(c.id);
         // Its label refuses it, found as it would have started: that ticket only, never the run.
         if (c.ending.kind === "not begun" && c.ending.why.kind === "refused label") console.log(`  ${c.ending.why.reason}`);
         // How each ticket's part in the run ended: the ledger records it.
@@ -2528,7 +2579,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   };
 
   const { endings, stop } = await schedule
-    .run({ workers, concurrency: CONCURRENCY, attempt, ...landingWork(ctx), tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
+    .run({ workers, concurrency: CONCURRENCY, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
       usageWatch?.stop();
