@@ -430,17 +430,22 @@ const firstFile = (re: RegExp, text: string, exists: PathExists) => {
 };
 // A place in the title is used as it is (`firm`). One found only in the evidence, or a file with no line in the
 // title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
-// another finding is about, and two titles that name a file say little by it.
+// another finding is about, and two titles that name a file say little by it. A file the title names comes before
+// a line the evidence cites in another file, which would otherwise hide it from a close title naming the same file;
+// the evidence may still give that file's line.
 const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
   const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
     from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
   });
   const inTitle = firstFile(PLACE, f.title, exists);
   if (inTitle) return seat(inTitle, true);
-  const inEvidence = firstFile(PLACE, f.evidence, exists);
-  if (inEvidence) return seat(inEvidence, false);
   const fileOnly = firstFile(FILE_ONLY, f.title, exists);
-  return fileOnly ? seat(fileOnly, false) : undefined;
+  if (fileOnly) {
+    const line = [...f.evidence.matchAll(PLACE)].find((m) => cleanPath(m[1]) === fileOnly.path)?.[2];
+    return seat({ ...fileOnly, line: line === undefined ? undefined : Number(line) }, false);
+  }
+  const inEvidence = firstFile(PLACE, f.evidence, exists);
+  return inEvidence ? seat(inEvidence, false) : undefined;
 };
 /** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
 export const onBase = (root: string, base: string): PathExists => (path) => {

@@ -110,6 +110,24 @@ test("a file with no line in one title and a line in the other's still needs the
   assert.equal(other.made.length, 2);
 });
 
+test("a file named with no line in both titles is one finding even when one's evidence cites a line in another file", async () => {
+  const { made, comments } = await fileAll([
+    named("Stale demo mock in site/js/status.js", "test/pool.test.ts:12 still expects AGE"),
+    named("The status demo mock is stale (site/js/status.js)", "", "7", "review"),
+  ]);
+  assert.deepEqual(made, ["Stale demo mock in site/js/status.js"]);
+  assert.equal(comments.length, 1);
+});
+
+test("a file named with no line in the title keeps the line its evidence gives in that file", async () => {
+  const { made, comments } = await fileAll([
+    named("Stale mock in status.sh", "status.sh:40 still draws AGE"),
+    named("Banner is off at status.sh:40", "", "7", "review"),
+  ]);
+  assert.deepEqual(made, ["Stale mock in status.sh"]);
+  assert.equal(comments.length, 1);
+});
+
 test("a host and port is not a place, even when the titles overlap", async () => {
   const { made, comments } = await fileAll([
     named("Health check hits api.example.com:443", "api.example.com:443 times out"),
