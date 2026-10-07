@@ -70,7 +70,9 @@ implementer's.
 Constraints:
 
 - **Do not expand scope.** If you find a real problem outside this ticket, give it a `<followup>` line (see
-  "Finishing") rather than fixing it here.
+  "Finishing") rather than fixing it here. A side effect of this branch outside the ticket (an
+  estimate, a width, a message it changes) is a regression it causes (item 1): fix it here. A
+  `<followup>` is for a problem the branch did not cause.
 - **A problem named only in prose is lost.** The closing summary carries the tagged lines of your
   final message, not its prose, so a "not fixed (minor)" or a "this probably needs an Upgrading note"
   that you write there and do nothing else about is never seen. Each problem you find ends one of
@@ -82,7 +84,9 @@ Constraints:
   needs a boundary faked (a clock, a process, a slot), fake it. An `<ungated>` line is not that
   proof: it is only for an effect no gate can run.
 - **Never remove a safety guard, a test or an assertion to make something pass.** If a test fails,
-  the implementation is the suspect, not the test.
+  the implementation is the suspect, not the test. An existing test whose expected text or fixture
+  the branch changed to fit (a narrower width, a longer timeout) is weakened unless the ticket
+  changes that behaviour: check each one, and undo the ones it does not.
 - **Do not rewrite work that is merely not how you would have done it.** Style disagreement is not
   a finding. Only change what is wrong, unclear to the point of being a hazard, or unasked for.
 - Dependencies are already installed. The gates are:

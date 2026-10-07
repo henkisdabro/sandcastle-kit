@@ -34,6 +34,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The start line says the slot kept for landing is kept only while no other run takes a share
   of the machine's slots.** Beside one, tickets may fill the run's share, and a landing still goes
   first when a slot frees.
+- **Agents count an existing test re-fitted to pass as a weakened test.** An implementer names
+  each expected text or fixture it changed (a width, a timeout) unless the ticket changes that
+  behaviour, and a reviewer undoes the ones it does not. A reviewer also fixes a side effect its
+  branch causes outside the ticket, instead of filing it as a follow-up.
 - **The start plan says `up to N at a time`.** Beside another project's live run, the plain
   figure sat above `this run's share is 1` and an estimate for one at a time, as though the run
   would start two.
