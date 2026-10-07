@@ -55,9 +55,9 @@ test("a test file that prints nothing passes", () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
-test("both test scripts in package.json preload the guard", () => {
+test("the test scripts in package.json preload the guard", () => {
   const { scripts } = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")) as { scripts: Record<string, string> };
-  for (const name of ["test", "test:shard"]) assert.match(scripts[name]!, /--import \.\/test\/no-stray\.ts --test /, name);
+  for (const name of ["test", "test:shard", "test:weights"]) assert.match(scripts[name]!, /--import \.\/test\/no-stray\.ts --test /, name);
 });
 
 test("test/full-check.sh's shards preload the guard as pnpm test does", () => {

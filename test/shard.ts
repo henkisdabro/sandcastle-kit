@@ -11,8 +11,8 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Seconds per file, startup included: the mean of a one-file-at-a-time run on ubuntu-24.04-arm and
-// one on macos-latest. Every file not listed averaged under 2.5. To refresh, run the suite with --test-concurrency=1 and a reporter
-// that sums each file's top-level test:pass and test:fail durations.
+// one on macos-latest. Every file not listed averaged under 2.5. To refresh, run `pnpm test:weights`
+// (test/weights-reporter.ts) on each and paste the mean of the blocks it prints over this table.
 const WEIGHTS: Record<string, number> = {
   // 30 alone, but its eight child test runs compete with the rest of its shard for the runner's
   // cores, and in a shard it took more than twice that.
