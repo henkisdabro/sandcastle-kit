@@ -425,6 +425,8 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   const noReading = s.usageGuard === true && s.usageReading === "unavailable";
   if (s.usageGuard === true) items.push(`usage guard on${stop !== undefined ? `, stops at ${stop}%` : ""}${noReading ? ", no reading" : ""}`);
   else if (s.usageGuard === false) items.push("usage guard off");
+  const pause = count(s.usagePause);
+  if (pause !== undefined) items.push(`usage pause at ${pause}%`);
   // Never silent: red where colour is wanted, and the words say it where it is not.
   if (s.apiKey === true) items.push(bare ? API_CREDITS : red(API_CREDITS));
   if (!items.length) return usage;

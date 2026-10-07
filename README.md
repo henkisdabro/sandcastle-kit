@@ -624,6 +624,7 @@ threshold, `USAGE_STOP`), or `○ usage-guard` greyed when it is off, which drop
 When the guard cannot get a reading (a 403 turns it off for the run, a rate limit, an expired
 Claude Code login or no token at all leaves it without one for now, and with an API key it does not apply) the row says so in the warning colour:
 `● usage-guard 90% (no reading - not guarding)`. A run whose sandboxes spend `ANTHROPIC_API_KEY`
+A run with `USAGE_PAUSE` set shows `● usage-pause 90%`, the percent at which it pauses itself.
 adds a red `● API credits (ANTHROPIC_API_KEY)` (`● API credits` below 100 columns), at any width. A row too wide for the pane wraps onto further
 lines rather than cut anything off.
 

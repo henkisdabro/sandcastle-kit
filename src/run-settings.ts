@@ -35,7 +35,7 @@ export type ResolvedSettings = {
   usageGuard: boolean;
   /** The guard's stop threshold in percent; only when it is on. */
   usageStop?: number;
-  /** The plan usage in percent at which the run pauses itself and resumes after the window's reset (`USAGE_PAUSE`, or the project's `usagePause`); absent when it is off. Not in the run record's settings group: the record says when a run is paused for it. */
+  /** The plan usage in percent at which the run pauses itself and resumes after the window's reset (`USAGE_PAUSE`, or the project's `usagePause`); absent when it is off. In the settings group too, so a summary never reads as if nothing watched the plan. */
   usagePause?: number;
   /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
   apiKey?: true;
@@ -79,6 +79,7 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     usageGuard: settings.usageGuard,
     ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
     ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
+    ...(settings.usagePause === undefined ? {} : { usagePause: settings.usagePause }),
     // Only when it does: a subscription run's record and view stay as they were.
     ...(settings.apiKey ? { apiKey: true } : {}),
   };

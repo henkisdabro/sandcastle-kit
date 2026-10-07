@@ -86,3 +86,9 @@ test("the settings and a hint sit under the headline, before the next steps", ()
   assert.ok(out.indexOf("Settings:") < out.indexOf("## ✅ Done"));
   assert.ok(out.indexOf("not guarded") < out.indexOf("## ✅ Done"));
 });
+
+// A run started with USAGE_PAUSE=90 once closed on "usage guard off" alone, as if nothing watched the plan.
+test("the usage pause is named beside the guard", () => {
+  const out = render(facts({ settings: settings({ autonomy: "drain", cap: 20, usagePause: 90 }) }));
+  assert.equal(settingsLine(out), "Settings: autonomy drain (turn 1 of 20) · cross-review off · usage guard off · usage pause at 90%");
+});

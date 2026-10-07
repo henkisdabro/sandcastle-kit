@@ -86,3 +86,10 @@ test("a written record carries its settings, and a later turn's record its own t
   recordRun(project, { settings: settingsGroup(settings, 2) });
   assert.deepEqual(read().settings, { autonomy: 3, turn: 2, cap: 3, repair: 1, concurrency: 4, asked: 4, crossReview: false, usageGuard: false });
 });
+
+test("the settings group carries the usage pause only when it is on", () => {
+  const on = resolveSettings({ env: { USAGE_PAUSE: "90" }, project: {}, machine: {} });
+  assert.equal(settingsGroup(on, 1).usagePause, 90);
+  const off = resolveSettings({ env: {}, project: {}, machine: {} });
+  assert.equal("usagePause" in settingsGroup(off, 1), false);
+});

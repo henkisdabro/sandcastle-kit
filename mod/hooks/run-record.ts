@@ -211,6 +211,8 @@ export type RunSettings = {
    * without one for now). The only settings field that may change during a turn.
    */
   usageReading?: "unavailable";
+  /** The plan usage in percent at which the run pauses itself (`USAGE_PAUSE`); only when it is on. */
+  usagePause?: number;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
   apiKey?: boolean;
 };

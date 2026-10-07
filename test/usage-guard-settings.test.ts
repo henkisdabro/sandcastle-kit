@@ -151,3 +151,10 @@ test("a record without the guard's fields shows nothing about the guard", () => 
   record({ ...base, usageGuard: false, usageReading: "unavailable" });
   assert.doesNotMatch(row(100) ?? "", /no reading/);
 });
+
+test("the usage pause: ● usage-pause with its percent beside the guard, at every width", () => {
+  record({ ...base, usageGuard: false, usagePause: 90 });
+  for (const cols of [70, 80, 100, 130]) assert.match(row(cols) ?? "", /● usage-pause 90% \(last run\)$/, `${cols} columns`);
+  record({ ...base, usageGuard: false });
+  assert.doesNotMatch(row(100) ?? "", /usage-pause/);
+});

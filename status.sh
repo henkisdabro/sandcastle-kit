@@ -833,7 +833,7 @@ models_line() {
   fi
 }
 
-# The run settings the settings row shows, as "autonomy US turn US cap US repair US concurrency US asked US cross US model US effort US guard US stop US reading" into SET_FIELDS:
+# The run settings the settings row shows, as "autonomy US turn US cap US repair US concurrency US asked US cross US model US effort US guard US stop US reading US apikey US pause" into SET_FIELDS:
 # a live run's record, else the next run's (`sandcastle status` passes them as SANDCASTLE_SETTINGS,
 # a settings group, the way it passes the models), else the last run's record. Only what the
 # source holds: a field it lacks stays empty and is never filled with a default, and a record
@@ -845,7 +845,7 @@ read_settings() {
     (if .crossReview == true then (.crossReviewModel // "" | tostring) else "" end),
     (if .crossReview == true then (.crossReviewEffort // "" | tostring) else "" end),
     (.usageGuard | if . == null then "" else tostring end), (.usageStop // "" | tostring), (.usageReading // "" | tostring),
-    (if .apiKey == true then "on" else "" end)] | join("\u001f") else "" end' "$f" 2>/dev/null
+    (if .apiKey == true then "on" else "" end), (.usagePause // "" | tostring)] | join("\u001f") else "" end' "$f" 2>/dev/null
 }
 settings_fields() {
   SET_MARK=""; SET_FIELDS=""
@@ -866,11 +866,11 @@ set_item() { # full narrow min_cols
   if [ "$cols" -ge 100 ]; then SET_ITEMS[${#SET_ITEMS[@]}]="$1"; else SET_ITEMS[${#SET_ITEMS[@]}]="${2:-$1}"; fi
 }
 settings_row() {
-  local lvl turn cap repair conc asked ask cross xmodel xeffort guard stop reading apikey l i n levels="" WRAP_SEP="${rule} · ${off}"
+  local lvl turn cap repair conc asked ask cross xmodel xeffort guard stop reading apikey pause l i n levels="" WRAP_SEP="${rule} · ${off}"
   SETTINGS_ROWS=(); SET_ITEMS=(); CROSS_SET=""
   settings_fields
   [ -n "$SET_FIELDS" ] || return 0
-  IFS="$US" read -r lvl turn cap repair conc asked cross xmodel xeffort guard stop reading apikey <<<"$SET_FIELDS"
+  IFS="$US" read -r lvl turn cap repair conc asked cross xmodel xeffort guard stop reading apikey pause <<<"$SET_FIELDS"
   CROSS_SET="$cross"
   # A level the record does not hold, or one outside the five, is not drawn.
   case "$lvl" in
@@ -911,6 +911,8 @@ settings_row() {
       else set_item "${grn}●${off} ${mute}usage-guard${off}${stop:+ ${head}${stop}%${off}}"; fi;;
     false) set_item "${gry}○ usage-guard${off}" "" 80;;
   esac
+  # The usage pause (USAGE_PAUSE) watches the plan too, so a row that says the guard is off says it.
+  [[ "$pause" =~ ^[0-9]+$ ]] && set_item "${grn}●${off} ${mute}usage-pause${off} ${head}${pause}%${off}"
   # An API key the sandboxes spend: never silent, so it is red, says so in words, and stays at any width.
   [ "$apikey" = on ] && set_item "${hot}● API credits (ANTHROPIC_API_KEY)${off}" "${hot}● API credits${off}"
   [ "${#SET_ITEMS[@]}" -gt 0 ] || return 0
