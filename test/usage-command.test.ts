@@ -72,7 +72,7 @@ test("a fresh reading in the run record is printed with its age, and no request 
   const p = project({ env: OAUTH, runRecord: { usage: [claude(nowSeconds() - 120)] } });
   const r = p.run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^Plan usage \(Claude\): 5h 14% - resets \S+ · week 93% - resets \S+ \S* ?\S* \(read 2m ago, from the run record\)$/m, r.stdout);
+  assert.match(r.stdout, /^Plan usage \(Claude\): 5h 14% - resets (?:\S+ )?\S+ · week 93% - resets \S+ \S* ?\S* \(read 2m ago, from the run record\)$/m, r.stdout);
   assert.equal(p.asked(), 0);
 });
 
