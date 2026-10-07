@@ -1,0 +1,31 @@
+name: Changelog
+
+# A pull request that changes shipped files adds a line under CHANGELOG.md's
+# Unreleased section (scripts/changelog-check.mjs says which files count), or
+# carries the no-changelog label. Labelling reruns the check, so the label
+# takes effect without a new push.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The merge base with the target branch, which a shallow clone lacks.
+          fetch-depth: 0
+      # Node built-ins only, so the runner's own Node does without an install.
+      - run: node scripts/changelog-check.mjs "origin/$BASE"
+        env:
+          BASE: ${{ github.base_ref }}
