@@ -167,9 +167,17 @@ const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 // sandbox's to choose. The others show old and new (a URL's credentials hidden).
 const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
 
+// Keys whose values are not shown because they carry credentials: an `extraHeader` (an Authorization
+// header), a credential helper's settings, a URL rewrite. Their names can carry a token too
+// (`url.https://<token>@host/.insteadOf`), which `hidden` hides.
+const SECRET_KEY = /^(http\.(.+\.)?extraheader|credential\..+|url\..+)$/i;
+
+// A URL's user and password, wherever it sits: in a value, or in a key name.
+const hidden = (t: string) => clean(t).replace(/\/\/[^/@\s]*@/g, "//***@");
+
 const shown = (value: string | null) => {
   if (value === null) return "(no value)";
-  const text = clean(value).replace(/\/\/[^/@\s]*@/g, "//***@");
+  const text = hidden(value);
   return JSON.stringify(text.length > 100 ? `${text.slice(0, 100)}...` : text);
 };
 
@@ -198,8 +206,8 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     const valid = next.every((v) => v !== null && (upstream?.[2] === "remote" ? PLAIN_REMOTE.test(v) : /^refs\/\S+$/.test(v)));
     if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
     else allBenign = false;
-    const name = clean(key);
-    if (COMMAND_KEY.test(key)) words.push(`${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`);
+    const name = hidden(key);
+    if (COMMAND_KEY.test(key) || SECRET_KEY.test(key)) words.push(`${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`);
     else if (!old.length) words.push(`${name} added: ${next.map(shown).join(", ")}`);
     else if (!next.length) words.push(`${name} removed (was ${old.map(shown).join(", ")})`);
     else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
@@ -444,7 +452,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       before.config = now.config;
     }
     if (benign.length) {
-      console.log(`${benign.map(clean).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
+      console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
     }
   }
   if (changed.length) {
