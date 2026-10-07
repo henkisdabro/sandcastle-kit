@@ -477,8 +477,11 @@ export type Attempted<G, O> =
  * ticket's attempt is over, and ends as `parked`. A port lets it through; the scheduler is its only catcher.
  */
 export class StoppedWhileParked extends Error {
-  constructor() {
+  /** The `.git` check after its sandbox closed, when it failed: the run stops with it as after any other attempt. */
+  readonly causes: readonly StopCause[];
+  constructor(causes: readonly StopCause[] = []) {
     super("the run stopped while this ticket was parked by a pause");
+    this.causes = causes;
   }
 }
 
@@ -1161,7 +1164,10 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
             r = await work.attempt(t, { n, again: first.get(t.id), last, juncture: (phase, park) => juncture(t.id, phase, park), paused: () => (sync(), pausedSince !== undefined) });
           } catch (error) {
             // Parked at a juncture when the run stopped: its record keeps the phase it waits at.
-            if (error instanceof StoppedWhileParked) return await end(t.id, { kind: "parked", cause: stop.headline });
+            if (error instanceof StoppedWhileParked) {
+              for (const c of error.causes) stop.add(c);
+              return await end(t.id, { kind: "parked", cause: stop.headline });
+            }
             r = { kind: "crashed", error };
           }
           if (r.kind === "not begun") {

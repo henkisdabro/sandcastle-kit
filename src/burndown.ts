@@ -157,6 +157,9 @@ export const settleAfter = async (settle: () => Promise<void>, kept: (error: unk
  */
 export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, check?: { error: unknown }, limited = false): Attempted<Outcome, Outcome> => {
   const tampered: StopCause[] = check ? [{ kind: "tampered", error: check.error }] : [];
+  // Parked by a pause when the run stopped: thrown on to the scheduler, which ends it as parked, with the check -
+  // dropped, a `.git` change found after a non-safety stop went unreported, as no check closes the run.
+  if (result.status === "rejected" && result.reason instanceof StoppedWhileParked) throw new StoppedWhileParked(tampered);
   if (result.status === "rejected") return { kind: "crashed", error: result.reason, causes: [...tampered, ...(limited ? [{ kind: "plan limit" as const, ticket: issue }] : [])] };
   const value = result.value;
   if (value.status === "green" || value.status === "merged-earlier") return check ? { kind: "stopped", cause: tampered[0] } : { kind: "green", green: value };
@@ -2094,7 +2097,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // Parked by a pause when the run stopped: not a crash. The schedule ends it as parked, its record still `paused`.
     if (result.status === "rejected" && result.reason instanceof StoppedWhileParked) {
       bookkeep(issue.id, () => view.finish(issue.id, "stopped", true));
-      throw result.reason;
+      return attempted(issue.id, result, check);
     }
     // Its ending arrives complete: an agent's hand-back is read now, not patched in after the schedule.
     const ended = result.status === "fulfilled" ? { ...result, value: handBack(result.value, tracker, { uncommitted: uncommittedWork(result.value) !== undefined, dryRun: DRY_RUN }) } : result;
