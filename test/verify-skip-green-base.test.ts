@@ -150,7 +150,7 @@ test("the summary says whose gates proved a merged base the verify did not run a
   const sha = "0123456789abcdef0123456789abcdef01234567";
   assert.equal(
     regated({ green: true, line: "", image: IMAGE, skipped: { commit: sha, by: "#427" } }),
-    `Merged main re-gated: green at 0123456 already (gated with #427) - not run again on image ${IMAGE}.`,
+    `Merged main re-gated: green at 0123456 already on image ${IMAGE} (gated with #427) - not run again.`,
   );
   assert.equal(verifySkippedLine("main", { commit: sha, by: "the base check" }), "Merged main re-gated: green at 0123456 already (gated by the base check) - not run again");
   assert.equal(verifySkippedLine("main", { commit: sha }), "Merged main re-gated: green at 0123456 already (gated before) - not run again");

@@ -474,17 +474,18 @@ const changelogLines = (all: { id: string; line: string }[]): string[] => {
   return out;
 };
 
-/** The closing summary as Markdown-ish text, every section present. */
 /**
  * The verify's line when it did not run: the green-base record already named the merged tip, so the gates that proved
  * it are the ones to name - a ticket's (`gated with #427`), or the base check's or an earlier verify's (`gated by ...`).
+ * `image` (` on image <tag>`) goes with the green, not after "not run again": those gates ran on it.
  */
-export const verifySkippedLine = (base: string, proof: { commit: string; by?: string }) => {
+export const verifySkippedLine = (base: string, proof: { commit: string; by?: string }, image = "") => {
   const by = typeof proof.by === "string" && proof.by ? proof.by : "";
   const said = by ? `gated ${by.startsWith("#") ? "with" : "by"} ${by}` : "gated before";
-  return `Merged ${base} re-gated: green at ${String(proof.commit).slice(0, 7)} already (${said}) - not run again`;
+  return `Merged ${base} re-gated: green at ${String(proof.commit).slice(0, 7)} already${image} (${said}) - not run again`;
 };
 
+/** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const ids = (states: TicketState[]) => Object.entries(f.tickets).filter(([, t]) => !!t.state && states.includes(t.state)).map(([id]) => id);
   const name = (id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
@@ -590,7 +591,7 @@ export const render = (f: Facts, plain = false): string => {
       // ticket closed as merged earlier merges nothing); undefined: it never got there.
       ? `Merged ${f.base} not re-gated (${f.verify === null ? "fewer than two branches merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green && f.verify.skipped
-        ? `${verifySkippedLine(f.base, f.verify.skipped)}${verifyImage}.${startingImage}`
+        ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
         : `Merged ${f.base} re-gated: RED TOGETHER (${f.verify.line})${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,

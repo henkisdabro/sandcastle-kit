@@ -342,7 +342,8 @@ merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base 
 that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
 merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
-the sources when the merged base is gated again at the end of the run.
+the sources: the landing's gates run on that commit, and the merged base is gated again at the end of the run unless
+those gates already ran on its tip.
 
 ### 🧩 A criterion left undone
 
@@ -702,7 +703,8 @@ the kit's own writes are the only moves it accepts. So a dependant of a ticket i
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
-locally and not yet pushed, and the merged base branch is gated once more. A dry run lands nothing
+locally and not yet pushed, and the merged base branch is gated once more - unless the last landing's own gates
+already ran on that very commit, which the closing summary then says. A dry run lands nothing
 and ends by checking that its tickets and the tracker are unchanged.
 
 > [!TIP]
