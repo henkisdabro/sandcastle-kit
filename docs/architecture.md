@@ -26,7 +26,7 @@ An agent names a problem outside its ticket in a `<followup>title - evidence</fo
 
 ## `src/landing.ts`
 
-`landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a merge as it is when the branch holds the base's tip, otherwise a merge gated in a sandbox, close) and what it returns - how it landed and the facts the run record keeps (the files a conflict or hold names, a red tree's failing tests, the paths beyond the Touches line, a failed close's error) - writing no verdict of its own, only the `landing` stage; `landingWork(ctx)`: the scheduler's land and host ports over one `LandContext`; the lines of a requeued ticket; `createHostGit`: the mutex through which every host git write goes and which moves the run's expected base; also the landing merge, its abort and the conflict line. What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it asks the ledger's `describe` for
+`landOne(ctx, outcome)`: landing one green branch (tracker check, moved head, held paths, then a merge as it is when the branch holds the base's tip, otherwise git's own merge of the base tip and the head on the host - a conflict outside the `generated` paths is returned at once, before any sandbox slot is asked for - and then a merge gated in a sandbox, close) and what it returns - how it landed and the facts the run record keeps (the files a conflict or hold names, a red tree's failing tests, the paths beyond the Touches line, a failed close's error) - writing no verdict of its own, only the `landing` stage; `landingWork(ctx)`: the scheduler's land and host ports over one `LandContext`; the lines of a requeued ticket; `createHostGit`: the mutex through which every host git write goes and which moves the run's expected base; also the landing merge, its abort and the conflict line. What it posts to the tracker as it lands (the close comment, a hold, an earlier merge closed) it asks the ledger's `describe` for
 
 ## `src/ledger.ts`
 
@@ -41,7 +41,7 @@ The ticket ledger: one place that turns each ending (`src/schedule.ts`) into eve
 
 ## `src/resolution.ts`
 
-`strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines
+`mergeTree` and `mergeTreeSupported` (the one `git merge-tree --write-tree` call and its git 2.38 gate, which `landOne`'s conflict precheck shares); `strayChanges`: compares a conflict resolution with git's own automatic merge (`git merge-tree --write-tree`, git 2.38 or newer) and names the changed paths that merged cleanly, so the land-only path holds the ticket instead of reviewing a resolution that dropped another ticket's lines
 
 ## `src/schedule.ts`
 
