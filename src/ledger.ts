@@ -226,7 +226,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
         };
       case "conflict": {
         // A second conflict is held with the tickets of both attempts named.
-        const line = e.again ? againNoteOf(landed) : conflictLine(landed);
+        const line = e.again ? againNoteOf(landed, e.again.kind) : conflictLine(landed);
         return {
           record: { state: "conflict", note: line, files: landed.files },
           outcome: { kind: "conflict", ...withOf(landed.with), text: `merge conflict: ${line}` },
@@ -240,10 +240,10 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
           // The pair, named: which tickets this one is red with.
           record: {
             state: "red",
-            note: e.again ? againNoteOf(landed) : redNote(landed),
+            note: e.again ? againNoteOf(landed, e.again.kind) : redNote(landed),
             ...(landed.failing?.length ? { failing: landed.failing } : {}),
           },
-          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed) : `red when merged${landed.with.length ? ` with ${refs}` : ""}${redDetail(landed)}` },
+          outcome: { kind: "red", ...withOf(landed.with), text: e.again ? againNoteOf(landed, e.again.kind) : `red when merged${landed.with.length ? ` with ${refs}` : ""}${redDetail(landed)}` },
           view: { word: "red when merged", landed: false },
           tracker: comment(notLandedComment(c.report, undefined, { branch: g.branch, base: c.base, with: landed.with, gates: landed.gates, failing: landed.failing })),
         };
@@ -360,7 +360,7 @@ const describeConflict = (e: Extract<TicketEnding, { kind: "conflict" }>, c: Con
       view: { word: "withdrawn", landed: true },
       tracker: comment(notLandedComment(c.report, undefined)),
     };
-  const line = e.again ? againNoteOf({ kind: "conflict", ...conflict }) : conflictLine(conflict);
+  const line = e.again ? againNoteOf({ kind: "conflict", ...conflict }, e.again.kind) : conflictLine(conflict);
   return {
     record: { state: "conflict", note: e.again ? line : `no longer merges onto ${c.base}: ${line}`, files: conflict.files, ...(unstarted && { requeued: null }) },
     outcome: { kind: "conflict", ...(conflict.with.length ? { with: conflict.with } : {}), text: `merge conflict before landing: ${line}` },

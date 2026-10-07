@@ -340,7 +340,11 @@ agent - both when a re-run merges the base into a branch from an earlier run, an
 landing resolved this way happens in a throwaway sandbox (the host never runs project code), as a
 merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base moves, the host checks
 that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
-merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
+merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. Before
+a landing takes a sandbox at all, the host asks `git merge-tree` (git 2.38+) whether the branch still
+merges, and only a conflict confined to `generated` paths goes on to the sandbox's merge. A file a
+merge driver would resolve inside the sandbox (an npm lockfile driver, say) is therefore a conflict
+unless it is listed under `generated`. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources: the landing's gates run on that commit, and the merged base is gated again at the end of the run unless
 those gates already ran on its tip.
