@@ -1,12 +1,13 @@
-// A drain turn's base check skips a commit the run's own gates just passed: verify's, and a landing's
-// merge that the base now names. Run for real against a fake docker whose every call succeeds (a gate's
+// A drain turn's base check skips the gates of a commit the run's own gates just passed: verify's, and a landing's
+// merge that the base now names. Those runs do not run the hook tests or the git-hook probe, so the check still
+// runs those; only its own record skips both. Run for real against a fake docker whose every call succeeds (a gate's
 // command is what decides green or red); no Docker or network.
 //
 //   node --test test/base-gates-recorded.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -25,6 +26,7 @@ writeFileSync(
 case "$*" in
   *"sh -c git rev-parse HEAD") git -C "$SANDCASTLE_TEST_REPO" rev-parse main ;;
   *"sh -c 'check-red'") [ -e "$SANDCASTLE_TEST_REPO/.red" ] && exit 7 ;;
+  *"git hook run"*) [ -e "$SANDCASTLE_TEST_REPO/.hookred" ] && { echo "@@hook pre-commit fail"; echo "needs a tool the image lacks"; }; echo probed >> "$SANDCASTLE_TEST_REPO/.probed" ;;
 esac
 exit 0
 `,
@@ -34,7 +36,7 @@ process.env.PATH = [bin, dirname(process.execPath), process.env.PATH].join(delim
 mkdirSync(join(dir, "config/sandcastle-kit"), { recursive: true });
 writeFileSync(join(dir, "config/sandcastle-kit/.env"), "CLAUDE_CODE_OAUTH_TOKEN=made-up\nGH_TOKEN=github_pat_made-up\n");
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { gateBase, requireGreenBase, verifyBase } = await import("../src/gates.ts");
+const { gateBase, noteGreenCommit, requireGreenBase, verifyBase } = await import("../src/gates.ts");
 const { loadProject } = await import("../src/config.ts");
 const { writePlan } = await import("../src/lean.ts");
 const { landOne, createHostGit } = await import("../src/landing.ts");
@@ -68,16 +70,79 @@ const inProject = async <T>(root: string, fn: (p: Awaited<ReturnType<typeof load
   }
 };
 const ran = (lines: string[]) => lines.some((l) => l.includes("running every gate on the base commit"));
+const probed = (root: string) => existsSync(join(root, ".probed"));
 const skipped = (lines: string[]) => lines.find((l) => l.includes("not re-run"));
 
-test("a green verify is the base the next turn's check does not gate again", async () => {
+test("a green verify is the base the next turn's check does not gate again, though it still runs the hook checks", async () => {
   const root = makeProject("check-red");
   await inProject(root, async (project, plan) => {
     await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
     const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
     assert.ok(!ran(lines), lines.join("\n"));
     const at = git(root, "rev-parse", "--short", "main");
-    assert.equal(skipped(lines), `Gates on main: green at ${at} already (verified this run) - not re-run.`);
+    assert.equal(skipped(lines), `Gates on main: green at ${at} already (verified this run) - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
+    assert.ok(probed(root), "the git-hook probe ran");
+  });
+});
+
+test("the base check's own record skips the gates and the hook checks both", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    assert.ok(probed(root));
+    rmSync(join(root, ".probed"));
+    // A verify at the same commit adds nothing the record lacked, and takes nothing from it.
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
+    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    assert.match(skipped(lines) ?? "", /already \(verified this run\) - not re-run\.$/);
+    assert.equal(probed(root), false);
+  });
+});
+
+test("a check that ran only the hook checks records them, so the one after it skips both", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => verifyBase(project, "sandcastle-fixture:t", plan, "run-1"));
+    await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    rmSync(join(root, ".probed"));
+    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    assert.match(skipped(lines) ?? "", /- not re-run\.$/);
+    assert.equal(probed(root), false);
+  });
+});
+
+test("a record without the hooks field, an older kit's, counts as gates alone", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    rmSync(join(root, ".probed"));
+    const file = join(root, ".sandcastle/.run/base-gates.json");
+    const { hooks: _, ...old } = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify(old) + "\n");
+    const { lines } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    assert.ok(!ran(lines), lines.join("\n"));
+    assert.match(skipped(lines) ?? "", /gates not re-run; running the hook tests/);
+    assert.ok(probed(root));
+  });
+});
+
+// A ticket that changes a commit hook and lands green: its landing's record is at the key the next base check computes.
+test("a landing that changes a git hook leaves a record the next base check still probes, and refuses", async () => {
+  const root = makeProject("check-red");
+  await inProject(root, async (project, plan) => {
+    await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-1"));
+    // The ticket's change: a hook the image cannot run, committed to the base.
+    writeFileSync(join(root, ".hookred"), "");
+    writeFileSync(join(root, "hook.txt"), "the hook\n");
+    git(root, "add", "hook.txt");
+    git(root, "commit", "-q", "-m", "ticket: change the pre-commit hook");
+    noteGreenCommit(project, "sandcastle-fixture:t", plan, git(root, "rev-parse", "main"));
+    const { lines, result } = await quietly(() => requireGreenBase(project, "sandcastle-fixture:t", plan, true, "run-2").then(() => undefined, (e: unknown) => e));
+    assert.ok(!ran(lines), lines.join("\n"));
+    assert.match(skipped(lines) ?? "", /gates not re-run; running the hook tests/);
+    assert.match(String((result as Error)?.message), /git hook pre-commit/);
+    // Red on the hook: no record is left that would skip it next time.
+    assert.equal(existsSync(join(root, ".sandcastle/.run/base-gates.json")), false);
   });
 });
 

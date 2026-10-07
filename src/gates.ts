@@ -242,11 +242,12 @@ export const gitHooksLine = (g: GitHooks) =>
 // exactly as an agent's is (image, setup, lean plan). `hookTests` also runs
 // the project's hook tests there, against the plan's kept hooks, and probes
 // the repo's git commit hooks.
+// `withGates` false runs only those hook checks, for a base a landing's or verify's gates already passed.
 // `runId` is the run these gates belong to, which the sandbox's peak is filed under.
 // `ownSlot` false runs it in the sandbox slot the caller holds: a ticket's pipeline that waits on
 // the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true) => {
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true) => {
   const gated = async () => {
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
@@ -255,7 +256,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
-      const run = await runGates(project, sandbox, `${project.name} ${label}`, true, undefined, ownSlot);
+      const run: GateRun = withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, undefined, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
       // Red on the base, whoever asked: a green record of it (a landing's, the verify's) would have the next
       // turn skip the check on a base known to be red - a flaky test passes once and fails the next time.
       if (run.failures.length || run.gates.some((g) => !g.pass)) noteBaseResult(project.root, "", false);
@@ -449,18 +450,34 @@ export const baseCacheHit = (root: string, key: string) => {
   }
 };
 
+// Whether the record at this key also covers the hook tests and the git-hook probe, which only the base check runs.
+// A record without the field (an older kit's) covers the gates alone.
+const hooksCovered = (root: string, key: string) => {
+  try {
+    const record = JSON.parse(readFileSync(baseRecord(root), "utf8"));
+    return record.key === key && record.hooks === true;
+  } catch {
+    return false;
+  }
+};
+
 // A green result is recorded; a red one removes the record. A gate that
 // depends on the clock or the network can go red at the same key `sandcastle
 // gates` was green at, and a record left behind would have the next run skip
 // the check and fan agents out on a base known to be red.
+// `hooks` says the green result covered the hook tests and the git-hook probe as well as the gates: only the base check
+// runs them, so a landing's or verify's record (gates alone) leaves the next base check its hook checks, which a
+// commit that changed a hook file would otherwise have skipped.
 // `run` is this process: a skip says "verified this run" only for a record this run wrote. Not the run record's
 // `startedAt`, which every autonomy turn writes afresh, so a drain turn never knew its own run's verify.
 const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 1000)}`;
-export const noteBaseResult = (root: string, key: string, green: boolean) => {
+export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
+  // The key names the commit, so the hook files: a gates-only result at the key a base check recorded in full says nothing less.
+  const covered = hooks || hooksCovered(root, key);
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered }) + "\n");
 };
 
 const recordedRun = (root: string): string | undefined => {
@@ -544,30 +561,33 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
-  if (cached && baseCacheHit(project.root, key)) {
+  // A landing's or verify's green record covers the gates, not the hook tests or the git-hook probe.
+  const gatesGreen = cached && baseCacheHit(project.root, key);
+  if (gatesGreen) {
     const commit = sh("git", ["rev-parse", "--short", base]);
-    console.log(
-      recordedRun(project.root) === THIS_RUN
-        ? `Gates on ${base}: green at ${commit} already (verified this run) - not re-run.`
-        : `Gates on ${base}: green at this commit and image before - not re-run.`,
-    );
-    return;
+    const seen = recordedRun(project.root) === THIS_RUN ? `green at ${commit} already (verified this run)` : "green at this commit and image before";
+    if (hooksCovered(project.root, key)) {
+      console.log(`Gates on ${base}: ${seen} - not re-run.`);
+      return;
+    }
+    console.log(`Gates on ${base}: ${seen} - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
+  } else console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
+  const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen);
+  if (!gatesGreen) {
+    console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
+    for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
+    console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   }
-  console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
-  const run = await gateBase(project, image, planFile, "base-gates", true, runId);
-  console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
-  for (const line of gateResultLines(project.gates, run.gates)) console.log(line);
-  console.log(`  time per gate, slowest first: ${gateTimeLine(run.gates)}`);
   for (const t of run.hookTests) console.log(`  hook test ${t.pass ? "pass" : "FAIL"}  ${t.name} - ${t.detail}`);
   if (run.gitHooks) console.log(`  ${gitHooksLine(run.gitHooks)}`);
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green);
+  noteBaseResult(project.root, key, green, true);
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,
-    `# base gates on ${base} at ${commit}, ${new Date().toISOString()}: ${gateLine(run.gates)}` +
+    `# base gates on ${base} at ${commit}, ${new Date().toISOString()}: ${gatesGreen ? "gates green on record, not re-run" : gateLine(run.gates)}` +
       (redHooks.length ? ` hook-tests=${redHooks.length}-FAIL` : "") +
       (gitHook ? ` git-hook=${gitHook.name}-FAIL` : ""),
     run.failures,
