@@ -42,6 +42,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   so a branch given an upstream there (`git worktree add` from a remote branch, `git push -u`,
   `gh pr create`) stops the run as a commit on the base does; `--no-track` or
   `git push origin HEAD:<branch>` avoid it.
+- **A ticket that waits for a blocker in the same run is named once in the start plan**, its own
+  line naming the blocker (`- waits for #446 in this run`), instead of again under the list.
 - **The start plan says `up to N at a time`.** Beside another project's live run, the plain
   figure sat above `this run's share is 1` and an estimate for one at a time, as though the run
   would start two.

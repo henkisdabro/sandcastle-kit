@@ -1762,8 +1762,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const parked = schedule.start.flatMap((c) => (c.file ? [{ ticket: c.ticket, wait: c.file }] : []));
   // `order` in run.json: the place in the start list; a released or requeued ticket is given an earlier one when it is (`createHoldRecord`).
   const order = new Map(candidates.map((t, at) => [t.id, at] as const));
-  const sayWaits = () => {
-    for (const w of waiting) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
+  // `inRun`: tickets whose plan line already names their blockers; a line of their own here said it twice.
+  const sayWaits = (inRun = new Set<string>()) => {
+    for (const w of waiting) if (!inRun.has(w.issue)) console.log(`  ${ref(w.issue)} waits for ${w.on.join(", ")} to close`);
   };
   if (issues.length === 0) {
     sayWaits();
@@ -1788,13 +1789,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const o = overrides.get(i.id) ?? {};
     const own = implementNote(o);
     const later = parked.find((p) => p.ticket.id === i.id);
-    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? " - waits for a blocker in this run" : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
+    const blockers = waiting.find((w) => w.issue === i.id)?.on.join(", ") || "a blocker";
+    console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? ` - waits for ${blockers} in this run` : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   // A Touches line naming a path the kit always holds: the work is still wanted and runs, only its merge is a
   // person's. Said now, since the reason was otherwise news only at the end of the run.
   for (const line of protectedPlanLines(project, candidates, ref)) console.log(`  ${line}`);
   // After the header, with the ticket list and the shared-file lines: they are indented under it.
-  sayWaits();
+  sayWaits(new Set(dependants.map((d) => d.id)));
   holds.start(schedule.start);
   // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
   const spend = projectApiKeySpend(project);
