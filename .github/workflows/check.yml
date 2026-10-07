@@ -45,6 +45,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Every tag: test/changelog-released.test.ts compares each release with its tag.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
