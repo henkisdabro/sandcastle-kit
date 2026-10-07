@@ -794,9 +794,12 @@ const SOLID_HISTORY = 5;
  * from all of them.
  *
  * `detail.carried` says which tickets of the run are carried branches (`isCarried`). A carried
- * ticket is estimated from the history tickets that were carried (a `resolve` pass, or a `carried`
- * field on their lines), a fresh one from the rest, each falling back to the other when it has no
- * history of its own; a carried ticket with none says the estimate is low.
+ * ticket is estimated from the history tickets that were carried (a `carried` field on their lines,
+ * or a `resolve` pass and no implement), a fresh one from the rest, each falling back to the other
+ * when it has no history of its own; a carried ticket with none says the estimate is low. A history
+ * ticket implemented and requeued in its own run is a fresh sample, and its lines from the first
+ * resolve on (resolve, narrow review, gates) a carried one: a carried branch's attempt is not its
+ * ticket's first one.
  *
  * `detail.gateSlots` is the machine's gates pool (`limit("gates")`): every ticket's gate passes (the
  * pre-landing `gates` lines, and the `landing gates` lines) share it, so the run takes at least their
@@ -815,7 +818,15 @@ export const estimate = (
     return undefined;
   }
   type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
-  type Group = { ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string };
+  type Group = {
+    ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string;
+    // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
+    flagged?: boolean; resolved?: boolean; implemented?: boolean;
+    // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
+    tail?: Group;
+    // The history ticket a `tail` was cut from, so the line counts tickets.
+    origin?: Group;
+  };
   const groups = new Map<string, Group>();
   const ticketLines: Line[] = [];
   // The run's own steps before and after the tickets (issue 0): base gates hold every agent back, and verify follows the last landing.
@@ -843,7 +854,24 @@ export const estimate = (
     else g.ms += l.ms as number;
     // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
     if (l.phase === "gates") g.gateMs += l.ms as number;
-    if (l.phase === "resolve" || l.carried === true) g.carried = true;
+    if (l.carried === true) g.flagged = true;
+    if (l.phase === "implement") g.implemented = true;
+    if (l.phase === "resolve") {
+      g.resolved = true;
+      g.tail ??= { ms: 0, gateMs: 0, landMs: 0, tokened: false, inTokens: 0, out: 0, carried: true, origin: g };
+    }
+    // From the first resolve on, the lines are the carried branch's attempt, which a ticket implemented in this run is requeued into.
+    const t = g.tail;
+    if (t) {
+      if (l.phase === LANDING_GATES) t.landMs += l.ms as number;
+      else t.ms += l.ms as number;
+      if (l.phase === "gates") t.gateMs += l.ms as number;
+      if (l.tokens && typeof l.tokens === "object") {
+        t.tokened = true;
+        t.inTokens += (l.tokens.input ?? 0) + (l.tokens.cacheWrite ?? 0) + (l.tokens.cacheRead ?? 0);
+        t.out += l.tokens.output ?? 0;
+      }
+    }
     // The review lines name the reviewer's model: only the steps the implementer ran say who implemented.
     if ((l.phase === "implement" || l.phase === "repair") && typeof l.model === "string" && l.model) g.model ??= l.model;
     if (l.tokens && typeof l.tokens === "object") {
@@ -853,7 +881,15 @@ export const estimate = (
     }
     groups.set(key, g);
   }
+  // Carried: a branch from an earlier run (its lines say so) or one with a resolve and no implement in this run. A ticket
+  // implemented and requeued in the same run is a fresh one, and its tail is a carried sample of its own: pricing a carried
+  // ticket from its whole first attempt put the estimate at twice the real time.
+  for (const g of groups.values()) {
+    g.carried = g.flagged === true || (g.resolved === true && !g.implemented);
+    if (g.carried || g.implemented !== true || !g.tail?.tokened) g.tail = undefined;
+  }
   const counted = [...groups.values()].filter((g) => g.tokened);
+  const samples = (g: Group): Group[] => (g.tail ? [g, g.tail] : [g]);
   if (!counted.length) return undefined;
   const figures = (gs: Group[], at: (xs: number[]) => number) => ({ inTokens: at(gs.map((g) => g.inTokens)), out: at(gs.map((g) => g.out)), ms: at(gs.map((g) => g.ms)), gateMs: at(gs.map((g) => g.gateMs)), landMs: at(gs.map((g) => g.landMs)) });
   // Each ticket of the run: the figures at the median and at the high end.
@@ -869,12 +905,12 @@ export const estimate = (
     if (!ofModel.length) unknown++;
     else if (ofModel.length < SOLID_HISTORY && model !== undefined) thin.set(model, ofModel.length);
     const priced = (pool: Group[]) => {
-      const same = pool.filter((g) => g.carried === carried);
+      const same = pool.flatMap(samples).filter((g) => g.carried === carried);
       const use = same.length ? same : pool;
-      for (const g of use) pricedFrom.add(g);
+      for (const g of use) pricedFrom.add(g.origin ?? g);
       return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
     };
-    if (carried && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).some((g) => g.carried)) lowCarried++;
+    if (carried && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).flatMap(samples).some((g) => g.carried)) lowCarried++;
     if (!ofModel.length || ofModel.length >= SOLID_HISTORY || model === undefined) return priced(ofModel.length ? ofModel : counted);
     // A model with a few tickets only is blended with all of them, weighted by how many it has: two dear tickets in
     // the window are not a median to price a run by, and the other models' median alone prices it as one of them.

@@ -24,10 +24,10 @@ const line = (o: object) => JSON.stringify({ project: "fixture", run: "r1", ...o
 
 /** A fresh ticket: `minutes` in one implement step. */
 const fresh = (issue: number, minutes: number, input: number, output: number) => [line({ issue: String(issue), phase: "implement", ms: minutes * MIN, tokens: tok(input, output) })];
-/** A carried ticket: the implement step and the resolve pass a conflicting base merge needs. */
+/** A carried ticket: its lines say `carried`, as the run writes them for a branch ahead of the base at the start. */
 const carried = (issue: number, minutes: number, input: number, output: number) => [
-  line({ issue: String(issue), phase: "resolve", ms: 2 * MIN, tokens: tok(0, 0) }),
-  line({ issue: String(issue), phase: "implement", ms: (minutes - 2) * MIN, tokens: tok(input, output) }),
+  line({ issue: String(issue), phase: "resolve", ms: 2 * MIN, carried: true, tokens: tok(0, 0) }),
+  line({ issue: String(issue), phase: "implement", ms: (minutes - 2) * MIN, carried: true, tokens: tok(input, output) }),
 ];
 
 const project = (lines: string[]) => {
