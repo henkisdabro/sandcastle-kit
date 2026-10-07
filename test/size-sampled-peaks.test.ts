@@ -137,7 +137,14 @@ test("a run's marked lines count their anon figures while the unmarked lines bef
     ...ran({ peakMib: 5200, anonMib: 2560, agentAnonMib: 820, sampled: 2 }, "new", "2026-05-09T00:00:00.000Z"),
   ];
   const m = measuredPeak(peaks, NOW);
-  assert.deepEqual(m, { peakMib: 5300, project: "abc123", runs: 2, anonMib: 2560, agentAnonMib: 820 });
+  assert.deepEqual(m, {
+    peakMib: 5300,
+    project: "abc123",
+    runs: 2,
+    anonMib: 2560,
+    agentAnonMib: 820,
+    figures: { peak: { mib: 5300, samples: 2, highest: 5300 }, anon: { mib: 2560, samples: 1, highest: 2560 }, agentAnon: { mib: 820, samples: 1, highest: 820 } },
+  });
   // An unmarked line's anon is not read as a larger figure than a marked one's, nor as the only one.
   assert.deepEqual(measuredPeak([{ ...peaks[0], anonMib: 9000, agentAnonMib: 3000 }, peaks[1]], NOW)?.anonMib, 2560);
 });
