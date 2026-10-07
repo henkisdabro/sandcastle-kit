@@ -1,21 +1,22 @@
 // A ticket whose Touches line names a path the kit always holds for a person (#441): the start plan
 // says so before the ticket costs a pipeline, and the live line of its hold carries the reason. The
-// plan line's words (`protectedPlanLine`) are read against `protectedTouches` over ticket files in a
-// temp git repo; the live line is the real ledger's `say`, over a run record in a temp dir. No Docker,
-// model or network.
+// plan lines (`protectedPlanLines`) are read over tickets against a temp git repo, and their place
+// in burndown()'s start output from its source (burndown() needs Docker, as start-output-order.test.ts
+// says); the live line is the real ledger's `say`, over a run record in a temp dir. No Docker, model
+// or network.
 //
 //   node --test test/protected-plan.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { protectedPlanLine, protectedTouches } = await import("../src/guard.ts");
+const { protectedPlanLines } = await import("../src/guard.ts");
 const { createLedger } = await import("../src/ledger.ts");
 const { recordRun } = await import("../src/run.ts");
 const { fakeTracker } = await import("./fixtures.ts");
@@ -35,17 +36,26 @@ test("the start plan names each ticket whose Touches line names a held path, and
   git(root, "init", "-q", "-b", "main");
   git(root, "add", "-A");
   git(root, "commit", "-qm", "t");
-  const project = { root, name: "t", baseBranch: "main", protectedPaths: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
+  const project = { root, name: "t", baseBranch: "main", protectedPaths: ["app.ts"], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
   const queued = [
-    { id: "7", body: "Fix CI.\n\nTouches: .github/workflows/check.yml, app.ts" },
-    { id: "8", body: "Touches: app.ts" },
+    { id: "7", body: "Fix CI.\n\nTouches: .github/workflows/check.yml, docs/x.md" },
+    { id: "8", body: "Touches: docs/x.md" },
     { id: "9" },
+    { id: "10", body: "Touches: app.ts" },
   ];
-  const lines = queued.flatMap((t) => {
-    const paths = protectedTouches(project, t.body ?? "");
-    return paths.length ? [protectedPlanLine(`#${t.id}`, paths)] : [];
-  });
-  assert.deepEqual(lines, ["#7 will be held for a person to merge (.github/workflows/check.yml)"]);
+  assert.deepEqual(protectedPlanLines(project, queued, (id) => `#${id}`), [
+    "#7 will be held for a person to merge (.github/workflows/check.yml)",
+    "#10 will be held for a person to merge (app.ts)",
+  ]);
+});
+
+test("burndown() says the plan lines under the run header, before the wait lines", () => {
+  const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
+  const body = src.indexOf("export const burndown = ");
+  const header = src.indexOf("ticket(s)${dependants.length", body);
+  const plan = src.indexOf("protectedPlanLines(project, candidates, ref)", body);
+  const waits = src.indexOf("sayWaits();\n  holds.start(schedule.start);", header);
+  assert.ok(header > body && plan > header && waits > plan, "the plan lines print after the header and before the wait lines");
 });
 
 test("the live line of a ticket held at landing carries the paths it is held for", () => {
