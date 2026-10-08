@@ -77,6 +77,25 @@ export { RUN_COMMAND } from "./run-live.ts";
 // for a ticket file.
 const ref = (id: string) => (/^\d+$/.test(id) ? `#${id}` : id);
 
+/** How a run ended, from its exit code alone: a whole number or the word `unknown`, never record text. */
+export const endedHow = (run: Run): string => (run.finishedAt ? `ended (exit ${whole(run.exitCode) ?? "unknown"})` : "ended without a clean exit");
+
+/**
+ * The prompt that has the session close a run that ended. It names the run by numbers only - the
+ * pid when it is a whole number, the start time re-rendered as local `HH:MM` (as the closing
+ * summary's Run line prints it) when `startedAt` parses as a date - and leaves out anything else:
+ * the record is a file in a repository that may be a stranger's. The text is fixed when the end is
+ * seen and read when the session is idle, by which time a later run may be live in the same
+ * root; the numbers are how the agent tells the run that ended from that one.
+ */
+export const endPrompt = (root: string, run: Run): string => {
+  const pid = run.pid !== undefined && Number.isSafeInteger(run.pid) && run.pid > 0 ? `pid ${run.pid}` : undefined;
+  const at = run.startedAt === undefined ? NaN : Date.parse(run.startedAt);
+  const started = Number.isFinite(at) ? `started ${new Date(at).toTimeString().slice(0, 5)}` : undefined;
+  const named = [pid, started].filter(Boolean).join(", ");
+  return `The sandcastle run in ${root}${named ? ` (${named})` : ""} ${endedHow(run)}. Close that run now: read run.md in the sandcastle skill's directory and follow it.`;
+};
+
 /** A half-written or foreign file reads as no record. */
 export const parse = (raw: string): Run | undefined => {
   let r: Record<string, unknown>;
