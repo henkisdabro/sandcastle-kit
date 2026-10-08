@@ -4,7 +4,7 @@
 // no run is promised: the summary suggests the hold label instead. Ticket files in a temp repo
 // (files tracker) and a made-up run record; no Docker, gh, model calls or network.
 //
-//   node --test test/report-partly-done-rerun.test.ts
+//   pnpm test:file test/report-partly-done-rerun.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -1,7 +1,7 @@
 // The base image refresh: `--pull` only when asked, and doctor's age warning. No Docker; dates are
 // parsed and subtracted in TypeScript, so macOS and Linux (and any timezone) give the same answer.
 //
-//   node --test test/image-refresh.test.ts
+//   pnpm test:file test/image-refresh.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

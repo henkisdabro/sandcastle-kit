@@ -3,7 +3,7 @@
 // the hook checks, which a landing never runs: no earlier record covered them to carry over (that case is
 // test/hook-checks-kept-across-landings.test.ts). Run for real against a fake docker; no Docker or network.
 //
-//   node --test test/fast-forward-landing-recorded.test.ts
+//   pnpm test:file test/fast-forward-landing-recorded.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

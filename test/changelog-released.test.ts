@@ -4,7 +4,7 @@
 // tags (CI checks out with fetch-depth 0; a sandbox's worktree shares the host's .git). No Docker,
 // model or network.
 //
-//   node --test test/changelog-released.test.ts
+//   pnpm test:file test/changelog-released.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

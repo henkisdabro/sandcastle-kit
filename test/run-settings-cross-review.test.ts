@@ -3,7 +3,7 @@
 // <effort>` / `○ cross-review` item, with the models cell holding only models for a record that
 // carries it. A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/run-settings-cross-review.test.ts
+//   pnpm test:file test/run-settings-cross-review.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

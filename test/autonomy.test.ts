@@ -2,7 +2,7 @@
 // re-runnable, the turn decision, the level-1 question, several run records and one run lock in
 // a single process, and the CLI refusing a bad level before any spend.
 //
-//   node --test test/autonomy.test.ts
+//   pnpm test:file test/autonomy.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

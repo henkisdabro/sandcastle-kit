@@ -2,7 +2,7 @@
 // a live lock is refused, a dead one is taken over, a release leaves someone
 // else's lock alone, and many processes racing one stale lock get one winner.
 //
-//   node --test test/lock.test.ts
+//   pnpm test:file test/lock.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

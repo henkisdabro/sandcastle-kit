@@ -4,7 +4,7 @@
 // processes' worth of behaviour against a fake docker that keeps its images as files and prints
 // BuildKit's plain progress. No Docker or network.
 //
-//   node --test test/sandbox-image-prune.test.ts
+//   pnpm test:file test/sandbox-image-prune.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";

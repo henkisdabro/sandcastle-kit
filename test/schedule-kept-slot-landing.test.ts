@@ -4,7 +4,7 @@
 // yields to it. With a landing waiting (`Work.landingWaits`), the kept slot goes back and the worker asks again.
 // One worker and one sandbox slot, the slot port's own; fake attempts and landings. No git, no Docker, no network.
 //
-//   node --test test/schedule-kept-slot-landing.test.ts
+//   pnpm test:file test/schedule-kept-slot-landing.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

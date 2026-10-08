@@ -1,6 +1,6 @@
 // CI's shards (test/shard.ts) run every test file exactly once, and spread the slow ones.
 //
-//   node --test test/shard.test.ts
+//   pnpm test:file test/shard.test.ts
 
 import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";

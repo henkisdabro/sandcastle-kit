@@ -2,7 +2,7 @@
 // no `versions` entry), or one above `dist-tags.latest`. An injected fetcher and a temp
 // XDG_CACHE_HOME: no network, no Docker.
 //
-//   node --test test/versions-codex-published.test.ts
+//   pnpm test:file test/versions-codex-published.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -1,7 +1,7 @@
 // The committer of the kit's merges and of a sandbox's commits: the agent, with the
 // operator still the author. Temp git repo, no Docker, no gh, no network.
 //
-//   node --test test/committer.test.ts
+//   pnpm test:file test/committer.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

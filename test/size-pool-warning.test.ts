@@ -2,7 +2,7 @@
 // which doctor and the run's start line print), and the page-cache note on the measured peak. The
 // readers are fakes (a made-up `docker info`, made-up peaks), so no Docker or model call is needed.
 //
-//   node --test test/size-pool-warning.test.ts
+//   pnpm test:file test/size-pool-warning.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

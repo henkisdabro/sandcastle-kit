@@ -2,7 +2,7 @@
 // ticket that landed meanwhile) or put back in the queue. The closing summary names the pair and
 // says so; the headline still counts what landed during the run, and the verify line is unchanged.
 //
-//   node --test test/report-in-run-landing.test.ts
+//   pnpm test:file test/report-in-run-landing.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

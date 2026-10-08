@@ -4,7 +4,7 @@
 // through test/cli-spawn.ts dies with the test process, also when that was killed outright.
 // No Docker, model calls or network.
 //
-//   node --test test/temp-cleanup.test.ts
+//   pnpm test:file test/temp-cleanup.test.ts
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

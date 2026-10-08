@@ -3,7 +3,7 @@
 // runs those; only its own record skips both. Run for real against a fake docker whose every call succeeds (a gate's
 // command is what decides green or red); no Docker or network.
 //
-//   node --test test/base-gates-recorded.test.ts
+//   pnpm test:file test/base-gates-recorded.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

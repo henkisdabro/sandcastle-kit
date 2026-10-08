@@ -2,7 +2,7 @@
 // end:` line it always gave, and Codex's reading, when cross-review has one, adds a `Codex plan usage at the end:`
 // line beside it. With no Codex reading the summary is unchanged. Facts only: a temp repository, no Docker, no network.
 //
-//   node --test test/report-usage-codex.test.ts
+//   pnpm test:file test/report-usage-codex.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

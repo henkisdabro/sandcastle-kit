@@ -3,7 +3,7 @@
 // a time limit, so a stuck child fails the test with its command named instead of hanging
 // `pnpm test`, every gate run in a sandbox and `full-check.sh`. No Docker, model calls or network.
 //
-//   node --test test/cli-spawn.test.ts
+//   pnpm test:file test/cli-spawn.test.ts
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";

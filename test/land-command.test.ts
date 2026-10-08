@@ -2,7 +2,7 @@
 // the ticket on green. A temp git repo, the ticket-file tracker and a host worktree for the
 // sandbox - no Docker, no model, no network.
 //
-//   node --test test/land-command.test.ts
+//   pnpm test:file test/land-command.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

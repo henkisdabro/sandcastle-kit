@@ -2,7 +2,7 @@
 // jest's "PASS a.test.ts" and pytest's "test_a.py ...." list every passing file, and blaming those
 // named each landed ticket that touched any tested module. One passing and one failing file per runner.
 //
-//   node --test test/red-subject-passing-lines.test.ts
+//   pnpm test:file test/red-subject-passing-lines.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -5,7 +5,7 @@
 //
 // This process is one run and the other is a file (test/pool-sim.ts); the clock the pool reads is ours.
 //
-//   node --test test/pool-wait-line.test.ts
+//   pnpm test:file test/pool-wait-line.test.ts
 
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";

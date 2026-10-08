@@ -4,7 +4,7 @@
 // docker call died with no recorded end, no notify, and its sandboxes left working.
 // The launcher's own exec line runs a fixture that stalls; no Docker, network or model calls.
 //
-//   node --test test/launcher-signal.test.ts
+//   pnpm test:file test/launcher-signal.test.ts
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

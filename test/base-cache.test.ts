@@ -1,7 +1,7 @@
 // The base-gate cache record (src/gates.ts): a green result makes the same key
 // hit, a later red result at that key clears it, and another key never hits.
 //
-//   node --test test/base-cache.test.ts
+//   pnpm test:file test/base-cache.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";

@@ -5,7 +5,7 @@
 // without terminal_id (an older kit's) acts as before. The fake `herdr` logs every call, and a fake
 // `sleep` sends status.sh its signal mid-loop; no Herdr, no network.
 //
-//   node --test test/herdr-view-quit.test.ts
+//   pnpm test:file test/herdr-view-quit.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

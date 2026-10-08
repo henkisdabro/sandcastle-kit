@@ -4,7 +4,7 @@
 // no Docker, gh, model calls or network. The CLI case starts the kit with the running node and the
 // launcher's preload, so it does not depend on a `node` shim on PATH (macOS version managers).
 //
-//   node --test test/queue-lint.test.ts
+//   pnpm test:file test/queue-lint.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

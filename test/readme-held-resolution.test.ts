@@ -2,7 +2,7 @@
 // person, in "How it works" (Re-runs) and in Troubleshooting, and the hold note it quotes is the one
 // the kit writes.
 //
-//   node --test test/readme-held-resolution.test.ts
+//   pnpm test:file test/readme-held-resolution.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 // kept. Real `landOne` against a temp repo, a fake tracker and a host worktree for the sandbox: no
 // Docker, no gh, no network.
 //
-//   node --test test/landing-deletes-branch.test.ts
+//   pnpm test:file test/landing-deletes-branch.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

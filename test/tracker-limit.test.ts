@@ -2,7 +2,7 @@
 // warns, on stderr, when a list comes back exactly full. A fake `gh` first on
 // PATH stands in for the real one, so no network is needed.
 //
-//   node --test test/tracker-limit.test.ts
+//   pnpm test:file test/tracker-limit.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

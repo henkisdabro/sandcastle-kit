@@ -3,7 +3,7 @@
 // `size` is run over fake readers, so there is no Docker, model call or network. Every expected figure is worked by
 // hand from the figures in the test: a MiB figure x 1.1, rounded up, over 1024.
 //
-//   node --test test/size-sampled-peaks.test.ts
+//   pnpm test:file test/size-sampled-peaks.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

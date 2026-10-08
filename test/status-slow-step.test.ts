@@ -3,7 +3,7 @@
 // pass is bounded by nothing but its idle timeout. A made-up live run record, a fake `sandcastle`
 // and a `docker` that finds nothing; no Docker, no network, no model calls.
 //
-//   node --test test/status-slow-step.test.ts
+//   pnpm test:file test/status-slow-step.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";

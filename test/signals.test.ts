@@ -5,7 +5,7 @@
 // deadlock on Node 24 (nodejs/node#66171). One real process per case,
 // no Docker, no network, no model.
 //
-//   node --test test/signals.test.ts
+//   pnpm test:file test/signals.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

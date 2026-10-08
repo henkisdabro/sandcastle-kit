@@ -3,7 +3,7 @@
 // closing summary lists the merged tickets' lines under Done, grouped Added / Changed / Fixed.
 // No Docker, model or network.
 //
-//   node --test test/changelog-lines.test.ts
+//   pnpm test:file test/changelog-lines.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

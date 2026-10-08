@@ -5,7 +5,7 @@
 // (a resolve's, test/resolve-wait-recorded.test.ts) is still the step's `waitMs`. Temp repo only; no
 // Docker, model or network.
 //
-//   node --test test/slot-wait-timings.test.ts
+//   pnpm test:file test/slot-wait-timings.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

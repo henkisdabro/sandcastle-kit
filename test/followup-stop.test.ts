@@ -4,7 +4,7 @@
 // in the record as "file it by hand". A normal run files each once. A temp repo, scripted agent
 // passes, the real run record and the real scheduler; no Docker, model or network.
 //
-//   node --test test/followup-stop.test.ts
+//   pnpm test:file test/followup-stop.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

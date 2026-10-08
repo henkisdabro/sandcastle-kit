@@ -4,7 +4,7 @@
 // prints no merge command; and a hand merge that is already closed no longer says "closes on push".
 // Throwaway repos, ticket files for the tracker; no gh, no Docker.
 //
-//   node --test test/hand-merged-branch-gone.test.ts
+//   pnpm test:file test/hand-merged-branch-gone.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

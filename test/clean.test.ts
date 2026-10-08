@@ -3,7 +3,7 @@
 // count (and goes with `all`), a branch merged as an equal patch counts as merged, only worktrees
 // under .sandcastle/worktrees/ are removed, and the run lock is still held when it returns.
 //
-//   node --test test/clean.test.ts
+//   pnpm test:file test/clean.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

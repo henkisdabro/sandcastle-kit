@@ -4,7 +4,7 @@
 // still turns the view off once, with Herdr's own message and not its JSON.
 // A fake `herdr` on PATH answers by the mode in $FAKE_MODE and logs every call: no Herdr, no Docker.
 //
-//   node --test test/herdr-status-pane-closed.test.ts
+//   pnpm test:file test/herdr-status-pane-closed.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

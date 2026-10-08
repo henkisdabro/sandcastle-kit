@@ -7,7 +7,7 @@
 // sandbox, scripted agents and gate runs - and the scheduler (`createSchedule`) runs it with a fake
 // landing that commits to the base. No Docker, model, gh or network.
 //
-//   node --test test/pipeline-conflict-before-landing.test.ts
+//   pnpm test:file test/pipeline-conflict-before-landing.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -3,7 +3,7 @@
 // `sandcastle wait` and `stop` - on a pid that was recycled. No real process stands in for the
 // run here except where a reader asks the system itself.
 //
-//   node --test test/run-live.test.ts
+//   pnpm test:file test/run-live.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";

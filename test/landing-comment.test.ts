@@ -1,7 +1,7 @@
 // The comment a ticket gets when it did not land: the conflict, the agents'
 // report, or both in one.
 //
-//   node --test test/landing-comment.test.ts
+//   pnpm test:file test/landing-comment.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

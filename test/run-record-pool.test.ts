@@ -3,7 +3,7 @@
 // never inside the `settings` group, which holds what a turn was told at its start. The record
 // writes them as they change, and the status view reads each by that name. No Docker, no network.
 //
-//   node --test test/run-record-pool.test.ts
+//   pnpm test:file test/run-record-pool.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

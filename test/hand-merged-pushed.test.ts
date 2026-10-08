@@ -2,7 +2,7 @@
 // It cannot ask the tracker on every refresh, but whether the merge commit is on origin's base branch
 // is one cheap git call. Throwaway repos with a bare repository as origin; no gh, no Docker.
 //
-//   node --test test/hand-merged-pushed.test.ts
+//   pnpm test:file test/hand-merged-pushed.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -3,7 +3,7 @@
 // shortened"; another reviewer filed a regression its own branch caused as a follow-up instead of
 // fixing it. No Docker, model or network.
 //
-//   node --test test/prompt-test-weakening.test.ts
+//   pnpm test:file test/prompt-test-weakening.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

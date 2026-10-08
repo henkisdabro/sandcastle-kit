@@ -2,7 +2,7 @@
 // `exitOnSignal` now ends one, by re-raising SIGINT or SIGTERM - is reported with the code a shell
 // would show, 128 + the signal's number, not a bare 128. A plain-JS stand-in, no Docker, no model.
 //
-//   node --test test/detach-signal.test.ts
+//   pnpm test:file test/detach-signal.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

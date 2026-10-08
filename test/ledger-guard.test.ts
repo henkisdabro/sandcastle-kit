@@ -4,7 +4,7 @@
 // blocked a ticket waits in, notes, tokens. A verdict written beside the ledger is one the ledger
 // cannot word, and one a requeue had to undo; this source test fails on the first one added.
 //
-//   node --test test/ledger-guard.test.ts
+//   pnpm test:file test/ledger-guard.test.ts
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";

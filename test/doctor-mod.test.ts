@@ -3,7 +3,7 @@
 // load a mod, and Claude Code's own words when it has mods turned off - a linked mod that never
 // drew anything gave no hint why. No Docker, no network, no real Claude Code.
 //
-//   node --test test/doctor-mod.test.ts
+//   pnpm test:file test/doctor-mod.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

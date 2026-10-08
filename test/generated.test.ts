@@ -1,7 +1,7 @@
 // Generated files: the path matching, the resolve-by-regenerating helper against a real merge
 // conflict in a temp repo (no Docker, no model, no network), and the config key's validation.
 //
-//   node --test test/generated.test.ts
+//   pnpm test:file test/generated.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

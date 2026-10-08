@@ -3,7 +3,7 @@
 // still runs once the ticket ahead of it has landed. Driven through the scheduler's ports with made-up
 // files and fake work. No git, no Docker, no network.
 //
-//   node --test test/schedule-resolve-worker.test.ts
+//   pnpm test:file test/schedule-resolve-worker.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

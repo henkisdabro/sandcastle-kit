@@ -5,7 +5,7 @@
 // run's demand drops to 0. On the resume the fixer lands, and the waiter merges its fix and gates again,
 // with no repair of its own. No Docker, model, gh or network.
 //
-//   node --test test/fix-wait-pause.test.ts
+//   pnpm test:file test/fix-wait-pause.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

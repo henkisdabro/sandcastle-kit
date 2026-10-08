@@ -2,7 +2,7 @@
 // fingerprint may show, and what an HTTP status says about the token. No
 // network is used.
 //
-//   node --test test/doctor-verify.test.ts
+//   pnpm test:file test/doctor-verify.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

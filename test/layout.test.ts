@@ -1,7 +1,7 @@
 // The Herdr view's proportions (src/herdr.ts): the status view gets about half the screen, and
 // the sandbox column ends in equal rows. Pure arithmetic on the split ratios - no Herdr.
 //
-//   node --test test/layout.test.ts
+//   pnpm test:file test/layout.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

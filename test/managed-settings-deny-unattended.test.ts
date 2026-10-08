@@ -2,7 +2,7 @@
 // the shared .git where the git guard's Bash|Write|Edit matcher never looks: EnterWorktree and
 // ExitWorktree add and remove a worktree and a branch there.
 //
-//   node --test test/managed-settings-deny-unattended.test.ts
+//   pnpm test:file test/managed-settings-deny-unattended.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

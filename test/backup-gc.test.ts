@@ -4,7 +4,7 @@
 // pack stays beside the base's. The kit's git calls on the backup turn background maintenance off.
 // Temp repos only: no Docker, no network.
 //
-//   node --test test/backup-gc.test.ts
+//   pnpm test:file test/backup-gc.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

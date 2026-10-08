@@ -2,7 +2,7 @@
 // and CONCURRENCY; anything else is refused before config, Docker or any spend. No Docker, model or
 // network.
 //
-//   node --test test/run-args.test.ts
+//   pnpm test:file test/run-args.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

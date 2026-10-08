@@ -3,7 +3,7 @@
 // on the run's end, and the status view's `ends ~HH:MM` follows. Made-up timings and run records;
 // no tracker, Docker or network.
 //
-//   node --test test/landing-gate-timing.test.ts
+//   pnpm test:file test/landing-gate-timing.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

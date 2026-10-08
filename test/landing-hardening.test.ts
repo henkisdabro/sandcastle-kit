@@ -4,7 +4,7 @@
 // the next sandbox slot, and the git config keys that run a program are pinned. Temp repos, a
 // fake tracker and host worktrees for the sandbox: no Docker, no gh, no network.
 //
-//   node --test test/landing-hardening.test.ts
+//   pnpm test:file test/landing-hardening.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

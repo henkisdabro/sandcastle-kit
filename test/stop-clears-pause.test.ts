@@ -7,7 +7,7 @@
 // write the test refuses) and the pause handling through the real `createPauseHandling` over a fake
 // record. No Docker, no model, no network.
 //
-//   node --test test/stop-clears-pause.test.ts
+//   pnpm test:file test/stop-clears-pause.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

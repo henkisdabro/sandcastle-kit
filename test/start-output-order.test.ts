@@ -3,7 +3,7 @@
 // Docker, so no test drives it: its order is held by its source, as outcome-at-landing.test.ts does
 // for the ledger.
 //
-//   node --test test/start-output-order.test.ts
+//   pnpm test:file test/start-output-order.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 // and the machine switch read from the personal settings. No Claude Code needed; the hooks that
 // draw it are tested in mod/tests/.
 //
-//   node --test test/idle-mark.test.ts
+//   pnpm test:file test/idle-mark.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

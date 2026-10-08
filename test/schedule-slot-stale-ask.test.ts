@@ -5,7 +5,7 @@
 // schedule never ended. Driven through the scheduler's ports with a made-up slot pool, files and fake work.
 // No git, no Docker, no network.
 //
-//   node --test test/schedule-slot-stale-ask.test.ts
+//   pnpm test:file test/schedule-slot-stale-ask.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

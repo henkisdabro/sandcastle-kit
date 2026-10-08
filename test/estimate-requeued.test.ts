@@ -4,7 +4,7 @@
 // cost. A ticket carried from an earlier run, with a resolve and no implement, is priced as before.
 // Made-up timings; no tracker, Docker or network.
 //
-//   node --test test/estimate-requeued.test.ts
+//   pnpm test:file test/estimate-requeued.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

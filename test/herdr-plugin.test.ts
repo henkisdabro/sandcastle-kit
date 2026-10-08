@@ -3,7 +3,7 @@
 // which links open, which project an action is about, and the manifest agreeing with
 // the code that serves it. No Herdr, no network.
 //
-//   node --test test/herdr-plugin.test.ts
+//   pnpm test:file test/herdr-plugin.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -6,7 +6,7 @@
 // from a person's terminal removes its file at exit as before.
 // Real child processes for the exit, a fake `herdr` that logs every call; no Herdr, no network.
 //
-//   node --test test/herdr-restart.test.ts
+//   pnpm test:file test/herdr-restart.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

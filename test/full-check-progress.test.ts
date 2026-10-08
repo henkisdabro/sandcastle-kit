@@ -3,7 +3,7 @@
 // and the RESULT: line. Run against a copy of the script with stub helpers and a fake `pnpm` (no
 // suite, no Docker), under the host's bash and under macOS's 3.2 where this sandbox has it.
 //
-//   node --test test/full-check-progress.test.ts
+//   pnpm test:file test/full-check-progress.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

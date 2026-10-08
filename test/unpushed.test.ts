@@ -3,7 +3,7 @@
 // upstream (by the last fetch; the view never fetches). A throwaway bare remote
 // and clone, a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/unpushed.test.ts
+//   pnpm test:file test/unpushed.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

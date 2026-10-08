@@ -2,7 +2,7 @@
 // sources and the machine cap, the group each turn's record carries, and the status view's row
 // for them. A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/run-settings-repair-concurrency.test.ts
+//   pnpm test:file test/run-settings-repair-concurrency.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

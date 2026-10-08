@@ -3,7 +3,7 @@
 // ERR_UNKNOWN_FILE_EXTENSION, which names neither the cause nor the fix; the launcher's preload
 // says both and stops before any TypeScript loads.
 //
-//   node --test test/node-check.test.ts
+//   pnpm test:file test/node-check.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

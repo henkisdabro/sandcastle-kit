@@ -5,7 +5,7 @@
 // card for the clicked log's ticket and project. A fake `herdr` and `less` on PATH; no Herdr, no
 // terminal, no network.
 //
-//   node --test test/herdr-ticket-card.test.ts
+//   pnpm test:file test/herdr-ticket-card.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

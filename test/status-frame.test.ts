@@ -4,7 +4,7 @@
 // and in the C locale, as the line is built by bash, not by the locale.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/status-frame.test.ts
+//   pnpm test:file test/status-frame.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -2,7 +2,7 @@
 // true) pass, any other value is reported with its fix. The mod only reads the file, so doctor is
 // where a typo is told. No Docker, no network.
 //
-//   node --test test/doctor-idle-mark.test.ts
+//   pnpm test:file test/doctor-idle-mark.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -3,7 +3,7 @@
 // test, and the base-red check can only decide for a test whose file it knows. Checked-in output, not a
 // live `node --test`: a Node that defaults to TAP when piped would print no summary at all.
 //
-//   node --test test/failing-test-file.test.ts
+//   pnpm test:file test/failing-test-file.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

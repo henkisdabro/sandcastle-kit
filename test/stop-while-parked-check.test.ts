@@ -5,7 +5,7 @@
 // closes it. The port is shaped as burndown's (its result, the check, `attempted`), the scheduler is
 // `createSchedule`. No Docker, no git, no network.
 //
-//   node --test test/stop-while-parked-check.test.ts
+//   pnpm test:file test/stop-while-parked-check.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

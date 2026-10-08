@@ -2,7 +2,7 @@
 // spawning the CLI once per command and flag cost a third of the test gate, each spawn starting
 // node. test/command-help.test.ts keeps the spawned tests that show nothing runs.
 //
-//   node --test test/command-help-inprocess.test.ts
+//   pnpm test:file test/command-help-inprocess.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

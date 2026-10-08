@@ -2,7 +2,7 @@
 // comment or a blank line blocked every commit (an empty pattern matches any line), naming the
 // harmless line as the hit. A stand-in gitleaks; a temp repo; no network.
 //
-//   node --test test/precommit-hook.test.ts
+//   pnpm test:file test/precommit-hook.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

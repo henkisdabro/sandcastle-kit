@@ -2,7 +2,7 @@
 // scratch repository outside the shared .git are allowed, a worktree of the shared repo is not, and
 // push is refused wherever it runs (its danger is the destination).
 //
-//   node --test test/git-guard-scratch-repo.test.ts
+//   pnpm test:file test/git-guard-scratch-repo.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

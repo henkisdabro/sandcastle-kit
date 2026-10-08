@@ -1,7 +1,7 @@
 // The closing summary's token figures (src/report.ts): a run's tokens summed
 // from timings.jsonl with the cached share, and the per-model line.
 //
-//   node --test test/tokens.test.ts
+//   pnpm test:file test/tokens.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

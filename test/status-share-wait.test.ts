@@ -5,7 +5,7 @@
 // ticket a worker had taken, and still shows. A made-up live run record, a fake `sandcastle` and a `docker`
 // that finds nothing; no Docker, no network, no model calls.
 //
-//   node --test test/status-share-wait.test.ts
+//   pnpm test:file test/status-share-wait.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

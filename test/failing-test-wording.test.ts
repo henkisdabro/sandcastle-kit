@@ -1,7 +1,7 @@
 // A red line names the failing tests: a path stays as it is, while a test title (node:test reports
 // titles, which are prose) is quoted and cut, so it does not run into the sentence around it.
 //
-//   node --test test/failing-test-wording.test.ts
+//   pnpm test:file test/failing-test-wording.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

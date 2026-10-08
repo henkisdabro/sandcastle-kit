@@ -2,7 +2,7 @@
 // non-zero exit, signal - with the summary in the environment, and a notifier that fails
 // never changes the run's result. One real process per case; no Docker, network or model.
 //
-//   node --test test/notify.test.ts
+//   pnpm test:file test/notify.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

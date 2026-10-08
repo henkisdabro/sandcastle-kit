@@ -1,7 +1,7 @@
 // Preflight's model calls (src/run.ts) overlap instead of queueing, and a failure message lists
 // models in a fixed order. A fake `docker` on PATH answers, so no Docker or model is needed.
 //
-//   node --test test/preflight-parallel.test.ts
+//   pnpm test:file test/preflight-parallel.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

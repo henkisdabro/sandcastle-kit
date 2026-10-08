@@ -4,7 +4,7 @@
 // the view and the tracker read nothing else. Then the writer, over fake ports. Pure: no git, no
 // Docker, no network.
 //
-//   node --test test/ledger.test.ts
+//   pnpm test:file test/ledger.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

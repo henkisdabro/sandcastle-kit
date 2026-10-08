@@ -3,7 +3,7 @@
 // needed; the spawned tests put a fake `docker` script on PATH. The runtime detection and the
 // native-Linux case are checked for both platforms by passing `platform`, not by running on each.
 //
-//   node --test test/size.test.ts
+//   pnpm test:file test/size.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";

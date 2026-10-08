@@ -2,7 +2,7 @@
 // merged ticket that carries one, and that the review prompt asks for it. No repo for most of it;
 // no Docker, model or network.
 //
-//   node --test test/ungated.test.ts
+//   pnpm test:file test/ungated.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

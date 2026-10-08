@@ -6,7 +6,7 @@
 // same run names the blocker's own ending, never "not in this run". The real guard on a temp git
 // repo, the real scheduler and ledger, fake attempts: no Docker, no network.
 //
-//   node --test test/stop-announced.test.ts
+//   pnpm test:file test/stop-announced.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -3,7 +3,7 @@
 // cheap model. Its figures are mixed with all tickets', weighted by its share of five, and the estimate
 // line says so. Made-up timings; no tracker, Docker or network.
 //
-//   node --test test/estimate-blend.test.ts
+//   pnpm test:file test/estimate-blend.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

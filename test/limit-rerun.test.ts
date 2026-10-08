@@ -2,7 +2,7 @@
 // another reason, the crash's limit check must read only what the re-run wrote, or the old limit
 // message stops the queue for "plan limit" again. Temp dirs only; no Docker, no model calls.
 //
-//   node --test test/limit-rerun.test.ts
+//   pnpm test:file test/limit-rerun.test.ts
 
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

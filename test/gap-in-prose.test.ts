@@ -5,7 +5,7 @@
 // nothing is left ("nothing remains"), flags nothing. A temp repo, scripted agent passes and run records; no
 // Docker, model or network.
 //
-//   node --test test/gap-in-prose.test.ts
+//   pnpm test:file test/gap-in-prose.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

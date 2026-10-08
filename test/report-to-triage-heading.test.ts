@@ -3,7 +3,7 @@
 // after the run's own items, so each headline count (`need you`, `to triage`) matches the bullets of its group.
 // A Markdown-files tracker; no gh, Docker or network.
 //
-//   node --test test/report-to-triage-heading.test.ts
+//   pnpm test:file test/report-to-triage-heading.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

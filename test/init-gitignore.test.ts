@@ -2,7 +2,7 @@
 // onto a last line that has no newline (".env" + "logs/" becoming ".envlogs/" un-ignores both).
 // A throwaway repo, so no Docker and no network.
 //
-//   node --test test/init-gitignore.test.ts
+//   pnpm test:file test/init-gitignore.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -2,7 +2,7 @@
 // and `sandcastle size` says why it may sit above the gate figure; with both figures anonymous the pool still warns.
 // The readers are fakes (a made-up `docker info`, made-up peaks): no Docker or model call.
 //
-//   node --test test/size-agent-peak-warning.test.ts
+//   pnpm test:file test/size-agent-peak-warning.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

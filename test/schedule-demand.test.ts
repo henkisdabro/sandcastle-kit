@@ -4,7 +4,7 @@
 // a ticket held for a blocker until that blocker lands. Told whenever the count changes, 0 once
 // the run is drained. Fake work, no git, no Docker, no network.
 //
-//   node --test test/schedule-demand.test.ts
+//   pnpm test:file test/schedule-demand.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

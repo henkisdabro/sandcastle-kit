@@ -3,7 +3,7 @@
 // says whether any failed. Run against a copy of the script beside a fake `node` (no suite, no
 // Docker); and full-check.sh starts its legs before it waits on any of them.
 //
-//   node --test test/run-shards.test.ts
+//   pnpm test:file test/run-shards.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

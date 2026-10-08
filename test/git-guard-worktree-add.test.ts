@@ -2,7 +2,7 @@
 // container path that a killed pass leaves behind) and allows it in a scratch repository, named with an
 // absolute `git -C`. `worktree remove --force` stays allowed.
 //
-//   node --test test/git-guard-worktree-add.test.ts
+//   pnpm test:file test/git-guard-worktree-add.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

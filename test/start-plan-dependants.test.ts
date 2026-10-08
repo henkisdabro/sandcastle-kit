@@ -3,7 +3,7 @@
 // Its own line now names the blocker, and the waits under the list leave it out. burndown() needs
 // Docker, so its wiring is held by its source. No Docker, model or network.
 //
-//   node --test test/start-plan-dependants.test.ts
+//   pnpm test:file test/start-plan-dependants.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

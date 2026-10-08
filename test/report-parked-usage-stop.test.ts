@@ -4,7 +4,7 @@
 // that is not live is not paused: a ticket still parked when it ended is runnable. Only `render`. No
 // Docker, no git, no network.
 //
-//   node --test test/report-parked-usage-stop.test.ts
+//   pnpm test:file test/report-parked-usage-stop.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

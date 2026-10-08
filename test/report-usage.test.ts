@@ -2,7 +2,7 @@
 // 5h 21%, week 97%`), and nothing when the run had none: an API-key run, a run on no Claude model, or a
 // run that no agent reported to. Facts only, no Docker and no network.
 //
-//   node --test test/report-usage.test.ts
+//   pnpm test:file test/report-usage.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

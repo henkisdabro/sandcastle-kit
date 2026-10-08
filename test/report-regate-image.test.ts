@@ -3,7 +3,7 @@
 // or the project's own layer) the verify ran on the starting image: the line says so, and what to do.
 // `changedDockerfiles` reads the change from git; a record from an older kit names no image.
 //
-//   node --test test/report-regate-image.test.ts
+//   pnpm test:file test/report-regate-image.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

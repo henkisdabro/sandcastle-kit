@@ -9,7 +9,7 @@
 // PATH: a mise or asdf shim on a Mac). No Docker, gh, model calls or network; paths come from
 // node:path and os.tmpdir(), so macOS and Linux behave alike.
 //
-//   node --test test/ticket-wording.test.ts
+//   pnpm test:file test/ticket-wording.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

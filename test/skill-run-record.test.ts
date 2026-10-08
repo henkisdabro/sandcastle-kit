@@ -1,7 +1,7 @@
 // The skill points a host agent at the run record instead of the output log and the status table,
 // and says where the mod's note appears. Skill-only text, so this pins what an agent must find.
 //
-//   node --test test/skill-run-record.test.ts
+//   pnpm test:file test/skill-run-record.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

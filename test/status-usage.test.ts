@@ -3,7 +3,7 @@
 // minutes, and carry no colour at all under NO_COLOR. Run on a pty from `script`, as the view's other colour
 // checks are (test/no-color.test.ts); the row's text, in each band, is test/status.test.sh's. No Docker, no network.
 //
-//   node --test test/status-usage.test.ts
+//   pnpm test:file test/status-usage.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

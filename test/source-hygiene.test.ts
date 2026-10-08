@@ -9,7 +9,7 @@
 //   caught one, and that never runs in a sandbox gate.
 // Reads the git index of this checkout (or walks it); no Docker, gh, model calls or network.
 //
-//   node --test test/source-hygiene.test.ts
+//   pnpm test:file test/source-hygiene.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

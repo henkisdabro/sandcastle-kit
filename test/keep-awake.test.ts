@@ -6,7 +6,7 @@
 // the same test holds on either platform. `-h` succeeds in both, as the real tool's does. Paths
 // come from node:path and os.tmpdir(); the shims are POSIX sh.
 //
-//   node --test test/keep-awake.test.ts
+//   pnpm test:file test/keep-awake.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

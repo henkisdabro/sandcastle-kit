@@ -4,7 +4,7 @@
 // that hung, went to the background with it, and a `pkill -f` on the test's path killed the agent's
 // own shell, leaving the worktree reverted. No model calls.
 //
-//   node --test test/prompt-mutation-check.test.ts
+//   pnpm test:file test/prompt-mutation-check.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

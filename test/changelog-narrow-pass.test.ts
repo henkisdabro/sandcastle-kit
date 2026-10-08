@@ -2,7 +2,7 @@
 // conflict resolution, a base merge or a repair) sees only what it reviewed, so its lines are added, and
 // its prompt asks for lines about its own changes alone. No Docker, model or network.
 //
-//   node --test test/changelog-narrow-pass.test.ts
+//   pnpm test:file test/changelog-narrow-pass.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

@@ -3,7 +3,7 @@
 // the line. A reader that matched the line's words read a red at landing as ready once, for want of
 // a prefix; the source test below fails if one does again.
 //
-//   node --test test/outcome-kinds.test.ts
+//   pnpm test:file test/outcome-kinds.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

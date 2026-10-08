@@ -1,7 +1,7 @@
 // The idle mark's per-project choices (mod/hooks/idle.ts), pure: hiding, a dismissal and what ends
 // it, the command's arguments and its report. No Claude Code needed; the hooks are tested in mod/tests/.
 //
-//   node --test test/idle-mark-choice.test.ts
+//   pnpm test:file test/idle-mark-choice.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

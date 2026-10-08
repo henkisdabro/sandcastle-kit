@@ -2,7 +2,7 @@
 // ends held, so `queue --lint` and `requeue` warn about it - and only warn. Ticket files in a temp
 // git repo; no Docker, gh, model calls or network. The CLI case starts the kit with `runKit`.
 //
-//   node --test test/protected-touches.test.ts
+//   pnpm test:file test/protected-touches.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

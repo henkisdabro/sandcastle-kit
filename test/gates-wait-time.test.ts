@@ -1,7 +1,7 @@
 // A gates step's recorded time is the gate run, not the wait for a machine-wide gates slot
 // (`stepTimes` in src/gates.ts; `typicalTimes` and `estimate` in src/run.ts read the line's `ms`).
 //
-//   node --test test/gates-wait-time.test.ts
+//   pnpm test:file test/gates-wait-time.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

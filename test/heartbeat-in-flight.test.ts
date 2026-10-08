@@ -1,7 +1,7 @@
 // The run's heartbeat (src/burndown.ts) is not silent while only landings and resolve waits are in
 // flight, and a gates step that waits for a gates slot says so and counts its time from the first gate.
 //
-//   node --test test/heartbeat-in-flight.test.ts
+//   pnpm test:file test/heartbeat-in-flight.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
