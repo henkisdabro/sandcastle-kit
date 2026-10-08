@@ -171,7 +171,7 @@ The status view's click hint. `resolveClickHint` runs once when `sandcastle stat
 
 ## `src/blockers.ts`
 
-What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore; `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
+What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore; `blockerProblems`, the one list `queue`, `queue --lint`, `blockers` and the run's start print, which includes blockers listed under a `Blocked by` heading (the parser does not read them); `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
 
 ## `src/touches.ts`
 
@@ -179,7 +179,7 @@ The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a 
 
 ## `src/lint.ts`
 
-`lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths absent from the base branch (`missingTouches`: a plain path with no match, or a glob matching nothing, unless the body names it beside "new" outside the `Touches:` line), `blockerProblems` and blockers listed under a heading (which the parser does not read), a rough estimate. Read-only advice
+`lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths absent from the base branch (`missingTouches`: a plain path with no match, unless the body names it beside "new" outside the `Touches:` line - that exception is for a plain path only - or a glob matching nothing, which gets its own line, as saying "new" changes nothing for a glob), `blockerProblems` (blockers listed under a heading, which the parser does not read, among them), a rough estimate. Read-only advice
 
 ## `src/detach.ts`
 

@@ -246,11 +246,17 @@ export const commentBlockLine = (f: Awaited<ReturnType<typeof commentOnlyBlocks>
     : `${who}: a comment says blocked by ${names}. When you queue it, put "Blocked by ..." in the body, or a run will start it at once.`;
 };
 
+// The to-tickets template writes blockers as a list under a heading (`## Blocked by`, then
+// `- #12`). The parser reads only a ref on the `Blocked by` line itself, so such a ticket starts
+// before its blocker lands, and nothing else says so.
+const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[-*+][ \t]/im;
+
 /**
  * Queued tickets that will never start, or start too soon, because of how their blockers are
  * written: a blocker that does not exist or cannot be read (it counts as open, so the ticket
- * waits for good), tickets that wait for each other, and a Linear-style id the config does not
- * name (the line is ignored, so the ticket starts at once). Each line says what to change.
+ * waits for good), tickets that wait for each other, a Linear-style id the config does not
+ * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
+ * (not read, so the ticket starts at once). Each line says what to change.
  */
 export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
   const queuedIds = new Set(queued.map((t) => t.id));
@@ -283,6 +289,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     for (const r of refsIn(project, t.body ?? "")) {
       if (!read.has(`${r.kind}:${r.id}`)) lines.push(`${who} mentions "Blocked by ${refLabel(r)}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
     }
+    if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) lines.push(`${who} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
     const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
     for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
       if (linear.has(m[1].toUpperCase())) continue;
