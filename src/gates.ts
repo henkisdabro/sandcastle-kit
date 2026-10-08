@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
@@ -140,7 +141,11 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
-        const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+        // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
+        // prompt, `failureKey` and `failingTests` read plain text. The gates log, written as the gate ran, keeps them.
+        const output = clip(
+          stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim(),
+        );
         failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
         // A timed-out gate may still be running in this container (or Docker
         // may not be answering): a later gate would run beside it, or wait out
@@ -396,9 +401,13 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // default with its absolute "location:" paths) the ids name no file, and the
 // red stays the branch's own.
 const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
+// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it. The label
+// is skipped, a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a
+// package, and its "0.004s" would pass for a file.
+const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))[^\s/.]+\s+)?(\S+)/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
-  /^\s*FAIL\s+(\S+)/,
+  FAIL_LINE,
   /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
   SPEC_FAILED,
   /^\s*--- FAIL: (\S+)/,
@@ -414,7 +423,8 @@ const CLIPPED = /^\[\.\.\. \d+ characters cut \.\.\.\]$/;
 const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
 // `limit`: the base-red check reads the base's whole list (Infinity): a branch's test sixth on it is still the base's.
 export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
-  const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
+  // A runner colours its output when it has no TTY and no NO_COLOR (vitest does), which hides its FAIL lines.
+  const lines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, ""));
   const header = lines.findIndex((line) => SPEC_SUMMARY.test(line));
   // A summary `clip` cut through is not the whole list: a test it lost could be the branch's own.
   const summary = header >= 0 && lines.slice(header).some((line) => CLIPPED.test(line)) ? -1 : header;
