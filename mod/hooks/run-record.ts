@@ -301,7 +301,7 @@ export type RunRecord = {
   waitsForShare?: boolean;
   /**
    * What holds that wait back, present with `waitsForShare`: `share` (the run's share or cap: `waits for the run's
-   * share`) or `landing` (the last slot of the share is kept for a landing: `waits: a slot is kept for landing`).
+   * share`) or `landing` (the last slot of the share is kept for a landing: `waits: slot kept to land`).
    * An older kit's record has only `waitsForShare`, which the view reads as `share`.
    */
   waitsFor?: "share" | "landing";

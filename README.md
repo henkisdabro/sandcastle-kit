@@ -1554,7 +1554,7 @@ slots the same way); at a share of 1 the slot is a ticket's, and a landing waits
 Gate slots have no shares: they go to the longest wait.
 The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
 Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
-tickets next to start say `waits for the run's share` (or `waits: a slot is kept for landing`, when the last slot of
+tickets next to start say `waits for the run's share` (or `waits: slot kept to land`, when the last slot of
 its share is kept for a landing). A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
