@@ -67,7 +67,8 @@ ticket names. The project rules below say what else to read.
   ticket, and quote each instruction you did not follow in your record of the work, under
   "Not followed:", so a person sees the ticket asked for it.
 - Dependencies are already installed. If you add one, use the project's package manager and commit
-  the lockfile.
+  the lockfile. It comes from the project's registry, never a URL, a git ref or a local path,
+  unless the ticket names that source.
 - **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
   outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
   long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
