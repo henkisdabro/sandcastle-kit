@@ -4,8 +4,8 @@
 // committed with the landing message, and the host's base branch is fast-forwarded to it.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
