@@ -381,32 +381,70 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
 // issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
 // every review prompt asks for, which would otherwise list nearly every merged ticket. Also "the remaining tests
-// pass", "every remaining criterion is met" and a test that "covers the gap the ticket describes": a first run
-// flagged each of these as a gap.
+// pass", "every remaining criterion is met" ("all 36 remaining ... match" too) and a test that "covers the gap the
+// ticket describes": a first run flagged each of these as a gap. And a remaining thing the reviewer calls right
+// ("the only remaining mention is in past entries, which is correct"), and an omission the ticket itself asked
+// for ("left alone, as the ticket asked").
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
+// A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
+// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" is no fix.
+const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+const isGap = (sentence: string): boolean => {
+  if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
+  const fixed = GAP_FIXED.exec(sentence);
+  return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
+};
+// A line that is a heading, not a sentence: a Markdown heading, or a line of nothing but bold text
+// ("**Checked and left as is**"). It would otherwise join the paragraph under it and be quoted with it.
+const HEADING_LINE = /^(?:#{1,6}\s|(?:[-*+•]\s+)?(?:\*\*[^*]+\*\*|__[^_]+__):?$)/;
+// Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
+const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
-// fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
-const sentencesOf = (text: string): string[] => {
+// fenced block are no prose, a heading is no sentence, a list item is a unit of its own, and a paragraph's
+// wrapped lines join. Each sentence keeps the unit it came from, for the context a gap sentence needs.
+const sentencesOf = (text: string): { text: string; unit: number }[] => {
   const prose = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "").replace(/<(\w+)>[\s\S]*?<\/\1>/g, "");
   const units: string[] = [];
   let open = false;
   for (const raw of prose.split("\n")) {
     const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
-    if (!line) open = false;
+    if (!line || HEADING_LINE.test(line)) open = false;
     else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
     else {
       units.push(line);
       open = true;
     }
   }
-  return units.flatMap((u) => u.split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)).map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim());
+  return units.flatMap((u, unit) =>
+    u
+      .split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)
+      .map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
+      .map((s) => ({ text: s, unit })),
+  );
 };
+// A sentence that points back at the one before it ("That is a coverage gap ..."): quoted alone, the person
+// has to open the review log to learn what "That" is.
+const ANAPHOR = /^(?:That|This|It|These|Those|Which)\b/;
 // The gap sentences of a reviewer's final message, when it filed none: a message with a `<followup>` or an
-// `<unmet>` line has said it the way the kit reads. Several sentences are one note.
+// `<unmet>` line has said it the way the kit reads. Several sentences are one note. A gap sentence that opens
+// with an anaphor brings the sentences before it in its paragraph, as many as fit under UNGATED_MAX (the
+// nearest first), because what it points at is one of them.
 const gapOf = (text: string): string | undefined => {
   if (followUpsOf(text).length || unmetOf(text)) return undefined;
-  const said = sentencesOf(text).filter((s) => GAP_WORDS.test(s) && !GAP_NEGATED.test(s));
+  const all = sentencesOf(text);
+  const take = new Set<number>();
+  all.forEach((s, i) => {
+    if (!isGap(withoutCode(s.text))) return;
+    take.add(i);
+    if (!ANAPHOR.test(s.text)) return;
+    let size = s.text.length;
+    for (let j = i - 1; j >= 0 && all[j].unit === s.unit && size + all[j].text.length < UNGATED_MAX; j--) {
+      take.add(j);
+      size += all[j].text.length + 1;
+    }
+  });
+  const said = [...take].sort((x, y) => x - y).map((i) => all[i].text);
   return said.length ? cutAtWord([...new Set(said)].join(" "), UNGATED_MAX) : undefined;
 };
 // The phase a pass's name says, in the words a person reads in the filed ticket.
