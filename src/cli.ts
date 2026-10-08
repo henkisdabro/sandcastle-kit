@@ -124,7 +124,7 @@ import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
-import { doctor } from "./doctor.ts";
+import { doctor, requireRepoAccess } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
@@ -258,6 +258,7 @@ try {
         }
         sandboxPanes(project);
         assertCleanBase(project);
+        await requireRepoAccess(project);
         const owner = livePid(root);
         if (owner) {
           throw new OperatorError(
@@ -289,6 +290,8 @@ try {
       const level = settings.autonomy;
       sandboxPanes(project);
       checkUsageSettings();
+      // A token that cannot see the repo would crash every ticket on its first `gh issue view`: refused before the billing question, an image or a sandbox.
+      await requireRepoAccess(project);
       // Told, never refused: a run works on a pulled kit, but a note may ask this project to act first.
       for (const line of upgradeLines(root, KIT, false)) console.log(line);
       // Once for the whole run, every turn included, and before any image, sandbox or model call.

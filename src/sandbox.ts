@@ -296,6 +296,12 @@ export const claudeCredentials = (project: Project): Record<string, string | und
   return { ANTHROPIC_API_KEY: local!.ANTHROPIC_API_KEY || user!.ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: local!.CLAUDE_CODE_OAUTH_TOKEN || user!.CLAUDE_CODE_OAUTH_TOKEN };
 };
 
+/** The GH_TOKEN a run would hand the sandboxes (the project's file over the shared one), read without the checks `credentials` makes. */
+export const githubToken = (project: Project): string | undefined => {
+  const [user, local] = credentialFiles(project).map(readEnv);
+  return local!.GH_TOKEN || user!.GH_TOKEN || undefined;
+};
+
 /** `apiKeySpend` over the project's two credentials files, as `credentials` reads them. */
 export const projectApiKeySpend = (project: Project) => apiKeySpend(credentialFiles(project));
 
