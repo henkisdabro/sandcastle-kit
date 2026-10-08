@@ -41,6 +41,10 @@ export const PARTIAL_CLONE_GAP =
 let gap: string | undefined;
 /** The note a run records when a host merge check could not run for missing objects (`noteMissingObjects`); undefined while none has. */
 export const mergeCheckGap = () => gap;
+/** Forgets the note, so each turn of a multi-turn run (one process, one `burndown()` per turn) records and says it for its own checks only. */
+export const resetMergeCheckGap = () => {
+  gap = undefined;
+};
 
 /**
  * Whether `error` is git failing to read an object the partial clone `root` does not hold. Says so once, on screen,
