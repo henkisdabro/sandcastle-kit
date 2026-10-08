@@ -138,10 +138,12 @@ const mergeIn = (git: (args: string[]) => string, ours: string, theirs: string):
  * The paths that conflict in git's own automatic merge of `ours` (the base) and `theirs`, run in a throwaway
  * git directory (`withObjectsOnly`), so nothing a sandbox wrote into the shared `.git` runs and
  * nothing is written there. Throws when git fails; the caller decides what an unanswered check
- * means. Needs git 2.38 (`mergeTreeSupported`).
+ * means. Needs git 2.38 (`mergeTreeSupported`). `tree` is the id of the merge's result, conflict
+ * markers included when `conflicted` is not empty; the object itself goes with the throwaway
+ * directory, so the id is only for comparing with a tree in the project.
  */
-export const mergeTree = (root: string, ours: string, theirs: string): { conflicted: Set<string> } =>
-  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => ({ conflicted: mergeIn(git, o, t).conflicted }), ours);
+export const mergeTree = (root: string, ours: string, theirs: string): { conflicted: Set<string>; tree: string } =>
+  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => mergeIn(git, o, t), ours);
 
 /**
  * The paths `resolved` changes relative to git's automatic merge of `ours` and `theirs`, other
