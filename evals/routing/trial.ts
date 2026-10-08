@@ -57,15 +57,17 @@ export const prepare = (task: Task, arm: Arm, dir: string) => {
 // The kit reads these from the caller; a trial must not open Herdr panes, inherit a person's run
 // settings, or be told it is inside another run.
 const scrubbed = (env: NodeJS.ProcessEnv) =>
-  Object.fromEntries(Object.entries(env).filter(([k]) => !/^(HERDR_|TMUX|SANDCASTLE_|IMPL_|REVIEW_|CROSS_REVIEW|AUTONOMY_LEVEL|DRY_RUN|TICKETS|CONCURRENCY|USAGE_)/.test(k)));
+  Object.fromEntries(Object.entries(env).filter(([k]) => !/^(HERDR_|TMUX|SANDCASTLE_|IMPL_|REVIEW_|CROSS_REVIEW|AUTONOMY_LEVEL|DRY_RUN|TICKETS|CONCURRENCY|USAGE_|SKIP_)/.test(k)));
 
 /** Runs the kit on the prepared repository and resolves with its exit code; output goes to `<dir>.out`. */
 export const runKit = (arm: Arm, dir: string, limitMinutes = 120) =>
   new Promise<number>((resolve) => {
     const out = openSync(`${dir}.out`, "w");
+    // The base is a commit `validate` already graded, and the end-of-run verify still gates what
+    // lands; checking the base first only queues each trial for the machine's gate slot once more.
     const child = spawn(join(REPO, "bin/sandcastle"), ["run"], {
       cwd: dir,
-      env: { ...scrubbed(process.env), ...armEnv(arm) },
+      env: { ...scrubbed(process.env), ...armEnv(arm), SKIP_BASE_GATES: "1" },
       stdio: ["ignore", out, out],
     });
     const timer = setTimeout(() => child.kill("SIGINT"), limitMinutes * 60_000);
