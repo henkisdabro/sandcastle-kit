@@ -21,6 +21,7 @@ import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
+import { shq } from "./generated.ts";
 
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
@@ -28,7 +29,8 @@ type Failure = { name: string; command: string; exitCode: number; output: string
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; head?: string };
+// `rewrote`: the tracked files the gates changed in the worktree, which were put back.
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; head?: string; rewrote?: string[] };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -55,6 +57,55 @@ export type GateProgress = {
 // nothing. The cut-off at 9.95 s stops 9.96 s printing as "10.0s".
 export const seconds = (ms: number) => (ms < 9_950 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`);
 
+type Dirty = Map<string, string>;
+
+// The worktree's changed paths with their status, or undefined when git cannot say (the sandbox died): a gate
+// run never fails for want of this bookkeeping.
+const dirtyPaths = async (sandbox: Parameters<typeof execGate>[0]): Promise<Dirty | undefined> => {
+  try {
+    const r = await sandbox.exec("git status --porcelain -z --no-renames --untracked-files=all");
+    if (r.exitCode !== 0) return undefined;
+    return new Map(r.stdout.split("\0").filter((e) => e.length > 3).map((e) => [e.slice(3), e.slice(0, 2)]));
+  } catch {
+    return undefined;
+  }
+};
+
+// Sandcastle keeps a dirty worktree, and its branch, at close: a gate that rewrites a tracked file (a build that
+// regenerates a checked-in one) or leaves a build behind would leak both. So the paths the gates changed are
+// put back; whatever was dirty before them is the agent's, and stays. Returns the tracked files restored.
+const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], before: Dirty | undefined): Promise<string[]> => {
+  if (!before) return [];
+  const after = await dirtyPaths(sandbox);
+  if (!after) return [];
+  const changed = [...after].filter(([path]) => !before.has(path));
+  const added = changed.filter(([, status]) => status[0] === "A").map(([path]) => path);
+  const untracked = changed.filter(([, status]) => status === "??").map(([path]) => path);
+  const tracked = changed.filter(([, status]) => status !== "??" && status[0] !== "A").map(([path]) => path);
+  // In chunks: a build can leave thousands of files, more than one command line takes.
+  const chunks = (paths: string[]) => {
+    const out: string[][] = [[]];
+    let size = 0;
+    for (const p of paths) {
+      if (size > 30_000) {
+        out.push([]);
+        size = 0;
+      }
+      out[out.length - 1].push(shq(p));
+      size += p.length + 3;
+    }
+    return out.filter((c) => c.length);
+  };
+  try {
+    for (const c of chunks(tracked)) await sandbox.exec(`git checkout HEAD -- ${c.join(" ")}`);
+    for (const c of chunks(added)) await sandbox.exec(`git rm -qf -- ${c.join(" ")}`);
+    for (const c of chunks(untracked)) await sandbox.exec(`git clean -fdq -- ${c.join(" ")}`);
+  } catch {
+    /* the gate's verdict stands; the sandbox's close reports a worktree that stays dirty */
+  }
+  return [...tracked, ...added];
+};
+
 // In order. A branch stops at the first red gate - its repair pass is fed
 // that one's output, and the rest would only cost time. `all` runs every
 // gate, for a report that says which of them are red, not just the first.
@@ -70,6 +121,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
     // wait reads as a gap between the section's header and its first gate.
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
+    const before = await dirtyPaths(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
@@ -92,7 +144,8 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
       }
     });
     const peakMib = await samplePeak(sandbox);
-    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}) };
+    const rewrote = await restoreGateChanges(sandbox, before);
+    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...(rewrote.length ? { rewrote } : {}) };
   }, progress.wait, undefined, priority);
 };
 
@@ -280,6 +333,13 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     } finally {
       unlockWorktree(sandbox.worktreePath);
       await recordPeak(sandbox, project.root, runId);
+      // Sandcastle's close keeps a worktree with any uncommitted file, and a gate or a hook test leaves one: the
+      // kept worktree and its branch would outlive the run, unnamed.
+      try {
+        await sandbox.exec("git reset -q --hard && git clean -fdq");
+      } catch {
+        /* closing still has to happen */
+      }
       await sandbox.close();
       try {
         sh("git", ["branch", "-D", branch]);
@@ -291,6 +351,10 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
   // In the caller's slot the sandbox is still a sandbox: an extra slot, never waited for, shows it to other runs.
   return ownSlot ? withSlot("sandboxes", `${project.name} ${label}`, gated) : withExtraSlot("sandboxes", `${project.name} ${label}`, gated);
 };
+
+// What the closing summary says of a tracked file a gate rewrote, once per path for the run.
+export const rewroteLine = (path: string) =>
+  `A gate rewrote ${path} and it was put back, so no worktree stays dirty. Add it to .gitignore, or list it under \`generated\` in the project config, so the gate stops rewriting a tracked file.`;
 
 export const gateLine = (gates: Gate[]) => gates.map((g) => `${g.name}=${g.pass ? "pass" : g.timedOut ? "TIMEOUT" : "FAIL"}`).join(" ");
 

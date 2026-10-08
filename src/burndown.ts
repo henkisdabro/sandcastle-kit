@@ -30,7 +30,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2112,6 +2112,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const waited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
+  // Tracked files a gate rewrote, named once for the run however many worktrees it was gated in.
+  const gateRewrites = new Set<string>();
   // Each issue's step, and when it started, go to run.json's tickets: the
   // status view cannot tell a gate run from the review before it by the logs
   // alone, and a log's age is how long since its last line, not how long the
@@ -2281,9 +2283,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
-    return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
+    const gated = await gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => {
         // The heartbeat says a wait as a wait; the gate time is counted from the first gate (below).
         const step = active.get(id) ?? landing.get(id);
@@ -2301,6 +2303,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       },
       log: gatesLog(project, id),
     }, priority);
+    for (const path of gated.rewrote ?? []) {
+      if (gateRewrites.has(path)) continue;
+      gateRewrites.add(path);
+      console.log(rewroteLine(path));
+      run.update({ gateRewrites: [...gateRewrites] });
+    }
+    return gated;
   };
 
   // The run's waits for a sandbox slot. One held back by the run's share or by the slot kept for landing, not only
@@ -2832,6 +2841,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   run.update({
     verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
+    ...(gateRewrites.size ? { gateRewrites: [...gateRewrites] } : {}),
     dryRunCheck,
   });
   console.log(`\n${await closingReport(project, turn && { level: turn.settings.autonomy, turn: turn.turn })}\n`);

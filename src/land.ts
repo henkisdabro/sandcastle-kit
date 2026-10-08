@@ -315,8 +315,8 @@ export const landTicket = async (
       let kept = "";
       try {
         sh("git", ["branch", squash ? "-D" : "-d", branch], project.root);
-      } catch {
-        kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
+      } catch (error) {
+        kept = ` ${branch} could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`;
       }
       const merged =
         `${squash ? "Squashed" : "Merged"} locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +

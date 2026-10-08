@@ -74,6 +74,8 @@ test("the read after a gate pass, when the sandbox holds more than the gate used
     exec: async (cmd: string) => {
       const known = answer(cmd);
       if (known) return known;
+      // Only the gate command grows it: the kit's own git bookkeeping around the gates is no gate.
+      if (!cmd.includes("run-tests")) return { exitCode: 0, stdout: "", stderr: "" };
       k.anon = 5000;
       return { exitCode: 0, stdout: "", stderr: "" };
     },

@@ -649,8 +649,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
   try {
     await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
-  } catch {
-    console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
+  } catch (error) {
+    // Git's own words: a kept worktree holding the branch is one cause, not the only one.
+    console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`);
   }
   // The merge stands whatever the tracker says next: a failed close is a
   // merged ticket still open, not one that failed to land - calling it "not
