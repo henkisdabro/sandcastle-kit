@@ -13,7 +13,7 @@
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
-import { band, building, CASTLE_FRAMES, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
+import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
 import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
@@ -251,11 +251,11 @@ async function look($: EngineInterface, root: string, follow = false): Promise<R
   // The run closed or left tickets: the count is read again at the next idle look. A followed run
   // too - it may be a second clone of this project, burning down the same tracker.
   trigger = "run-ended";
-  const how = run.finishedAt ? `ended (exit ${run.exitCode ?? "unknown"})` : "ended without a clean exit";
+  const how = endedHow(run);
   if (mine) {
     // The store keeps the old `since` until the turn this starts has begun, which may be much
     // later: a session quit with the prompt still queued hears it again when it is resumed.
-    const text = `The sandcastle run in ${root} ${how}. Close it now: read run.md in the sandcastle skill's directory and follow it.`;
+    const text = endPrompt(root, run);
     void $.prompt.submit({ text }).then(() => (follow ? undefined : remember($, root))).catch(() => {});
   }
   $.ui.toast(`run ${how}`, { timeoutMs: 10000 });
