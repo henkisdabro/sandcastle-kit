@@ -1345,8 +1345,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         }
       }
       if (landOnly && mergeConflicted && greenHead !== undefined && baseTip !== undefined) {
-        // A resolution may touch only what git could not merge itself: a change to any other
-        // path can drop another ticket's landed lines with every gate green.
+        // A resolution may touch only what git could not merge itself: a change to another path
+        // the base had changed can drop another ticket's landed lines with every gate green.
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch], project.root), generated: project.generated });
         if (stray?.length) {
           const why = strayNote(stray);
