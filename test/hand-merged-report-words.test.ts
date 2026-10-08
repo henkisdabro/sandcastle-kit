@@ -103,3 +103,16 @@ test("report: a part-of merge whose ticket was closed since reads closed", async
   const { project } = repo("Merge agent/issue-7 (part of #7)", "github", false, "x");
   assert.match(await report(project, '{"state":"CLOSED"}'), /merged by hand, and closed: .*#7/);
 });
+
+test("report: a closing merge by hand after an earlier run's part-of landing keeps closes on push", async () => {
+  const { root, project } = repo("Merge agent/issue-7 (part of #7)", "github");
+  git(root, "checkout", "-q", "agent/issue-7");
+  writeFileSync(join(root, "rest.txt"), "the rest\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-qm", "the rest");
+  git(root, "checkout", "-q", "main");
+  git(root, "merge", "--no-ff", "-qm", "Merge agent/issue-7 (closes #7)", "agent/issue-7");
+  const out = await report(project, '{"state":"OPEN"}');
+  assert.match(out, /1 held, merged by hand; closes on push: .*#7/);
+  assert.doesNotMatch(out, /partly done/);
+});
