@@ -80,6 +80,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   every autonomy level, so `sandcastle wait` no longer reports success on a base the summary says not
   to push.
 
+- **A landing merge that git's own merge says conflicts is refused again.** The host's tree check
+  read every `merge-tree` failure as a git older than 2.38 and stepped aside; it now asks git's
+  version instead.
 - **The live status view keeps running with no terminal** (an agent's tool, a pipe), instead of
   drawing one frame and ending on `TERM_COLS: unbound variable`.
 - **The status view's ETA floor for landings works again.** The typical landing-gates time is taken

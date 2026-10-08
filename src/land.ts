@@ -15,7 +15,7 @@ import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
-import { withObjectsOnly } from "./resolution.ts";
+import { mergeTreeSupported, withObjectsOnly } from "./resolution.ts";
 import { gatesLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
@@ -74,17 +74,18 @@ export const checkLandingMerge = (root: string, c: string, b: string, h: string,
  */
 let mergeTreeNoticed = false;
 export const plainMergeNote = (root: string, c: string, b: string, h: string): string | undefined => {
+  // Asked of git's version, not read from a failure: the failure's message names the command, `--write-tree`
+  // included, so every conflict read as an old git and the check stepped aside.
+  if (!mergeTreeSupported(root)) {
+    if (!mergeTreeNoticed) console.log("git on this machine has no `merge-tree --write-tree` (2.38+): a landing merge is checked by its changed paths only.");
+    mergeTreeNoticed = true;
+    return undefined;
+  }
   let tree: string;
   try {
     // In a throwaway git directory, as every host merge-tree: a merge driver the sandbox left in the shared `.git` must not run.
     tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi])).split("\n")[0];
-  } catch (error) {
-    const message = String((error as Error).message ?? error);
-    if (/usage|unknown option|write-tree/i.test(message)) {
-      if (!mergeTreeNoticed) console.log("git on this machine has no `merge-tree --write-tree` (2.38+): a landing merge is checked by its changed paths only.");
-      mergeTreeNoticed = true;
-      return undefined;
-    }
+  } catch {
     return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
   }
   return sh("git", ["rev-parse", `${c}^{tree}`], root) === tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
