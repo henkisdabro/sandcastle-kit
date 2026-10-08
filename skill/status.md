@@ -71,7 +71,7 @@ over` is a branch from an earlier run, for `sandcastle clean`. The live view fit
 summarises the rows that do not fit on one line (`sandcastle status 10 all` shows them all).
 
 **Logs.** Each ticket's agent and gate logs are `.sandcastle/logs/agent-issue-<n>-*.log` (a
-merged ticket's move to `.sandcastle/logs/archive/` at the next run or `sandcastle clean`); the
+merged ticket's move to `.sandcastle/logs/archive/` at the next run or `sandcastle clean`, or only at `sandcastle clean` while its worktree is kept); the
 `-gates-` one is the orchestrator's gate output. Each pass's raw stream - every tool call and
 result - is the `.jsonl` beside its `.log`: read that to check a reviewer's claim. The `.log`
 marks a failed tool result as `! error: ...` or `! exit N: ...`, and the last lines of a failed

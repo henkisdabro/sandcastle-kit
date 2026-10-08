@@ -1059,7 +1059,21 @@ export const render = (f: Facts, plain = false): string => {
     const b = one ? heldEarlier[0] : "<branch>";
     next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with \`git merge --no-ff ${b}\`, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
   }
-  if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
+  // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
+  // and no other step reaches it. Only a merged one: `clean` removes every worktree, and the others hold work a run or a person still needs.
+  const mergedKept = f.keptWorktrees
+    .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i && f.tickets[k.issue]?.state === "merged")
+    .map((k) => `${refOf(k.issue)} (\`${k.path}\`)`);
+  if (!baseRed) {
+    if (f.standing.length) {
+      next.push(`\`sandcastle clean\` once the branches above are resolved${mergedKept.length ? ` and you have looked at the files left in the kept worktree of ${mergedKept.join(", ")}` : ""}.`);
+    } else if (mergedKept.length) {
+      next.push(
+        `Look at the files left in the kept worktree of ${mergedKept.join(", ")}: ${mergedKept.length === 1 ? "its" : "their"} work is merged. ` +
+          "Then `sandcastle clean` removes it and the branch it holds and archives its logs - and removes every other kept worktree too, so do the steps above first.",
+      );
+    }
+  }
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
   const steps = f.next
     ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level === "drain" ? `at most ${DRAIN_CAP}` : f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; what needs you from this turn is carried into the last turn's summary.`, ...(push ? [push] : [])]
