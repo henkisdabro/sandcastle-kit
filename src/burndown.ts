@@ -937,7 +937,7 @@ export type PipelineContext = {
   timed: Timed;
   run: { ticket(id: string, fields: TicketRecord): void };
   view: Pick<SandboxView, "claim">;
-  host: Pick<HostGit, "begin" | "settle">;
+  host: Pick<HostGit, "begin" | "settle"> & Partial<Pick<HostGit, "write">>;
   /** The requeue-once state: a requeued ticket's line, while its second attempt is to come. */
   requeuedAs: ReadonlyMap<string, string>;
   /** This run's pipeline results so far: a requeued ticket's first attempt is among them. */
@@ -988,6 +988,38 @@ export const createPipeline = (ctx: PipelineContext) => {
     if (!found) return undefined;
     const [merge, mergedAt] = found.split(" ");
     return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
+  };
+
+  /**
+   * A branch an earlier run left with no commit ahead of the base (a crashed attempt, a remainder whose work already
+   * merged) is cut from the base's tip again, before its sandbox opens. Sandcastle checks an existing branch out as it
+   * stands and the base merge in the attempt's setup is for a carried branch only, so the agent would work - count
+   * tests, conflict at landing - on the tree of the run that left it. Nothing is lost: with none ahead, every commit
+   * of the branch is already the base's. A branch with commits keeps its fork point (the sandbox merges the base in).
+   * It runs through the host git's one writer, after `host.begin` so the `.git` check reads the new tip as the
+   * pipeline's own move. A branch a worktree still holds is left: git refuses the move, and that worktree may hold
+   * uncommitted files Sandcastle reuses.
+   */
+  const cutFromBase = (issue: string, branch: string) => {
+    const cut = () => {
+      let ahead: number;
+      let behind: number;
+      try {
+        ahead = Number(sh("git", ["rev-list", "--count", `refs/heads/${base}..refs/heads/${branch}`], project.root));
+        behind = Number(sh("git", ["rev-list", "--count", `refs/heads/${branch}..refs/heads/${base}`], project.root));
+      } catch {
+        return; // no such branch: the sandbox cuts a new one from the base
+      }
+      if (ahead > 0 || behind === 0) return;
+      const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it`;
+      try {
+        sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
+        console.log(`${was} - cut again from ${base}'s tip.`);
+      } catch (error) {
+        console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
+      }
+    };
+    return host.write ? host.write(cut) : cut();
   };
 
   const addReport = (id: string, heading: string, text: string) =>
@@ -1102,11 +1134,16 @@ export const createPipeline = (ctx: PipelineContext) => {
 
     const started = Date.now();
     releaseBranchWorktree(branch, project.root);
-    // From here the agent commits to the branch; the `.git` check lets it move.
+    // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
     host.begin(branch);
     // Reassigned when a pause closes the sandbox and the resume opens another on the same branch.
-    let sandbox = await timed(issue.id, "setup", () =>
-      open(branch),
+    let sandbox = await timed(
+      issue.id,
+      "setup",
+      async () => {
+        await cutFromBase(issue.id, branch);
+        return open(branch);
+      },
       requeuedAs.get(issue.id),
       undefined,
       at?.resolveWaitMs,
