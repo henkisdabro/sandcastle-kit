@@ -24,8 +24,8 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
@@ -1023,6 +1023,34 @@ export type PipelineContext = {
   tampered: Map<string, unknown>;
 };
 
+/**
+ * The worktree under the project's `.sandcastle/worktrees/` that has `branch` checked out, as the kit's sandboxes
+ * keep theirs; none for a branch no worktree holds, or one a person's own worktree holds elsewhere. Git lists the
+ * real path of a worktree, so the directory is compared under the root and under its realpath (as a project under
+ * macOS's `/tmp` needs).
+ */
+const keptWorktreeOf = (project: Project, branch: string): string | undefined => {
+  const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);
+  for (const entry of sh("git", ["worktree", "list", "--porcelain"], project.root).split("\n\n")) {
+    const lines = entry.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && lines.includes(`branch refs/heads/${branch}`) && under.some((u) => resolve(path).startsWith(u))) return path;
+  }
+};
+
+/**
+ * True when nothing in the worktree is uncommitted or untracked (what Sandcastle's close keeps a worktree for), so
+ * a move of its checkout loses nothing. Asked of git with the options a config could turn off; a worktree git
+ * cannot read (gone, its record rewritten) is not clean.
+ */
+const worktreeIsClean = (project: Project, path: string) => {
+  try {
+    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], project.root) === "";
+  } catch {
+    return false;
+  }
+};
+
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
@@ -1051,8 +1079,11 @@ export const createPipeline = (ctx: PipelineContext) => {
    * tests, conflict at landing - on the tree of the run that left it. Nothing is lost: with none ahead, every commit
    * of the branch is already the base's. A branch with commits keeps its fork point (the sandbox merges the base in).
    * It runs through the host git's one writer, after `host.begin` so the `.git` check reads the new tip as the
-   * pipeline's own move. A branch a worktree still holds is left: git refuses the move, and that worktree may hold
-   * uncommitted files Sandcastle reuses.
+   * pipeline's own move. A branch a worktree still holds cannot be moved (git refuses), and Sandcastle reuses that
+   * worktree as it stands - the worktree a run killed before its sandboxes closed leaves. Such a worktree under
+   * `.sandcastle/worktrees/` with nothing uncommitted is moved with its branch (a fast-forward: none ahead, so git
+   * refuses rather than lose anything), keeping its installed dependencies; one with uncommitted or untracked
+   * files, or a person's own elsewhere, is left where it is.
    */
   const cutFromBase = (issue: string, branch: string) => {
     const cut = () => {
@@ -1067,8 +1098,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       if (ahead > 0 || behind === 0) return;
       const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it`;
       try {
-        sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
-        console.log(`${was} - cut again from ${base}'s tip.`);
+        const kept = keptWorktreeOf(project, branch);
+        if (kept && worktreeIsClean(project, kept)) {
+          sh("git", ["-C", kept, "merge", "--ff-only", `refs/heads/${base}`], project.root);
+          console.log(`${was} - cut again from ${base}'s tip in its kept worktree.`);
+        } else {
+          // No worktree holds it, or one that is not clean or not the kit's does: git moves the branch, or refuses to.
+          sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
+          console.log(`${was} - cut again from ${base}'s tip.`);
+        }
       } catch (error) {
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
       }
