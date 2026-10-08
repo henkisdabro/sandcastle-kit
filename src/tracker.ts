@@ -631,3 +631,22 @@ export const resolveTracker = (root: string, config?: TrackerConfig): Resolved =
 
 export const makeTracker = (project: Project): Tracker =>
   project.tracker.kind === "files" ? files(project, project.tracker.dir, project.tracker.done) : github(project);
+
+/**
+ * `tracker` with one read of every open ticket (`open(false)`) behind its `get`: a ticket in that list is
+ * answered from it - open, held by its label or status, no comments - and any other id (closed since, or
+ * past a full list) is read by the real `get`. `listed` is the ids in the list, open by definition, for
+ * `blockerResolver`'s `known`. For a caller that reads many tickets in a row (the closing summary), where
+ * a `gh issue view` per ticket took a minute or more.
+ */
+export const withOpenList = (project: Project, tracker: Tracker): { tracker: Tracker; listed: Set<string> } => {
+  const byId = new Map(tracker.open(false).map((t) => [t.id, t]));
+  const get = (id: string): TicketState => {
+    const t = byId.get(id);
+    if (!t) return tracker.get(id);
+    const status = tracker.kind === "github" ? (t.labels?.includes(project.label) ? project.label : undefined) : t.status;
+    const held = tracker.kind === "github" ? !!t.labels?.some((l) => isHeld(project, l)) : isHeld(project, t.status);
+    return { ...t, comments: [], open: true, held, status };
+  };
+  return { tracker: { ...tracker, get }, listed: new Set(byId.keys()) };
+};

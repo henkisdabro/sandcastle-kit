@@ -22,7 +22,7 @@ import { sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
-import { makeTracker, refOf } from "./tracker.ts";
+import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
@@ -268,8 +268,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const waiting = earlier ? [] : Object.entries(tickets).filter(([, t]) => t.state === "blocked").map(([id]) => id);
   if (waiting.length) {
     try {
-      const tracker = makeTracker(project);
-      const resolve = blockerResolver(project, tracker);
+      // One list of the open tickets answers every ticket and blocker in it; a read per one took a minute with dozens blocked.
+      const { tracker, listed } = withOpenList(project, makeTracker(project));
+      const resolve = blockerResolver(project, tracker, listed);
       const whyOf = blockerWhy(project, tracker);
       for (const id of waiting) {
         const t = tracker.get(id);
