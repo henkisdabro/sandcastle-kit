@@ -720,28 +720,31 @@ export const heartbeatLine = (o: {
 /**
  * The run's waits for a machine-wide sandbox slot: a pipeline worker's for the next ticket (slot first,
  * `Work.slot` in src/schedule.ts) and a ticket's own as a pause ends. None of them is a ticket's in the queue, so
- * what they say is the run's: `share` is told each time "a wait is held back by the run's share" turns true or
- * false (the run record's `waitsForShare`), and `since` is when the oldest wait still open began (the heartbeat).
- * Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`, and `end`s as it is served or given up.
+ * what they say is the run's: `share` is told each time what holds a wait back changes - `held` is whether the run's
+ * share or the slot kept for landing does (the run record's `waitsForShare`, which an older view reads), `waitsFor`
+ * which of the two (`waitsFor`; the share wins while waits of both kinds are open) - and `since` is when the oldest
+ * wait still open began (the heartbeat). Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`,
+ * and `end`s as it is served or given up.
  */
-export const createSlotWaits = (share: (held: boolean) => void, now: () => number = Date.now) => {
-  const open = new Map<object, { since: number; share: boolean }>();
-  let told = false;
+export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "landing") => void, now: () => number = Date.now) => {
+  const open = new Map<object, { since: number; why?: "share" | "landing" }>();
+  let told: "share" | "landing" | undefined;
   const tell = () => {
-    const held = [...open.values()].some((w) => w.share);
-    if (held === told) return;
-    told = held;
-    share(held);
+    const whys = [...open.values()].map((w) => w.why);
+    const waitsFor = whys.includes("share") ? "share" : whys.includes("landing") ? "landing" : undefined;
+    if (waitsFor === told) return;
+    told = waitsFor;
+    share(waitsFor !== undefined, waitsFor);
   };
   return {
     begin() {
       const key = {};
-      open.set(key, { since: now(), share: false });
+      open.set(key, { since: now() });
       return {
         onWait(why: WaitReason) {
           const wait = open.get(key);
           if (!wait) return;
-          wait.share = why === "share";
+          wait.why = why === "share" || why === "landing" ? why : undefined;
           tell();
         },
         end() {
@@ -2277,11 +2280,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     }, priority);
   };
 
-  // The run's waits for a sandbox slot. One held back by the run's share, not only by a full pool, is the run
-  // record's `waitsForShare`, which the status view's next-to-start rows say.
-  const slotWaits = createSlotWaits((held) => {
+  // The run's waits for a sandbox slot. One held back by the run's share or by the slot kept for landing, not only
+  // by a full pool, is the run record's `waitsFor` (and `waitsForShare`, for an older view), which the status
+  // view's next-to-start rows say.
+  const slotWaits = createSlotWaits((held, waitsFor) => {
     try {
-      run.update({ waitsForShare: held || undefined });
+      run.update({ waitsForShare: held || undefined, waitsFor });
     } catch {
       /* the record's note only: a throw here would end the wait it describes */
     }

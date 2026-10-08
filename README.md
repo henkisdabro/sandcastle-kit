@@ -696,7 +696,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 | `gate red` `conflict` `held` `uncommitted` `crashed` `not landed` | Needs you. A conflict names the files and the branch merged before it that changed them; `held` with no commits is a ticket handed back to a person (a held branch you then merged by hand reads `merged`, "closes on push" until the merge is on `origin`'s base branch); `uncommitted`: the agent's work is in its kept worktree, not committed |
 | `stopped` `orphaned` `stalled` | Needs you. `stopped`: finished, but the run stopped before landing (it says why, and lands on the next run). `orphaned`: its run was killed and its container still works - `sandcastle clean` or the next run stops it. `stalled`: no container, and its log quiet for 30 minutes |
 | `withdrawn` | Closed, taken out of the queue or marked `ready-for-human` during the run - someone's decision. Not landed, and not started if it came before its sandbox |
-| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots, or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
+| `queued` `blocked` | Not started: next to start, how many ahead, that it waits for the run's share of the machine's sandbox slots (or that a slot of it is kept for landing), or what it waits for and whether this run holds that blocker. A `requeued` line marks a second attempt this run, after a conflict or a red at landing, or a conflict its pipeline found before its review or gates |
 | `paused` | Parked between two phases of a [paused](#-pausing-a-run) run: its sandbox is closed and its branch kept, and the note names the phase it resumes at and the commit (`before review at a1b2c3d`) |
 | `merged` `no change` `skipped` | Done, found nothing to do, or not started because the run stopped early |
 | `left over` | A branch from an earlier run, not in this one; `sandcastle clean` removes it once it is merged |
@@ -1519,7 +1519,8 @@ slots the same way); at a share of 1 the slot is a ticket's, and a landing waits
 Gate slots have no shares: they go to the longest wait.
 The status header's `this run` row shows the run's demand and share (`wants 4 · share 3`), the
 Herdr tab bar shows each live run's share, and while the run waits for a slot its share holds back, the
-tickets next to start say `waits for the run's share`. A run started by an older kit knows no shares and
+tickets next to start say `waits for the run's share` (or `waits: a slot is kept for landing`, when the last slot of
+its share is kept for a landing). A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
 first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent; with `USAGE_PAUSE` it

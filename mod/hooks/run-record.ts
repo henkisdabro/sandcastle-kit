@@ -293,11 +293,18 @@ export type RunRecord = {
   /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
   cap?: number;
   /**
-   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, not
-   * only a full pool: the status view's next-to-start rows say `waits for the run's share`. The wait is the run's, not a
-   * ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting ticket's note.
+   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, or
+   * the slot kept for landing does, not only a full pool: the status view's next-to-start rows say so. The wait is the
+   * run's, not a ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting
+   * ticket's note. Kept for older views: `waitsFor` says which.
    */
   waitsForShare?: boolean;
+  /**
+   * What holds that wait back, present with `waitsForShare`: `share` (the run's share or cap: `waits for the run's
+   * share`) or `landing` (the last slot of the share is kept for a landing: `waits: a slot is kept for landing`).
+   * An older kit's record has only `waitsForShare`, which the view reads as `share`.
+   */
+  waitsFor?: "share" | "landing";
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */
