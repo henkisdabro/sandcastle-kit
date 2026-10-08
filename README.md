@@ -597,13 +597,13 @@ ask the same, and take `--api-key` as well. Red only on a terminal and without `
 say it either way.
 
 When another run is live and holds or wants sandbox slots, the start also says how the machine is
-split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3; it starts
-as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
+split, before the estimate: `webshop is live (6 slots, demand 5): this run's share is 3, its tickets 2
+at a time (one slot is kept for landing); it starts as webshop's tickets finish, the first likely in ~12m`. The wait comes from that project's usual
 time for an issue and the ages of its working tickets, so it is left out where that project has no
 history. A run from an older kit is named as one that ignores shares (`webshop's run predates
 shares: it keeps taking free slots until it ends`); the run still starts. Nothing is asked: the
-split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share, not the
-machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`.
+split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share less the
+slot kept for landing (from a share of 2; a dry run keeps none), not the machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`.
 
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
