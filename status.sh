@@ -1298,8 +1298,8 @@ render() {
           activity_note="partly done, ticket open"
           # The agent's own line, as the closing summary reads it (needsDecision in src/autonomy.ts).
           unmet=""; fields_of "$n" "$UNMETS" "$US" && unmet="${F[1]:-}"
-          if printf '%s' "$unmet" | grep -Eiq '(^|[^[:alnum:]_])(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)([^[:alnum:]_]|$)'; then
-            activity_note="partly done - needs a person's decision"
+          if printf '%s' "$unmet" | grep -Eiq '(^|[^[:alnum:]_])(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off|not allowed|access I (don.t|do not) have|can(not|.t)[^.;]*from (here|this sandbox)|needs? (a |an |the )?(deploy[a-z]*|production|dashboard|login|pushed (PR|pull request))|agents? may not (edit|touch|change|modify))([^[:alnum:]_]|$)'; then
+            activity_note="partly done - needs a person"
           fi;;
         esac
       else

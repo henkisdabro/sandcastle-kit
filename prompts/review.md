@@ -140,6 +140,10 @@ with your sentence in place of the dots. The branch still merges if its gates ar
 ticket stays open with that criterion named, and the next run picks up the remainder. Give the real
 reason, and leave the line out when every criterion is met: a criterion you fixed is met.
 
+If what is left needs a person and no agent can do it (access you do not have, a deploy, a file agents may
+not edit, a decision), write the line as `<unmet who="person">...</unmet>` instead: a plain `<unmet>` line is
+picked up again by the next run, which would spend an agent on work only a person can do.
+
 If you committed a fix, make sure the gates it touches pass and everything is committed, then output
 `<promise>COMPLETE</promise>`.
 

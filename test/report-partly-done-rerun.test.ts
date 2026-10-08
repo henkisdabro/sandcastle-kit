@@ -1,6 +1,6 @@
 // A ticket that landed with a criterion left undone stays open and queued, so the next run takes it:
 // the closing summary lists it under Runnable now, the autonomy loop counts it as re-runnable, and
-// the promise matches. When the agent's own `<unmet>` line says the remainder is a person's decision,
+// the promise matches. When the agent's own `<unmet>` line says the remainder needs a person,
 // no run is promised: the summary suggests the hold label instead. Ticket files in a temp repo
 // (files tracker) and a made-up run record; no Docker, gh, model calls or network.
 //
@@ -54,7 +54,7 @@ test("the tracker comment promises a run only for a remainder an agent can do", 
   assert.match(partlyDoneComment({ ...o, unmet: ROUTINE }, "tsc"), /The next run picks up the remainder\./);
   const asked = partlyDoneComment({ ...o, unmet: PERSON }, "tsc");
   assert.doesNotMatch(asked, /picks up the remainder/);
-  assert.match(asked, /needs a person's decision.*hold label/);
+  assert.match(asked, /needs a person: do or decide it.*hold label/);
   assert.match(remainderNote(PERSON, "`sandcastle run`"), /hold label/);
   assert.equal(remainderNote(ROUTINE, "`sandcastle run`"), "The next `sandcastle run` picks up the remainder.");
 });
@@ -115,7 +115,7 @@ test("a remainder that needs a person is not runnable: the summary suggests the 
   assert.match(section(out, "## Runnable now / Still blocked"), /none|^$/);
   assert.doesNotMatch(section(out, "## Runnable now / Still blocked"), /#7/);
   assert.doesNotMatch(out, /picks up the remainder/);
-  assert.match(section(out, "## Needs you"), /needs a person's decision.*move it to the hold label \(`ready-for-human`\)/);
+  assert.match(section(out, "## Needs you"), /needs a person \(the agent's note\).*move it to the hold label \(`ready-for-human`\)/);
   assert.match(section(out, "## Next step"), /Decide what is left on #7.*hold label \(`ready-for-human`\)/);
   assert.deepEqual(rerunnable(f)?.partial, []);
   assert.equal(afterTurn(f, "drain", 1, () => true)?.verdict, "stop");

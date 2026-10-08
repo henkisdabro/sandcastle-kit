@@ -520,7 +520,7 @@ export const render = (f: Facts, plain = false): string => {
   const partly = merged.filter((id) => f.tickets[id].unmet);
   const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
   // What the next run does with each remainder, as the autonomy loop reads it (`partialRerunnable`): an agent
-  // runs it again while the ticket is queued, unless its own note says the remainder is a person's decision.
+  // runs it again while the ticket is queued, unless its own note says the remainder needs a person.
   const partlyRerun = partialRerunnable(f);
   const partlyDecide = partly.filter((id) => needsDecision(f.tickets[id].unmet!));
   // Still open but out of the queue (a person held or unlabelled it): no run takes it. Unknown when the queue was unreadable.
@@ -726,7 +726,7 @@ export const render = (f: Facts, plain = false): string => {
         const note = f.tickets[id].unmet ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
         const then = partlyDecide.includes(id)
-          ? `the remainder needs a person's decision (the agent's note), so a run would only ask it again: decide it and close the ticket, or move it to the hold label${holdLabel}`
+          ? `the remainder needs a person (the agent's note), so a run would only ask it again: do or decide it and close the ticket, or move it to the hold label${holdLabel}`
           : partlyAway.includes(id)
             ? "the ticket is still open but no longer in the queue, so no run takes it"
             : "and the next `sandcastle run` picks up the remainder";

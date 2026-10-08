@@ -28,6 +28,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
+import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
@@ -281,17 +282,30 @@ export const cutAtWord = (text: string, max: number): string => {
 // start its line and the closing tag end one (the prompts ask for "a line of its own"); the
 // content may still wrap over several lines but never holds another opening tag. A fence never closed blanks nothing: dropping a real
 // tag after a stray one costs more than reading a mention.
-const ownLineTags = (text: string, tag: string): string[] => {
+// `attrs`: an opening tag may carry attributes (`<unmet who="person">`), returned beside the text; only a tag
+// asked for with `withAttrs` takes any, so `<changelog x>` stays prose as before.
+const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: string; text: string }[] => {
   const unfenced = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
-  return [...unfenced.matchAll(new RegExp(`^[ \\t]*<${tag}>((?:(?!<${tag}>)[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => m[1]);
+  const open = withAttrs ? `<${tag}(?:[ \\t]+([^<>\\n]*?))?[ \\t]*>` : `<${tag}()>`;
+  return [...unfenced.matchAll(new RegExp(`^[ \\t]*${open}((?:(?!<${tag}[ \\t>])[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => ({ attrs: m[1] ?? "", text: m[2] }));
 };
+const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
 const lineOf = (tag: string) => (text: string): string | undefined => {
   const said = ownLineTags(text, tag).at(-1)?.replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 export const ungatedOf = lineOf("ungated");
 // An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
-export const unmetOf = lineOf("unmet");
+// `<unmet who="person">...</unmet>` says the remainder needs a person (access, a deploy, a human-only file, a
+// decision): the note keeps that as `PERSON_MARK` in front, so the run record's `unmet` carries it to the
+// report and the status view, and no other run is spent on it (`needsDecision`).
+export const unmetOf = (text: string): string | undefined => {
+  const last = ownLineMatches(text, "unmet", true).at(-1);
+  const said = last?.text.replace(/\s+/g, " ").trim();
+  if (!last || !said || said === "...") return undefined;
+  const byPerson = /(^|\s)who\s*=\s*(["']?)person\2(\s|$)/i.test(last.attrs);
+  return cutAtWord(byPerson && !said.startsWith(PERSON_MARK) ? PERSON_MARK + said : said, UNGATED_MAX);
+};
 // What a full review is shown of the implementer's `<unmet>` line: its words are dropped from the ticket's
 // leftovers once a full review ran (`left`), so the reviewer must finish the criterion or restate it, or it is lost.
 // Empty when the implementer gave none, so the prompt carries no heading over nothing.

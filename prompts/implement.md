@@ -140,6 +140,10 @@ stays open with that criterion named, and the next run picks up the remainder. L
 every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
 to omit it.
 
+If what is left needs a person and no agent can do it (access you do not have, a deploy, a file agents may
+not edit, a decision), open the line as `<unmet who="person">...</unmet>` instead: a plain `<unmet>` line is
+picked up again by the next run, which would spend an agent on work only a person can do.
+
 **A problem, limitation, risk or trade-off you judge outside the ticket** does not stay in the prose of
 your final message, which no reviewer and no tracker reads. Put each one on a line of its own:
 
