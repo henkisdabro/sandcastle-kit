@@ -1115,7 +1115,7 @@ itself, in the status view's castle, glyphs and colours:
   the run ends.
 - 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the
   run's process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that
-  died seconds after it started - and closes the run with the seven-section summary. It needs no
+  died seconds after it started - and closes the run with the closing summary (the seven sections, or a short hand-back when asked). It needs no
   Herdr and no `sandcastle wait`. It follows the run that session started wherever its project
   is - a second clone of the repository, a package of a monorepo - because every run records the
   id of the Claude Code session that started it (and only the id). A run started from a plain
