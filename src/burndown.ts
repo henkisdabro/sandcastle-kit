@@ -413,7 +413,7 @@ const STOPWORDS = new Set(
 // The significant words of a title: 4 letters or more, no stopword, and not the path itself.
 const significantWords = (title: string, path: string): Set<string> =>
   new Set(
-    title.replace(path, " ").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+    (path ? title.replace(path, " ") : title).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
   );
 /** Where a finding is: the source ticket's file, and its line when the agent gave one. */
 type Seat = { from: string; path: string; line?: number; firm: boolean; words: Set<string> };
@@ -432,8 +432,9 @@ const firstFile = (re: RegExp, text: string, exists: PathExists) => {
 // title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
 // another finding is about, and two titles that name a file say little by it. A file the title names comes before
 // a line the evidence cites in another file, which would otherwise hide it from a close title naming the same file;
-// the evidence may still give that file's line.
-const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
+// the evidence may still give that file's line. A finding that names no file of the base tree gets a seat with
+// no path, which `sameFinding` matches on its title alone.
+const placeSeat = (f: FollowUp, exists: PathExists): Seat => {
   const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
     from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
   });
@@ -445,7 +446,7 @@ const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
     return seat({ ...fileOnly, line: line === undefined ? undefined : Number(line) }, false);
   }
   const inEvidence = firstFile(PLACE, f.evidence, exists);
-  return inEvidence ? seat(inEvidence, false) : undefined;
+  return inEvidence ? seat(inEvidence, false) : { from: f.from, path: "", firm: false, words: significantWords(f.title, "") };
 };
 /** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
 export const onBase = (root: string, base: string): PathExists => (path) => {
@@ -456,22 +457,26 @@ export const onBase = (root: string, base: string): PathExists => (path) => {
   }
 };
 const WORDS_SHARED = 2;
+// With no file to agree on, the titles are all there is to go by, so they must share more: the same tooling
+// failure worded twice shares three, and two unrelated findings of one ticket rarely do.
+const WORDS_SHARED_NO_PLACE = 3;
 // Per source ticket: the same place named for another ticket is a different finding. Two findings at one line
 // are one when either names it in its title; otherwise (or with no line on one side) their titles must overlap.
+// Two findings that name no place are one when their titles overlap by more.
 const sameFinding = (a: Seat, b: Seat): boolean => {
   if (a.from !== b.from || a.path !== b.path) return false;
-  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= WORDS_SHARED;
+  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= (a.path ? WORDS_SHARED : WORDS_SHARED_NO_PLACE);
   if (a.line !== undefined && b.line !== undefined) return a.line === b.line && (a.firm || b.firm || overlap);
   return overlap;
 };
 /** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
 export type Places = Map<string, { id: string; seat: Seat }[]>;
 const placesKey = (s: Seat) => `${s.from}\0${s.path}`;
-const placeOf = (places: Places, seat: Seat | undefined) => (seat ? places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat)) : undefined);
+const placeOf = (places: Places, seat: Seat) => places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat));
 const addPlace = (places: Places, seat: Seat, id: string) => places.set(placesKey(seat), [...(places.get(placesKey(seat)) ?? []), { id, seat }]);
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
-  `Named again by the ${f.phase} agent working on ${ref(f.from)}, at the same place, as "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
+  `Named again by the ${f.phase} agent working on ${ref(f.from)}, as the same finding, worded "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
 // The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
 // requeued) hears its agents name the same problem again, and that is still one ticket.
 const filedThisRun = new Set<string>();
@@ -481,7 +486,8 @@ const placesThisRun: Places = new Map();
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A follow-up naming the
- * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, is not filed:
+ * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, or naming no place and
+ * sharing three significant words of its title with one, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
  * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
@@ -526,7 +532,7 @@ export const fileFollowUps = async (
       const id = await o.write(() => tracker.create(f.title, body, f.from));
       out.push({ ...at, id });
       seen.add(key);
-      if (place) addPlace(places, place, id);
+      addPlace(places, place, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -581,11 +587,11 @@ export const createFollowUpBook = (
       if (seen.has(key)) return;
       if (!listed.has(key)) {
         const place = placeSeat(f, o.exists);
-        if (place && (placeOf(listedPlaces, place) || placeOf(places, place))) {
+        if (placeOf(listedPlaces, place) || placeOf(places, place)) {
           repeats.push(f);
           return;
         }
-        if (place) addPlace(listedPlaces, place, "");
+        addPlace(listedPlaces, place, "");
       }
       heard.push(f);
       if (listed.has(key)) return;
