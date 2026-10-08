@@ -285,3 +285,13 @@ implementer the order is: the ticket's own `model:` or `effort:` label, then `IM
 `model:` label as it is; to override a label for one run, remove the label. Repair uses the
 implementer's model and effort. A run that is already going keeps its models; the change applies
 from the next one, and it never needs a change to the kit.
+
+A model's price can depend on the length of the prompt, and an agent pass sends its whole context
+with every tool call, so a long pass pays the long-prompt rate on most of its requests. Claude
+Haiku 5.5 is the case to know, billed through an API key: its price covers prompts up to 100K
+tokens, and a longer prompt is billed at five times it, input and output. At `high` or `max`
+effort most of an implement pass's requests run past 100K tokens. The kit's default effort is
+`high` for any model, so `IMPL_MODEL=claude-haiku-5-5` on its own runs Haiku there. If Haiku is the
+implementer, run it at `medium` or below and set its effort with it (`IMPL_EFFORT`, or `effort`
+beside `model` under `implement` in `.sandcastle/config.ts`). Compare runs on their token lines:
+the status view's TOKENS column and the closing summary's tokens.
