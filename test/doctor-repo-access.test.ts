@@ -115,13 +115,13 @@ test("doctor --verify keeps its line for a token that sees the repo but cannot p
   assert.doesNotMatch(out, /cannot see octo\/demo/, out);
 });
 
-test("doctor --verify says the token cannot see the repo when only the write probe answers 404", async () => {
+test("doctor --verify reads a write probe's 404 as no push access when the read sees the repo", async () => {
   let out = "";
   await github(200, 404, async (url) => {
     out = await doctorVerify(url);
   });
-  assert.match(out, /^FIX\s+GH_TOKEN cannot see octo\/demo/m, out);
-  assert.doesNotMatch(out, /cannot push to octo\/demo \(no Contents/, out);
+  assert.match(out, /^ok\s+GH_TOKEN cannot push to octo\/demo \(no Contents: write\)$/m, out);
+  assert.doesNotMatch(out, /cannot see octo\/demo/, out);
 });
 
 test("doctor --verify gives no FIX for a 404 in a project whose tickets are in files", async () => {
