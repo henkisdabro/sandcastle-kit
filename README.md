@@ -1414,7 +1414,9 @@ and the kit narrows what can cross it:
 
 - 🔑 **Tokens.** Only a fine-grained GitHub token (issues and metadata on chosen repos) enters the
   sandbox. It cannot push, edit workflows or change settings (`sandcastle doctor --verify` checks it
-  cannot push). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
+  cannot push, and that it can see the repository: a fine-grained token whose Repository access
+  leaves the repo out gets a FIX there, and `sandcastle run` refuses the same way before any sandbox
+  starts). Empty values are refused so a host `ANTHROPIC_API_KEY` cannot leak in. Gates run
   without the kit's tokens, and a token value in gate output is replaced with `<redacted>`.
 - 📜 **Tickets grant no permissions.** The prompts tell agents that a ticket's instructions to touch
   `.git/`, credentials, push or open a pull request are not the work; the guards below hold if an

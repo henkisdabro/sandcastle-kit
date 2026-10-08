@@ -8,7 +8,7 @@ import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
-import { CONFIG_PATH, loadProject } from "./config.ts";
+import { CONFIG_PATH, loadProject, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { pluginState } from "./herdr-plugin.ts";
@@ -16,7 +16,7 @@ import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
 import { poolWarningsNow, sizePointerNow } from "./size.ts";
-import { apiKeySpend, baseImage, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
+import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { runtimeProblemNow } from "./runtime.ts";
@@ -159,6 +159,41 @@ export const probeGithubWrite = async (token: string, repo: string): Promise<num
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
   return res?.status;
+};
+
+/**
+ * The HTTP status GitHub gives a token that reads a repository's issues (what every ticket's prompt does
+ * through `gh issue view`), undefined when there was no answer. A fine-grained token whose Repository
+ * access leaves the repo out gets 404 here, as for a repo that does not exist.
+ */
+export const probeGithubRead = async (token: string, repo: string): Promise<number | undefined> => {
+  const res = await fetch(`${process.env.SANDCASTLE_TEST_GITHUB_API || "https://api.github.com"}/repos/${repo}/issues?per_page=1`, {
+    headers: { Authorization: `Bearer ${token}`, "User-Agent": "sandcastle-kit" },
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined);
+  return res?.status;
+};
+
+/** What doctor and the run's start both say when GH_TOKEN cannot see the repository. */
+export const repoInvisible = (repo: string) => ({
+  label: `GH_TOKEN cannot see ${repo} (HTTP 404)`,
+  fix: `Every ticket would fail reading its issue. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens): under Repository access, include ${repo}.`,
+});
+
+/**
+ * The run's start check, no model call: refuses when the project's GH_TOKEN gets 404 for the repo. Only a
+ * 404 refuses - no connection, a rate limit or a 403 prove nothing about the token, so the run goes ahead.
+ */
+export const requireRepoAccess = async (project: Project, repoRoot = project.root) => {
+  if (project.tracker.kind !== "github") return;
+  const token = githubToken(project);
+  if (!token) return; // credentials() refuses a missing token with its own words
+  const repo = run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot);
+  if (!repo) return;
+  if ((await probeGithubRead(token, repo)) === 404) {
+    const { label, fix } = repoInvisible(repo);
+    throw new OperatorError(`${label}: ${fix}`);
+  }
 };
 
 /** The HTTP status Anthropic's model list gives an API key (401 for a bad one), undefined when there was no answer. Listing models is free: no model call, no tokens spent. */
@@ -476,9 +511,16 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // In a project: the sandboxes get this token, and a prompt-injected agent has it too.
       const repo = key === "GH_TOKEN" && seen === "ok" && inProject ? run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], repoRoot) : undefined;
       if (repo) {
+        const read = await probeGithubRead(found.value, repo);
         const write = await probeGithubWrite(found.value, repo);
-        if (write === 422) check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.`);
-        else if (write === 403 || write === 404) console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
+        // A token without the repo answers 404 to both probes; that is not "no Contents: write".
+        // Tickets in files are never read with it, so there the shared token may leave this repo out.
+        if (read === 404 || write === 404) {
+          const { label, fix } = repoInvisible(repo);
+          check(false, label + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), fix, !needsGh);
+        }
+        else if (write === 422) check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.`);
+        else if (write === 403) console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
         else console.log(`opt  GH_TOKEN push access to ${repo} - not checked (${write === undefined ? "no connection" : `HTTP ${write}`})`);
       }
       else if (seen === "rejected") check(false, `${print} - rejected (HTTP ${status})`, `Make a new token and replace it in ${found.file}: \`${setup}\``);
