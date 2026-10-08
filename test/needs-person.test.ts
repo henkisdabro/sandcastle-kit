@@ -4,7 +4,7 @@
 // criterion stays re-runnable. The words are grepped by status.sh too, so both readers are held to
 // the same phrases. No repo, Docker, model or network.
 //
-//   node --test test/needs-person.test.ts
+//   pnpm test:file test/needs-person.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -4,7 +4,7 @@
 // through its ports: a temp repo, a host worktree for the sandbox and scripted agents and gate runs.
 // No Docker, model, gh or network.
 //
-//   node --test test/land-only-ungated.test.ts
+//   pnpm test:file test/land-only-ungated.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

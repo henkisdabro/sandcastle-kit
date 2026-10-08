@@ -4,7 +4,7 @@
 // repair prompts tell the agent to carry such text through a file tool, never a command line. No
 // model calls.
 //
-//   node --test test/prompt-guard-quoted-text.test.ts
+//   pnpm test:file test/prompt-guard-quoted-text.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
