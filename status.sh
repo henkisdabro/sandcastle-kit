@@ -1267,9 +1267,13 @@ render() {
     # its branch's state, with a note, not as working forever.
     # A container with no live run is an orphan: its run was killed, and its
     # agent goes on spending with nobody to gate or land what it makes.
+    # A worktree is the live run's only while the ticket is its own: a current
+    # record's tickets never reach this loop, so only an older orchestrator's
+    # `issues` list names one here. Any other worktree is an earlier run's,
+    # kept like one with no live run - a container on it is an orphan.
     live_wt=0; kept_wt=0; orphan=0
     if [ -d "worktrees/agent-issue-$n" ]; then
-      if [ "$RUN_LIVE" = 1 ]; then live_wt=1; elif [ -n "$S_CPU" ]; then orphan=1; else kept_wt=1; fi
+      if [ "$RUN_LIVE" = 1 ] && [ "$RECORD" = 0 ] && has_line "$n" "$RUN_ISSUES"; then live_wt=1; elif [ -n "$S_CPU" ]; then orphan=1; else kept_wt=1; fi
     fi
     if [ "$orphan" = 1 ]; then
       state="orphaned"; activity_note="its run is gone, its agent still works - sandcastle clean stops it"
