@@ -27,9 +27,9 @@ This continues SKILL.md: run its "Before every action" first.
    the Dockerfile (from the kit's `templates/Dockerfile` if init wrote none) only when the base
    image lacks something the gates or hooks need (browsers, a pinned package manager).
    If the project tests in Chromium (Playwright, Puppeteer), tell the user its tests must launch
-   it with `--disable-dev-shm-usage`: sandboxes have Docker's default 64 MB `/dev/shm`, and a heavy
-   page crashes there. Add a line to `rules.md` too, so an agent does not mistake the crash for
-   its own bug.
+   it with `--disable-dev-shm-usage`: a sandbox has the runtime's default `/dev/shm`, 64 MB on
+   Docker (`df -h /dev/shm` in one shows it), and a heavy page crashes there. Add a line to
+   `rules.md` too, so an agent does not mistake the crash for its own bug.
 3. **Make the sandbox lean.** `sandcastle init` ends with the lean check: every skill, subagent,
    command, MCP server and plugin the repo would load into each sandbox agent, with its per-turn
    token cost. All of it is hidden unless `lean.keep` names it. Keep an item only when a run
