@@ -54,6 +54,7 @@ test("two merged tickets' kept worktrees are one step naming each", () => {
   const next = nextStep(facts({ tickets: { "7": { ...mergedTicket }, "8": { ...mergedTicket } }, keptWorktrees: [{ issue: "7", path: wt7 }, { issue: "8", path: wt8 }] }));
   assert.equal(next.split("sandcastle clean").length - 1, 1);
   assert.ok(next.includes(wt7) && next.includes(wt8));
+  assert.match(next, /kept worktrees of #7 .*, #8 .*: their work is merged\. Then `sandcastle clean` removes them and the branches they hold and archives their logs/);
 });
 
 test("a merged ticket's kept worktree and a standing branch: one clean line naming both", () => {

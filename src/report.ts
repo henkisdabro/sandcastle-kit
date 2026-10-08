@@ -1069,8 +1069,11 @@ export const render = (f: Facts, plain = false): string => {
       next.push(`\`sandcastle clean\` once the branches above are resolved${mergedKept.length ? ` and you have looked at the files left in the kept worktree of ${mergedKept.join(", ")}` : ""}.`);
     } else if (mergedKept.length) {
       next.push(
-        `Look at the files left in the kept worktree of ${mergedKept.join(", ")}: ${mergedKept.length === 1 ? "its" : "their"} work is merged. ` +
-          "Then `sandcastle clean` removes it and the branch it holds and archives its logs - and removes every other kept worktree too, so do the steps above first.",
+        mergedKept.length === 1
+          ? `Look at the files left in the kept worktree of ${mergedKept[0]}: its work is merged. ` +
+              "Then `sandcastle clean` removes it and the branch it holds and archives its logs - and removes every other kept worktree too, so do the steps above first."
+          : `Look at the files left in the kept worktrees of ${mergedKept.join(", ")}: their work is merged. ` +
+              "Then `sandcastle clean` removes them and the branches they hold and archives their logs - and removes every other kept worktree too, so do the steps above first.",
       );
     }
   }
