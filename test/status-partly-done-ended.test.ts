@@ -1,7 +1,7 @@
 // After a run has ended, the status view shows a ticket landed partly done (`Merge ... (part of #n)`)
 // as partly done, not as "queued for the next run": it is open and in the queue by design, and its
 // own comment moves the issue after the merge, which `requeued` read as a person putting it back.
-// Where the run record's `unmet` says the remainder is a person's decision, the row says so, as the
+// Where the run record's `unmet` says the remainder needs a person, the row says so, as the
 // closing summary does. A ticket that landed with "closes" and was relabelled after still reads queued.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
@@ -84,7 +84,7 @@ test("an ended run's partly-done landing reads partly done, not queued for the n
   assert.match(out, /#6 +│ . queued .*for the next run/);
 });
 
-test("the run record's unmet says the remainder needs a person's decision, as the summary does", () => {
+test("the run record's unmet says the remainder needs a person, as the summary does", () => {
   const out = frame({ 5: "which of the two formats to keep is the maintainer's decision" }, [5, 6]);
   assert.match(out, /#5 +│ . merged .*partly done - needs a person/);
   assert.doesNotMatch(out, /#5 .*for the next run/);

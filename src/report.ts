@@ -520,7 +520,7 @@ export const render = (f: Facts, plain = false): string => {
   const partly = merged.filter((id) => f.tickets[id].unmet);
   const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
   // What the next run does with each remainder, as the autonomy loop reads it (`partialRerunnable`): an agent
-  // runs it again while the ticket is queued, unless its own note says the remainder is a person's decision.
+  // runs it again while the ticket is queued, unless its own note says the remainder needs a person.
   const partlyRerun = partialRerunnable(f);
   const partlyDecide = partly.filter((id) => needsDecision(f.tickets[id].unmet!));
   // Still open but out of the queue (a person held or unlabelled it): no run takes it. Unknown when the queue was unreadable.
@@ -726,7 +726,7 @@ export const render = (f: Facts, plain = false): string => {
         const note = f.tickets[id].unmet ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
         const then = partlyDecide.includes(id)
-          ? `the remainder needs a person's decision (the agent's note), so a run would only ask it again: decide it and close the ticket, or move it to the hold label${holdLabel}`
+          ? `the remainder needs a person (the agent's note), so a run would only ask it again: do or decide it and close the ticket, or move it to the hold label${holdLabel}`
           : partlyAway.includes(id)
             ? "the ticket is still open but no longer in the queue, so no run takes it"
             : "and the next `sandcastle run` picks up the remainder";
@@ -882,7 +882,7 @@ export const render = (f: Facts, plain = false): string => {
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
   if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
-  if (partlyDecide.length) next.push(`Decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is settled, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
+  if (partlyDecide.length) next.push(`Do or decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   if (gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);

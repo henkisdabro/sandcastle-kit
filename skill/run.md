@@ -168,7 +168,7 @@ This continues SKILL.md: run its "Before every action" first.
       Each ticket listed `merged - check by hand`: what the reviewer said to check, and offer to
       check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
-      next run picks up the remainder - unless the line says the remainder is a person's decision,
+      next run picks up the remainder - unless the line says the remainder needs a person (a decision, a deploy, access),
       when the summary suggests moving the ticket to the hold label instead). Each ticket listed `the reviewer named a gap it did not file`: a sentence the reviewer left in prose, with no
       `<followup>` or `<unmet>` line, so nothing was filed - file it as a ticket (offer to), or say it needs nothing. A follow-up the summary says to file by hand is one the kit
       could not file, after a stop or a failed filing: file it, or offer to. The rest are under a `### To triage`
