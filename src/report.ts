@@ -21,6 +21,7 @@ import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
+import { LANDING_HOLD } from "./ledger.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
@@ -70,6 +71,8 @@ export type Facts = {
   standing: string[];
   /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
   earlierHeld?: Record<string, string>;
+  /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
+  heldResolutions?: string[];
   keptWorktrees: { issue: string; path: string }[];
   /** Tracked files a gate rewrote and the kit put back. */
   gateRewrites?: string[];
@@ -366,6 +369,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     }),
   );
 
+  // Told from a landing hold (`LANDING_HOLD`) and an agent's hand-back by the outcome's text: neither has a `files` list to tell it by.
+  const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text !== LANDING_HOLD && o.text !== HANDED_BACK).map(([id]) => id);
+
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
@@ -394,6 +400,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     upstream,
     standing,
     earlierHeld,
+    heldResolutions,
     keptWorktrees: run.keptWorktrees ?? [],
     gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
@@ -677,7 +684,9 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       // A criterion the agents left undone travels with the branch: whoever lands it by hand sees it first
       // (`sandcastle land` merges it as partly done and leaves the ticket open).
       const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
-      return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
+      // A held conflict resolution is landed with `sandcastle land`, which gates the merge; a hand merge runs no gate.
+      const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: git merge --no-ff agent/issue-${id}`;
+      return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   ${how}`];
     }),
     ...o.gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
     ...o.takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
@@ -719,7 +728,10 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   const list = listOf;
   const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
   const next: string[] = [];
-  if (o.heldWork.length) next.push(`Review and merge the ${o.heldWork.length} held branch(es) (commands above).`);
+  const resolutions = o.heldWork.filter((id) => f.heldResolutions?.includes(id));
+  const merges = o.heldWork.length - resolutions.length;
+  if (merges) next.push(`Review and merge the ${merges} held branch(es) (commands above).`);
+  if (resolutions.length) next.push(`Check and land the ${resolutions.length} held conflict resolution(s) (commands above): \`sandcastle land <ticket>\` gates the merge.`);
   if (o.gone.length) next.push(`Decide ${list(o.gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
   if (o.handedBack.length) next.push(`Read the agent's comment on ${list(o.handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
   if (o.notClosed.length && !carried) next.push(`Close ${list(o.notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
@@ -973,12 +985,17 @@ export const render = (f: Facts, plain = false): string => {
 
   // Local state
   const earlier = f.earlierHeld ?? {};
+  const isResolution = (b: string) => !!f.heldResolutions?.includes(b.replace(/^agent\/issue-/, ""));
+  const earlierWords = (b: string) =>
+    isResolution(b)
+      ? `its conflict resolution was held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
+      : `held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""}`;
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
       : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
     "Nothing is pushed by Sandcastle. Push by this repo's own rules (for example `git push`, or a pull request).",
-    `Agent branches with unmerged work: ${f.standing.length ? f.standing.map((b) => (b in earlier ? `${b} (held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""})` : b)).join(", ") : "none"}`,
+    `Agent branches with unmerged work: ${f.standing.length ? f.standing.map((b) => (b in earlier ? `${b} (${earlierWords(b)})` : b)).join(", ") : "none"}`,
     // By path: a requeued ticket's second pipeline keeps the same worktree, and one line per path is the fact.
     ...f.keptWorktrees
       .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i)
@@ -1053,7 +1070,17 @@ export const render = (f: Facts, plain = false): string => {
   const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
   if (push) next.push(push);
   // `sandcastle land` refuses a branch held for a protected path or a large file, and plain `clean` keeps an unmerged branch: the person merges it or deletes it.
-  const heldEarlier = f.standing.filter((b) => b in earlier);
+  const heldEarlier = f.standing.filter((b) => b in earlier && !isResolution(b));
+  const resolvedEarlier = f.standing.filter((b) => b in earlier && isResolution(b));
+  if (resolvedEarlier.length) {
+    const one = resolvedEarlier.length === 1;
+    const b = one ? resolvedEarlier[0] : "<branch>";
+    const n = one ? resolvedEarlier[0].replace(/^agent\/issue-/, "") : "<n>";
+    next.push(
+      `Check the resolution on ${resolvedEarlier.join(", ")}, held in an earlier run: \`git log -p ${f.base}..${b}\`; if no other ticket's lines were lost, \`sandcastle land ${n}\` lands ${one ? "it" : "each"} with the gates; ` +
+        `if some were, fix the branch first, or \`sandcastle requeue ${n} --note "..."\`.`,
+    );
+  }
   if (heldEarlier.length) {
     const one = heldEarlier.length === 1;
     const b = one ? heldEarlier[0] : "<branch>";
