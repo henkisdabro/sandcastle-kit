@@ -2,7 +2,7 @@
 // significant words: the first is filed, the second becomes a comment on it. Different source tickets stay
 // separate. A fake tracker that records what it is asked to create and comment on; no Docker, model or network.
 //
-//   node --test test/followup-no-place.test.ts
+//   pnpm test:file test/followup-no-place.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

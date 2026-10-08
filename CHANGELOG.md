@@ -9,6 +9,79 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **Implement and repair agents carry text that names a git command the guard refuses through the
+  Edit or Write tool or a file** (a heredoc, a script, a commit message), never on a shell command
+  line, so such an edit no longer costs a refused turn.
+- **The README and the init skill tell Playwright and Puppeteer projects to launch Chromium with
+  `--disable-dev-shm-usage`**: a sandbox gets the runtime's default `/dev/shm` (64 MB on Docker),
+  and heavy pages crash there.
+
+### Security
+
+- **A filter, driver or hook that another ticket's sandbox planted in the shared `.git` while a
+  landing was being checked can no longer run on the host at the fast-forward.** The `.git` check
+  now runs straight before the fast-forward and stops the run first, for runs and for
+  `sandcastle land`.
+
+### Fixed
+
+- **`sandcastle doctor --verify` reads the repository with `GH_TOKEN`** and gives a FIX naming the
+  token's Repository access when GitHub answers 404 (the write probe's 404 no longer reads as
+  "cannot push"). `sandcastle run` refuses the same way before any sandbox starts, instead of
+  crashing every ticket.
+- **In a partial (promisor) clone, the host's merge checks no longer fail quietly** when an object
+  is missing locally (the conflict check before landing, the landing pre-check, and the check of a
+  conflict resolution). The run says so once, the closing summary names it, and doctor warns on a
+  partial clone. The checks still never fetch: a full clone is what lets them run.
+- **A landing whose host merge check could not run because a git call failed is held with a "could
+  not be run" note**, instead of being reported as a merge conflict.
+- **A conflict resolution is held for a person only when it changes a file the base had changed
+  since the merge base.** A new file, or one only the ticket's branch touched, goes to the narrow
+  review of the resolution instead.
+- **A ticket branch an earlier run left with no commits ahead of the base is cut again from the
+  base's tip** before its sandbox opens (a crashed attempt, or a remainder whose work already
+  merged), so the agent no longer works on a stale tree and conflicts at landing.
+- **A gate that rewrites a tracked file no longer leaves every worktree dirty**, so merged tickets'
+  branches are deleted and no worktree or branch leaks. The closing summary names the rewritten
+  file once, with the hint to `.gitignore` it or list it under `generated`, and lists each kept
+  worktree once.
+- **A drain no longer re-runs a partly-done ticket whose remainder only a person can do** (a
+  deploy, access an agent lacks, a file agents may not edit): agents mark such a remainder with
+  `<unmet who="person">`, and the wording check catches more of these phrasings.
+- **Follow-ups that name no file are deduped when the same ticket's passes word one finding
+  differently**: two titles sharing three or more significant words are filed once, and the second
+  becomes a comment on the first's issue.
+- **A ticket's gates log heads each section with the kind of gate run** (ticket gates, landing gates
+  on the merged tree, or a hand landing by `sandcastle land`), says `# waited Ns for a gates slot`
+  after a wait, and stamps its gate lines in the header's local time.
+- **The lean hook check no longer warns of an unseen Python import for a hook a passing hook test
+  ran cleanly.** The warning stays for hooks no passing test has run, and returns after a commit
+  that changes a hook file, manifest or lockfile, until the next base check reruns the hook tests.
+- **`sandcastle lean` and `sandcastle doctor` list a project's `permissions.ask` rules as refused in
+  sandboxes**, where nobody can answer them, and agents commit with `git commit -F <file>`, so a
+  commit message can no longer match a command rule.
+- **The status view no longer marks an earlier run's kept worktrees as `stalled`** (or as a working
+  phase) while a new run is live; they show as `merged` or `left over` by their branch, as they do
+  with no live run.
+- **A ticket waiting because the last slot of the run's share is kept for landing shows `waits: a
+  slot is kept for landing`** in the status view, instead of `waits for the run's share`. The run
+  record gains `waitsFor` (`share` or `landing`) beside the old `waitsForShare`.
+- **The closing summary's wording of hand merges is right.** A GitHub ticket whose hand merge was
+  pushed and closed reads "merged by hand, and closed", not always "closes on push", and a "part of"
+  hand merge reads "merged by hand, partly done: stays open" with its unmet criterion.
+- **The closing summary says when a listed agent branch was held for a human merge in an earlier
+  run**, with the reason, and its Next step says to review and merge it by hand or delete it.
+- **A branch carried into a later run keeps its earlier review's "check by hand" note and gap**, so
+  they reach that run's closing summary.
+- **The closing summary no longer lists a reviewer's prose as "named a gap it did not file"** when
+  the gap word sits in inline code or a heading, or the sentence reports a fix or a deliberate
+  omission. A gap named after its fix, or a fix not made, still counts, and a gap sentence opening
+  with "That" or "This" is quoted with the sentences before it.
+- **With the Markdown ticket-files tracker, a red end-of-run verify on the tree a landing's own
+  gates passed says the difference is the sandbox, not the merge**, instead of "RED TOGETHER".
+
 ## [0.11.0] - 2026-10-08
 
 ### Added

@@ -1,7 +1,7 @@
 // A branch an earlier run held for a person is said to be so beside the branch in the closing
 // summary, with the way to resolve it; a standing branch with no such outcome reads as before.
 //
-//   node --test test/report-earlier-held.test.ts
+//   pnpm test:file test/report-earlier-held.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

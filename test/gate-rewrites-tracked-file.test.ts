@@ -3,7 +3,7 @@
 // the closing summary names the file once with the way to stop it, and a requeued ticket's kept worktree is one line.
 // No Docker, model or network: the sandbox is a temp git repo, the one fake being how a command reaches it.
 //
-//   node --test test/gate-rewrites-tracked-file.test.ts
+//   pnpm test:file test/gate-rewrites-tracked-file.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
