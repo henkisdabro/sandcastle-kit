@@ -16,7 +16,7 @@ const read = (...p: string[]) => readFileSync(join(import.meta.dirname, "..", ..
 test("every agent that may run a test without its change limits the run, restores apart, and never self-matches", () => {
   for (const name of ["implement.md", "review.md", "repair.md"]) {
     const p = read("prompts", name);
-    assert.match(p, /git diff > \/tmp\/p && git checkout -- <files>`, run it, then `git apply \/tmp\/p`/, name);
+    assert.match(p, /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>`, run it, then `git apply \/tmp\/p`/, name);
     assert.match(p, /Give that test run a time limit/, name);
     assert.match(p, /Run `git apply \/tmp\/p` as a command of its own, never chained after the test/, name);
     assert.match(p, /Never `pgrep -f` or `pkill -f` a pattern that also appears in your own command line/, name);

@@ -93,7 +93,7 @@ done < <(grep -oE "${GIT}(update-ref|gc|prune)([[:space:]]|\$)" <<<"$CMD")
 # another agent's change. list and show only read it.
 while IFS= read -r m; do
   grep -qE 'stash[[:space:]]+(list|show)[[:space:]]*$' <<<"$m" && continue
-  scratch_only "$(sed -E 's/stash[[:space:]]+[^[:space:]]+[[:space:]]*$/stash /' <<<"$m")" || deny "git stash" "" "The stash list is shared by every agent's worktree. To run a test without your change: git diff > /tmp/p && git checkout -- <files>, run it, then git apply /tmp/p."
+  scratch_only "$(sed -E 's/stash[[:space:]]+[^[:space:]]+[[:space:]]*$/stash /' <<<"$m")" || deny "git stash" "" "The stash list is shared by every agent's worktree. To run a test without your change: git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- <files>, run it, then git apply /tmp/p."
 done < <(grep -oE "${GIT}stash([[:space:]]+[^[:space:];&|]+)?([[:space:]]|\$)" <<<"$CMD")
 grep -qE "${GIT}push([[:space:]]|\$)" <<<"$CMD" && deny "git push" "" "To test remote handling, build a bare origin under the temp dir and use git fetch, and use git -C <absolute path> for a scratch repository's own plumbing."
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
