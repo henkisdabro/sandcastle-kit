@@ -43,7 +43,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeCheckGap, mergeTree, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -2018,6 +2018,8 @@ let unlockOnExit = false;
  */
 export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
+  // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
+  resetMergeCheckGap();
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
   // counts each ticket's first gate run as red, with an output that says so.
