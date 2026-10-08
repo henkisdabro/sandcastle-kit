@@ -15,7 +15,7 @@ import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
-import { mergeTreeSupported, noteMissingObjects, withObjectsOnly } from "./resolution.ts";
+import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { gatesLog, markLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
@@ -81,16 +81,18 @@ export const plainMergeNote = (root: string, c: string, b: string, h: string): s
     mergeTreeNoticed = true;
     return undefined;
   }
-  let tree: string;
+  let merge: ReturnType<typeof mergeTree>;
   try {
-    // In a throwaway git directory, as every host merge-tree: a merge driver the sandbox left in the shared `.git` must not run.
-    tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi]), b).split("\n")[0];
+    // The shared runner: in a throwaway git directory, so a merge driver the sandbox left in the shared `.git` does not run.
+    merge = mergeTree(root, b, h);
   } catch (error) {
     // A partial clone's missing objects are no conflict: said once, and the path check alone stands.
     if (noteMissingObjects(root, error)) return undefined;
-    return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
+    // A git call that failed is no verdict on the merge, but nothing vouches for the commit either: held, and said so.
+    return `the host's own merge of base and the gated head could not be run (${errorLine(error)})`;
   }
-  return sh("git", ["rev-parse", `${c}^{tree}`], root) === tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
+  if (merge.conflicted.size) return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
+  return sh("git", ["rev-parse", `${c}^{tree}`], root) === merge.tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
 };
 
 /** A squash landing's commit body: the branch's own subjects, without the kit's merges of the base into it. */
