@@ -33,6 +33,11 @@ chmodSync(join(bin, "gh"), 0o755);
 const repo = join(tmp, "project");
 mkdirSync(repo);
 execFileSync("git", ["init", "-q", repo]);
+// A project that keeps its tickets in files: GH_TOKEN is never read for them there.
+const filesRepo = join(tmp, "files-project");
+mkdirSync(join(filesRepo, ".sandcastle"), { recursive: true });
+execFileSync("git", ["init", "-q", filesRepo]);
+writeFileSync(join(filesRepo, ".sandcastle/config.ts"), 'export default { name: "demo", tracker: "files", gates: [{ name: "t", command: "true" }] };\n');
 
 // The token is accepted at /user (hard-wired to api.github.com), so that one URL is answered by a preload.
 const preload = join(tmp, "stub.mjs");
@@ -65,10 +70,10 @@ const github = async (read: number, write: number, body: (url: string) => Promis
 };
 
 // Not runKit: the stub above has to answer while doctor runs.
-const doctorVerify = (url: string) =>
+const doctorVerify = (url: string, cwd = repo) =>
   new Promise<string>((done) => {
     const child = startKit(["doctor", "--verify"], {
-      cwd: repo,
+      cwd,
       env: {
         ...process.env,
         PATH: `${bin}${delimiter}${process.env.PATH}`,
@@ -117,6 +122,15 @@ test("doctor --verify says the token cannot see the repo when only the write pro
   });
   assert.match(out, /^FIX\s+GH_TOKEN cannot see octo\/demo/m, out);
   assert.doesNotMatch(out, /cannot push to octo\/demo \(no Contents/, out);
+});
+
+test("doctor --verify gives no FIX for a 404 in a project whose tickets are in files", async () => {
+  let out = "";
+  await github(404, 404, async (url) => {
+    out = await doctorVerify(url, filesRepo);
+  });
+  assert.match(out, /^opt\s+GH_TOKEN cannot see octo\/demo \(HTTP 404\) \(not needed: this project keeps tickets in files\)$/m, out);
+  assert.doesNotMatch(out, /^FIX\s+GH_TOKEN cannot see/m, out);
 });
 
 // The run's start (cli.ts calls this before the billing question, an image or any sandbox).

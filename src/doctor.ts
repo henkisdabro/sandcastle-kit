@@ -514,9 +514,10 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         const read = await probeGithubRead(found.value, repo);
         const write = await probeGithubWrite(found.value, repo);
         // A token without the repo answers 404 to both probes; that is not "no Contents: write".
+        // Tickets in files are never read with it, so there the shared token may leave this repo out.
         if (read === 404 || write === 404) {
           const { label, fix } = repoInvisible(repo);
-          check(false, label, fix);
+          check(false, label + (needsGh ? "" : " (not needed: this project keeps tickets in files)"), fix, !needsGh);
         }
         else if (write === 422) check(false, `GH_TOKEN cannot push to ${repo}`, `It has Contents: write there, so an agent misled by a ticket could push code. Edit the token on GitHub (Settings -> Developer settings -> Fine-grained tokens) to Issues: read and write and Metadata: read only.`);
         else if (write === 403) console.log(`ok   GH_TOKEN cannot push to ${repo} (no Contents: write)`);
