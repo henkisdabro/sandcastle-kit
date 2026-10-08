@@ -143,7 +143,16 @@ This continues SKILL.md: run its "Before every action" first.
    `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
    queued after the run started: quote the cause and name those tickets in the hand-back.
 
-   Then write your closing message with **all seven sections, in this order, with these
+   **A shorter hand-back, when the user asked for one.** If the user has asked for a short or plain
+   hand-back - in this conversation, or as a standing preference in their own memory or
+   instructions - that request wins over the seven sections below. Write the short form: it keeps,
+   in this order, (1) anything the `## 🏁 Run finished` section says must come first - RED TOGETHER
+   and "do not push", a red merged base, a run that ended early, was stopped or was killed; (2) one
+   line for each item that needs the person, from Needs you and Needs fixing; (3) that nothing was
+   pushed; (4) the one recommended next step and the one question. It ends with one line offering
+   the full seven sections. The seven sections stay the default when nothing was asked.
+
+   Otherwise write your closing message with **all seven sections, in this order, with these
    headings**, each one present and saying "none" when empty. Copy each `## ` heading **verbatim
    from what `sandcastle report` printed, emoji included** - retyping a heading is how the emoji
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):

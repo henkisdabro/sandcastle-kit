@@ -1115,7 +1115,7 @@ itself, in the status view's castle, glyphs and colours:
   the run ends.
 - 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the
   run's process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that
-  died seconds after it started - and closes the run with the seven-section summary. It needs no
+  died seconds after it started - and closes the run with the closing summary (the seven sections, or a short hand-back when asked). It needs no
   Herdr and no `sandcastle wait`. The prompt names the run by its pid and start time, so a prompt
   that arrives after a later run has begun is closed from the run it names, not the live one. It
   follows the run that session started wherever its project is - a second clone of the repository, a package of a monorepo - because every run records the

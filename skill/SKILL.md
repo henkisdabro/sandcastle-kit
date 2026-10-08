@@ -14,7 +14,7 @@ Requested action: `$action`
 | `init` | Sets up the current project: config, rules, lean sandbox, hook decisions | The user has approved the config and it is committed |
 | `audit` | Reviews the repo with read-only agents, one per lens, and files what they find as tickets that meet the queue criteria, with the user | Every finding is filed, merged into another, or dropped with a stated reason, and the user has the table |
 | `queue` | Triages every open ticket into the agent queue, with the user | Every open ticket is labelled, parked, or left with a stated reason |
-| `run` | Starts a burndown detached, waits for it with `sandcastle wait`, and closes it with a summary | The run is live and its printed status view is confirmed, or the user holds the exact command; when it ends, the user has the seven-section closing summary |
+| `run` | Starts a burndown detached, waits for it with `sandcastle wait`, and closes it with a summary | The run is live and its printed status view is confirmed, or the user holds the exact command; when it ends, the user has the closing summary: the seven sections, unless they asked for a short hand-back |
 | `status` | Reports what a run is doing, or how the last one ended | The user has the snapshot and the cause of any failed row |
 | `pause` | Holds the live run at the next safe juncture, so no new ticket or agent pass starts and no work is lost; a hold is a pause, never a `stop` | The user knows the run is paused, what is still finishing, and how to resume (or that no run is live) |
 | `resume` | Carries a paused run on, in the same run | The status view no longer reads PAUSED (or the user knows why there was nothing to resume) |
