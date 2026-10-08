@@ -33,9 +33,16 @@ const hostGitConfig = (key: string, value: string) => {
 
 export const disableHostGitHooks = () => hostGitConfig("core.hooksPath", "/dev/null");
 
-// A landing merge on the host runs while sandboxes add and remove worktrees, and `git merge` starts
-// `git gc --auto` when the repo has enough loose objects: maintenance that prunes beside them.
-export const disableHostGitGc = () => hostGitConfig("gc.auto", "0");
+// A landing merge on the host runs while sandboxes add and remove worktrees. Since git 2.29 the
+// commands that used to start an auto gc start `git maintenance run --auto`, which only
+// `maintenance.auto=false` stops before a process starts; from git 2.54 the default tasks of that
+// process (geometric repack, worktree prune, ref pack, reflog expiry) do not read `gc.auto`, so
+// they could run in the shared `.git` beside the sandboxes. `gc.auto=0` stays for an auto gc
+// started directly.
+export const disableHostGitGc = () => {
+  hostGitConfig("gc.auto", "0");
+  hostGitConfig("maintenance.auto", "false");
+};
 
 // Config keys that make the host's git run a program. A sandbox can write `.git/config` at any
 // moment, and the `.git` check before each host write leaves a gap of milliseconds before the git
