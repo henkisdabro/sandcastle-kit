@@ -290,7 +290,10 @@ Then edit, in this order:
    catches drift in generated files (see [A gate for generated files](#-a-gate-for-generated-files)) -
    and the `/sandcastle` skill's init action asks them for you.
 3. **`.sandcastle/Dockerfile`** - only if the gates need something the base image lacks (browsers,
-   Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit.
+   Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit, then name
+   it in `.sandcastle/config.ts` with `dockerfile: ".sandcastle/Dockerfile"`: without the key the file
+   is never built, and `sandcastle build` skips it with a "Not built" line (`init` adds the key
+   itself when it writes the Dockerfile).
    A project that tests in Chromium (Playwright, Puppeteer) should launch it with
    `--disable-dev-shm-usage`: a sandbox gets the runtime's default `/dev/shm`, 64 MB on Docker
    (some runtimes give more), and a heavy page can crash there (`Navigation failed because page

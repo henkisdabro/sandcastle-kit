@@ -25,7 +25,10 @@ This continues SKILL.md: run its "Before every action" first.
 
    "None" is a fine answer to each; write it down so the next reader knows it was asked. Extend
    the Dockerfile (from the kit's `templates/Dockerfile` if init wrote none) only when the base
-   image lacks something the gates or hooks need (browsers, a pinned package manager).
+   image lacks something the gates or hooks need (browsers, a pinned package manager). A Dockerfile
+   written from the template needs `dockerfile: ".sandcastle/Dockerfile"` in `.sandcastle/config.ts`
+   too, or it is never built (`sandcastle build` says "Not built"); init adds the key itself only
+   for a Dockerfile it wrote.
    If the project tests in Chromium (Playwright, Puppeteer), tell the user its tests must launch
    it with `--disable-dev-shm-usage`: a sandbox has the runtime's default `/dev/shm`, 64 MB on
    Docker (`df -h /dev/shm` in one shows it), and a heavy page crashes there. Add a line to
