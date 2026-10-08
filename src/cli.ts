@@ -97,7 +97,8 @@
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
@@ -108,7 +109,7 @@ import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
-import { requireGreenBase } from "./gates.ts";
+import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
@@ -647,7 +648,14 @@ try {
       }
       leanReport(project, p);
       const image = await ensureImage(project);
-      reportHookCheck(checkHooks(project, image, p), p.hooks.length);
+      // The plan, written only to key the green-base record (`hooksThatRanClean`): the project's own plan file is the
+      // one a live run's next sandbox applies, and a preview of an edited config must not change it under that run.
+      const planDir = mkdtempSync(join(tmpdir(), "sandcastle-lean-"));
+      try {
+        reportHookCheck(checkHooks(project, image, p, hooksThatRanClean(project, image, writePlan(project, planDir).file)), p.hooks.length);
+      } finally {
+        rmSync(planDir, { recursive: true, force: true });
+      }
       if (args.includes("--measure")) leanMeasure(project, image, p);
       break;
     }

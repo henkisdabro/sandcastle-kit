@@ -199,11 +199,12 @@ export const plan = (project: Project): Plan => {
   return { hide, write, items, hooks };
 };
 
-// Where the worktree hook reads the plan from; a sandbox without it is not lean.
-export const writePlan = (project: Project) => {
+// Where the worktree hook reads the plan from; a sandbox without it is not lean. `dir` elsewhere is a plan file only
+// to key the green-base record by (`sandcastle lean`): a live run's sandboxes read the one under `.sandcastle/.run`.
+export const writePlan = (project: Project, dir = join(project.root, ".sandcastle/.run")) => {
   const p = plan(project);
-  const file = join(project.root, ".sandcastle/.run/lean-plan.json");
-  mkdirSync(join(project.root, ".sandcastle/.run"), { recursive: true });
+  const file = join(dir, "lean-plan.json");
+  mkdirSync(dir, { recursive: true });
   writeFileSync(file, JSON.stringify(p, null, 2));
   return { plan: p, file };
 };
@@ -393,7 +394,10 @@ const exportHead = (root: string, into: string) => {
   }
 };
 
-export const checkHooks = (project: Project, image: string, p: Plan) => {
+// `ranClean`: commands of the hooks a passing hook test ran without error (`hooksThatRanClean`). Such a hook imported
+// what it needs, so the static import check's MODULES warning - blind to a `sys.path.insert` the hook makes at run
+// time - is dropped for it; a syntax error and every other finding stay.
+export const checkHooks = (project: Project, image: string, p: Plan, ranClean: readonly string[] = []) => {
   if (!p.hooks.length) return { failures: [] as string[], warnings: [] as string[] };
   const lines = ["cd " + WORKSPACE];
   p.hooks.forEach((h, i) => {
@@ -436,7 +440,10 @@ export const checkHooks = (project: Project, image: string, p: Plan) => {
     const all = out.split("\n").filter(Boolean);
     return {
       failures: all.filter((l) => l.startsWith("FAIL")).map(describe),
-      warnings: all.filter((l) => l.startsWith("WARN")).map(describe),
+      warnings: all
+        .filter((l) => l.startsWith("WARN"))
+        .filter((l) => !(l.split(" ")[2] === "MODULES" && ranClean.includes(p.hooks[Number(l.split(" ")[1])].command)))
+        .map(describe),
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });

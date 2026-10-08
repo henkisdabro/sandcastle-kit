@@ -102,7 +102,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
 // ---------------------------------------------------------------------------
 
 type Exec = { exec(cmd: string, options?: { stdin?: string }): Promise<{ exitCode: number; stdout: string; stderr: string }> };
-export type HookTestResult = { name: string; pass: boolean; detail: string };
+// `clean`: the commands of the hooks that ran to a verdict in this test - exit 0, or a block - and did not error. A
+// test that passes says nothing of a guard whose own error it ignored (a block test passes when any guard blocks), so
+// only these are vouched for.
+export type HookTestResult = { name: string; pass: boolean; detail: string; clean: string[] };
 
 // Claude Code's matcher: empty or `*` takes every tool, anything else is a
 // regex over the whole tool name (`Write|Edit`).
@@ -132,7 +135,7 @@ export const runHookTests = async (tests: HookTest[], hooks: Hook[], sandbox: Ex
   for (const t of tests) {
     const guards = hooks.filter((h) => h.event === "PreToolUse" && matches(h.matcher, t.tool));
     if (!guards.length) {
-      results.push({ name: t.name, pass: false, detail: `no kept PreToolUse hook matches ${t.tool}` });
+      results.push({ name: t.name, pass: false, detail: `no kept PreToolUse hook matches ${t.tool}`, clean: [] });
       continue;
     }
     const stdin = JSON.stringify({
@@ -141,9 +144,11 @@ export const runHookTests = async (tests: HookTest[], hooks: Hook[], sandbox: Ex
     });
     const blockers: string[] = [];
     const errors: string[] = [];
+    const clean: string[] = [];
     for (const h of guards) {
       const cmd = `CLAUDE_PROJECT_DIR='${cwd}' timeout 60 sh -c '${h.command.replace(/'/g, "'\\''")}'`;
       const r = await sandbox.exec(cmd, { stdin });
+      if (blocked(r) || r.exitCode === 0) clean.push(h.command);
       if (blocked(r)) blockers.push(h.command);
       else if (r.exitCode !== 0) errors.push(`${h.command.slice(0, 60)} exited ${r.exitCode}: ${(r.stderr || r.stdout).trim().split("\n").slice(-2).join(" ").slice(0, 200)}`);
     }
@@ -157,7 +162,7 @@ export const runHookTests = async (tests: HookTest[], hooks: Hook[], sandbox: Ex
         : blockers.length
           ? `blocked by ${blockers.map((b) => b.slice(0, 70)).join(", ")}`
           : `a matching hook errored (a guard that errors fails open): ${errors.join("; ")}`;
-    results.push({ name: t.name, pass, detail });
+    results.push({ name: t.name, pass, detail, clean: pass ? clean : [] });
   }
   return results;
 };
@@ -523,13 +528,26 @@ const THIS_RUN = `${process.pid}@${Math.round(Date.now() - process.uptime() * 10
 // (its git identity, its caches), which a clean gate-only sandbox may not reproduce - so the verify never trusts it.
 export type ProofKind = "ticket-sandbox" | "landing-sandbox" | "base" | "verify";
 export type GreenProof = { commit: string; by: string; kind: ProofKind };
-export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false, proof?: GreenProof) => {
+// `hookRuns` are the commands of the kept hooks that ran cleanly in a passing hook test (`HookTestResult.clean`), which the
+// lean hook check reads to drop its unseen-import warning. They travel with `hooks`: a record that covers the hook tests
+// keeps the list of the record it covers (same key) or is handed the carried one, and a record that does not has none.
+export const noteBaseResult = (root: string, key: string, green: boolean, hooks = false, proof?: GreenProof, hookRuns?: string[]) => {
   const file = baseRecord(root);
   if (!green) return rmSync(file, { force: true });
   // The key names the commit, so the hook files: a gates-only result at the key a base check recorded in full says nothing less.
   const covered = hooks || hooksCovered(root, key);
+  const runs = !covered ? [] : (hookRuns ?? (hooksCovered(root, key) ? recordedHookRuns(root) : []));
   mkdirSync(join(root, ".sandcastle/.run"), { recursive: true });
-  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, ...(proof ? { commit: proof.commit, by: proof.by, kind: proof.kind } : {}) }) + "\n");
+  writeFileSync(file, JSON.stringify({ key, at: new Date().toISOString(), run: THIS_RUN, hooks: covered, hookRuns: runs, ...(proof ? { commit: proof.commit, by: proof.by, kind: proof.kind } : {}) }) + "\n");
+};
+
+const recordedHookRuns = (root: string): string[] => {
+  try {
+    const runs = JSON.parse(readFileSync(baseRecord(root), "utf8")).hookRuns;
+    return Array.isArray(runs) ? runs.filter((c): c is string => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
 };
 
 const recordedRun = (root: string): string | undefined => {
@@ -584,18 +602,38 @@ const hookInputsChanged = (project: Project, planFile: string, from: string, to:
  * `kind` has no default: a caller that forgot it would otherwise be trusted to skip the verify (`greenProofOfBase`).
  */
 export const noteGreenCommit = (project: Project, image: string, planFile: string, commit: string, by: string, kind: ProofKind) => {
-  let hooks = false;
+  const hooks = hookRecordHolds(project, image, planFile, commit);
+  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by, kind }, hooks ? recordedHookRuns(project.root) : []);
+};
+
+// Whether the record on disk covers the hook tests and the git-hook probe at a commit it names, on this image and
+// config, with nothing they read changed from that commit to `commit`. No record, or an unreadable one: no.
+const hookRecordHolds = (project: Project, image: string, planFile: string, commit: string): boolean => {
   try {
     const prev = JSON.parse(readFileSync(baseRecord(project.root), "utf8"));
-    hooks =
+    return (
       prev.hooks === true &&
       typeof prev.commit === "string" &&
       prev.key === baseKey(project, image, planFile, prev.commit) &&
-      !hookInputsChanged(project, planFile, prev.commit, commit);
+      !hookInputsChanged(project, planFile, prev.commit, commit)
+    );
   } catch {
-    // no record, or an unreadable one: the hooks are checked
+    return false;
   }
-  noteBaseResult(project.root, baseKey(project, image, planFile, commit), true, hooks, { commit, by, kind });
+};
+
+/**
+ * The commands of the kept hooks that ran cleanly in a passing hook test, from the base check's record - for the lean
+ * hook check, which prints before the base gates and so before this run's hook tests. The record counts at the base's
+ * tip when it covers the hook tests there (`hookRecordHolds`): a commit that changed a hook file, a manifest or a
+ * lockfile, another image or another plan leaves none, and the check warns as it did.
+ */
+export const hooksThatRanClean = (project: Project, image: string, planFile: string): string[] => {
+  try {
+    return hookRecordHolds(project, image, planFile, sh("git", ["rev-parse", project.baseBranch], project.root)) ? recordedHookRuns(project.root) : [];
+  } catch {
+    return [];
+  }
 };
 
 /**
@@ -721,7 +759,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const redHooks = run.hookTests.filter((t) => !t.pass);
   const gitHook = run.gitHooks?.failure;
   const green = !run.failures.length && !redHooks.length && !gitHook;
-  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check", kind: "base" });
+  // A hook test that ran every hook of this run passed when `green` (a red one removes the record).
+  const hookRuns = [...new Set(run.hookTests.flatMap((t) => t.clean))];
+  noteBaseResult(project.root, key, green, true, { commit: sh("git", ["rev-parse", base]), by: "the base check", kind: "base" }, hookRuns);
   const commit = sh("git", ["rev-parse", "--short", base]);
   writeGateLog(
     log,
