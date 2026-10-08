@@ -1094,7 +1094,19 @@ export const mergedByHand = (root: string, base: string, id: string): boolean =>
   }
 };
 
-export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
+/**
+ * A ticket merged by hand (`mergedByHand`) whose merge the kit worded "part of" it (`sandcastle land` with a
+ * criterion unmet): the push does not close it, so it stays open. Only the subject says so, branch or no branch.
+ */
+export const mergedPartly = (root: string, base: string, id: string): boolean => {
+  try {
+    return execFileSync("git", ["log", base, "-1", "--format=%H", "--fixed-strings", `--grep=Merge agent/issue-${id} (part of ${refOf(id)})`], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() !== "";
+  } catch {
+    return false;
+  }
+};
+
+export const recordOutcomes =(project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
   const all = readOutcomes(project.root);
   const at = new Date().toISOString();

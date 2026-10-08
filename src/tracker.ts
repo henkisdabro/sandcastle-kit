@@ -263,7 +263,16 @@ const github = (project: Project): Tracker => {
       }
     },
     declaredBlockers: () => [],
-    isClosed: () => undefined,
+    // Asked of a ticket merged by hand, whose push closes it: the report words it "and closed" once it is.
+    // An error (no network, no such issue) is not "open": undefined keeps the report's "closes on push".
+    isClosed: (id) => {
+      try {
+        const state = JSON.parse(gh(["issue", "view", id, "--json", "state"])).state;
+        return state === "CLOSED" ? true : state === "OPEN" ? false : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     words: {
       LOST: "comment on the ticket that the sandbox's git record was lost",
       TICKET_VIEW: "!`gh issue view {{ISSUE_NUMBER}}`",
