@@ -25,7 +25,7 @@ This continues SKILL.md: run its "Before every action" first.
      branch in this checkout (use another worktree): the `.git` guard cannot tell a person's commit
      from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
      nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
-     same. Check `sandcastle status` (is a run live?) before any git write to the base in that
+     same. Check `sandcastle status 0` (is a run live?) before any git write to the base in that
      checkout, yours included. Another worktree shares `.git/config`, which the guard reads by key:
      an upstream for your own branch there (`git worktree add ... origin/<x>`, `git push -u`,
      `git branch -u`, `gh pr create` from a local branch) is let through with one line, but any other
