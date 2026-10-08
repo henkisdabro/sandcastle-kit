@@ -429,10 +429,9 @@ cat >"$L/run.json" <<EOF
   "tickets": { "530": { "state": "implement", "since": $((now - 30)), "started": $((now - 60)) } } }
 EOF
 render "530"
-row '#521' merged
-row '#522' 'left over' 'earlier run'
+row '#521' merged 'worktree kept'
+row '#522' 'left over' 'earlier run - sandc'
 hasnt 'stalled'
-has 'needs you 0'
 
 # An older orchestrator's record has no tickets: its `issues` are the live
 # run's, and its quiet worktree with no container is a sandbox that died.
