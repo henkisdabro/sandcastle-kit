@@ -29,7 +29,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   whose gates proved it (`Merged main re-gated: green at <sha> already on image <tag> (gated with
   #427 in its landing sandbox) - not run again`). A fast-forward landing's proof is its ticket's own
   sandbox, which can differ from a clean one (its agent's git identity, say), so after one the
-  verify still runs.
+  verify still runs - for a run that lands a single ticket too, where it used to run only after two.
 - **Beside another run, a run whose share of the machine's sandbox slots is 2 or more keeps one
   slot of that share for landing**, so a green branch no longer waits for a ticket to finish before
   it can land.
@@ -43,6 +43,14 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The closing summary's Needs you section lists the follow-ups filed for triage, and the issues
   opened during the run, under a `### To triage` sub-heading** after the run's own items, so the
   headline's "need you" and "to triage" counts each match their bullets.
+
+### Security
+
+- **A merge driver a sandbox wrote into the shared `.git` no longer runs on the host.** Every host
+  `git merge-tree` (the conflict checks before review and before landing, and the check of a
+  conflict resolution) runs in a throwaway git directory that borrows only the project's objects,
+  so a driver set in `.git/config` and mapped in `.git/info/attributes` is never read, and nothing
+  is written into the project's object store.
 
 ### Fixed
 
@@ -80,6 +88,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   every autonomy level, so `sandcastle wait` no longer reports success on a base the summary says not
   to push.
 
+- **A ticket the run merged but whose tracker close failed no longer holds its dependants** for the
+  rest of the run: a landed ticket counts as closed for them, and a refused close is retried once.
 - **A landing merge that git's own merge says conflicts is refused again.** The host's tree check
   read every `merge-tree` failure as a git older than 2.38 and stepped aside; it now asks git's
   version instead.
