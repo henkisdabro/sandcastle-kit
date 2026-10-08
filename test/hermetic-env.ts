@@ -1,6 +1,6 @@
 // Preloaded into every test file's process, beside test/no-stray.ts (`--import ./test/hermetic-env.ts` in
 // package.json's `test`, `test:shard` and `test:weights`, and test/run-shards.sh): every test starts from the
-// same environment, whatever shell the developer runs it in. Four things in a developer's shell change what
+// same environment, whatever shell the developer runs it in. Five things in a developer's shell change what
 // the code under test does, and a Linux sandbox with a clean environment passes them all:
 //
 //  - `TMPDIR` is the realpath of `os.tmpdir()`: on macOS it is a `/var/...` path that git and `process.cwd()`
@@ -13,6 +13,11 @@
 //    already set, such as the gate's `commit.gpgsign=false`, stays). A fixture repo that never sets its own identity
 //    passes on macOS (git guesses `user@host.local`) and in a ticket's sandbox (the agent's `~/.gitconfig`), and
 //    fails only in a gate-only sandbox, the base check or the end-of-run verify: here it fails everywhere.
+//  - `maintenance.auto=false` is appended to the same pairs: since git 2.29 a `commit`, `merge`, `fetch` and others end
+//    by starting a detached `git maintenance run --auto`, which holds `.git/objects/maintenance.lock` and can outlive
+//    the git call that started it, so a before-and-after listing of a fixture repo differs and removing the fixture
+//    can fail with ENOTEMPTY. (Not `gc.auto`: a pair for it would stop `hostGitConfig` adding its own, and hide a
+//    broken `disableHostGitGc` from test/landing-queue.test.ts.)
 //  - Names the code reads as a setting or a credential are removed: HERDR_*, TMUX*, SANDCASTLE_* (but not
 //    SANDCASTLE_TEST_*, which test/run-shards.sh sets for the tests) and the names in `SCRUBBED` below. A test that
 //    needs one sets it itself. test/hermetic-env.test.ts fails when `src/` reads a name that is neither
@@ -69,4 +74,5 @@ if (process.env.NODE_TEST_CONTEXT) {
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   for (const name of GIT_IDENTITY) delete process.env[name];
   addGitConfig("user.useConfigOnly", "true");
+  addGitConfig("maintenance.auto", "false");
 }

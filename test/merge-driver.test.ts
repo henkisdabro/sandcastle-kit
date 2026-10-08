@@ -17,6 +17,9 @@ import { test } from "node:test";
 import { everyPidIsTheKit } from "./kit-process.ts";
 import { quietly } from "./quiet.ts";
 
+// Its own TMPDIR: `temps()` below lists the `sandcastle-merge-*` directories there, and every other test file that reaches
+// `withObjectsOnly` makes and removes one in the shared TMPDIR between its two listings.
+process.env.TMPDIR = mkdtempSync(join(tmpdir(), "sandcastle-driver-tmp-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-driver-cache-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-driver-cfg-"));
 process.env.SANDCASTLE_MAX_SANDBOXES = "1";
