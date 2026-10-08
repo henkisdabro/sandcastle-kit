@@ -399,7 +399,8 @@ gathers the facts, asks you the open decisions in batches, writes each decision 
 labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
 A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
-A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
+A colon is read too (`Blocked by: #12`); blockers listed under a `## Blocked by` heading are not,
+and `sandcastle queue` warns about them. A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
 soon as #12 has landed with its work done, even if the tracker then refuses to close it (a chain of tickets drains in one run); a blocker outside the run
 holds it for a later one. A blocker can also live outside
 GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue

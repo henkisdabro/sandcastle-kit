@@ -5,9 +5,9 @@
 // line is an agent-written hint, so every figure here is a rough one.
 
 import type { Project } from "./config.ts";
-import { blockerProblems, refsOf, stripCode } from "./blockers.ts";
+import { blockerProblems, refsOf } from "./blockers.ts";
 import { protectedAmong, protectedWarning } from "./guard.ts";
-import { expandTouches, missingTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { expandTouches, isGlob, missingTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
 /** A ticket declaring more files than this is likely to meet others at landing. */
@@ -18,11 +18,6 @@ export const HOT_TICKETS = 4;
 export type Queued = { id: string; body?: string };
 
 const names = (ids: string[]) => ids.map(refOf).join(", ");
-
-// The to-tickets template writes blockers as a list under a heading (`## Blocked by`, then
-// `- #12`). The parser reads only a ref on the `Blocked by` line itself, so such a ticket starts
-// before its blocker lands, and nothing else says so.
-const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[-*+][ \t]/im;
 
 /** Who waits for whom, among `queued` tickets only: a blocker outside them holds a ticket back, it does not order it. */
 const blockerWaits = (project: Project, tracker: Tracker, queued: Queued[]) => {
@@ -89,14 +84,15 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   const hard = new Set(unmergeableFiles(project.root, project.baseBranch, twice.map(([f]) => f), project.generated ?? []));
   const shared = twice.filter(([f]) => hard.has(f));
   const problems = await blockerProblems(project, tracker, queued);
-  for (const t of queued) {
-    if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) problems.push(`${refOf(t.id)} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
-  }
 
   // A plain path no file matches is kept by expandTouches (it may be a new file) and an empty glob is dropped: neither shows above.
   for (const t of queued) {
     const absent = missingTouches(project.root, project.baseBranch, t.body ?? "");
-    if (absent.length) problems.push(`${refOf(t.id)} names paths not on ${project.baseBranch}: ${absent.join(", ")} - new files (say so under ## Fix) or typos?`);
+    const paths = absent.filter((p) => !isGlob(p));
+    const globs = absent.filter(isGlob);
+    if (paths.length) problems.push(`${refOf(t.id)} names paths not on ${project.baseBranch}: ${paths.join(", ")} - new files (say so under ## Fix) or typos?`);
+    // Saying "new" changes nothing for a glob: it orders nothing until files exist.
+    if (globs.length) problems.push(`${refOf(t.id)}'s Touches globs match no file on ${project.baseBranch}: ${globs.join(", ")} - a glob orders nothing until files exist: name the new files themselves (and call them new under ## Fix), or fix the glob`);
   }
 
   // A ticket whose work lies in a protected path ends held whatever the agent does: said before it costs a pipeline.

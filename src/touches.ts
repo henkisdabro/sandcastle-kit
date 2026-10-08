@@ -72,7 +72,8 @@ export const isDocPath = (path: string): boolean => {
   return /\.md$/i.test(p) || p.startsWith("docs/") || p.startsWith("skill/");
 };
 
-const isGlob = (p: string) => /[*?]/.test(p);
+/** Whether a `Touches:` entry is a glob (`*` or `?`) and not a plain path. */
+export const isGlob = (p: string) => /[*?]/.test(p);
 
 // `**` crosses directories, `*` and `?` stay inside one path segment.
 const globToRegExp = (glob: string) => {

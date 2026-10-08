@@ -54,7 +54,7 @@ test("a path named in prose with no 'new' beside it is still listed", async () =
 
 test("a glob that matches nothing is listed, one that matches is not", async () => {
   const text = await lint({ "01-a.md": ticket("A", "src/*.ts, lib/**/*.ts") });
-  assert.match(text, /names paths not on main: lib\/\*\*\/\*\.ts - /);
+  assert.match(text, /Touches globs match no file on main: lib\/\*\*\/\*\.ts - /);
   assert.ok(!/src\/\*\.ts - /.test(text), text);
 });
 

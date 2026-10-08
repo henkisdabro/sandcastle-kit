@@ -77,7 +77,8 @@ comments, and the gates can prove it.
    from the files in `.sandcastle/triage/`. Add the queue's shape from `sandcastle queue --lint`
    (read-only, no model calls): the longest `Blocked by` chain, edges that only order overlapping
    `Touches:`, wide tickets, hot and unmergeable files, `Touches:` paths missing from the base
-   branch (a new file said to be new under `## Fix`, or a typo), and a rough turn count. It is advice, so
+   branch (a plain path: a new file said to be new under `## Fix`, or a typo; a glob matching no file
+   orders nothing, so name the new files themselves or fix the glob), and a rough turn count. It is advice, so
    quote it as a guess and offer to trim a chain or a `Blocked by` edge it flags.
    A ticket it lists under protected paths will always be held for a human merge: say so, and offer
    to unqueue it (or to leave the protected file to the user) rather than spend a pipeline on it.
@@ -88,7 +89,8 @@ Whenever this action or the audit writes or rewrites a ticket body, the run read
 from it, and only in plain text: a line inside a code block or backticks is not read.
 
 - **Blocker line.** GitHub: `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
-  refs on the same line - a list under a `Blocked by:` heading is not read, nor is a comment.
+  refs on the same line (a colon after `Blocked by` is read too: `Blocked by: #12, #14` works) - a
+  list under a "Blocked by" heading (`## Blocked by`, then `- #12`) is not read, nor is a comment.
   Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`,
   naming tickets in the same feature by number. A Linear issue or an in-repo task file can be
   named (`Blocked by ENG-42`, `Blocked by tasks/0042-auth.md`) once the project's config has
