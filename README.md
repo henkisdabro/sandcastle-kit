@@ -291,6 +291,11 @@ Then edit, in this order:
    and the `/sandcastle` skill's init action asks them for you.
 3. **`.sandcastle/Dockerfile`** - only if the gates need something the base image lacks (browsers,
    Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit.
+   A project that tests in Chromium (Playwright, Puppeteer) should launch it with
+   `--disable-dev-shm-usage`: sandboxes get Docker's default 64 MB `/dev/shm`, and a heavy page
+   can crash there (`Navigation failed because page crashed!`) on the branch and on the base
+   alike. The kit passes no `--shm-size`, since the `docker run` builder of `@ai-hero/sandcastle`
+   has no such option.
 4. **Lean and hooks** - `sandcastle lean` lists what the repo would load into each sandbox and
    checks every kept hook. Keep nothing unless a run needs it; drop only host-only hooks.
    It also lists the project's `permissions.ask` rules (in the tracked `.claude/settings.json`),
