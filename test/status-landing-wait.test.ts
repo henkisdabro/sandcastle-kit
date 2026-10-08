@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -133,4 +133,10 @@ test("the run record says which of the share and the kept slot holds a wait back
   assert.deepEqual(told.at(-1), [true, "landing"], "the kept slot still holds the other back");
   kept.onWait("slots");
   assert.deepEqual(told.at(-1), [false, undefined]);
+});
+
+test("burndown() writes what createSlotWaits tells into the run record, the reason beside the older boolean", () => {
+  // burndown() needs Docker, so its call site is held by its text: without `waitsFor` the view never says the kept slot.
+  const src = readFileSync(join(KIT, "src", "burndown.ts"), "utf8");
+  assert.match(src, /createSlotWaits\(\(held, waitsFor\) => \{\s*try \{\s*run\.update\(\{ waitsForShare: held \|\| undefined, waitsFor \}\);/);
 });
