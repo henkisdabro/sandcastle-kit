@@ -2262,7 +2262,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // the output as it arrives - a gate run is minutes of nothing otherwise.
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
   const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
-    markLog(gatesLog(project, id), runId);
+    markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => {
         // The heartbeat says a wait as a wait; the gate time is counted from the first gate (below).

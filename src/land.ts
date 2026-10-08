@@ -16,7 +16,7 @@ import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
 import { mergeTreeSupported, noteMissingObjects, withObjectsOnly } from "./resolution.ts";
-import { gatesLog, readHeads } from "./run.ts";
+import { gatesLog, markLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
@@ -296,7 +296,8 @@ export const landTicket = async (
   const { open } = await prepare();
   const head = sh("git", ["rev-parse", branch], project.root);
   const log = gatesLog(project, id);
-  mkdirSync(dirname(log), { recursive: true });
+  // The section a hand landing's gates are: without it they read as part of the last run's.
+  markLog(log, undefined, "sandcastle land gates on the merged tree");
   const unmet = recordedUnmet(project, id, branch, head);
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
     landInSandbox(project, { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" }, open, (box) =>
