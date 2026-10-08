@@ -44,19 +44,26 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    yourself; a criterion you cannot do is reported under "Finishing" below.
 2. **Correctness bugs.** Wrong conditions, off-by-one, unhandled null, a promise not awaited, an
    effect that fires when it should not.
-3. **Does it contradict a settled decision** recorded in the repo (see the project rules)?
-4. **Repo conventions**, from the repo's agent instructions (`CLAUDE.md`, `AGENTS.md`).
-5. **Docs left describing the old behaviour.** If the diff changes what the project does, grep its
+3. **Dependencies the branch adds or changes.** For each one in a manifest or lockfile, say where
+   it comes from (the project's registry, a git ref, a URL, a local path), whether it is pinned as
+   the project pins the rest, and whether the ticket needs it. A package from outside the registry
+   skips it, and with it any release-age cooldown the project sets. Remove one the ticket does not
+   need; switch one from outside the registry to the registry's release where there is one; if the
+   ticket needs one only published elsewhere, keep it and name the package and its source in an
+   `<ungated>` line, so a person checks it.
+4. **Does it contradict a settled decision** recorded in the repo (see the project rules)?
+5. **Repo conventions**, from the repo's agent instructions (`CLAUDE.md`, `AGENTS.md`).
+6. **Docs left describing the old behaviour.** If the diff changes what the project does, grep its
    README, docs, agent instructions and skill files for the words that described the old behaviour,
    not only for the changed function's name. A sentence that is now false is a finding: fix it.
-6. **Tests that do not test.** For each test, ask: would it fail if the behaviour broke, and
+7. **Tests that do not test.** For each test, ask: would it fail if the behaviour broke, and
    survive a refactor that kept the behaviour? The usual failures: an expected value recomputed
    the way the code computes it; a mock of this repository's own code where no boundary is
    involved; an assertion on calls or private state where the caller sees only the result.
    Rewrite such a test at the public interface. When you doubt one, break the behaviour, confirm
    the test fails, then restore the code (the time limit and the restore in a command of its own,
    as above).
-7. **Leftovers from building in steps.** Fix duplication or a misleading name this branch
+8. **Leftovers from building in steps.** Fix duplication or a misleading name this branch
    introduced when it makes the changed behaviour harder to follow. Do not reorganise sound code
    to your taste.
 
@@ -118,8 +125,8 @@ available here.
 # Finishing
 
 **If no gate exercises this change** - its effect shows only in a browser, in a generated file
-the gates do not rebuild, in a rendered document or image, or anywhere else the gates above
-never run - say what a person should check, in one sentence, on a line of its own, whether or
+the gates do not rebuild, in a rendered document or image, in a dependency from outside the registry
+(item 3), or anywhere else the gates above never run - say what a person should check, in one sentence, on a line of its own, whether or
 not you committed:
 
 <ungated>...</ungated>
