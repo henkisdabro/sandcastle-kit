@@ -84,7 +84,7 @@ export const plainMergeNote = (root: string, c: string, b: string, h: string): s
   let tree: string;
   try {
     // In a throwaway git directory, as every host merge-tree: a merge driver the sandbox left in the shared `.git` must not run.
-    tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi])).split("\n")[0];
+    tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi]), b).split("\n")[0];
   } catch {
     return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
   }

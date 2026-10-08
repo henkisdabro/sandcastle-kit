@@ -200,3 +200,23 @@ test("a merge-tree that exits 1 with no tree id is no answer, not a clean merge"
     process.env.PATH = path;
   }
 });
+
+test("a committed merge=union file merges in the throwaway directory as in the project", () => {
+  // Two tickets each add a changelog line: git's union driver merges them, and the throwaway directory, which has no work
+  // tree to read `.gitattributes` from, read none and called it a conflict before review and at landing.
+  const root = join(tmp, `repo${n++}`);
+  mkdirSync(root);
+  git(root, "init", "-q", "-b", "main");
+  commit(root, { ".gitattributes": "CHANGES.md merge=union\n", "CHANGES.md": "# Changes\n" }, "start");
+  git(root, "checkout", "-q", "-b", "agent/issue-9");
+  commit(root, { "CHANGES.md": "# Changes\n- nine\n" }, "work on 9");
+  git(root, "checkout", "-q", "main");
+  commit(root, { "CHANGES.md": "# Changes\n- three\n" }, "ticket 3 landed");
+  const base = git(root, "rev-parse", "main");
+  const nine = git(root, "rev-parse", "agent/issue-9");
+  // GIT_ATTR_SOURCE is git 2.42's: an older git reads no attributes there, and the conflict stands.
+  const [major, minor] = git(root, "--version").match(/(\d+)\.(\d+)/)!.slice(1).map(Number);
+  const attrSource = major > 2 || (major === 2 && minor >= 42);
+  assert.equal(spawnSync("git", ["merge-tree", "--write-tree", base, nine], { cwd: root }).status, 0, "the project's own merge is clean");
+  assert.deepEqual([...mergeTree(root, base, nine).conflicted], attrSource ? [] : ["CHANGES.md"]);
+});

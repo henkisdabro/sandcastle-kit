@@ -50,9 +50,14 @@ const REPO_VARS = ["GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJ
  * merge-tree, before any fingerprint check sees it; here there is no driver to run. `revs` are
  * resolved in `root` first (the temp directory has no refs) and handed to `use` as commit ids.
  * Objects git writes stay in the temp directory, removed when `use` returns or throws.
+ * `attrs`, a rev: whose committed `.gitattributes` the merge reads (`GIT_ATTR_SOURCE`, git 2.42+). The temp
+ * directory has no work tree to read them from, and without them a `merge=union` file conflicts where the
+ * project's own merge does not. A committed attribute can only name a driver in the user's or the
+ * operator's own config, never one a sandbox wrote. Older git ignores the variable.
  */
-export const withObjectsOnly = <T>(root: string, revs: string[], use: (git: (args: string[]) => string, ids: string[]) => T): T => {
+export const withObjectsOnly = <T>(root: string, revs: string[], use: (git: (args: string[]) => string, ids: string[]) => T, attrs?: string): T => {
   const ids = revs.map((rev) => sh("git", ["rev-parse", "--verify", `${rev}^{commit}`], root));
+  const attrSource = attrs === undefined ? undefined : sh("git", ["rev-parse", "--verify", `${attrs}^{commit}`], root);
   const objects = resolve(root, sh("git", ["rev-parse", "--git-path", "objects"], root));
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-merge-"));
   try {
@@ -63,7 +68,7 @@ export const withObjectsOnly = <T>(root: string, revs: string[], use: (git: (arg
     if (ids.some((id) => id.length === 64)) writeFileSync(join(dir, "config"), "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectFormat = sha256\n");
     // Quoted: the variable is a colon-separated list, so a project path with a `:` would name two missing stores.
     const alternate = `"${objects.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_DIR: dir, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate, GIT_NO_REPLACE_OBJECTS: "1" };
+    const env: NodeJS.ProcessEnv = { ...process.env, GIT_DIR: dir, GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate, GIT_NO_REPLACE_OBJECTS: "1", ...(attrSource && { GIT_ATTR_SOURCE: attrSource }) };
     for (const name of REPO_VARS) delete env[name];
     const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8", cwd: dir, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT }).trim();
     return use(git, ids);
@@ -90,13 +95,13 @@ const mergeIn = (git: (args: string[]) => string, ours: string, theirs: string):
 };
 
 /**
- * The paths that conflict in git's own automatic merge of `ours` and `theirs`, run in a throwaway
+ * The paths that conflict in git's own automatic merge of `ours` (the base) and `theirs`, run in a throwaway
  * git directory (`withObjectsOnly`), so nothing a sandbox wrote into the shared `.git` runs and
  * nothing is written there. Throws when git fails; the caller decides what an unanswered check
  * means. Needs git 2.38 (`mergeTreeSupported`).
  */
 export const mergeTree = (root: string, ours: string, theirs: string): { conflicted: Set<string> } =>
-  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => ({ conflicted: mergeIn(git, o, t).conflicted }));
+  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => ({ conflicted: mergeIn(git, o, t).conflicted }), ours);
 
 /**
  * The paths `resolved` changes relative to git's automatic merge of `ours` and `theirs`, other
@@ -118,7 +123,7 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
       // No rename detection: with it a path list names only a rename's target, and a stray
       // deletion paired with an added file would hide behind that path.
       return { changed: git(["diff", "--no-renames", "--name-only", "-z", tree, r]).split("\0").filter(Boolean), conflicted };
-    });
+    }, theirs);
     const inGenerated = (f: string) => generated.some((g) => g.paths.some((p) => covers(p, f)));
     return changed.filter((f) => !conflicted.has(f) && !inGenerated(f));
   } catch (error) {
