@@ -608,7 +608,7 @@ time for an issue and the ages of its working tickets, so it is left out where t
 history. A run from an older kit is named as one that ignores shares (`webshop's run predates
 shares: it keeps taking free slots until it ends`); the run still starts. Nothing is asked: the
 split applies by itself ([Concurrency](#-concurrency)), and the estimate divides by the run's share less the
-slot kept for landing (from a share of 2; a dry run keeps none), not the machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`.
+slot kept for landing (from a share of 2; a dry run keeps none), not the machine limit. In a detached run the line is in `.sandcastle/logs/run-output.log`. A run that shares its project's name with another (a second checkout, say) is named with its folder (`site (site-review)`), or its pid (`site (pid 4242)`) where the folder is unknown or alike.
 
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it

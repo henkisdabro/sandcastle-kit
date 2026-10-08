@@ -60,5 +60,5 @@ test("the estimate beside another run counts the tickets' slots, not the whole s
 test("burndown() hands the estimate and the start line whether it is a dry run", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(src, /estimateSlots\(workers, split, !DRY_RUN\)/);
-  assert.match(src, /\}\), !DRY_RUN\)\) console\.log\(line\)/);
+  assert.match(src, /\}\), !DRY_RUN, project\.name\)\) console\.log\(line\)/);
 });
