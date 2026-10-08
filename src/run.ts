@@ -1345,7 +1345,8 @@ export const archiveFinishedLogs = (project: Project) => {
   for (const name of readdirSync(logs)) {
     const slug = logOwner(name);
     if (!slug) continue;
-    // A live sandbox is still appending to its log, whatever its branch says.
+    // A kept worktree's logs are its evidence, whatever its branch says: an uncommitted ticket's branch has no commits ahead, so it reads as finished
+    // while its work waits in the worktree. `sandcastle clean` removes the worktree first and archives after.
     if (existsSync(join(project.root, `.sandcastle/worktrees/agent-issue-${slug}`))) continue;
     const branch = `agent/issue-${slug}`;
     if (!finished.has(branch)) finished.set(branch, isFinished(branch));
