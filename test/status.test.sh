@@ -337,7 +337,7 @@ has "PAUSED - 5-hour usage 93%, resumes $back"
 usage_paused week 100 codex '[]'
 render "120 121 123"
 has "PAUSED - Codex weekly usage 100%, resumes $back"
-COLS="$COLS_WAS"
+COLS=80
 # At 80 columns the longest wording does not fit its row, so it keeps only what it can: usage and its percent.
 usage_paused week 100 codex '[]'
 render "120 121 123"
@@ -348,6 +348,7 @@ sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
 render "120 121 123"
 has 'PAUSED since [0-9]{2}:[0-9]{2}'
 hasnt 'usage'
+COLS="$COLS_WAS"
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
