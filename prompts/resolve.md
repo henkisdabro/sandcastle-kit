@@ -47,6 +47,12 @@ whose 2-minute default moves a longer suite to the background) and its output in
 worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite
 to time it.
 
+A long command that is not a gate - a download, an install, a build - also runs in the foreground
+with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
+it with a single foreground command that has its own limit, `timeout 600 bash -c 'until <check>; do sleep 5; done'`,
+where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
+available here.
+
 # Finishing
 
 If the merge is resolved, the typecheck gate and the covering tests pass and the merge is committed, output
