@@ -18,8 +18,9 @@ Infer the repo from `git remote -v` - `gh` does this automatically when run insi
 - **Milestones say the release**: one GitHub milestone per version (`vX.Y.Z`); no milestone is
   backlog. Labels keep meaning state, kind and area.
 - **Triage sets the milestone along with the state**: `gh issue edit <n> --milestone vX.Y.Z`. Below
-  1.0, fixes only go in a patch; features, or anything that needs an **Upgrading** note, go in a
-  minor. `v1.0.0` holds the CLI, config and run record compatible.
+  1.0 every release is a minor (`v0.N.0`) - fixes, features and **Upgrading** notes alike; a patch
+  is only for a hotfix (`docs/releasing.md` -> Planning). `v1.0.0` holds the CLI, config and run
+  record compatible.
 - **A release-focused run**: `sandcastle run $(gh issue list --milestone vX.Y.Z --label ready-for-agent --json number -q '.[].number')`.
 - **At release**, follow the Planning section of `docs/releasing.md`.
 

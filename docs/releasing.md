@@ -50,9 +50,14 @@ A GitHub milestone per version (`vX.Y.Z`) says which release a ticket ships in; 
 milestone is backlog. Labels keep saying state, kind and area. Triage sets the milestone along with
 the state, and asks when it is unclear.
 
-Below 1.0, a patch release carries fixes only and no **Upgrading** note; a minor release carries
-features or any **Upgrading** note. `v1.0.0` is the release from which the CLI, the config and the
-run record are held compatible.
+Below 1.0, every release is a minor (`v0.N.0`), whatever it carries: fixes, features or
+**Upgrading** notes. Releases are cut from main alone, so a patch line would only mean that nothing
+from the next minor's milestone had landed yet, and a project takes the kit with a pull and
+`/sandcastle update`, which acts on the **Upgrading** notes whatever the number says. A patch
+(`v0.N.1`) is only for a hotfix: a fix a release needs at once while main holds work that is not
+ready to ship, as v0.4.1 and v0.4.2 were. Two open milestones can still order the work - the fixes
+in the next release, the larger changes in the one after. `v1.0.0` is the release from which the
+CLI, the config and the run record are held compatible.
 
 A run that works only on one release's tickets:
 
