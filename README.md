@@ -378,7 +378,7 @@ An agent that finds a problem outside its ticket - implementer, reviewer or repa
 for it and files nothing itself: it ends its final message with a `<followup>title - one line of
 evidence</followup>` line. Once the run has landed, the kit files each as a new ticket through the
 project's tracker, with the triage label (or ticket-file status) of the `needs-triage` role, and a
-body naming the source ticket and the phase; a title already filed in the run is filed once, and a follow-up that names the same `path:line` in its title as one already filed for the same source ticket is a comment on that issue, not a second one (so is one whose place is only in its evidence, or a file with no line, when the titles also share two significant words). A ticket
+body naming the source ticket and the phase; a title already filed in the run is filed once, and a follow-up that names the same `path:line` in its title as one already filed for the same source ticket is a comment on that issue, not a second one (so is one whose place is only in its evidence, or a file with no line, when the titles also share two significant words; so is one that names no file at all, when the titles share three). A ticket
 file goes beside its source ticket's. The closing summary lists each under Needs you, in its `To triage` group, as `filed for
 triage`. A dry run files none and lists them instead. A run that stops before its end (a crash, or a
 safety stop) keeps what its agents named in the run record as they arrive, and files them as it

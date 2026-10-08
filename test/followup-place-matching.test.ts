@@ -131,7 +131,7 @@ test("a file named with no line in the title keeps the line its evidence gives i
 test("a host and port is not a place, even when the titles overlap", async () => {
   const { made, comments } = await fileAll([
     named("Health check hits api.example.com:443", "api.example.com:443 times out"),
-    named("Health check against api.example.com:443 fails", "api.example.com:443 refused", "7", "review"),
+    named("Health probe against api.example.com:443 fails", "api.example.com:443 refused", "7", "review"),
   ]);
   assert.equal(made.length, 2);
   assert.deepEqual(comments, []);
