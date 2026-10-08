@@ -109,6 +109,12 @@ you need. Run the full suite once, and only if your own commits changed code; af
 commits (prose in a README, a doc or a comment), none. A full gate run of your own adds nothing when
 you commit nothing.
 
+A long command that is not a gate - a download, an install, a build - also runs in the foreground
+with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
+it with a single foreground command that has its own limit, `timeout 600 bash -c 'until <check>; do sleep 5; done'`,
+where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
+available here.
+
 # Finishing
 
 **If no gate exercises this change** - its effect shows only in a browser, in a generated file
