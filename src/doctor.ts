@@ -11,6 +11,7 @@ import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
+import { askRuleLines } from "./lean.ts";
 import { pluginState } from "./herdr-plugin.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
@@ -612,6 +613,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
       if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
+    // A warning, never a FIX: the rules are the project's own, and only a person can say which to move.
+    const [askHead, ...askRest] = askRuleLines(repoRoot);
+    if (askHead) console.log([`warn ${askHead}`, ...askRest].join("\n"));
     // A warning, never a FIX. Silent when Docker is down or the image is not built yet.
     const staleImage = (() => {
       try {

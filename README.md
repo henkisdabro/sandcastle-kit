@@ -293,6 +293,9 @@ Then edit, in this order:
    Python tooling, a pinned package manager). Start from `templates/Dockerfile` in the kit.
 4. **Lean and hooks** - `sandcastle lean` lists what the repo would load into each sandbox and
    checks every kept hook. Keep nothing unless a run needs it; drop only host-only hooks.
+   It also lists the project's `permissions.ask` rules (in the tracked `.claude/settings.json`),
+   which sandboxes refuse - nobody there can answer - so a command matching one fails;
+   `sandcastle doctor` warns of them too.
 
 ```bash
 sandcastle build             # base image, then the project layer
