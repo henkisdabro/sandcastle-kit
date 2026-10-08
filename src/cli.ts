@@ -108,7 +108,7 @@ import { burndown, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
-import { requireGreenBase } from "./gates.ts";
+import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
 import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
@@ -639,7 +639,7 @@ try {
     }
     case "lean": {
       const project = await loadProject(root);
-      const p = leanPlan(project);
+      const { plan: p, file: planFile } = writePlan(project);
       // Asked before the image and the report, so a no costs nothing.
       if (args.includes("--measure")) {
         if (args.includes("--api-key")) process.env.SANDCASTLE_API_KEY = "1";
@@ -647,7 +647,7 @@ try {
       }
       leanReport(project, p);
       const image = await ensureImage(project);
-      reportHookCheck(checkHooks(project, image, p), p.hooks.length);
+      reportHookCheck(checkHooks(project, image, p, hooksThatRanClean(project, image, planFile)), p.hooks.length);
       if (args.includes("--measure")) leanMeasure(project, image, p);
       break;
     }

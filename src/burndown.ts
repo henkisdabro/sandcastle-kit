@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2226,7 +2226,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   }
   // A kept hook that cannot run fails on every tool call of every agent, or
   // silently guards nothing. Stop before any sandbox starts.
-  const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean));
+  const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean, hooksThatRanClean(project, image, planFile)));
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);

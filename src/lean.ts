@@ -393,7 +393,10 @@ const exportHead = (root: string, into: string) => {
   }
 };
 
-export const checkHooks = (project: Project, image: string, p: Plan) => {
+// `ranClean`: commands of the hooks a passing hook test ran without error (`hooksThatRanClean`). Such a hook imported
+// what it needs, so the static import check's MODULES warning - blind to a `sys.path.insert` the hook makes at run
+// time - is dropped for it; a syntax error and every other finding stay.
+export const checkHooks = (project: Project, image: string, p: Plan, ranClean: readonly string[] = []) => {
   if (!p.hooks.length) return { failures: [] as string[], warnings: [] as string[] };
   const lines = ["cd " + WORKSPACE];
   p.hooks.forEach((h, i) => {
@@ -436,7 +439,10 @@ export const checkHooks = (project: Project, image: string, p: Plan) => {
     const all = out.split("\n").filter(Boolean);
     return {
       failures: all.filter((l) => l.startsWith("FAIL")).map(describe),
-      warnings: all.filter((l) => l.startsWith("WARN")).map(describe),
+      warnings: all
+        .filter((l) => l.startsWith("WARN"))
+        .filter((l) => !(l.split(" ")[2] === "MODULES" && ranClean.includes(p.hooks[Number(l.split(" ")[1])].command)))
+        .map(describe),
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
