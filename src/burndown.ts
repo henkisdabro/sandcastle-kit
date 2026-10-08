@@ -383,10 +383,18 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // every review prompt asks for, which would otherwise list nearly every merged ticket. Also "the remaining tests
 // pass", "every remaining criterion is met" ("all 36 remaining ... match" too) and a test that "covers the gap the
 // ticket describes": a first run flagged each of these as a gap. And a remaining thing the reviewer calls right
-// ("the only remaining mention is in past entries, which is correct"), a gap reported with its fix ("found one gap
-// ... and fixed both"), and an omission the ticket itself asked for ("left alone, as the ticket asked").
+// ("the only remaining mention is in past entries, which is correct"), and an omission the ticket itself asked
+// for ("left alone, as the ticket asked").
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bfound\b.*\band\s+fixed\b|\bfixed\s+(?:both|all|each|it|them|these|those)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
+// A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
+// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" is no fix.
+const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+const isGap = (sentence: string): boolean => {
+  if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
+  const fixed = GAP_FIXED.exec(sentence);
+  return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
+};
 // A line that is a heading, not a sentence: a Markdown heading, or a line of nothing but bold text
 // ("**Checked and left as is**"). It would otherwise join the paragraph under it and be quoted with it.
 const HEADING_LINE = /^(?:#{1,6}\s|(?:[-*+•]\s+)?(?:\*\*[^*]+\*\*|__[^_]+__):?$)/;
@@ -427,8 +435,7 @@ const gapOf = (text: string): string | undefined => {
   const all = sentencesOf(text);
   const take = new Set<number>();
   all.forEach((s, i) => {
-    const bare = withoutCode(s.text);
-    if (!GAP_WORDS.test(bare) || GAP_NEGATED.test(bare)) return;
+    if (!isGap(withoutCode(s.text))) return;
     take.add(i);
     if (!ANAPHOR.test(s.text)) return;
     let size = s.text.length;

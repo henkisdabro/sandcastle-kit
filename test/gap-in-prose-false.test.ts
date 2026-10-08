@@ -159,3 +159,13 @@ test("a gap sentence that opens with That is quoted with the sentences before it
 test("a gap sentence that does not open with an anaphor is quoted alone", async () => {
   assert.equal(await gapOfReview("The link step was checked. One gap remains: the README names AGE.\n"), "One gap remains: the README names AGE.");
 });
+
+test("a gap named after the fix, or a fix not made, is still a gap", async () => {
+  for (const gap of [
+    "I fixed all the typos; one gap remains in the README.",
+    "I found two gaps and fixed one; the other remains open.",
+    "Fixed it in the README, but the same gap remains in docs/INSTALL.md.",
+    "The README gap is real: I have not fixed it.",
+  ]) assert.equal(await gapOfReview(`${gap}\n`), gap);
+  assert.equal(await gapOfReview("I found the remaining issue in the parser and fixed it.\n"), undefined);
+});
