@@ -132,6 +132,11 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         const ms = Date.now() - since;
         const timedOut = r.exitCode === 124;
         const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
+        // With `onLine` set the sandbox streams stdout alone and returns stderr apart, so a log written only
+        // from `onLine` has none of it - and a test runner prints its failures there. Not `2>&1` on the command:
+        // the failure output's order would change for logged gates only, and `redOnBase` compares failure keys
+        // between a branch and the base.
+        if (log && r.stderr) appendFileSync(log, `# stderr of ${g.name} (at most its last 64 KiB):\n${r.stderr.endsWith("\n") ? r.stderr : r.stderr + "\n"}`);
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
