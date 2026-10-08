@@ -1,8 +1,10 @@
 // Checking a conflict resolution against git's own merge. A resolver that finishes a base merge
 // can quietly drop or rewrite lines outside the conflicted hunks ("take ours" across a whole
 // file) and keep every gate green; the lines lost may be another ticket's landed work. Git's
-// automatic merge says exactly which paths needed a decision, so a change anywhere else is a
-// stray. Read-only plumbing on the host, as `checkLandingMerge` in land.ts does.
+// automatic merge says exactly which paths needed a decision, so a change anywhere else that the
+// base side had changed is a stray. A path only the branch has (a new file, a file the base never
+// touched) can carry none of another ticket's lines and is left to the narrow review. Read-only
+// plumbing on the host, as `checkLandingMerge` in land.ts does.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -15,6 +17,44 @@ import { covers, type Generated } from "./generated.ts";
 const MIN_GIT: [number, number] = [2, 38];
 
 let said = false;
+
+/**
+ * Whether `root` is a partial (promisor) clone: `extensions.partialClone`, or a remote with `promisor` or
+ * `partialclonefilter` set. Some of its objects live only on the remote, which a host merge check cannot fetch.
+ */
+export const isPartialClone = (root: string): boolean => {
+  try {
+    return !!sh("git", ["config", "--get-regexp", "^(extensions\\.partialclone|remote\\..*\\.(promisor|partialclonefilter))$"], root);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * What a partial clone's missing objects cost, in one sentence: the doctor's warning, the run's line and the closing summary share it.
+ * The checks never fetch: the remote's address is read from a `.git/config` that sandboxes can write, and a fetch would use the operator's credentials.
+ */
+export const PARTIAL_CLONE_GAP =
+  "the host's merge checks (a conflict before landing, a conflict resolution against git's own merge) read only the objects held here and never fetch, " +
+  "so on an object only the remote has they cannot run, and the merge is not checked; a full clone holds them all";
+
+let gap: string | undefined;
+/** The note a run records when a host merge check could not run for missing objects (`noteMissingObjects`); undefined while none has. */
+export const mergeCheckGap = () => gap;
+
+/**
+ * Whether `error` is git failing to read an object the partial clone `root` does not hold. Says so once, on screen,
+ * and remembers it for the closing summary: the callers go on as if the merge were clean, and without this nothing shows it.
+ */
+export const noteMissingObjects = (root: string, error: unknown): boolean => {
+  const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+  if (!/unable to read|could not read|missing (blob|tree|commit)|bad object|promisor/i.test(stderr) || !isPartialClone(root)) return false;
+  if (!gap) {
+    gap = `a host merge check could not run, because objects are missing in this partial clone: ${PARTIAL_CLONE_GAP}`;
+    console.log(`${gap}.`);
+  }
+  return true;
+};
 
 /** The refs involved: `ours` and `theirs` are what the merge joined, `resolved` is the resolver's result. */
 export type Resolution = {
@@ -98,16 +138,21 @@ const mergeIn = (git: (args: string[]) => string, ours: string, theirs: string):
  * The paths that conflict in git's own automatic merge of `ours` (the base) and `theirs`, run in a throwaway
  * git directory (`withObjectsOnly`), so nothing a sandbox wrote into the shared `.git` runs and
  * nothing is written there. Throws when git fails; the caller decides what an unanswered check
- * means. Needs git 2.38 (`mergeTreeSupported`).
+ * means. Needs git 2.38 (`mergeTreeSupported`). `tree` is the id of the merge's result, conflict
+ * markers included when `conflicted` is not empty; the object itself goes with the throwaway
+ * directory, so the id is only for comparing with a tree in the project.
  */
-export const mergeTree = (root: string, ours: string, theirs: string): { conflicted: Set<string> } =>
-  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => ({ conflicted: mergeIn(git, o, t).conflicted }), ours);
+export const mergeTree = (root: string, ours: string, theirs: string): { conflicted: Set<string>; tree: string } =>
+  withObjectsOnly(root, [ours, theirs], (git, [o, t]) => mergeIn(git, o, t), ours);
 
 /**
  * The paths `resolved` changes relative to git's automatic merge of `ours` and `theirs`, other
- * than the ones that conflicted and the project's generated files. Empty when the resolution
- * stayed inside the conflicts. `undefined` when the check cannot run (git older than 2.38, or
- * a git call failed): it says so once and never throws, so the narrow review remains.
+ * than the ones that conflicted and the project's generated files, and only where `theirs` (the
+ * base) could have put lines another ticket landed: a path it changed since the merge base, or one
+ * git's merge carried its changes into (a rename of the branch's). A new file, or one only the
+ * branch touched, is left out. Empty when the resolution stayed inside the conflicts and its own
+ * files. `undefined` when the check cannot run (git older than 2.38, or a git call failed): it says
+ * so once and never throws, so the narrow review remains.
  */
 export const strayChanges = (root: string, { ours, theirs, resolved, generated = [], gitVersion }: Resolution): string[] | undefined => {
   const unavailable = (why: string) => {
@@ -117,16 +162,26 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
   };
   if (!mergeTreeSupported(root, gitVersion)) return unavailable(`it needs git ${MIN_GIT.join(".")} or newer`);
   try {
-    // The merged tree exists only in the throwaway directory, so the diff against it runs there too.
-    const { changed, conflicted } = withObjectsOnly(root, [ours, theirs, resolved], (git, [o, t, r]) => {
+    // The merged tree exists only in the throwaway directory, so the diffs against it run there too.
+    const { changed, conflicted, baseSide } = withObjectsOnly(root, [ours, theirs, resolved], (git, [o, t, r]) => {
       const { tree, conflicted } = mergeIn(git, o, t);
       // No rename detection: with it a path list names only a rename's target, and a stray
       // deletion paired with an added file would hide behind that path.
-      return { changed: git(["diff", "--no-renames", "--name-only", "-z", tree, r]).split("\0").filter(Boolean), conflicted };
+      const names = (from: string, to: string) => git(["diff", "--no-renames", "--name-only", "-z", from, to]).split("\0").filter(Boolean);
+      // Every merge base: a criss-cross history has several, and a path changed since any of them may hold the base's lines.
+      const bases = git(["merge-base", "--all", o, t]).split("\n").filter(Boolean);
+      return {
+        changed: names(tree, r),
+        conflicted,
+        // What `theirs` changed under its own name, and what the merge changed in `ours`: the second is where a rename
+        // of the branch's received the base's edits to the old name, a path `theirs` never changed.
+        baseSide: new Set([...bases.flatMap((base) => names(base, t)), ...names(o, tree)]),
+      };
     }, theirs);
     const inGenerated = (f: string) => generated.some((g) => g.paths.some((p) => covers(p, f)));
-    return changed.filter((f) => !conflicted.has(f) && !inGenerated(f));
+    return changed.filter((f) => baseSide.has(f) && !conflicted.has(f) && !inGenerated(f));
   } catch (error) {
+    if (noteMissingObjects(root, error)) return undefined;
     return unavailable(`git failed (${String(error).split("\n")[0].slice(0, 120)})`);
   }
 };

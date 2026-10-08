@@ -323,17 +323,19 @@ test("a resolution that changes a path git merged cleanly is held with the branc
   const h = await conflicted();
   const recorded = readHeads(h.root)[ID]?.gates;
   assert.deepEqual(recorded, GREEN.gates);
+  // Another ticket lands a file the conflict does not touch; the base merge takes it in cleanly.
+  h.land("landed.txt", "another ticket's line\n");
   h.agents.resolve = (wt) => {
     write(wt, "shared.txt", "one\nseven\n");
-    // Another ticket's file, which the base merge took in cleanly: the resolution drops its line.
-    write(wt, "review.txt", "");
-    git(wt, "add", "shared.txt", "review.txt");
+    // The resolution drops that ticket's line.
+    write(wt, "landed.txt", "");
+    git(wt, "add", "shared.txt", "landed.txt");
     git(wt, "commit", "-q", "--no-edit");
   };
   const o = await h.attempt();
   assert.deepEqual(h.events, ["resolve"], "held before any review or gate run");
   assert.equal(o.status, "held");
-  assert.match(o.heldNote ?? "", /review\.txt/);
+  assert.match(o.heldNote ?? "", /landed\.txt/);
   assert.equal(o.commits, ownCommits("main", BRANCH, h.root));
   assert.ok(o.commits > 0);
   assert.deepEqual(o.gates, recorded);
@@ -344,6 +346,26 @@ test("a resolution that changes a path git merged cleanly is held with the branc
     h.notes.map((x) => x.issue),
     [ID],
   );
+});
+
+test("a resolution that changes only the branch's own files and adds a new one goes to the narrow review, not a hold", async () => {
+  const h = await conflicted();
+  h.land("landed.txt", "another ticket's line\n");
+  h.agents.resolve = (wt) => {
+    write(wt, "shared.txt", "one\nseven\n");
+    // review.txt is the first attempt's reviewer's file: the base never had it, so no other ticket's lines are in it.
+    write(wt, "review.txt", "adapted to the landed code\n");
+    write(wt, "added-in-the-merge.txt", "exists on neither parent\n");
+    git(wt, "add", "shared.txt", "review.txt", "added-in-the-merge.txt");
+    git(wt, "commit", "-q", "--no-edit");
+  };
+  h.agents.review = implementing("review-2.txt", "the resolution's review\n");
+  h.gates.push(GREEN);
+  const o = await h.attempt();
+  assert.deepEqual(h.events, ["resolve", "review", "gate"]);
+  assert.ok(h.passes[1].args.REVIEW_BASE, "the resolution's review is the narrow one");
+  assert.equal(o.status, "green");
+  assert.deepEqual(h.notes, []);
 });
 
 test("a green head records its changelog lines and unmet criterion, and a later land-only run carries them", async () => {

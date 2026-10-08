@@ -20,7 +20,7 @@ another agent's change. To run a test without your change, `git diff > /tmp/p &&
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
 worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
-own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. If git ever tells you this
+own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -80,6 +80,9 @@ ticket names. The project rules below say what else to read.
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
+  Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
   hook, a full disk or a signing failure can refuse a commit. If one does, quote the last lines of
@@ -136,6 +139,10 @@ with your sentence in place of the dots. The branch still merges if its gates ar
 stays open with that criterion named, and the next run picks up the remainder. Leave the line out when
 every criterion is met: a criterion you chose not to do because it seemed out of scope is not a reason
 to omit it.
+
+If what is left needs a person and no agent can do it (access you do not have, a deploy, a file agents may
+not edit, a decision), open the line as `<unmet who="person">...</unmet>` instead: a plain `<unmet>` line is
+picked up again by the next run, which would spend an agent on work only a person can do.
 
 **A problem, limitation, risk or trade-off you judge outside the ticket** does not stay in the prose of
 your final message, which no reviewer and no tracker reads. Put each one on a line of its own:

@@ -638,8 +638,11 @@ const tryAcquire = (pool: PoolName, label: string): { file: string; mine: string
 /** How long a wait is quiet before it says again why it waits: a reason that flips back and forth says nothing new. */
 const REPRINT_MS = 15 * 60_000;
 
-/** Why a wait waits: every slot is taken, or this run is at its share while another run waits below its own (or at its cap). */
-export type WaitReason = "slots" | "share";
+/**
+ * Why a wait waits: every slot is taken, this run is at its share while another run waits below its own (or at its
+ * cap), or the last slot of the run's share is kept for a landing (`keptForLanding`).
+ */
+export type WaitReason = "slots" | "share" | "landing";
 
 /** A slot taken with `leaseSlot`: `release` frees it, once; a second call does nothing. */
 export type SlotLease = { release(): void };
@@ -653,7 +656,7 @@ export type SlotLease = { release(): void };
  * slot is free, a wait that is no longer wanted (the run was paused) ends with no lease and no trace.
  * `priority` puts this wait before the run's other waits for the pool (the ones that did not ask for
  * it), without changing which run is served. `keep` is a ticket pipeline's sandbox slot: beside another run it
- * leaves the last slot of the run's share to a landing (`keptForLanding`), and waits with the reason `share`.
+ * leaves the last slot of the run's share to a landing (`keptForLanding`), and waits with the reason `landing`.
  */
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
 export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
@@ -686,7 +689,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
         else writeWait(wait);
         wait.hidden = kept;
       }
-      if (kept) return (yielded = "kept"), "share";
+      if (kept) return (yielded = "kept"), "landing";
       if (olderWait(pool, countedFrom(wait), ms, seen)) return (yielded = "run"), "slots";
       if (priorityAhead(wait)) return (yielded = "priority"), "slots";
       if (earlierAhead(wait)) return (yielded = "earlier"), "slots";
@@ -700,7 +703,7 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       // fires at each change, since the run's note of waiting for its share follows it.
       if (printedAt === undefined || clock() - printedAt >= REPRINT_MS) {
         printedAt = clock();
-        const me = why === "share" ? myShare() : undefined;
+        const me = why === "share" || why === "landing" ? myShare() : undefined;
         const reason = yielded === "kept" ? `this run's share is ${me?.share ?? 0} and its tickets hold ${keeping}: one slot of it is kept for landing`
           : why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
           : yielded === "run" ? "another run has waited longer"

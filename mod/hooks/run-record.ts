@@ -293,11 +293,18 @@ export type RunRecord = {
   /** A person's cap on the run's share (`sandcastle cap`); absent when there is none. */
   cap?: number;
   /**
-   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, not
-   * only a full pool: the status view's next-to-start rows say `waits for the run's share`. The wait is the run's, not a
-   * ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting ticket's note.
+   * Present (true) while the run waits for a sandbox slot that its share of the machine pool (or its cap) holds back, or
+   * the slot kept for landing does, not only a full pool: the status view's next-to-start rows say so. The wait is the
+   * run's, not a ticket's - a worker leases its slot before it takes a ticket - and an older kit wrote it as each waiting
+   * ticket's note. Kept for older views: `waitsFor` says which.
    */
   waitsForShare?: boolean;
+  /**
+   * What holds that wait back, present with `waitsForShare`: `share` (the run's share or cap: `waits for the run's
+   * share`) or `landing` (the last slot of the share is kept for a landing: `waits: a slot is kept for landing`).
+   * An older kit's record has only `waitsForShare`, which the view reads as `share`.
+   */
+  waitsFor?: "share" | "landing";
   typical?: unknown;
   tokens?: string;
   /** Why the run stopped before the end of its queue. */
@@ -307,6 +314,8 @@ export type RunRecord = {
   baseGates?: unknown;
   /** Tests found red on the base mid-run, each once: a failure no branch caused, so none was repaired. */
   baseRed?: string[];
+  /** Why a host merge check could not run for objects a partial clone lacks (`noteMissingObjects`): the closing summary says so, since those checks read the merge as clean. */
+  mergeUnchecked?: string;
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
   followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
   /**
@@ -319,6 +328,8 @@ export type RunRecord = {
    */
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
+  /** Tracked files a gate rewrote and the kit put back, by path, once each. */
+  gateRewrites?: string[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;
 };

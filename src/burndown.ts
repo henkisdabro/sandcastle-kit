@@ -28,8 +28,9 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
+import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, stepTimes, timedLandingGate, withQueued, writeLandingLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -42,7 +43,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeTree, mergeTreeSupported, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -281,17 +282,30 @@ export const cutAtWord = (text: string, max: number): string => {
 // start its line and the closing tag end one (the prompts ask for "a line of its own"); the
 // content may still wrap over several lines but never holds another opening tag. A fence never closed blanks nothing: dropping a real
 // tag after a stray one costs more than reading a mention.
-const ownLineTags = (text: string, tag: string): string[] => {
+// `attrs`: an opening tag may carry attributes (`<unmet who="person">`), returned beside the text; only a tag
+// asked for with `withAttrs` takes any, so `<changelog x>` stays prose as before.
+const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: string; text: string }[] => {
   const unfenced = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
-  return [...unfenced.matchAll(new RegExp(`^[ \\t]*<${tag}>((?:(?!<${tag}>)[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => m[1]);
+  const open = withAttrs ? `<${tag}(?:[ \\t]+([^<>\\n]*?))?[ \\t]*>` : `<${tag}()>`;
+  return [...unfenced.matchAll(new RegExp(`^[ \\t]*${open}((?:(?!<${tag}[ \\t>])[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => ({ attrs: m[1] ?? "", text: m[2] }));
 };
+const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
 const lineOf = (tag: string) => (text: string): string | undefined => {
   const said = ownLineTags(text, tag).at(-1)?.replace(/\s+/g, " ").trim();
   return said && said !== "..." ? cutAtWord(said, UNGATED_MAX) : undefined;
 };
 export const ungatedOf = lineOf("ungated");
 // An agent's `<unmet>...</unmet>` line: the acceptance criterion it knowingly left undone. Read the same way.
-export const unmetOf = lineOf("unmet");
+// `<unmet who="person">...</unmet>` says the remainder needs a person (access, a deploy, a human-only file, a
+// decision): the note keeps that as `PERSON_MARK` in front, so the run record's `unmet` carries it to the
+// report and the status view, and no other run is spent on it (`needsDecision`).
+export const unmetOf = (text: string): string | undefined => {
+  const last = ownLineMatches(text, "unmet", true).at(-1);
+  const said = last?.text.replace(/\s+/g, " ").trim();
+  if (!last || !said || said === "...") return undefined;
+  const byPerson = /(^|\s)who\s*=\s*(["']?)person\2(\s|$)/i.test(last.attrs);
+  return cutAtWord(byPerson && !said.startsWith(PERSON_MARK) ? PERSON_MARK + said : said, UNGATED_MAX);
+};
 // What a full review is shown of the implementer's `<unmet>` line: its words are dropped from the ticket's
 // leftovers once a full review ran (`left`), so the reviewer must finish the criterion or restate it, or it is lost.
 // Empty when the implementer gave none, so the prompt carries no heading over nothing.
@@ -367,32 +381,70 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // What the same words say when they report there is nothing left ("nothing remains", "no gaps", "no remaining
 // issue"), and a thing that "remains green" or "remains unchanged" - or "unaffected", the platform sentence
 // every review prompt asks for, which would otherwise list nearly every merged ticket. Also "the remaining tests
-// pass", "every remaining criterion is met" and a test that "covers the gap the ticket describes": a first run
-// flagged each of these as a gap.
+// pass", "every remaining criterion is met" ("all 36 remaining ... match" too) and a test that "covers the gap the
+// ticket describes": a first run flagged each of these as a gap. And a remaining thing the reviewer calls right
+// ("the only remaining mention is in past entries, which is correct"), and an omission the ticket itself asked
+// for ("left alone, as the ticket asked").
 const GAP_NEGATED =
-  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b/i;
+  /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
+// A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
+// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" is no fix.
+const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+const isGap = (sentence: string): boolean => {
+  if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
+  const fixed = GAP_FIXED.exec(sentence);
+  return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
+};
+// A line that is a heading, not a sentence: a Markdown heading, or a line of nothing but bold text
+// ("**Checked and left as is**"). It would otherwise join the paragraph under it and be quoted with it.
+const HEADING_LINE = /^(?:#{1,6}\s|(?:[-*+•]\s+)?(?:\*\*[^*]+\*\*|__[^_]+__):?$)/;
+// Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
+const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
-// fenced block are no prose, a list item is a unit of its own, and a paragraph's wrapped lines join.
-const sentencesOf = (text: string): string[] => {
+// fenced block are no prose, a heading is no sentence, a list item is a unit of its own, and a paragraph's
+// wrapped lines join. Each sentence keeps the unit it came from, for the context a gap sentence needs.
+const sentencesOf = (text: string): { text: string; unit: number }[] => {
   const prose = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "").replace(/<(\w+)>[\s\S]*?<\/\1>/g, "");
   const units: string[] = [];
   let open = false;
   for (const raw of prose.split("\n")) {
     const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
-    if (!line) open = false;
+    if (!line || HEADING_LINE.test(line)) open = false;
     else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
     else {
       units.push(line);
       open = true;
     }
   }
-  return units.flatMap((u) => u.split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)).map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim());
+  return units.flatMap((u, unit) =>
+    u
+      .split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)
+      .map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
+      .map((s) => ({ text: s, unit })),
+  );
 };
+// A sentence that points back at the one before it ("That is a coverage gap ..."): quoted alone, the person
+// has to open the review log to learn what "That" is.
+const ANAPHOR = /^(?:That|This|It|These|Those|Which)\b/;
 // The gap sentences of a reviewer's final message, when it filed none: a message with a `<followup>` or an
-// `<unmet>` line has said it the way the kit reads. Several sentences are one note.
+// `<unmet>` line has said it the way the kit reads. Several sentences are one note. A gap sentence that opens
+// with an anaphor brings the sentences before it in its paragraph, as many as fit under UNGATED_MAX (the
+// nearest first), because what it points at is one of them.
 const gapOf = (text: string): string | undefined => {
   if (followUpsOf(text).length || unmetOf(text)) return undefined;
-  const said = sentencesOf(text).filter((s) => GAP_WORDS.test(s) && !GAP_NEGATED.test(s));
+  const all = sentencesOf(text);
+  const take = new Set<number>();
+  all.forEach((s, i) => {
+    if (!isGap(withoutCode(s.text))) return;
+    take.add(i);
+    if (!ANAPHOR.test(s.text)) return;
+    let size = s.text.length;
+    for (let j = i - 1; j >= 0 && all[j].unit === s.unit && size + all[j].text.length < UNGATED_MAX; j--) {
+      take.add(j);
+      size += all[j].text.length + 1;
+    }
+  });
+  const said = [...take].sort((x, y) => x - y).map((i) => all[i].text);
   return said.length ? cutAtWord([...new Set(said)].join(" "), UNGATED_MAX) : undefined;
 };
 // The phase a pass's name says, in the words a person reads in the filed ticket.
@@ -413,7 +465,7 @@ const STOPWORDS = new Set(
 // The significant words of a title: 4 letters or more, no stopword, and not the path itself.
 const significantWords = (title: string, path: string): Set<string> =>
   new Set(
-    title.replace(path, " ").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+    (path ? title.replace(path, " ") : title).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
   );
 /** Where a finding is: the source ticket's file, and its line when the agent gave one. */
 type Seat = { from: string; path: string; line?: number; firm: boolean; words: Set<string> };
@@ -432,8 +484,9 @@ const firstFile = (re: RegExp, text: string, exists: PathExists) => {
 // title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
 // another finding is about, and two titles that name a file say little by it. A file the title names comes before
 // a line the evidence cites in another file, which would otherwise hide it from a close title naming the same file;
-// the evidence may still give that file's line.
-const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
+// the evidence may still give that file's line. A finding that names no file of the base tree gets a seat with
+// no path, which `sameFinding` matches on its title alone.
+const placeSeat = (f: FollowUp, exists: PathExists): Seat => {
   const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
     from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
   });
@@ -445,7 +498,7 @@ const placeSeat = (f: FollowUp, exists: PathExists): Seat | undefined => {
     return seat({ ...fileOnly, line: line === undefined ? undefined : Number(line) }, false);
   }
   const inEvidence = firstFile(PLACE, f.evidence, exists);
-  return inEvidence ? seat(inEvidence, false) : undefined;
+  return inEvidence ? seat(inEvidence, false) : { from: f.from, path: "", firm: false, words: significantWords(f.title, "") };
 };
 /** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
 export const onBase = (root: string, base: string): PathExists => (path) => {
@@ -456,22 +509,26 @@ export const onBase = (root: string, base: string): PathExists => (path) => {
   }
 };
 const WORDS_SHARED = 2;
+// With no file to agree on, the titles are all there is to go by, so they must share more: the same tooling
+// failure worded twice shares three, and two unrelated findings of one ticket rarely do.
+const WORDS_SHARED_NO_PLACE = 3;
 // Per source ticket: the same place named for another ticket is a different finding. Two findings at one line
 // are one when either names it in its title; otherwise (or with no line on one side) their titles must overlap.
+// Two findings that name no place are one when their titles overlap by more.
 const sameFinding = (a: Seat, b: Seat): boolean => {
   if (a.from !== b.from || a.path !== b.path) return false;
-  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= WORDS_SHARED;
+  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= (a.path ? WORDS_SHARED : WORDS_SHARED_NO_PLACE);
   if (a.line !== undefined && b.line !== undefined) return a.line === b.line && (a.firm || b.firm || overlap);
   return overlap;
 };
 /** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
 export type Places = Map<string, { id: string; seat: Seat }[]>;
 const placesKey = (s: Seat) => `${s.from}\0${s.path}`;
-const placeOf = (places: Places, seat: Seat | undefined) => (seat ? places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat)) : undefined);
+const placeOf = (places: Places, seat: Seat) => places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat));
 const addPlace = (places: Places, seat: Seat, id: string) => places.set(placesKey(seat), [...(places.get(placesKey(seat)) ?? []), { id, seat }]);
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
-  `Named again by the ${f.phase} agent working on ${ref(f.from)}, at the same place, as "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
+  `Named again by the ${f.phase} agent working on ${ref(f.from)}, as the same finding, worded "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
 // The titles filed by every turn of this `sandcastle run`: a turn that re-runs a ticket (partly done,
 // requeued) hears its agents name the same problem again, and that is still one ticket.
 const filedThisRun = new Set<string>();
@@ -481,7 +538,8 @@ const placesThisRun: Places = new Map();
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A follow-up naming the
- * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, is not filed:
+ * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, or naming no place and
+ * sharing three significant words of its title with one, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
  * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
@@ -526,7 +584,7 @@ export const fileFollowUps = async (
       const id = await o.write(() => tracker.create(f.title, body, f.from));
       out.push({ ...at, id });
       seen.add(key);
-      if (place) addPlace(places, place, id);
+      addPlace(places, place, id);
     } catch (error) {
       out.push({ ...at, failed: errorLine(error) });
     }
@@ -581,11 +639,11 @@ export const createFollowUpBook = (
       if (seen.has(key)) return;
       if (!listed.has(key)) {
         const place = placeSeat(f, o.exists);
-        if (place && (placeOf(listedPlaces, place) || placeOf(places, place))) {
+        if (placeOf(listedPlaces, place) || placeOf(places, place)) {
           repeats.push(f);
           return;
         }
-        if (place) addPlace(listedPlaces, place, "");
+        addPlace(listedPlaces, place, "");
       }
       heard.push(f);
       if (listed.has(key)) return;
@@ -720,28 +778,31 @@ export const heartbeatLine = (o: {
 /**
  * The run's waits for a machine-wide sandbox slot: a pipeline worker's for the next ticket (slot first,
  * `Work.slot` in src/schedule.ts) and a ticket's own as a pause ends. None of them is a ticket's in the queue, so
- * what they say is the run's: `share` is told each time "a wait is held back by the run's share" turns true or
- * false (the run record's `waitsForShare`), and `since` is when the oldest wait still open began (the heartbeat).
- * Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`, and `end`s as it is served or given up.
+ * what they say is the run's: `share` is told each time what holds a wait back changes - `held` is whether the run's
+ * share or the slot kept for landing does (the run record's `waitsForShare`, which an older view reads), `waitsFor`
+ * which of the two (`waitsFor`; the share wins while waits of both kinds are open) - and `since` is when the oldest
+ * wait still open began (the heartbeat). Each wait `begin`s as it asks the pool, hands the pool's reason to `onWait`,
+ * and `end`s as it is served or given up.
  */
-export const createSlotWaits = (share: (held: boolean) => void, now: () => number = Date.now) => {
-  const open = new Map<object, { since: number; share: boolean }>();
-  let told = false;
+export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "landing") => void, now: () => number = Date.now) => {
+  const open = new Map<object, { since: number; why?: "share" | "landing" }>();
+  let told: "share" | "landing" | undefined;
   const tell = () => {
-    const held = [...open.values()].some((w) => w.share);
-    if (held === told) return;
-    told = held;
-    share(held);
+    const whys = [...open.values()].map((w) => w.why);
+    const waitsFor = whys.includes("share") ? "share" : whys.includes("landing") ? "landing" : undefined;
+    if (waitsFor === told) return;
+    told = waitsFor;
+    share(waitsFor !== undefined, waitsFor);
   };
   return {
     begin() {
       const key = {};
-      open.set(key, { since: now(), share: false });
+      open.set(key, { since: now() });
       return {
         onWait(why: WaitReason) {
           const wait = open.get(key);
           if (!wait) return;
-          wait.share = why === "share";
+          wait.why = why === "share" || why === "landing" ? why : undefined;
           tell();
         },
         end() {
@@ -914,7 +975,7 @@ export type PipelineContext = {
   timed: Timed;
   run: { ticket(id: string, fields: TicketRecord): void };
   view: Pick<SandboxView, "claim">;
-  host: Pick<HostGit, "begin" | "settle">;
+  host: Pick<HostGit, "begin" | "settle"> & Partial<Pick<HostGit, "write">>;
   /** The requeue-once state: a requeued ticket's line, while its second attempt is to come. */
   requeuedAs: ReadonlyMap<string, string>;
   /** This run's pipeline results so far: a requeued ticket's first attempt is among them. */
@@ -967,13 +1028,45 @@ export const createPipeline = (ctx: PipelineContext) => {
     return tracker.reopenedSince(issue, Date.parse(mergedAt)) ? undefined : merge;
   };
 
+  /**
+   * A branch an earlier run left with no commit ahead of the base (a crashed attempt, a remainder whose work already
+   * merged) is cut from the base's tip again, before its sandbox opens. Sandcastle checks an existing branch out as it
+   * stands and the base merge in the attempt's setup is for a carried branch only, so the agent would work - count
+   * tests, conflict at landing - on the tree of the run that left it. Nothing is lost: with none ahead, every commit
+   * of the branch is already the base's. A branch with commits keeps its fork point (the sandbox merges the base in).
+   * It runs through the host git's one writer, after `host.begin` so the `.git` check reads the new tip as the
+   * pipeline's own move. A branch a worktree still holds is left: git refuses the move, and that worktree may hold
+   * uncommitted files Sandcastle reuses.
+   */
+  const cutFromBase = (issue: string, branch: string) => {
+    const cut = () => {
+      let ahead: number;
+      let behind: number;
+      try {
+        ahead = Number(sh("git", ["rev-list", "--count", `refs/heads/${base}..refs/heads/${branch}`], project.root));
+        behind = Number(sh("git", ["rev-list", "--count", `refs/heads/${branch}..refs/heads/${base}`], project.root));
+      } catch {
+        return; // no such branch: the sandbox cuts a new one from the base
+      }
+      if (ahead > 0 || behind === 0) return;
+      const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it`;
+      try {
+        sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
+        console.log(`${was} - cut again from ${base}'s tip.`);
+      } catch (error) {
+        console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
+      }
+    };
+    return host.write ? host.write(cut) : cut();
+  };
+
   const addReport = (id: string, heading: string, text: string) =>
     reports.set(id, [reports.get(id), `**${heading}**\n\n${text}`].filter(Boolean).join("\n\n"));
 
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -1052,7 +1145,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The landed tickets this branch has never seen that changed a file of the conflict, as landing names them.
       const others = [...landed].filter(([, r]) => files.some((f) => r.files.includes(f)) && !isAncestor(project.root, r.commit, head)).map(([id]) => id);
       return { files, with: others };
-    } catch {
+    } catch (error) {
+      // Objects a partial clone lacks: said once and kept for the closing summary, not read as a merge that is clean.
+      noteMissingObjects(project.root, error);
       return undefined;
     }
   };
@@ -1077,11 +1172,16 @@ export const createPipeline = (ctx: PipelineContext) => {
 
     const started = Date.now();
     releaseBranchWorktree(branch, project.root);
-    // From here the agent commits to the branch; the `.git` check lets it move.
+    // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
     host.begin(branch);
     // Reassigned when a pause closes the sandbox and the resume opens another on the same branch.
-    let sandbox = await timed(issue.id, "setup", () =>
-      open(branch),
+    let sandbox = await timed(
+      issue.id,
+      "setup",
+      async () => {
+        await cutFromBase(issue.id, branch);
+        return open(branch);
+      },
       requeuedAs.get(issue.id),
       undefined,
       at?.resolveWaitMs,
@@ -1320,8 +1420,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         }
       }
       if (landOnly && mergeConflicted && greenHead !== undefined && baseTip !== undefined) {
-        // A resolution may touch only what git could not merge itself: a change to any other
-        // path can drop another ticket's landed lines with every gate green.
+        // A resolution may touch only what git could not merge itself: a change to another path
+        // the base had changed can drop another ticket's landed lines with every gate green.
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch], project.root), generated: project.generated });
         if (stray?.length) {
           const why = strayNote(stray);
@@ -1376,9 +1476,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       // base commits its merge brought in, which read as `commits=1 (review=14)`.
       const ownNow = () => ownCommits(base, branch, project.root);
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
-      const ungated: string[] = [];
+      // A land-only branch runs no review: what its reviewers said stands from its head record, as `unmet` does.
+      const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
       // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
-      const gaps: string[] = [];
+      const gaps: string[] = landOnly ? [readHeads(project.root)[issue.id]?.gap ?? ""].filter(Boolean) : [];
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -1403,6 +1504,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
           changelog: changelog.length ? [...new Set(changelog)] : undefined,
           changelogDropped: changelogDropped || undefined,
+          ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+          gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         };
       };
       if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
@@ -1754,9 +1857,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       const head = sh("git", ["rev-parse", branch], project.root);
-      const { unmet: unmetNote, changelog: changelogNote } = agentsSaid();
+      const { unmet: unmetNote, changelog: changelogNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined, ungated: ungatedNote, gap: gapNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {
@@ -1774,8 +1877,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         head,
         carried,
         unreviewed,
-        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
-        gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
+        ungated: ungatedNote,
+        gap: gapNote,
         changelog: changelogNote,
         changelogDropped: changelogDropped || undefined,
         unmet: unmetNote,
@@ -2084,6 +2187,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const waited = new Map<string, number>();
   const spent = new Map<string, Tokens>();
   const keptWorktrees: { issue: string; path: string }[] = [];
+  // Tracked files a gate rewrote, named once for the run however many worktrees it was gated in.
+  const gateRewrites = new Set<string>();
   // Each issue's step, and when it started, go to run.json's tickets: the
   // status view cannot tell a gate run from the review before it by the logs
   // alone, and a log's age is how long since its last line, not how long the
@@ -2221,7 +2326,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   }
   // A kept hook that cannot run fails on every tool call of every agent, or
   // silently guards nothing. Stop before any sandbox starts.
-  const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean));
+  const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean, hooksThatRanClean(project, image, planFile)));
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
@@ -2253,9 +2358,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Which gate is running, or that the run waits for a machine-wide slot, and
   // the output as it arrives - a gate run is minutes of nothing otherwise.
   // A landing's gate takes a freed gates slot before this run's ticket gates: the one landing worker sets the run's end.
-  const runGates = (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
-    markLog(gatesLog(project, id), runId);
-    return gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
+  const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false) => {
+    markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
+    const gated = await gatesIn(project, sandbox, gatesLabel(project, ref, id, what), false, {
       wait: () => {
         // The heartbeat says a wait as a wait; the gate time is counted from the first gate (below).
         const step = active.get(id) ?? landing.get(id);
@@ -2273,13 +2378,21 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       },
       log: gatesLog(project, id),
     }, priority);
+    for (const path of gated.rewrote ?? []) {
+      if (gateRewrites.has(path)) continue;
+      gateRewrites.add(path);
+      console.log(rewroteLine(path));
+      run.update({ gateRewrites: [...gateRewrites] });
+    }
+    return gated;
   };
 
-  // The run's waits for a sandbox slot. One held back by the run's share, not only by a full pool, is the run
-  // record's `waitsForShare`, which the status view's next-to-start rows say.
-  const slotWaits = createSlotWaits((held) => {
+  // The run's waits for a sandbox slot. One held back by the run's share or by the slot kept for landing, not only
+  // by a full pool, is the run record's `waitsFor` (and `waitsForShare`, for an older view), which the status
+  // view's next-to-start rows say.
+  const slotWaits = createSlotWaits((held, waitsFor) => {
     try {
-      run.update({ waitsForShare: held || undefined });
+      run.update({ waitsForShare: held || undefined, waitsFor });
     } catch {
       /* the record's note only: a throw here would end the wait it describes */
     }
@@ -2657,7 +2770,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // (`safety`: the shared .git changed) left in the record to file by hand, so the summary lists them either way.
   const stopLanding = async (error: unknown, safety: boolean): Promise<never> => {
     const why = String((error as Error).message ?? error);
-    run.update({ stopped: why, paused: undefined });
+    // A merge check that could not run before the stop is named in this summary too: the run's end never comes.
+    const mergeUnchecked = mergeCheckGap();
+    run.update({ stopped: why, paused: undefined, ...(mergeUnchecked && { mergeUnchecked }) });
     try {
       await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {
@@ -2748,7 +2863,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red verify on a tree a landing's own gates passed is red for its sandbox, not for the tickets meeting.
     if (verify.some((g) => !g.pass)) {
-      const same = landingOfTree(project.root, `refs/heads/${base}`, landed);
+      const same = landingOfTree(project.root, `refs/heads/${base}`, landed, project.tracker.kind === "files" ? project.tracker.dir : undefined);
       // A tree a landing sandbox gated was green in a clean sandbox already: no sandbox difference, a flaky test.
       if (same && landed.get(same)?.clean) verifyCleanTreeOf = ref(same);
       else if (same) verifyTreeOf = ref(same);
@@ -2762,7 +2877,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       console.log(`Full output: ${VERIFY_LOG}`);
     }
   }
-  run.update({ stage: "report" });
+  const mergeUnchecked = mergeCheckGap();
+  run.update({ stage: "report", ...(mergeUnchecked && { mergeUnchecked }) });
 
   // -------------------------------------------------------------------------
   // Report
@@ -2800,6 +2916,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   run.update({
     verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
+    ...(gateRewrites.size ? { gateRewrites: [...gateRewrites] } : {}),
     dryRunCheck,
   });
   console.log(`\n${await closingReport(project, turn && { level: turn.settings.autonomy, turn: turn.turn })}\n`);

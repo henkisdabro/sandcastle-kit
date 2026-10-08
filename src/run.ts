@@ -13,6 +13,7 @@ import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
 import { GROUPS, isOutcomeKind, type Outcome, type OutcomeEntry, type RunRecord, sessionId, type TicketRecord } from "../mod/hooks/run-record.ts";
@@ -433,18 +434,18 @@ export const relabelContextWindow = (log: string) => {
   }
 };
 
-// Local time with its offset, built by hand: toLocaleString varies by locale,
-// and git and the terminal show local time where the gate headers show UTC.
-export const localStamp = (d = new Date()) => {
-  const p = (n: number) => String(Math.abs(n)).padStart(2, "0");
-  const offset = -d.getTimezoneOffset();
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} ${offset < 0 ? "-" : "+"}${p(Math.trunc(offset / 60))}:${p(offset % 60)}`;
-};
+export { localStamp };
 
-/** Separates one run's output from the last in a log that accumulates across attempts and runs. */
-export const markLog = (file: string, runId: string) => {
+/**
+ * Separates one run's output from the last in a log that accumulates across attempts and runs. `what` names the
+ * kind of run ("landing gates on the merged tree"): a ticket's gates log holds several, and the header is
+ * all that tells a red landing from the ticket's own gates.
+ */
+export const markLog = (file: string, runId: string | undefined, what?: string) => {
   mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, `\n# run ${runId}, ${localStamp()}\n`);
+  // `sandcastle land` has no run: its section is headed by the kind alone.
+  const head = [what, runId === undefined ? undefined : `run ${runId}`].filter(Boolean).join(" - ");
+  appendFileSync(file, `\n# ${head}, ${localStamp()}\n`);
 };
 
 // Sandcastle warns about an argument its prompt never mentions, so each run
@@ -1093,6 +1094,20 @@ export const mergedByHand = (root: string, base: string, id: string): boolean =>
   }
 };
 
+/**
+ * A ticket merged by hand (`mergedByHand`) whose merge the kit worded "part of" it (`sandcastle land` with a
+ * criterion unmet): the push does not close it, so it stays open. Only the subject says so, branch or no branch.
+ * The newest of the ticket's merges decides: an earlier run's "part of" landing is followed by a merge that closes it.
+ */
+export const mergedPartly = (root: string, base: string, id: string): boolean => {
+  const partly = `Merge agent/issue-${id} (part of ${refOf(id)})`;
+  try {
+    return execFileSync("git", ["log", base, "-1", "--format=%B", "--fixed-strings", `--grep=Merge agent/issue-${id} (closes ${refOf(id)})`, `--grep=${partly}`], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).includes(partly);
+  } catch {
+    return false;
+  }
+};
+
 export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");
   const all = readOutcomes(project.root);
@@ -1124,6 +1139,10 @@ export type BranchHead = {
   changelog?: string[];
   /** How many `<changelog>` tags by `green` were no changelog line and were left out, carried like `changelog`. */
   changelogDropped?: number;
+  /** What a reviewer said no gate exercises, by `green` (its `<ungated>` line): a later land-only run reads no reviewer, so without it the "check by hand" note would not reach the closing summary. */
+  ungated?: string;
+  /** What a reviewer said of a gap in prose and filed nowhere, carried like `ungated`. */
+  gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
   /** run.json's startedAt of the run that wrote the record last. */
@@ -1142,7 +1161,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

@@ -24,7 +24,7 @@ import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import { mergeTree, mergeTreeSupported } from "./resolution.ts";
+import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
@@ -168,11 +168,22 @@ const treeOf = (root: string, c: string) => sh("git", ["rev-parse", `${c}^{tree}
  * The ticket whose landing left `tip`'s exact tree (the last such landing), or undefined. A landing's tree is
  * the one its gates passed (`landingMade` checks it), so a red verify on that tree is red because of the sandbox
  * it ran in, not because tickets met: the closing summary says so instead of "together".
+ *
+ * With the files tracker the close of a ticket (and a follow-up filed mid-run) is a commit of a ticket file after
+ * the landing, so the tip never has the landing's exact tree: `ticketDir` names the directory whose changes
+ * do not count, which no gate reads. Without it (GitHub) only an exact tree matches.
  */
-export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>): string | undefined => {
+export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>, ticketDir?: string): string | undefined => {
   try {
     const want = treeOf(root, tip);
-    return [...landed].filter(([, r]) => treeOf(root, r.commit) === want).map(([id]) => id).pop();
+    const prefix = ticketDir ? `${ticketDir.replace(/^(\.\/)+/, "").replace(/\/+$/, "")}/` : undefined;
+    const same = (commit: string) => {
+      if (treeOf(root, commit) === want) return true;
+      if (!prefix || prefix === "/") return false;
+      const changed = sh("git", ["diff", "--no-renames", "--name-only", "-z", commit, tip], root).split("\0").filter(Boolean);
+      return changed.every((f) => f.startsWith(prefix));
+    };
+    return [...landed].filter(([, r]) => same(r.commit)).map(([id]) => id).pop();
   } catch {
     return undefined;
   }
@@ -519,7 +530,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     let conflicted: string[] = [];
     try {
       if (mergeTreeSupported(root, ctx.gitVersion)) conflicted = [...mergeTree(root, before, o.head!).conflicted];
-    } catch {
+    } catch (error) {
+      // Objects a partial clone lacks: said once, and the sandbox's own merge decides, as for any check that cannot run.
+      noteMissingObjects(root, error);
       conflicted = [];
     }
     if (conflicted.length && !regensFor(conflicted, project.generated)) {
@@ -636,8 +649,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // branch holding a commit the base lacks, where a squash's `-D` is the only delete that works.
   try {
     await host.write(() => sh("git", ["branch", squash ? "-D" : "-d", o.branch], root));
-  } catch {
-    console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`);
+  } catch (error) {
+    // Git's own words: a kept worktree holding the branch is one cause, not the only one.
+    console.log(`${o.branch}: ${squash ? "squashed" : "merged"} into ${base}, but the branch could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`);
   }
   // The merge stands whatever the tracker says next: a failed close is a
   // merged ticket still open, not one that failed to land - calling it "not

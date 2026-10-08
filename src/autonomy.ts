@@ -32,12 +32,24 @@ export const autonomyLevel = (env: string | undefined, config: unknown): Level =
 export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[] };
 
 /**
- * Whether an `<unmet>` line says the remainder is a person's to decide ("is the maintainer's decision"):
- * another run would spend an agent on a question for a person, so the ticket is not re-runnable.
- * Read from the agent's own words, so it errs towards a person looking: a false hit costs one
- * manual `sandcastle run`, a miss costs an agent run that comes back with the same question.
+ * What `unmetOf` (src/burndown.ts) puts in front of an `<unmet who="person">` line: the agent's explicit
+ * word that the remainder needs a person, which survives into the run record's `unmet` for the report and
+ * the status view to read. It reads naturally where the note is printed, and holds the word "person".
  */
-export const needsDecision = (unmet: string): boolean => /\b(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off)\b/i.test(unmet);
+export const PERSON_MARK = "needs a person: ";
+
+/**
+ * Whether an `<unmet>` line says the remainder is a person's to do or decide ("is the maintainer's decision",
+ * "needs a deploy", "access I don't have", a file "agents may not edit"): another run would spend an agent on
+ * work only a person can do, so the ticket is not re-runnable. The agent's explicit marker (`PERSON_MARK`)
+ * counts first; the words are the fallback for a note written without it. Read from the agent's own words, so it
+ * errs towards a person looking: a false hit costs one manual `sandcastle run`, a miss costs an agent run
+ * that comes back with the same question. `status.sh` greps the same alternation (`test/needs-person.test.ts`
+ * holds the two together), so a change here changes it too.
+ */
+export const needsDecision = (unmet: string): boolean =>
+  unmet.includes(PERSON_MARK) ||
+  /\b(decisions?|decides?|decided|maintainers?|humans?|person|people|up to (you|them)|sign[- ]?off|not allowed|access I (don['’]t|do not) have|can(not|['’]t)[^.;]*from (here|this sandbox)|needs? (a |an |the )?(deploy[a-z]*|production|dashboard|login|pushed (PR|pull request))|agents? may not (edit|touch|change|modify))\b/i.test(unmet);
 
 /**
  * The exit code a run's last turn earns on its own: 1 when the merged base was re-gated and is red, whatever the
@@ -59,14 +71,14 @@ export const noRerunCause = (facts: Facts): string | undefined => {
 
 /**
  * What happens to the remainder of a partly-done ticket, as the tracker comment and the report say it:
- * the next run picks it up, unless the agent's own `<unmet>` line says it is a person's decision.
+ * the next run picks it up, unless the agent's own `<unmet>` line says it needs a person.
  */
 export const remainderNote = (unmet: string, run = "run"): string =>
   needsDecision(unmet)
-    ? "The agent's note says the remainder needs a person's decision: decide it and close the ticket, or move it to the hold label so a run does not spend an agent on it."
+    ? "The agent's note says the remainder needs a person: do or decide it and close the ticket, or move it to the hold label so a run does not spend an agent on it."
     : `The next ${run} picks up the remainder.`;
 
-/** Merged partly done, still in the queue, and the remainder is not a person's to decide: the next run takes it. */
+/** Merged partly done, still in the queue, and the remainder is not a person's to do or decide: the next run takes it. */
 export const partialRerunnable = (facts: Facts): string[] =>
   (facts.partial ?? []).filter((id) => facts.tickets[id]?.state === "merged" && !!facts.tickets[id].unmet && !needsDecision(facts.tickets[id].unmet!));
 

@@ -117,7 +117,8 @@ end-of-run notification and the Claude Code mod's idle mark switch go in an opti
 
 Run `sandcastle doctor` until it reports no `FIX` lines. `sandcastle doctor --verify` also asks
 GitHub and Anthropic whether the tokens are accepted (it prints a fingerprint of each, never the value),
-and, inside a GitHub project, whether `GH_TOKEN` can push there - it should not.
+and, inside a GitHub project, whether `GH_TOKEN` can see the repository (a fine-grained token whose
+Repository access leaves it out gets a `FIX`) and whether it can push there - it should not.
 
 ## 📏 Sizing the machine pool
 

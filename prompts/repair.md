@@ -14,7 +14,7 @@ without your change, `git diff > /tmp/p && git checkout -- <files>`, run it, the
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
-`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell.
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command.
 
 # The ticket
 
@@ -58,6 +58,9 @@ see the whole set, and fix all of them.
   line). The orchestrator files each as a new ticket for triage, naming this ticket, so do not file it
   yourself.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
+  Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 {{KIT_PROJECT_RULES}}
 
