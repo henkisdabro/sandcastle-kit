@@ -7,6 +7,9 @@
 #   sandcastle status 0             print once and exit, every row
 #   sandcastle status 10 all        refresh, every row even past the pane
 #
+# With no terminal on stdout (a pipe, an agent's tool) any interval prints once and
+# exits, as 0 does: a refreshing view there only ends when it is killed.
+#
 # The CLI sets SANDCASTLE_PROJECT, SANDCASTLE_NAME and SANDCASTLE_BASE from
 # the project's .sandcastle/config.ts.
 #
@@ -30,6 +33,9 @@ case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
 esac
 
 INTERVAL="${1:-10}"
+# Nobody watches a refreshing view whose output is not a terminal, and a pipe or an agent's
+# tool would wait on it until killed. STATUS_FRAMES keeps the loop for the tests that drive it.
+if [ ! -t 1 ] && [ -z "${STATUS_FRAMES:-}" ]; then INTERVAL=0; fi
 # A live frame taller than its pane scrolls its own top - the header and the
 # working rows - out of sight. So the refreshing view fits the pane unless
 # asked for "all"; a one-off snapshot (0) prints everything.
