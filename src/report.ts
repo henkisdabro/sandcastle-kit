@@ -16,11 +16,11 @@ import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
-import { LANDING_GATES } from "./gates.ts";
+import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
@@ -68,7 +68,11 @@ export type Facts = {
   upstream?: string;
   /** Agent branches with work not on the base branch. */
   standing: string[];
+  /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
+  earlierHeld?: Record<string, string>;
   keptWorktrees: { issue: string; path: string }[];
+  /** Tracked files a gate rewrote and the kit put back. */
+  gateRewrites?: string[];
   dryRunCheck?: string;
   /** Why the run stopped before landing, if it did. */
   stopped?: string;
@@ -80,6 +84,8 @@ export type Facts = {
   mergedByHand?: string[];
   /** The part of `mergedByHand` whose ticket is already closed (the hand merge was pushed): nothing is left to close on push. */
   mergedByHandClosed?: string[];
+  /** The part of `mergedByHand` merged as "part of" its ticket (a criterion left unmet): still open after the push, by design. */
+  mergedByHandPartly?: string[];
   /** Held tickets whose branch is gone (`sandcastle clean`) with no merge of it on the base: nothing to review, and no merge command that would work. */
   branchGone?: string[];
   /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
@@ -93,6 +99,8 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
   /** Tests found red on the base mid-run (the run record's `baseRed`): no branch was repaired for them. */
   baseRed?: string[];
+  /** The run record's `mergeUnchecked`: a host merge check that could not run for objects a partial clone lacks. */
+  mergeUnchecked?: string;
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
   /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
@@ -312,6 +320,10 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
       byHandClosed = [];
     }
   }
+  // A "part of" merge never closes its ticket, so "closes on push" would be wrong for it. The criterion it left
+  // undone is in the run record, or else in the head record the hand merge was judged on.
+  const byHandPartly = byHand.filter((id) => !byHandClosed.includes(id) && mergedPartly(root, base, id));
+  for (const id of byHandPartly) tickets[id].unmet ||= readHeads(root)[id]?.unmet;
 
   // Issues opened during the run: open, carrying the triage label, created between its start
   // and its end. Agents file with the person's own token, so the author cannot say who opened
@@ -342,6 +354,14 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     Object.entries(readOutcomes(root)).flatMap(([id, o]) => (o.run === run.startedAt && o.kind ? [[id, o.kind]] : [])),
   );
 
+  // Said beside the branch: the reader of this summary would otherwise have to remember the earlier run, or read outcomes.json.
+  const earlierHeld = Object.fromEntries(
+    standing.flatMap((b) => {
+      const o = recorded[b.replace(/^agent\/issue-/, "")];
+      return o?.kind === "held" && o.run !== run.startedAt ? [[b, o.text ?? ""]] : [];
+    }),
+  );
+
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
@@ -369,13 +389,16 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     ahead: Number.isNaN(ahead) ? undefined : ahead,
     upstream,
     standing,
+    earlierHeld,
     keptWorktrees: run.keptWorktrees ?? [],
+    gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     stoppedBy: run.stoppedBy,
     changed,
     mergedByHand: byHand,
     mergedByHandClosed: byHandClosed,
+    mergedByHandPartly: byHandPartly,
     branchGone,
     // The kit's own filings are listed as follow-ups, with their source: not again as issues someone opened.
     filed: filed.filter((i) => !followUps.some((u) => u.id === i.id)),
@@ -384,6 +407,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     exitCode: run.exitCode,
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
+    mergeUnchecked: typeof run.mergeUnchecked === "string" ? run.mergeUnchecked : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
     usage: readPlanUsages(run.usage).find((u) => u.provider === "claude"),
     codexUsage: readPlanUsages(run.usage).find((u) => u.provider === "codex"),
@@ -499,7 +523,7 @@ export const render = (f: Facts, plain = false): string => {
   const partly = merged.filter((id) => f.tickets[id].unmet);
   const closed = merged.filter((id) => !notClosed.includes(id) && !partly.includes(id));
   // What the next run does with each remainder, as the autonomy loop reads it (`partialRerunnable`): an agent
-  // runs it again while the ticket is queued, unless its own note says the remainder is a person's decision.
+  // runs it again while the ticket is queued, unless its own note says the remainder needs a person.
   const partlyRerun = partialRerunnable(f);
   const partlyDecide = partly.filter((id) => needsDecision(f.tickets[id].unmet!));
   // Still open but out of the queue (a person held or unlabelled it): no run takes it. Unknown when the queue was unreadable.
@@ -620,6 +644,8 @@ export const render = (f: Facts, plain = false): string => {
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
   out.push(...settingsLines(f, plain));
+  // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
+  if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
@@ -648,9 +674,15 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
   for (const id of merged.filter((id) => overrunNoted(f.tickets[id].overrun))) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
-  const byHandOpen = byHand.filter((id) => !f.mergedByHandClosed?.includes(id));
   const byHandShut = byHand.filter((id) => f.mergedByHandClosed?.includes(id));
+  const byHandPart = byHand.filter((id) => !byHandShut.includes(id) && f.mergedByHandPartly?.includes(id));
+  const byHandOpen = byHand.filter((id) => !byHandShut.includes(id) && !byHandPart.includes(id));
   if (byHandOpen.length) done.push(`${byHandOpen.length} held, merged by hand; closes on push: ${list(byHandOpen)}`);
+  // A "part of" merge never closes its ticket: the criterion it left undone is for the next run, or a person.
+  if (byHandPart.length) {
+    done.push(`${byHandPart.length} held, merged by hand, partly done: stays open: ${list(byHandPart)}`);
+    for (const id of byHandPart) if (f.tickets[id].unmet) done.push(`${name(id)} - criterion unmet: ${f.tickets[id].unmet}`);
+  }
   if (byHandShut.length) done.push(`${byHandShut.length} held, merged by hand, and closed: ${list(byHandShut)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
@@ -697,7 +729,7 @@ export const render = (f: Facts, plain = false): string => {
         const note = f.tickets[id].unmet ?? "";
         const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
         const then = partlyDecide.includes(id)
-          ? `the remainder needs a person's decision (the agent's note), so a run would only ask it again: decide it and close the ticket, or move it to the hold label${holdLabel}`
+          ? `the remainder needs a person (the agent's note), so a run would only ask it again: do or decide it and close the ticket, or move it to the hold label${holdLabel}`
           : partlyAway.includes(id)
             ? "the ticket is still open but no longer in the queue, so no run takes it"
             : "and the next `sandcastle run` picks up the remainder";
@@ -794,13 +826,18 @@ export const render = (f: Facts, plain = false): string => {
   ] : []);
 
   // Local state
+  const earlier = f.earlierHeld ?? {};
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
       : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
     "Nothing is pushed by Sandcastle. Push by this repo's own rules (for example `git push`, or a pull request).",
-    `Agent branches with unmerged work: ${f.standing.length ? f.standing.join(", ") : "none"}`,
-    ...f.keptWorktrees.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    `Agent branches with unmerged work: ${f.standing.length ? f.standing.map((b) => (b in earlier ? `${b} (held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""})` : b)).join(", ") : "none"}`,
+    // By path: a requeued ticket's second pipeline keeps the same worktree, and one line per path is the fact.
+    ...f.keptWorktrees
+      .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i)
+      .map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    ...(f.gateRewrites ?? []).map(rewroteLine),
   ]);
 
   // Next step: the first thing that unblocks the most, then the rest in order.
@@ -852,7 +889,7 @@ export const render = (f: Facts, plain = false): string => {
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
   if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
-  if (partlyDecide.length) next.push(`Decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is settled, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
+  if (partlyDecide.length) next.push(`Do or decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   if (gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
@@ -876,6 +913,13 @@ export const render = (f: Facts, plain = false): string => {
   // A red base is red for whoever pulls it too.
   const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
   if (push) next.push(push);
+  // `sandcastle land` refuses a branch held for a protected path or a large file, and plain `clean` keeps an unmerged branch: the person merges it or deletes it.
+  const heldEarlier = f.standing.filter((b) => b in earlier);
+  if (heldEarlier.length) {
+    const one = heldEarlier.length === 1;
+    const b = one ? heldEarlier[0] : "<branch>";
+    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with \`git merge --no-ff ${b}\`, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
+  }
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
   const steps = f.next

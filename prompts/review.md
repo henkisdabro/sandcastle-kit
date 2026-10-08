@@ -66,7 +66,9 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 **Fix it yourself and commit**, in the same style as the existing commits. You are not writing a
 report for a human - your commits are the deliverable, and they will be gated alongside the
-implementer's.
+implementer's. Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 Constraints:
 
@@ -137,6 +139,10 @@ a line of its own, whether or not you committed:
 with your sentence in place of the dots. The branch still merges if its gates are green, but the
 ticket stays open with that criterion named, and the next run picks up the remainder. Give the real
 reason, and leave the line out when every criterion is met: a criterion you fixed is met.
+
+If what is left needs a person and no agent can do it (access you do not have, a deploy, a file agents may
+not edit, a decision), write the line as `<unmet who="person">...</unmet>` instead: a plain `<unmet>` line is
+picked up again by the next run, which would spend an agent on work only a person can do.
 
 If you committed a fix, make sure the gates it touches pass and everything is committed, then output
 `<promise>COMPLETE</promise>`.

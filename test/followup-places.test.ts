@@ -99,9 +99,9 @@ test("another line of the same file is another finding", async () => {
 test("a host:port or a word:number is not a place", async () => {
   const { made, comments, tracker } = recording();
   const { book: b } = book(tracker);
-  // Titles that overlap, and every path a file: only the match itself keeps these apart.
+  // Titles that share two words (not the three that merge path-less findings), and every path a file: only the match itself keeps these apart.
   b.push(named("Server port hard-coded", "serves on http://example.com:8080 only", "7", "implement"));
-  b.push(named("Hard-coded server port again", "serves on http://example.com:8080 only; see also step:3", "7", "review"));
+  b.push(named("Port hard-wired in the listener", "serves on http://example.com:8080 only; see also step:3", "7", "review"));
   await b.file();
   assert.equal(made.length, 2);
   assert.deepEqual(comments, []);

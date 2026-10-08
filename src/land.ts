@@ -4,8 +4,8 @@
 // committed with the landing message, and the host's base branch is fast-forwarded to it.
 
 import { createSandbox } from "@ai-hero/sandcastle";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
@@ -15,8 +15,8 @@ import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
-import { mergeTreeSupported, withObjectsOnly } from "./resolution.ts";
-import { gatesLog, readHeads } from "./run.ts";
+import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
+import { gatesLog, markLog, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, ownCommits, sandboxConfig, sh } from "./sandbox.ts";
 import type { Tracker } from "./tracker.ts";
 import { execGate, lockWorktree, unlockWorktree } from "./worktree-lock.ts";
@@ -81,14 +81,18 @@ export const plainMergeNote = (root: string, c: string, b: string, h: string): s
     mergeTreeNoticed = true;
     return undefined;
   }
-  let tree: string;
+  let merge: ReturnType<typeof mergeTree>;
   try {
-    // In a throwaway git directory, as every host merge-tree: a merge driver the sandbox left in the shared `.git` must not run.
-    tree = withObjectsOnly(root, [b, h], (git, [bi, hi]) => git(["merge-tree", "--write-tree", bi, hi]), b).split("\n")[0];
-  } catch {
-    return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
+    // The shared runner: in a throwaway git directory, so a merge driver the sandbox left in the shared `.git` does not run.
+    merge = mergeTree(root, b, h);
+  } catch (error) {
+    // A partial clone's missing objects are no conflict: said once, and the path check alone stands.
+    if (noteMissingObjects(root, error)) return undefined;
+    // A git call that failed is no verdict on the merge, but nothing vouches for the commit either: held, and said so.
+    return `the host's own merge of base and the gated head could not be run (${errorLine(error)})`;
   }
-  return sh("git", ["rev-parse", `${c}^{tree}`], root) === tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
+  if (merge.conflicted.size) return "the host's own merge of base and the gated head conflicts, but the sandbox's did not";
+  return sh("git", ["rev-parse", `${c}^{tree}`], root) === merge.tree ? undefined : "landing merge does not hold the tree the host's own merge makes";
 };
 
 /** A squash landing's commit body: the branch's own subjects, without the kit's merges of the base into it. */
@@ -198,6 +202,11 @@ export const landInSandbox = async (
           return sh("git", ["commit-tree", `${commit}^{tree}`, "-p", baseTip, ...message], project.root, AGENT_COMMITTER);
         })()
       : commit;
+    // The check above is followed by host git calls, and other tickets' sandboxes keep writing the shared .git
+    // meanwhile: a `filter.<x>.smudge` and an `info/attributes` line planted since would run when the fast-forward
+    // writes the files out, and the config pin only holds the filters that existed at the run's start. The calls
+    // above are synchronous, so nothing of this run interleaves; this check is the last thing before the write.
+    assertGitUnchanged(project, before, `before fast-forwarding ${t.branch}`);
     sh("git", ["merge", "--ff-only", landed], project.root);
     if (expected) {
       // Only what this fast-forward made: a base that names anything else is not ours to adopt.
@@ -289,7 +298,8 @@ export const landTicket = async (
   const { open } = await prepare();
   const head = sh("git", ["rev-parse", branch], project.root);
   const log = gatesLog(project, id);
-  mkdirSync(dirname(log), { recursive: true });
+  // The section a hand landing's gates are: without it they read as part of the last run's.
+  markLog(log, undefined, "sandcastle land gates on the merged tree");
   const unmet = recordedUnmet(project, id, branch, head);
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
     landInSandbox(project, { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" }, open, (box) =>
@@ -307,8 +317,8 @@ export const landTicket = async (
       let kept = "";
       try {
         sh("git", ["branch", squash ? "-D" : "-d", branch], project.root);
-      } catch {
-        kept = ` ${branch} could not be deleted (a kept worktree holds it?) - \`sandcastle clean --all\` removes it.`;
+      } catch (error) {
+        kept = ` ${branch} could not be deleted (${errorLine(error)}) - \`sandcastle clean --all\` removes it.`;
       }
       const merged =
         `${squash ? "Squashed" : "Merged"} locally, not yet pushed, by \`sandcastle land\` from \`${branch}\` (${commits} commit(s)); ` +

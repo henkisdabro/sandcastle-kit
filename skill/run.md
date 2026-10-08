@@ -168,7 +168,7 @@ This continues SKILL.md: run its "Before every action" first.
       Each ticket listed `merged - check by hand`: what the reviewer said to check, and offer to
       check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
-      next run picks up the remainder - unless the line says the remainder is a person's decision,
+      next run picks up the remainder - unless the line says the remainder needs a person (a decision, a deploy, access),
       when the summary suggests moving the ticket to the hold label instead). Each ticket listed `the reviewer named a gap it did not file`: a sentence the reviewer left in prose, with no
       `<followup>` or `<unmet>` line, so nothing was filed - file it as a ticket (offer to), or say it needs nothing. A follow-up the summary says to file by hand is one the kit
       could not file, after a stop or a failed filing: file it, or offer to. The rest are under a `### To triage`
@@ -226,7 +226,8 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   the ticket `ready-for-human` during the run. `held` with "no commits" is a ticket an agent
   handed back: it needs an answer, not a merge. A held branch a person has since merged by hand
   reads "merged by hand; closes on push" under Done: nothing is left for them but the push (once the
-  ticket is closed it reads "merged by hand, and closed"). That holds after `sandcastle clean` has
+  ticket is closed it reads "merged by hand, and closed"). A merge worded "part of" the ticket reads
+  "merged by hand, partly done: stays open", with its unmet criterion: the push does not close it. That holds after `sandcastle clean` has
   deleted the branch, if the merge's own subject (`Merge agent/issue-<n> (closes|part of ...)`) is on
   the base; a held branch that is gone with no such subject is listed with no merge command.
 - **`withdrawn`** tickets were closed or unqueued during the run: someone's decision, nothing to
