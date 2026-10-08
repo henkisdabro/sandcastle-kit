@@ -16,7 +16,7 @@ import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
-import { addTokens, HANDED_BACK, mergedByHand, NO_TOKENS, readOutcomes, type Tokens, tokenLine } from "./run.ts";
+import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
@@ -82,6 +82,8 @@ export type Facts = {
   mergedByHand?: string[];
   /** The part of `mergedByHand` whose ticket is already closed (the hand merge was pushed): nothing is left to close on push. */
   mergedByHandClosed?: string[];
+  /** The part of `mergedByHand` merged as "part of" its ticket (a criterion left unmet): still open after the push, by design. */
+  mergedByHandPartly?: string[];
   /** Held tickets whose branch is gone (`sandcastle clean`) with no merge of it on the base: nothing to review, and no merge command that would work. */
   branchGone?: string[];
   /** Issues opened during the run (by anyone: agents share the person's `gh` token), carrying the triage label and still open (GitHub only). */
@@ -316,6 +318,10 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
       byHandClosed = [];
     }
   }
+  // A "part of" merge never closes its ticket, so "closes on push" would be wrong for it. The criterion it left
+  // undone is in the run record, or else in the head record the hand merge was judged on.
+  const byHandPartly = byHand.filter((id) => !byHandClosed.includes(id) && mergedPartly(root, base, id));
+  for (const id of byHandPartly) tickets[id].unmet ||= readHeads(root)[id]?.unmet;
 
   // Issues opened during the run: open, carrying the triage label, created between its start
   // and its end. Agents file with the person's own token, so the author cannot say who opened
@@ -389,6 +395,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     changed,
     mergedByHand: byHand,
     mergedByHandClosed: byHandClosed,
+    mergedByHandPartly: byHandPartly,
     branchGone,
     // The kit's own filings are listed as follow-ups, with their source: not again as issues someone opened.
     filed: filed.filter((i) => !followUps.some((u) => u.id === i.id)),
@@ -664,9 +671,15 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A warning on a ticket that landed: the line is agent-written, so nothing was held for it.
   for (const id of merged.filter((id) => overrunNoted(f.tickets[id].overrun))) done.push(`${name(id)} - beyond Touches: ${overrunPaths(f.tickets[id].overrun!)}`);
-  const byHandOpen = byHand.filter((id) => !f.mergedByHandClosed?.includes(id));
   const byHandShut = byHand.filter((id) => f.mergedByHandClosed?.includes(id));
+  const byHandPart = byHand.filter((id) => !byHandShut.includes(id) && f.mergedByHandPartly?.includes(id));
+  const byHandOpen = byHand.filter((id) => !byHandShut.includes(id) && !byHandPart.includes(id));
   if (byHandOpen.length) done.push(`${byHandOpen.length} held, merged by hand; closes on push: ${list(byHandOpen)}`);
+  // A "part of" merge never closes its ticket: the criterion it left undone is for the next run, or a person.
+  if (byHandPart.length) {
+    done.push(`${byHandPart.length} held, merged by hand, partly done: stays open: ${list(byHandPart)}`);
+    for (const id of byHandPart) if (f.tickets[id].unmet) done.push(`${name(id)} - criterion unmet: ${f.tickets[id].unmet}`);
+  }
   if (byHandShut.length) done.push(`${byHandShut.length} held, merged by hand, and closed: ${list(byHandShut)}`);
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.

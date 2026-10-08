@@ -226,7 +226,8 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   the ticket `ready-for-human` during the run. `held` with "no commits" is a ticket an agent
   handed back: it needs an answer, not a merge. A held branch a person has since merged by hand
   reads "merged by hand; closes on push" under Done: nothing is left for them but the push (once the
-  ticket is closed it reads "merged by hand, and closed"). That holds after `sandcastle clean` has
+  ticket is closed it reads "merged by hand, and closed"). A merge worded "part of" the ticket reads
+  "merged by hand, partly done: stays open", with its unmet criterion: the push does not close it. That holds after `sandcastle clean` has
   deleted the branch, if the merge's own subject (`Merge agent/issue-<n> (closes|part of ...)`) is on
   the base; a held branch that is gone with no such subject is listed with no merge command.
 - **`withdrawn`** tickets were closed or unqueued during the run: someone's decision, nothing to
