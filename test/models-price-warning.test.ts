@@ -25,6 +25,7 @@ for (const [where, text] of [
 ] as const) {
   test(`${where} warns about Haiku 5.5's long-prompt price`, () => {
     assert.match(text, /Haiku 5\.5/);
+    assert.match(text, /through an API key/);
     assert.match(text, /100K tokens/);
     assert.match(text, /five times/);
     assert.match(text, /`medium` or below/);
