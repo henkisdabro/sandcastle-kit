@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -20,35 +20,33 @@ const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 // 10: closed as not planned, 11: open and held, 12: open and not queued, 13: closed as completed.
-// 21-25 are the blocked tickets. Every call is logged as its arguments on one line; the open list
-// is the file beside the fake (written per test), and a ticket `issue view` reads is open and queued.
+// 21-25 are the blocked tickets. Every call is logged as its arguments on one line. Every read
+// answers from the same made-up issues (`setIssues`): the open list is the open ones, and
+// `issue view` and `api` read one file per issue, so the per-ticket reads a slower `gather` makes
+// report the very same facts and only the call log tells them apart.
 const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
 const log = join(bin, "calls");
-const listFile = join(bin, "open.json");
+const data = join(bin, "issues");
+mkdirSync(data);
 writeFileSync(
   join(bin, "gh"),
   `#!/bin/sh
 echo "$*" >> "${log}"
 case "$1" in
   api)
-    case "$2" in
-      */issues/10) echo "closed not_planned" ;;
-      */issues/13) echo "closed completed" ;;
-      *) exit 1 ;;
-    esac ;;
+    n=\${2##*/}
+    [ -f "${data}/$n.state" ] || exit 1
+    cat "${data}/$n.state" ;;
   issue)
     case "$2" in
       list)
         case "$*" in
           *--label*) echo '[]' ;;
-          *) cat "${listFile}" ;;
+          *) cat "${data}/open.json" ;;
         esac ;;
       view)
-        body=""
-        case "$3" in
-          21) body="Blocked by #11" ;;
-        esac
-        echo "{\\"number\\":$3,\\"title\\":\\"t\\",\\"state\\":\\"OPEN\\",\\"body\\":\\"$body\\",\\"comments\\":[],\\"labels\\":[{\\"name\\":\\"ready-for-agent\\"}]}" ;;
+        [ -f "${data}/$3.json" ] || exit 1
+        cat "${data}/$3.json" ;;
       *) exit 1 ;;
     esac ;;
   *) exit 1 ;;
@@ -58,25 +56,37 @@ esac
 chmodSync(join(bin, "gh"), 0o755);
 process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 
+type Issue = { number: number; labels: string[]; body?: string; state?: "open" | "closed completed" | "closed not_planned"; listed?: boolean };
+const setIssues = (issues: Issue[], filler = 0) => {
+  rmSync(data, { recursive: true, force: true });
+  mkdirSync(data);
+  const json = (i: Issue) => ({ number: i.number, title: `t${i.number}`, body: i.body ?? "", labels: i.labels.map((name) => ({ name })) });
+  for (const i of issues) {
+    writeFileSync(join(data, `${i.number}.json`), JSON.stringify({ ...json(i), state: (i.state ?? "open") === "open" ? "OPEN" : "CLOSED", comments: [] }));
+    writeFileSync(join(data, `${i.number}.state`), `${i.state ?? "open"}${(i.state ?? "open") === "open" ? " " : ""}\n`);
+  }
+  const listed = issues.filter((i) => (i.state ?? "open") === "open" && i.listed !== false).map((i) => ({ ...json(i), updatedAt: "2026-01-01T00:00:00Z" }));
+  const rest = Array.from({ length: filler }, (_, k) => ({ ...json({ number: 1000 + k, labels: [] }), updatedAt: "2026-01-01T00:00:00Z" }));
+  writeFileSync(join(data, "open.json"), JSON.stringify([...listed, ...rest]));
+};
+const blockers: Issue[] = [
+  { number: 10, labels: [], state: "closed not_planned" },
+  { number: 11, labels: ["ready-for-human"] },
+  { number: 12, labels: [] },
+  { number: 13, labels: [], state: "closed completed" },
+];
+
 const root = mkdtempSync(join(tmpdir(), "sandcastle-report-reads-"));
 execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
 const project = { name: "demo", root, baseBranch: "main", label: "ready-for-agent", gates: [], tracker: fakeTracker() } as unknown as Project;
 
-const issue = (number: number, labels: string[], body = "") => ({ number, title: `t${number}`, body, labels: labels.map((name) => ({ name })), updatedAt: "2026-01-01T00:00:00Z" });
 const callsOf = () => readFileSync(log, "utf8").split("\n").filter(Boolean);
 const record = (ids: string[]) =>
   recordRun(project, { issues: ids, tickets: Object.fromEntries(ids.map((id) => [id, { state: "blocked", title: `t${id}` }])) });
 
 test("five blocked tickets on four blockers cost one list and one read for each closed blocker", async () => {
   const blockedBodies: Record<number, string> = { 21: "Blocked by #10", 22: "Blocked by #11", 23: "Blocked by #12", 24: "Blocked by #13", 25: "Blocked by #10, #11" };
-  writeFileSync(
-    listFile,
-    JSON.stringify([
-      issue(11, ["ready-for-human"]),
-      issue(12, []),
-      ...Object.entries(blockedBodies).map(([n, body]) => issue(Number(n), ["ready-for-agent"], body)),
-    ]),
-  );
+  setIssues([...blockers, ...Object.entries(blockedBodies).map(([n, body]) => ({ number: Number(n), labels: ["ready-for-agent"], body }))]);
   writeFileSync(log, "");
   record(Object.keys(blockedBodies));
 
@@ -98,8 +108,8 @@ test("five blocked tickets on four blockers cost one list and one read for each 
 });
 
 test("a blocked ticket past a full open list is still read on its own and reported correctly", async () => {
-  // 500 entries (gh's limit), none of them the blocked ticket 21; #11 is among them, held.
-  writeFileSync(listFile, JSON.stringify([issue(11, ["ready-for-human"]), ...Array.from({ length: 499 }, (_, i) => issue(1000 + i, []))]));
+  // 500 entries (gh's limit), none of them the blocked ticket 21, open past the list; #11 is among them, held.
+  setIssues([...blockers, { number: 21, labels: ["ready-for-agent"], body: "Blocked by #11", listed: false }], 498);
   writeFileSync(log, "");
   record(["21"]);
 
