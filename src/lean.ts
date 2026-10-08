@@ -155,7 +155,8 @@ export const plan = (project: Project): Plan => {
     if (!kept) hide.push(".codex/config.toml");
   }
 
-  // Settings stay - permissions and env are harmless - minus what loads things.
+  // Settings stay - permissions and env are the project's own - minus what loads things. An ask rule
+  // among them is refused in a sandbox, where nobody can answer: the report names those (askRuleLines).
   const settingsPath = ".claude/settings.json";
   const settings = tracked(root, settingsPath).length ? readJson(join(root, settingsPath)) : undefined;
   if (settings) {
