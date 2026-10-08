@@ -404,16 +404,28 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 const GAP_NEGATED =
   /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
 // A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
-// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" is no fix.
-const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" and "I have not yet fixed it" are no fix.
+const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+(?:(?:yet|fully|really|actually|properly)\s+)?)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
 const isGap = (sentence: string): boolean => {
   if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
   const fixed = GAP_FIXED.exec(sentence);
   return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
 };
-// A line that is a heading, not a sentence: a Markdown heading, or a line of nothing but bold text
-// ("**Checked and left as is**"). It would otherwise join the paragraph under it and be quoted with it.
-const HEADING_LINE = /^(?:#{1,6}\s|(?:[-*+•]\s+)?(?:\*\*[^*]+\*\*|__[^_]+__):?$)/;
+// A line that is a heading, not a sentence: a Markdown heading, or a short bold label ("**Checked and left as
+// is**"). It would otherwise join the paragraph under it and be quoted with it.
+const MD_HEADING = /^#{1,6}\s/;
+const BOLD_LINE = /^((?:[-*+•]\s+)?)(?:\*\*([^*]+)\*\*|__([^_]+)__):?$/;
+const LABEL_WORDS = 6;
+// A wholly bold line is a label only when its text reads like one: at most six words, no sentence punctuation,
+// and no colon with words after it. A reviewer who writes the gap itself in bold ("**One gap remains: the
+// Linux path is untested.**") has said a sentence, which is read as prose with its bold markers dropped.
+const boldLine = (line: string): { label: boolean; prose: string } | undefined => {
+  const m = BOLD_LINE.exec(line);
+  if (!m) return undefined;
+  const inner = (m[2] ?? m[3]).trim().replace(/:$/, "");
+  const label = !/[.!?;]|:\s*\S/.test(inner) && inner.split(/\s+/).length <= LABEL_WORDS;
+  return { label, prose: `${m[1]}${inner}` };
+};
 // Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
 const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
@@ -424,8 +436,10 @@ const sentencesOf = (text: string): { text: string; unit: number }[] => {
   const units: string[] = [];
   let open = false;
   for (const raw of prose.split("\n")) {
-    const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
-    if (!line || HEADING_LINE.test(line)) open = false;
+    let line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
+    const bold = boldLine(line);
+    if (bold && !bold.label) line = bold.prose;
+    if (!line || MD_HEADING.test(line) || bold?.label) open = false;
     else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
     else {
       units.push(line);
