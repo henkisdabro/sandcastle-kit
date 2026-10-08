@@ -45,7 +45,9 @@ apply it once the user agrees.
       can turn a gate red or green on base. Fix a red gate as in init.md step 6. It also runs the
       repo's `pre-commit` and `commit-msg` hooks in the sandbox: a refused hook means the tool it
       needs is missing from the image, so add it to `.sandcastle/Dockerfile`, then `sandcastle
-      build` and `sandcastle gates` again.
+      build` and `sandcastle gates` again. If the project had no Dockerfile until now, also add
+      `dockerfile: ".sandcastle/Dockerfile"` to `.sandcastle/config.ts`: without the key the file is
+      never built (`sandcastle build` says "Not built").
    2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
       changes what a run does or spends (the Upgrading notes list them) and ask whether to set it
