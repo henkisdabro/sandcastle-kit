@@ -254,8 +254,9 @@ const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ 
 /**
  * Queued tickets that will never start, or start too soon, because of how their blockers are
  * written: a blocker that does not exist or cannot be read (it counts as open, so the ticket
- * waits for good), tickets that wait for each other, and a Linear-style id the config does not
- * name (the line is ignored, so the ticket starts at once). Each line says what to change.
+ * waits for good), tickets that wait for each other, a Linear-style id the config does not
+ * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
+ * (not read, so the ticket starts at once). Each line says what to change.
  */
 export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
   const queuedIds = new Set(queued.map((t) => t.id));
