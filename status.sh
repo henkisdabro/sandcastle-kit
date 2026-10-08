@@ -652,8 +652,14 @@ hand_merged() {
 # in (the tip as a second parent); a fast-forward has none, so the tip itself -
 # not a later merge onto it, which would wait for a push already made. No
 # origin/<base> ref, or no way to find the commit, keeps "closes on push".
+# A ticket whose newest kit-worded merge on the base is a "part of" one never
+# closes on a push (the report's mergedPartly rule), so it says that, pushed or not.
+# Called in a subshell: the disp below leaves the caller's DISP alone.
 hand_merged_note() {
-  local tip merge
+  local tip merge subj
+  disp "$1"
+  subj=$(git log "$BASE" -1 --format=%s --fixed-strings --grep="Merge agent/issue-$1 (closes $DISP)" --grep="Merge agent/issue-$1 (part of $DISP)" 2>/dev/null)
+  case "$subj" in *"(part of "*) printf 'merged by hand, partly done: stays open'; return;; esac
   if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null 2>&1 \
     && tip=$(git rev-parse --verify --quiet "refs/heads/agent/issue-$1" 2>/dev/null) && [ -n "$tip" ]; then
     merge=$(git rev-list --merges --ancestry-path --parents "$tip..refs/heads/$BASE" 2>/dev/null \
