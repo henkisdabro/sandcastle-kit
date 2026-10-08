@@ -97,7 +97,8 @@
 // environment variables, see README.md.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODELS_LINE, implementNote, ticketOverride } from "./agents.ts";
 import { confirmApiKey } from "./api-key.ts";
@@ -639,7 +640,7 @@ try {
     }
     case "lean": {
       const project = await loadProject(root);
-      const { plan: p, file: planFile } = writePlan(project);
+      const p = leanPlan(project);
       // Asked before the image and the report, so a no costs nothing.
       if (args.includes("--measure")) {
         if (args.includes("--api-key")) process.env.SANDCASTLE_API_KEY = "1";
@@ -647,7 +648,14 @@ try {
       }
       leanReport(project, p);
       const image = await ensureImage(project);
-      reportHookCheck(checkHooks(project, image, p, hooksThatRanClean(project, image, planFile)), p.hooks.length);
+      // The plan, written only to key the green-base record (`hooksThatRanClean`): the project's own plan file is the
+      // one a live run's next sandbox applies, and a preview of an edited config must not change it under that run.
+      const planDir = mkdtempSync(join(tmpdir(), "sandcastle-lean-"));
+      try {
+        reportHookCheck(checkHooks(project, image, p, hooksThatRanClean(project, image, writePlan(project, planDir).file)), p.hooks.length);
+      } finally {
+        rmSync(planDir, { recursive: true, force: true });
+      }
       if (args.includes("--measure")) leanMeasure(project, image, p);
       break;
     }

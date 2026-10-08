@@ -1375,7 +1375,9 @@ keeps - a test that reads a skill file, say, would fail on every branch until th
 guards, linters, test gates, audit logs. `lean.dropHooks` removes host-only conveniences (a token
 compressor, a preview server, a notification), never a guard. Before any sandbox starts, every
 kept hook is checked in the image: executable on PATH, scripts present, Python compiles, top-level
-imports resolve. A failing hook stops the run; fix it in the project's Dockerfile. Hooks in the
+imports resolve. A failing hook stops the run; fix it in the project's Dockerfile. An import the
+check cannot find (one a hook reaches through a `sys.path.insert` of its own) is only a warning, and
+none for a hook that ran cleanly in a passing hook test of the base check at this base. Hooks in the
 untracked `.claude/settings.local.json` never reach a sandbox, and the check warns about them. Git
 hooks run on agent commits inside the sandbox as usual, so `sandcastle gates` and every run's base
 check also run the repo's `pre-commit` and `commit-msg` hooks there (`git hook run`, nothing committed,

@@ -199,11 +199,12 @@ export const plan = (project: Project): Plan => {
   return { hide, write, items, hooks };
 };
 
-// Where the worktree hook reads the plan from; a sandbox without it is not lean.
-export const writePlan = (project: Project) => {
+// Where the worktree hook reads the plan from; a sandbox without it is not lean. `dir` elsewhere is a plan file only
+// to key the green-base record by (`sandcastle lean`): a live run's sandboxes read the one under `.sandcastle/.run`.
+export const writePlan = (project: Project, dir = join(project.root, ".sandcastle/.run")) => {
   const p = plan(project);
-  const file = join(project.root, ".sandcastle/.run/lean-plan.json");
-  mkdirSync(join(project.root, ".sandcastle/.run"), { recursive: true });
+  const file = join(dir, "lean-plan.json");
+  mkdirSync(dir, { recursive: true });
   writeFileSync(file, JSON.stringify(p, null, 2));
   return { plan: p, file };
 };
