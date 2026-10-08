@@ -68,6 +68,8 @@ export type Facts = {
   upstream?: string;
   /** Agent branches with work not on the base branch. */
   standing: string[];
+  /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
+  earlierHeld?: Record<string, string>;
   keptWorktrees: { issue: string; path: string }[];
   dryRunCheck?: string;
   /** Why the run stopped before landing, if it did. */
@@ -342,6 +344,14 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     Object.entries(readOutcomes(root)).flatMap(([id, o]) => (o.run === run.startedAt && o.kind ? [[id, o.kind]] : [])),
   );
 
+  // Said beside the branch: the reader of this summary would otherwise have to remember the earlier run, or read outcomes.json.
+  const earlierHeld = Object.fromEntries(
+    standing.flatMap((b) => {
+      const o = recorded[b.replace(/^agent\/issue-/, "")];
+      return o?.kind === "held" && o.run !== run.startedAt ? [[b, o.text ?? ""]] : [];
+    }),
+  );
+
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
@@ -369,6 +379,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     ahead: Number.isNaN(ahead) ? undefined : ahead,
     upstream,
     standing,
+    earlierHeld,
     keptWorktrees: run.keptWorktrees ?? [],
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
@@ -794,12 +805,13 @@ export const render = (f: Facts, plain = false): string => {
   ] : []);
 
   // Local state
+  const earlier = f.earlierHeld ?? {};
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
       : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
     "Nothing is pushed by Sandcastle. Push by this repo's own rules (for example `git push`, or a pull request).",
-    `Agent branches with unmerged work: ${f.standing.length ? f.standing.join(", ") : "none"}`,
+    `Agent branches with unmerged work: ${f.standing.length ? f.standing.map((b) => (b in earlier ? `${b} (held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""})` : b)).join(", ") : "none"}`,
     ...f.keptWorktrees.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
   ]);
 
@@ -876,6 +888,13 @@ export const render = (f: Facts, plain = false): string => {
   // A red base is red for whoever pulls it too.
   const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
   if (push) next.push(push);
+  // `sandcastle land` refuses a branch held for a protected path or a large file, and plain `clean` keeps an unmerged branch: the person merges it or deletes it.
+  const heldEarlier = f.standing.filter((b) => b in earlier);
+  if (heldEarlier.length) {
+    const one = heldEarlier.length === 1;
+    const b = one ? heldEarlier[0] : "<branch>";
+    next.push(`Resolve ${heldEarlier.join(", ")}, held for a human merge in an earlier run: review ${one ? "it" : "each"} with \`git log -p ${f.base}..${b}\` and merge by hand with \`git merge --no-ff ${b}\`, or drop ${one ? "it" : "one"} with \`git branch -D ${b}\`.`);
+  }
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
   const steps = f.next
