@@ -365,12 +365,28 @@ export type FiledFollowUp = { title: string; from: string; phase: string; id?: s
 export const FOLLOWUP_TITLE_MAX = 120;
 // Every own-line `<followup>title - evidence</followup>` of one final message, in order. An agent that
 // left a problem in prose lost it (nobody reads the message), so the kit reads these and files them.
-// The title is what comes before the first " - "; the echoed placeholder counts for nothing.
-const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
+// The title is what comes before the first " - " outside double quotes ("...", “...”) and backticks, so a
+// title quoting UI text or a command that holds one keeps it; with none outside them (an unclosed quote)
+// it is the first " - ". The first and not the last: the evidence is often a command and its output.
+// The echoed placeholder counts for nothing.
+const titleSplit = (said: string): number => {
+  let quote = "";
+  for (let i = 0; i < said.length; i++) {
+    const c = said[i];
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"') quote = '"';
+    else if (c === "“") quote = "”";
+    else if (c === "`") quote = "`";
+    else if (said.startsWith(" - ", i)) return i;
+  }
+  return said.indexOf(" - ");
+};
+export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
   ownLineTags(text, "followup").flatMap((raw) => {
     const said = raw.replace(/\s+/g, " ").trim();
     if (!said || said === "..." || said === "title - one line of evidence") return [];
-    const at = said.indexOf(" - ");
+    const at = titleSplit(said);
     const title = (at > 0 ? said.slice(0, at) : said).trim();
     return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
