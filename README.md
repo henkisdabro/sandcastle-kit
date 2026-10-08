@@ -900,8 +900,11 @@ A queued ticket with a branch from an earlier run builds on that branch:
 
 - A branch with no commits ahead of the base (a crashed attempt, or a remainder whose work already
   merged) has nothing to build on: it is cut again from the base's tip before the sandbox opens, so the
-  agent works on the current tree, not on the one the earlier run started from. A branch a worktree
-  still holds is left where it is.
+  agent works on the current tree, not on the one the earlier run started from. A branch a clean
+  worktree under `.sandcastle/worktrees/` still holds (the one a run killed before its sandboxes
+  closed leaves) is moved together with that worktree, which keeps its installed dependencies; one a
+  worktree with uncommitted or untracked files holds, or a worktree of your own outside
+  `.sandcastle/worktrees/`, is left where it is.
 - The base is merged into the branch first. A conflict goes to the implementer; a conflict only in
   [`generated`](#-a-gate-for-generated-files) paths is resolved by regenerating them, with no agent.
 - A branch that was reviewed and green, and has gained nothing since but merge commits, skips
