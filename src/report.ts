@@ -488,7 +488,11 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   const opened = openedIssues(project);
   const facts = await gatherTurn(project, run, probe, opened);
   const carried = await carriedTurns(project, run, probe, opened);
-  return carried.length ? { ...facts, carried } : facts;
+  if (!carried.length) return facts;
+  // A branch an earlier turn held is said with its turn: not again as held "in an earlier run", with a second step.
+  const heldBefore = new Set(carried.flatMap((c) => Object.entries(c.facts.tickets).filter(([, t]) => t.state === "held").map(([id]) => `agent/issue-${id}`)));
+  const earlierHeld = Object.fromEntries(Object.entries(facts.earlierHeld ?? {}).filter(([b]) => !heldBefore.has(b)));
+  return { ...facts, earlierHeld, carried };
 };
 
 const LEVELS = [0, 1, 2, 3, "drain"];

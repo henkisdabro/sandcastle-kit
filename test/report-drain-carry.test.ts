@@ -175,6 +175,16 @@ test("a turn-1 record carries nothing, and the facts have no carried turns", asy
   assert.doesNotMatch(await summary(p), /\(turn \d+\)/);
 });
 
+test("a branch an earlier turn held is not said again as held in an earlier run", async (t) => {
+  const p = project(t, turn2(), [turn1()]);
+  // The ledger records turn 1's hold with turn 1's start, which is not the last turn's.
+  writeFileSync(join(p.root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ "shop-01": { run: turn1().startedAt, kind: "held", text: "changes src/a.ts" } }));
+  const out = await summary(p);
+  assert.doesNotMatch(out, /in an earlier run/);
+  assert.match(body(out, "## Next step"), /Review and merge the 1 held branch\(es\) \(commands above\) \(turn 1\)\./);
+  assert.equal(body(out, "## Next step").match(/agent\/issue-shop-01/g), null);
+});
+
 test("a partly done ticket closed since is not carried", async (t) => {
   const p = project(t, turn2(), [turn1()]);
   writeFileSync(join(p.root, ".scratch/shop/issues/02-half.md"), "# Half done\n\nStatus: done\n\nDo it.\n\n## Comments\n");
