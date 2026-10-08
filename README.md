@@ -1116,8 +1116,9 @@ itself, in the status view's castle, glyphs and colours:
 - 🏁 **A prompt when the run ends.** The session where you used `/sandcastle` hears that the
   run's process is gone - after the report, a drained queue, a crash or Ctrl-C, or a run that
   died seconds after it started - and closes the run with the seven-section summary. It needs no
-  Herdr and no `sandcastle wait`. It follows the run that session started wherever its project
-  is - a second clone of the repository, a package of a monorepo - because every run records the
+  Herdr and no `sandcastle wait`. The prompt names the run by its pid and start time, so a prompt
+  that arrives after a later run has begun is closed from the run it names, not the live one. It
+  follows the run that session started wherever its project is - a second clone of the repository, a package of a monorepo - because every run records the
   id of the Claude Code session that started it (and only the id). A run started from a plain
   terminal, Codex or OpenCode has no such session: the mod shows it only in the session's own
   project, and the skill's `sandcastle wait` covers the rest. A session you quit and resumed in the meantime hears it when
@@ -1207,8 +1208,9 @@ all of it. The mod:
 It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no
 file, calls no model and changes neither git nor the tracker. The record is a file in the
 repository, so the mod trusts none of it: text from it is cut to one short line with control and
-invisible characters removed, and the prompt it submits carries nothing from the record but a
-numeric exit code. Ticket titles are shown as written, as `sandcastle status` shows them.
+invisible characters removed, and the prompt it submits carries nothing from the record but
+numbers: the exit code, the pid and the start time as `HH:MM`, each left out when it is not a
+number. Ticket titles are shown as written, as `sandcastle status` shows them.
 `claude plugin validate <kit>/mod` lists every event it hooks and every call it makes, without
 running it:
 

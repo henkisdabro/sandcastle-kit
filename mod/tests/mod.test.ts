@@ -90,7 +90,8 @@ const START = { surface: "terminal", isInteractive: true, cwd: "/work" } as cons
 const SKILL = { skill: "sandcastle", text: "the skill" };
 // `/sandcastle-status` as a person types it.
 const STATUS = { command: "sandcastle-status", args: "", origin: { kind: "composer" }, presentation: { isFullscreen: false, columns: 120 } } as const;
-const CLOSE = (how: string) => `The sandcastle run in /work ${how}. Close it now: read run.md in the sandcastle skill's directory and follow it.`;
+// The record's pid (42) and start time (NEW) are named; the time is local, so the expected one is read in the same zone (test/mod-end-prompt.test.ts pins literals).
+const CLOSE = (how: string) => `The sandcastle run in /work (pid 42, started ${new Date(NEW).toTimeString().slice(0, 5)}) ${how}. Close that run now: read run.md in the sandcastle skill's directory and follow it.`;
 
 // How long the castle takes to build, from level sand to complete (run-state.ts, CASTLE_FRAMES).
 const BUILD = 2500;
@@ -277,7 +278,7 @@ test("a run that starts and dies between two idle looks is still closed", async 
   expect(w.prompts.length).toBe(1);
 });
 
-test("the prompt takes nothing from the record but a whole exit code", async ($, on) => {
+test("the prompt takes nothing from the record but whole numbers", async ($, on) => {
   const w = world(on);
   await $.session.start(START);
   await $.skill.prompt(SKILL);
