@@ -112,7 +112,9 @@ This continues SKILL.md: run its "Before every action" first.
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
-   `sandcastle wait` again. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
+   `sandcastle wait` again. N is how long `sandcastle wait N` waits for the run to end; once it
+   has ended, `wait` reads the tracker again to print the closing summary, which takes longer with
+   many blocked tickets, so the harness's own timeout needs room above N. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
    user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
