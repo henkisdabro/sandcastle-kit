@@ -413,6 +413,44 @@ row '#103' finished 'this run - landing'
 hasnt 'on its earlier branch'
 
 # ---------------------------------------------------------------------------
+SCENARIO="live run, earlier run's kept worktrees"
+# A new run starts while the last run's closed sandboxes left worktrees with
+# uncommitted files. Those tickets are not the live run's: they read as they do
+# with no live run, never stalled or working. #521 landed (its kept worktree
+# holds the branch, so landing could not delete it); #522 never did.
+branch 521 1; git_ merge -q --no-ff -m "Merge agent/issue-521 (closes #521)" agent/issue-521
+log 521 impl '# build green in 1.2s'; touch -t 202001010000 "$L/agent-issue-521-impl-521.log"
+mkdir -p "$REPO/.sandcastle/worktrees/agent-issue-521"
+branch 522 1; log 522 impl '# build green in 2.4s'
+mkdir -p "$REPO/.sandcastle/worktrees/agent-issue-522"
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["530"], "waiting": [], "active": {},
+  "tickets": { "530": { "state": "implement", "since": $((now - 30)), "started": $((now - 60)) } } }
+EOF
+render "530"
+row '#521' merged 'worktree kept'
+row '#522' 'left over' 'earlier run - sandc'
+hasnt 'stalled'
+
+# An older orchestrator's record has no tickets: its `issues` are the live
+# run's, and its quiet worktree with no container is a sandbox that died.
+branch 523 1; log 523 impl '# build green in 3.1s'; touch -t 202001010000 "$L/agent-issue-523-impl-523.log"
+mkdir -p "$REPO/.sandcastle/worktrees/agent-issue-523"
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "issues": ["523"], "waiting": [], "active": {} }
+EOF
+render "523"
+row '#523' stalled
+row '#521' merged
+row '#522' 'left over' 'earlier run'
+# Later scenarios rewrite the record; the worktrees, branches and logs here must not show in them.
+rm -rf "$REPO/.sandcastle/worktrees/agent-issue-521" "$REPO/.sandcastle/worktrees/agent-issue-522" "$REPO/.sandcastle/worktrees/agent-issue-523"
+git_ branch -q -D agent/issue-521 agent/issue-522 agent/issue-523
+rm -f "$L"/agent-issue-52[123]-*
+
+# ---------------------------------------------------------------------------
 SCENARIO="after the run"
 # Ended: inference again. The red branch shows its outcome, the merged one is
 # merged, and the models line is the config's, not the last run's.

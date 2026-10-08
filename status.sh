@@ -1261,15 +1261,18 @@ render() {
     # so an in-flight worktree has to win over the merged check.
     stat_for "$n"
     quiet=0; act_col="$mute"; activity_note=""
-    # A worktree is live work only while a container holds it or its run is
-    # alive. Sandcastle keeps a closed sandbox's worktree when it has
-    # uncommitted files (a setup step's lockfile, say); that one is shown by
-    # its branch's state, with a note, not as working forever.
-    # A container with no live run is an orphan: its run was killed, and its
-    # agent goes on spending with nobody to gate or land what it makes.
+    # A worktree is live work only while it is the live run's ticket: a
+    # current record's tickets never reach this loop, so only an older
+    # orchestrator's `issues` list names one here. Sandcastle keeps a closed
+    # sandbox's worktree when it has uncommitted files (a setup step's
+    # lockfile, say); an earlier run's, live run or not, is shown by its
+    # branch's state, with a note, not as stalled or working forever.
+    # A container on a worktree that is not the live run's is an orphan: its
+    # run was killed, and its agent goes on spending with nobody to gate or
+    # land what it makes.
     live_wt=0; kept_wt=0; orphan=0
     if [ -d "worktrees/agent-issue-$n" ]; then
-      if [ "$RUN_LIVE" = 1 ]; then live_wt=1; elif [ -n "$S_CPU" ]; then orphan=1; else kept_wt=1; fi
+      if [ "$RUN_LIVE" = 1 ] && [ "$RECORD" = 0 ] && has_line "$n" "$RUN_ISSUES"; then live_wt=1; elif [ -n "$S_CPU" ]; then orphan=1; else kept_wt=1; fi
     fi
     if [ "$orphan" = 1 ]; then
       state="orphaned"; activity_note="its run is gone, its agent still works - sandcastle clean stops it"
