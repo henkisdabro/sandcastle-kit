@@ -2,7 +2,7 @@
 // maximum: one agent pass far above the rest must not set every later pool. Expected figures are worked by hand:
 // a MiB figure x 1.1, rounded up, over 1024. Fake readers, no Docker, model call or network.
 //
-//   node --test test/size-percentile.test.ts
+//   pnpm test:file test/size-percentile.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

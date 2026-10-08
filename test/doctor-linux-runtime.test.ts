@@ -4,7 +4,7 @@
 // to call `podman-docker` "not running" and pass rootless Docker. The shims print the outputs
 // captured from each runtime. No Docker, no network.
 //
-//   node --test test/doctor-linux-runtime.test.ts
+//   pnpm test:file test/doctor-linux-runtime.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

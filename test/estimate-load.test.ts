@@ -3,7 +3,7 @@
 // a full queue's gates run slower than a small run's. With fewer it falls back to every run and says so.
 // Made-up timings and history; no tracker, Docker or network.
 //
-//   node --test test/estimate-load.test.ts
+//   pnpm test:file test/estimate-load.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -4,7 +4,7 @@
 // mostly carried tickets, 18.8M tokens in / 179k out and 43 minutes against 9.2M / 133k and 19m. Made-up
 // timings and a temp git repo; no tracker, Docker or network.
 //
-//   node --test test/estimate-carried.test.ts
+//   pnpm test:file test/estimate-carried.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

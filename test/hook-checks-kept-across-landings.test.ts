@@ -2,7 +2,7 @@
 // touched nothing they read; a hook file, a lockfile or a protected path still gets the full hook check next turn.
 // Run for real against a fake docker; no Docker or network.
 //
-//   node --test test/hook-checks-kept-across-landings.test.ts
+//   pnpm test:file test/hook-checks-kept-across-landings.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

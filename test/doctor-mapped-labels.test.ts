@@ -2,7 +2,7 @@
 // it names the missing ones with one create command, and says nothing when all exist. A fake `gh`
 // and a made-up mapping; no Docker, no network.
 //
-//   node --test test/doctor-mapped-labels.test.ts
+//   pnpm test:file test/doctor-mapped-labels.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

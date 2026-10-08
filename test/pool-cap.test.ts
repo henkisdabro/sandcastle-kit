@@ -3,7 +3,7 @@
 // other runs, up to their demand), and a capped run above it keeps the slots it holds.
 // This process is one run and the others are files, as in test/pool-shares.test.ts.
 //
-//   node --test test/pool-cap.test.ts
+//   pnpm test:file test/pool-cap.test.ts
 
 import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";

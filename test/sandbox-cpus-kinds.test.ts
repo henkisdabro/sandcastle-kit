@@ -5,7 +5,7 @@
 // The project's own `cpus` overrides both, cut to the VM's CPUs. No Docker here: `docker info` is
 // handed in as made-up JSON; test/sandbox-cpus-commands.test.ts runs the two commands themselves.
 //
-//   node --test test/sandbox-cpus-kinds.test.ts
+//   pnpm test:file test/sandbox-cpus-kinds.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

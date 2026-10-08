@@ -3,7 +3,7 @@
 // open from inside (the file's read is wrapped), and the person's `pause` runs as a second process
 // in that gap, so the two sequences really interleave. No Docker, no model, no network.
 //
-//   node --test test/pause-race.test.ts
+//   pnpm test:file test/pause-race.test.ts
 
 import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

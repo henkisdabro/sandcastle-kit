@@ -4,7 +4,7 @@
 // not begun - a requeued one keeps its landing - not as parked. The scheduler is driven through its
 // ports with fake attempts and landings. No Docker, no model, no network.
 //
-//   node --test test/schedule-attempt-count.test.ts
+//   pnpm test:file test/schedule-attempt-count.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

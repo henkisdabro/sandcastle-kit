@@ -2,7 +2,7 @@
 // its summary heading, its notify line and its "Runnable now" section say so. No Docker, network
 // or model call.
 //
-//   node --test test/stopped-by.test.ts
+//   pnpm test:file test/stopped-by.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

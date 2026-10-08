@@ -1,7 +1,7 @@
 // The shared tracker fixture (test/fixtures.ts) follows the config loader's defaults, and no test
 // builds a full `tracker: { ... }` literal of its own.
 //
-//   node --test test/fixtures.test.ts
+//   pnpm test:file test/fixtures.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";

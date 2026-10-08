@@ -4,7 +4,7 @@
 // cause reaches the stop state only from a port's result or the host's failure read live. No git,
 // no Docker, no network.
 //
-//   node --test test/schedule-run.test.ts
+//   pnpm test:file test/schedule-run.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

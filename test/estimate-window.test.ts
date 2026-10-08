@@ -2,7 +2,7 @@
 // project's last three runs only (src/run.ts `recentWindow`), widened to older
 // runs while those hold fewer than 5 tickets; lines without a `run` are oldest.
 //
-//   node --test test/estimate-window.test.ts
+//   pnpm test:file test/estimate-window.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

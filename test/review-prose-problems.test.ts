@@ -2,7 +2,7 @@
 // message: nothing in the closing summary carries a reviewer's prose, so each was found by reading
 // the log. The review prompt says plainly that a problem named only in prose is lost. No model calls.
 //
-//   node --test test/review-prose-problems.test.ts
+//   pnpm test:file test/review-prose-problems.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

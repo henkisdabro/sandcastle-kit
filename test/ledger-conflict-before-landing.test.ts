@@ -5,7 +5,7 @@
 // with fake attempts and the real ledger (createLedger in src/ledger.ts) over a run record in a temp dir.
 // No Docker, no model, no network.
 //
-//   node --test test/ledger-conflict-before-landing.test.ts
+//   pnpm test:file test/ledger-conflict-before-landing.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

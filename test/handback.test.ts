@@ -3,7 +3,7 @@
 // label nothing creates - `gh issue edit` with an unknown label fails whole, yet
 // still applies --remove-label, leaving the ticket with no labels at all.
 //
-//   node --test test/handback.test.ts
+//   pnpm test:file test/handback.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

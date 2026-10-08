@@ -6,7 +6,7 @@
 // record names the pane: the fake `herdr` runs that trap's own jq on the record at the Ctrl-C. A
 // fake `herdr` on PATH; no Herdr.
 //
-//   node --test test/herdr-view-reuse.test.ts
+//   pnpm test:file test/herdr-view-reuse.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

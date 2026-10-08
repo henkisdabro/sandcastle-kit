@@ -2,7 +2,7 @@
 // the home directory's .cache, never a relative path under the current directory. And the archive
 // cleanup's line gives the raw streams' limit its unit. No Docker, no model calls, no network.
 //
-//   node --test test/cache-dir-and-prune-line.test.ts
+//   pnpm test:file test/cache-dir-and-prune-line.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

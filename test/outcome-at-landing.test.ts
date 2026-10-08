@@ -3,7 +3,7 @@
 // `sandcastle report` mid-run - reads red together and taken back from the outcome's kind, and
 // without it told a branch red together as a red gate and gave a taken-back ticket merge commands.
 //
-//   node --test test/outcome-at-landing.test.ts
+//   pnpm test:file test/outcome-at-landing.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

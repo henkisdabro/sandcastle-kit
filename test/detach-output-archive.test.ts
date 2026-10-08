@@ -2,7 +2,7 @@
 // before's output is moved to logs/archive/, not overwritten - it once was, and a person closing
 // two runs in a row lost the first one's turn summaries. A plain-JS stand-in, no Docker, no model.
 //
-//   node --test test/detach-output-archive.test.ts
+//   pnpm test:file test/detach-output-archive.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

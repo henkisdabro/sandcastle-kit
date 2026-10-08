@@ -2,7 +2,7 @@
 // repair counter is per attempt, so the second attempt starts from the first's. No Docker, model or network. The pipeline itself,
 // repaired on both attempts, is driven in test/pipeline.test.ts.
 //
-//   node --test test/repairs-requeued.test.ts
+//   pnpm test:file test/repairs-requeued.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

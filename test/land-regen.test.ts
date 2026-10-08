@@ -2,7 +2,7 @@
 // throwaway sandbox, resolved by regenerating, and the host base is fast-forwarded. The
 // sandbox is a host worktree here - no Docker, no model, no network.
 //
-//   node --test test/land-regen.test.ts
+//   pnpm test:file test/land-regen.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

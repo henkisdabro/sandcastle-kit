@@ -1,6 +1,6 @@
 // The Touches line: parsing, glob expansion against a temp repo, and the files git cannot merge.
 //
-//   node --test test/touches.test.ts
+//   pnpm test:file test/touches.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

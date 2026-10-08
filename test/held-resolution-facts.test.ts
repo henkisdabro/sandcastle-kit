@@ -3,7 +3,7 @@
 // outcome the run record and the per-ticket line are written from. Temp git repo; no Docker, model
 // or network. The pipeline's own hold is driven in test/pipeline.test.ts.
 //
-//   node --test test/held-resolution-facts.test.ts
+//   pnpm test:file test/held-resolution-facts.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

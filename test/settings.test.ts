@@ -2,7 +2,7 @@
 // message naming it, never NaN (no workers, an endless slot wait) or a raw
 // JSON stack, and importing pool.ts stays safe so doctor can report it.
 //
-//   node --test test/settings.test.ts
+//   pnpm test:file test/settings.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 // carries the criterion, or the later landing would close the ticket. Plain temp directories; no
 // git, Docker, model or network. The pipeline that writes and reads it is driven in test/pipeline.test.ts.
 //
-//   node --test test/unmet-carried.test.ts
+//   pnpm test:file test/unmet-carried.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

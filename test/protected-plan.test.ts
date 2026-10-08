@@ -5,7 +5,7 @@
 // says); the live line is the real ledger's `say`, over a run record in a temp dir. No Docker, model
 // or network.
 //
-//   node --test test/protected-plan.test.ts
+//   pnpm test:file test/protected-plan.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

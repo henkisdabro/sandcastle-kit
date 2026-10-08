@@ -2,7 +2,7 @@
 // whichever worker happens to poll at the moment it frees. The run is a child process that looks
 // like the kit to `ps`, as in test/pool-wait-order.test.ts.
 //
-//   node --test test/pool-run-wait-order.test.ts
+//   pnpm test:file test/pool-run-wait-order.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

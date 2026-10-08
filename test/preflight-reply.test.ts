@@ -1,7 +1,7 @@
 // What preflight prints for a model the CLI does not know: the CLI's reason, not its whole JSON
 // reply. A fake `docker` replays the Claude CLI's output for `--model bogus-model`.
 //
-//   node --test test/preflight-reply.test.ts
+//   pnpm test:file test/preflight-reply.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

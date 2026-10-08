@@ -5,7 +5,7 @@
 // record a sandbox rewrote is named. Temp repos, a fake tracker and a made-up sandbox: no Docker,
 // no network; every write is under a temp directory.
 //
-//   node --test test/backup-branches.test.ts
+//   pnpm test:file test/backup-branches.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

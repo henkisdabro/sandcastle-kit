@@ -2,7 +2,7 @@
 // as written, read-only, and carry a `Tickets:` line the assistant fills in before sending (a
 // literal placeholder prompt once sent a whole fan-out to be killed and rerun).
 //
-//   node --test test/skill.test.ts
+//   pnpm test:file test/skill.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

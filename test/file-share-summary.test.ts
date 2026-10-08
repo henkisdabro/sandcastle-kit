@@ -3,7 +3,7 @@
 // dozens of pair lines and buried the pool warning. The docs files every ticket touches are one count,
 // and the full pair list goes to the hold record's `log`. Fake files; no git, no Docker, no network.
 //
-//   node --test test/file-share-summary.test.ts
+//   pnpm test:file test/file-share-summary.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

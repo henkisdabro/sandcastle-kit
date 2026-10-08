@@ -2,7 +2,7 @@
 // the offline fallbacks, and the versions being part of the image tag. An injected fetcher and a
 // temp XDG_CACHE_HOME: no network, no Docker.
 //
-//   node --test test/versions.test.ts
+//   pnpm test:file test/versions.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

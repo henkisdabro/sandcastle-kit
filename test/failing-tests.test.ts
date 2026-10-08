@@ -2,7 +2,7 @@
 // output per runner. Pure string parsing, so it behaves the same on macOS and
 // Linux; CRLF output is covered because a Windows-flavoured runner can emit it.
 //
-//   node --test test/failing-tests.test.ts
+//   pnpm test:file test/failing-tests.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

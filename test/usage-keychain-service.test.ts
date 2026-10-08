@@ -3,7 +3,7 @@
 // must look that name up, or it finds nothing and falls back to a token the endpoint answers 403.
 // The `security` tool is faked on PATH; no real keychain, network or model calls.
 //
-//   node --test test/usage-keychain-service.test.ts
+//   pnpm test:file test/usage-keychain-service.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

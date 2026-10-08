@@ -2,7 +2,7 @@
 // the run record and keep-awake, and an attempt's wait while the run is paused. Driven with fakes for the record, the
 // keep-awake, the view and the log - no whole run, no Docker, no model, no network.
 //
-//   node --test test/pause-handling.test.ts
+//   pnpm test:file test/pause-handling.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

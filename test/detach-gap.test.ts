@@ -4,7 +4,7 @@
 // waits on files, not on a clock. Wait must keep waiting for the live pid in run.json and then
 // exit with the recorded code, not 0.
 //
-//   node --test test/detach-gap.test.ts
+//   pnpm test:file test/detach-gap.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";

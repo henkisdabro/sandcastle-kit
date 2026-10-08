@@ -2,7 +2,7 @@
 // the ticket is written); a modified test file, or an added file elsewhere, still is. Temp git repos:
 // no Docker, no gh, no network.
 //
-//   node --test test/touches-overrun-tests.test.ts
+//   pnpm test:file test/touches-overrun-tests.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

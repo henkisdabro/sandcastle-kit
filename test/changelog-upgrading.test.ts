@@ -2,7 +2,7 @@
 // reviewer's full set carries it like any other line, the prompts say when one is needed, and the
 // closing summary lists it apart from the ordinary lines. No Docker, model or network.
 //
-//   node --test test/changelog-upgrading.test.ts
+//   pnpm test:file test/changelog-upgrading.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

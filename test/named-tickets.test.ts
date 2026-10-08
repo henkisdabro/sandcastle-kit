@@ -2,7 +2,7 @@
 // error, so the CLI prints one line instead of a stack trace. A temp repo with ticket files; no
 // Docker, no gh, no network.
 //
-//   node --test test/named-tickets.test.ts
+//   pnpm test:file test/named-tickets.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

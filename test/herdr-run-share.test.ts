@@ -2,7 +2,7 @@
 // record carries it (`share`, rewritten by the run); a record from an older kit has none, and the
 // line is as it was. No Herdr, no network.
 //
-//   node --test test/herdr-run-share.test.ts
+//   pnpm test:file test/herdr-run-share.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

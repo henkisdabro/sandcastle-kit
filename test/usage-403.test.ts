@@ -2,7 +2,7 @@
 // the endpoint is not asked again; a 429 still fails open and is asked again before the next ticket.
 // A stubbed fetch for the endpoint; no network or model calls.
 //
-//   node --test test/usage-403.test.ts
+//   pnpm test:file test/usage-403.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";

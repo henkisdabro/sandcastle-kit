@@ -6,7 +6,7 @@
 // with fake attempts and landings and the real ledger over a run record in a temp dir. No Docker, no
 // model, no network.
 //
-//   node --test test/ledger-third-attempt-unstarted.test.ts
+//   pnpm test:file test/ledger-third-attempt-unstarted.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";

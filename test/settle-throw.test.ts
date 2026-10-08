@@ -6,7 +6,7 @@
 // its `finally`), reports it as burndown's attempt does (`attempted`), and drives `createSchedule`
 // with the real ledger over an in-memory run record. No Docker, no git, no network.
 //
-//   node --test test/settle-throw.test.ts
+//   pnpm test:file test/settle-throw.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

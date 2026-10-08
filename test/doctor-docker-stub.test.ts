@@ -2,7 +2,7 @@
 // first (test/docker-stub.ts), so a slow or silent real Docker cannot time them out. Here the real
 // one is a `docker` that sleeps 120 s: doctor ends at once, and only the stub was started. No Docker, no network.
 //
-//   node --test test/doctor-docker-stub.test.ts
+//   pnpm test:file test/doctor-docker-stub.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";

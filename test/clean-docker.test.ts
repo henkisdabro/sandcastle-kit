@@ -4,7 +4,7 @@
 // stays; the build argv labels the kit's images; doctor's build-cache line reads `docker system df`.
 // The fake is a shell script run by `sh`, so it works the same with macOS's bash 3.2 and BSD tools.
 //
-//   node --test test/clean-docker.test.ts
+//   pnpm test:file test/clean-docker.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";

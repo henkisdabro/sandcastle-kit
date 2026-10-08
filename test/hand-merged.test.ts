@@ -5,7 +5,7 @@
 // held for a human. Only the held-work outcome tells the two apart, and only an ancestor check says
 // the merge happened. Throwaway repos, ticket files for the tracker; no gh, no Docker.
 //
-//   node --test test/hand-merged.test.ts
+//   pnpm test:file test/hand-merged.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

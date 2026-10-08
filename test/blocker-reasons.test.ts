@@ -3,7 +3,7 @@
 // code (stripped on purpose, so a run does not wait - the author may think it does). A fake `gh`
 // on PATH answers; no network.
 //
-//   node --test test/blocker-reasons.test.ts
+//   pnpm test:file test/blocker-reasons.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

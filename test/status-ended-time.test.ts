@@ -4,7 +4,7 @@
 // finished now shows its whole length, as the live view did; one the record has no start for keeps the
 // time since its log changed. A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/status-ended-time.test.ts
+//   pnpm test:file test/status-ended-time.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

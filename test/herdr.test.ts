@@ -2,7 +2,7 @@
 // step and time to the sidebar (src/herdr.ts), against a fake `herdr` on PATH: no
 // Herdr, no Docker.
 //
-//   node --test test/herdr.test.ts
+//   pnpm test:file test/herdr.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

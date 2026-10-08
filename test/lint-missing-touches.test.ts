@@ -2,7 +2,7 @@
 // file, a glob matching nothing. A path the ticket's prose calls new is left out, an existing
 // one is never listed. Ticket files in a temp repo (files tracker); no Docker, gh or network.
 //
-//   node --test test/lint-missing-touches.test.ts
+//   pnpm test:file test/lint-missing-touches.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

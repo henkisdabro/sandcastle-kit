@@ -1,7 +1,7 @@
 // The commit count in a ticket's close comment: a carried branch's own work,
 // without the merge commits the kit makes to bring the base in.
 //
-//   node --test test/commits.test.ts
+//   pnpm test:file test/commits.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

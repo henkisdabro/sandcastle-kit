@@ -5,7 +5,7 @@
 // (as test/sandbox-image-lock.test.ts's does) and whose layer build fails when its base image is not
 // there once it resolves `FROM`. No Docker or network.
 //
-//   node --test test/sandbox-layer-lock.test.ts
+//   pnpm test:file test/sandbox-layer-lock.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, type ChildProcess } from "node:child_process";

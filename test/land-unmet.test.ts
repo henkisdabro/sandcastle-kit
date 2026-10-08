@@ -3,7 +3,7 @@
 // as "part of" its ticket and the ticket stays open with the criterion commented; one without lands
 // and closes. A temp git repo, the ticket-file tracker and a host worktree for the sandbox.
 //
-//   node --test test/land-unmet.test.ts
+//   pnpm test:file test/land-unmet.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

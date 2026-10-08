@@ -4,7 +4,7 @@
 // both. Doctor runs as a child against a temp XDG_CONFIG_HOME; setup needs a terminal, Docker and
 // tokens, so its wiring is read from the source and its line from the function it calls. No Docker.
 //
-//   node --test test/doctor-size-pointer.test.ts
+//   pnpm test:file test/doctor-size-pointer.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

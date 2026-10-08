@@ -1,7 +1,7 @@
 // The shared-.git check (src/guard.ts) in a throwaway repo: a moved base
 // branch and a changed .git/config are told apart, and each says what moved.
 //
-//   node --test test/guard.test.ts
+//   pnpm test:file test/guard.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

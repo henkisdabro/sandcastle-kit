@@ -2,7 +2,7 @@
 // pause) begins with `setup` again, and rewriting `started` there made a finished ticket's TIME in the
 // status view (`since - started`) its last attempt's length, not the ticket's. No Docker, model or network.
 //
-//   node --test test/ticket-first-start.test.ts
+//   pnpm test:file test/ticket-first-start.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

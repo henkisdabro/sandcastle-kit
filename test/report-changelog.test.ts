@@ -3,7 +3,7 @@
 // handler kept in history by the next run. Made-up history files in a temp git repo; no Docker,
 // model or network.
 //
-//   node --test test/report-changelog.test.ts
+//   pnpm test:file test/report-changelog.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

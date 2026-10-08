@@ -2,7 +2,7 @@
 // starts, so it is no longer "landing this run" and its note says it did not land. A chain 6 -> 4 -> 3
 // where #3 is stopped; #4 and #6 never start and end as `waiting`. No git, no Docker, no network.
 //
-//   node --test test/schedule-held-chain-note.test.ts
+//   pnpm test:file test/schedule-held-chain-note.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -2,7 +2,7 @@
 // base-red line is counted among those that need you, it never calls the tickets that failed on it
 // held (they end gate-failed), and the first next step is fixing the base, before any ticket step.
 //
-//   node --test test/report-base-red-mid-run.test.ts
+//   pnpm test:file test/report-base-red-mid-run.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -2,7 +2,7 @@
 // names nobody: a forced-colour runner's "FAIL" behind a colour code, and tsc's
 // "file(line,col): error" (its plain format, with no "file:line:col") in a test file.
 //
-//   node --test test/red-subject-colour-and-tsc.test.ts
+//   pnpm test:file test/red-subject-colour-and-tsc.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

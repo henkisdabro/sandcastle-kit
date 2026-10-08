@@ -4,7 +4,7 @@
 // requeue, not a final "conflicted again". Driven through the scheduler's ports with made-up
 // files and fake work. No git, no Docker, no network.
 //
-//   node --test test/schedule-resolve-wait.test.ts
+//   pnpm test:file test/schedule-resolve-wait.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

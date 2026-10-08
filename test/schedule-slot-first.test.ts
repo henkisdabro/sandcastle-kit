@@ -6,7 +6,7 @@
 // the slots are the real pool's (src/pool.ts) in a temp cache, the other run is files (test/pool-sim.ts).
 // Fake attempts and landings; no git, no Docker, no network.
 //
-//   node --test test/schedule-slot-first.test.ts
+//   pnpm test:file test/schedule-slot-first.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";

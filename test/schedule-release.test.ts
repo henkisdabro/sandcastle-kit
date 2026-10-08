@@ -5,7 +5,7 @@
 // files are freed and its dependants released before the open count drops. No git, no Docker, no
 // network.
 //
-//   node --test test/schedule-release.test.ts
+//   pnpm test:file test/schedule-release.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

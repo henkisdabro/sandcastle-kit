@@ -2,7 +2,7 @@
 // launcher checks before the kit's code runs, and under the project, where any write can hit it. No Docker,
 // network or model calls; ENOSPC is simulated (a temp directory that cannot be written, a patched fs).
 //
-//   node --test test/disk-full.test.ts
+//   pnpm test:file test/disk-full.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

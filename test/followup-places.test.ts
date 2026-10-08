@@ -3,7 +3,7 @@
 // Follow-ups of different source tickets stay separate issues. A fake tracker that records what it is
 // asked to create and comment on; no Docker, model or network.
 //
-//   node --test test/followup-places.test.ts
+//   pnpm test:file test/followup-places.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

@@ -2,7 +2,7 @@
 // than a typical issue takes. The wait is the run's: a worker leases its slot before it takes a ticket
 // (slot first, src/schedule.ts), so no ticket is named.
 //
-//   node --test test/heartbeat-slot-wait.test.ts
+//   pnpm test:file test/heartbeat-slot-wait.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

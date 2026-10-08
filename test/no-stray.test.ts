@@ -2,7 +2,7 @@
 // (test/no-stray.ts), so a gate log stays free of stray lines. Each case runs one made-up test file
 // the way package.json's `test` script runs the real ones.
 //
-//   node --test test/no-stray.test.ts
+//   pnpm test:file test/no-stray.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

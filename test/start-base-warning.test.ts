@@ -2,7 +2,7 @@
 // on it mid-run stops the run. burndown() needs Docker, so the line is read from its source (as
 // start-output-order.test.ts does) and the text is the helper's.
 //
-//   node --test test/start-base-warning.test.ts
+//   pnpm test:file test/start-base-warning.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

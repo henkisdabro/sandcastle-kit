@@ -3,7 +3,7 @@
 // placeholder must still fail. A throwaway repo, so no Docker and no network. (test/init.test.ts
 // covers stack detection and scaffolding.)
 //
-//   node --test test/init-fallback.test.ts
+//   pnpm test:file test/init-fallback.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

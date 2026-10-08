@@ -3,7 +3,7 @@
 // operator to guess where work comes from. A throwaway repo and a fake `gh`;
 // no Docker, no model call, no network.
 //
-//   node --test test/next-step.test.ts
+//   pnpm test:file test/next-step.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

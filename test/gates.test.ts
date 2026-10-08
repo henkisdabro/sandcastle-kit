@@ -1,7 +1,7 @@
 // Hook tests and gate runs (src/gates.ts) against a made-up sandbox: its
 // exec answers from a table, so no Docker is needed.
 //
-//   node --test test/gates.test.ts
+//   pnpm test:file test/gates.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

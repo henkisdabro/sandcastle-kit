@@ -5,7 +5,7 @@
 // pool is a temp XDG_CACHE_HOME of one sandbox slot, the landing sandbox a host worktree - no
 // Docker, no model, no network.
 //
-//   node --test test/landing-slot-first.test.ts
+//   pnpm test:file test/landing-slot-first.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

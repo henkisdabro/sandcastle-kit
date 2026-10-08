@@ -3,7 +3,7 @@
 // view split beside it, in the tab it was working in. The decision as a pure function, then the
 // view against a fake `herdr` on PATH: no Herdr, no Docker.
 //
-//   node --test test/herdr-adopt.test.ts
+//   pnpm test:file test/herdr-adopt.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 // verbatim, emoji included: a model that retypes them drops the emoji. The headings the
 // skill lists must also be the ones src/report.ts prints, so the two cannot drift apart.
 //
-//   node --test test/skill-report-headings.test.ts
+//   pnpm test:file test/skill-report-headings.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

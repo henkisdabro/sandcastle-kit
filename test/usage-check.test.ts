@@ -2,7 +2,7 @@
 // image and preflight had run), and an unknown reading says why rather than always "rate-limited".
 // A stubbed fetch; no network or model calls.
 //
-//   node --test test/usage-check.test.ts
+//   pnpm test:file test/usage-check.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

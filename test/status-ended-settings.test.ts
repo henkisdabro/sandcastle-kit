@@ -2,7 +2,7 @@
 // `next run:` and never reads as the settings the closing summary recorded for the run that ended.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/status-ended-settings.test.ts
+//   pnpm test:file test/status-ended-settings.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

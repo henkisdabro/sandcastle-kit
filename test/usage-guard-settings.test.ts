@@ -2,7 +2,7 @@
 // the reading it says was lost, read back), and the settings row's frames. A stubbed fetch and a
 // made-up project with a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/usage-guard-settings.test.ts
+//   pnpm test:file test/usage-guard-settings.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

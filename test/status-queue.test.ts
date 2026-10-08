@@ -3,7 +3,7 @@
 // jq must say what to install rather than show nothing. A made-up project, a
 // fake `sandcastle` and a `docker` that finds nothing; no Docker, no network.
 //
-//   node --test test/status-queue.test.ts
+//   pnpm test:file test/status-queue.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

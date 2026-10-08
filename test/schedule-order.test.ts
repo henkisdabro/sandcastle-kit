@@ -16,7 +16,7 @@
 // with `SCHEDULE_RUNS=<count>` plays `count` seeds from it. The default seeds are fixed, so the
 // gates never turn red on a draw. No git, no Docker, no network, no timers.
 //
-//   SCHEDULE_SEED=42 node --test test/schedule-order.test.ts
+//   SCHEDULE_SEED=42 pnpm test:file test/schedule-order.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

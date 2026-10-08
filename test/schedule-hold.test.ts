@@ -4,7 +4,7 @@
 // so, it is told it waits for the next run when the run stops first, and a dry run (no files)
 // holds nothing. No git, no Docker, no network.
 //
-//   node --test test/schedule-hold.test.ts
+//   pnpm test:file test/schedule-hold.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

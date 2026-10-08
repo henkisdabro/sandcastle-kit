@@ -2,7 +2,7 @@
 // removes that directory afterwards: every doctor run once left a `sandcastle-mods-*` directory in
 // the temp directory. A `claude` shim on PATH, no Docker, no network, no real Claude Code.
 //
-//   node --test test/doctor-mods-temp.test.ts
+//   pnpm test:file test/doctor-mods-temp.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

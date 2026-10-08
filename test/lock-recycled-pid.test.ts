@@ -4,7 +4,7 @@
 // lasts. When `ps` cannot say what a pid is, the lock is kept: a live run must never look gone.
 // status.sh's slot count follows the same rule. No Docker, no model calls.
 //
-//   node --test test/lock-recycled-pid.test.ts
+//   pnpm test:file test/lock-recycled-pid.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

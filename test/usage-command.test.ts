@@ -3,7 +3,7 @@
 // stubbed fetch, through a preload that counts its calls); with an API key in use it says the sandboxes
 // spend credits, not a plan. A temp git repo and made-up tokens; no network, no model calls.
 //
-//   node --test test/usage-command.test.ts
+//   pnpm test:file test/usage-command.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

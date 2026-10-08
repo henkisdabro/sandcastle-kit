@@ -3,7 +3,7 @@
 // reads, the start line and `doctor --verify` say whose plan that is. Injected login readers, a
 // stubbed fetch and a stub `security`; no real keychain, network or model calls.
 //
-//   node --test test/usage-plan-applies.test.ts
+//   pnpm test:file test/usage-plan-applies.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

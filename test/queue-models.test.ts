@@ -2,7 +2,7 @@
 // label, in the run's start-line text, and reports a bad label without stopping the
 // listing. A throwaway repo and a fake `gh`; no Docker, no model call, no network.
 //
-//   node --test test/queue-models.test.ts
+//   pnpm test:file test/queue-models.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

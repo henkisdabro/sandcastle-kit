@@ -2,7 +2,7 @@
 // compare the kit's changelog with the project's update record. And the kit version that doctor
 // and `--version` print. A made-up kit (in git and out of it) and project in temp directories; no network.
 //
-//   node --test test/upgrading.test.ts
+//   pnpm test:file test/upgrading.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

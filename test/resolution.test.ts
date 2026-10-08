@@ -1,7 +1,7 @@
 // A conflict resolution is compared with git's own automatic merge: a change to a path that
 // merged cleanly is refused. Temp git repos; no Docker, model or network.
 //
-//   node --test test/resolution.test.ts
+//   pnpm test:file test/resolution.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

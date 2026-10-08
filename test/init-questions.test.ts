@@ -3,7 +3,7 @@
 // the closing message, and the skill's init step that asks them without gaining a numbered step
 // (update.md refers to steps 4 and 6 by number). Temp dirs only: no Docker, no model, no network.
 //
-//   node --test test/init-questions.test.ts
+//   pnpm test:file test/init-questions.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

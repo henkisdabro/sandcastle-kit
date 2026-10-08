@@ -2,7 +2,7 @@
 // own output - not a stack trace that buries it. And a .sandcastle/Dockerfile the config does not
 // name is said to be unbuilt, not silently skipped. A fake docker; no network or model calls.
 //
-//   node --test test/image-build-failure.test.ts
+//   pnpm test:file test/image-build-failure.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

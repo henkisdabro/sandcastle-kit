@@ -4,7 +4,7 @@
 // "Blocked by: 01" written in a comment. Each of these was silent. Ticket files in a temp repo;
 // no network.
 //
-//   node --test test/blocker-problems.test.ts
+//   pnpm test:file test/blocker-problems.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

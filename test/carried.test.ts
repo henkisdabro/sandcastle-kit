@@ -5,7 +5,7 @@
 // (`createPipeline`, src/burndown.ts) runs over a temp repo with scripted agents and gate runs. No Docker,
 // model, gh or network.
 //
-//   node --test test/carried.test.ts
+//   pnpm test:file test/carried.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

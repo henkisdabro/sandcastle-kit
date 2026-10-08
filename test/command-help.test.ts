@@ -3,7 +3,7 @@
 // merged `agent/issue-1` branch, which must still be there afterwards. No Docker, model calls or
 // network.
 //
-//   node --test test/command-help.test.ts
+//   pnpm test:file test/command-help.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

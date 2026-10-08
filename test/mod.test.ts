@@ -4,7 +4,7 @@
 // to the calls the README promises - a mod runs inside Claude Code with the user's permissions,
 // so a new call is a change a reviewer must see. No session and no model calls.
 //
-//   node --test test/mod.test.ts
+//   pnpm test:file test/mod.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

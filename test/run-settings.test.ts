@@ -1,7 +1,7 @@
 // The run settings (src/run-settings.ts): one pure resolver, the settings group each turn's run
 // record carries, and the `sandcastle status` input for the next run. No Docker, no model calls.
 //
-//   node --test test/run-settings.test.ts
+//   pnpm test:file test/run-settings.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";

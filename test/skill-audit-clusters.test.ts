@@ -2,7 +2,7 @@
 // ticket per file cluster where three or more small findings share most files, and no order-only
 // blocker line for overlap the run's landing already handles. Pins that step's place and content.
 //
-//   node --test test/skill-audit-clusters.test.ts
+//   pnpm test:file test/skill-audit-clusters.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

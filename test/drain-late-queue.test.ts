@@ -2,7 +2,7 @@
 // it (a turn takes the last turn's re-runnable tickets only), and the closing lines name it.
 // A fake tracker and made-up facts; no Docker, gh, model calls or network.
 //
-//   node --test test/drain-late-queue.test.ts
+//   pnpm test:file test/drain-late-queue.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

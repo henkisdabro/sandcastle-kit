@@ -2,7 +2,7 @@
 // prints a WEIGHTS block in test/shard.ts's own format, with each file's top-level test durations
 // summed and the files under 2.5 s left out.
 //
-//   node --test test/weights-reporter.test.ts
+//   pnpm test:file test/weights-reporter.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

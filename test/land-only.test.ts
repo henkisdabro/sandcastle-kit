@@ -2,7 +2,7 @@
 // implement and review) and the resolver prompt that finishes a conflicted base
 // merge. Temp git repos and temp directories; no Docker, model or network.
 //
-//   node --test test/land-only.test.ts
+//   pnpm test:file test/land-only.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

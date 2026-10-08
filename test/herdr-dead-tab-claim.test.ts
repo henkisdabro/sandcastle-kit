@@ -2,7 +2,7 @@
 // of two callers that read the same record at once. The fake `herdr` logs every call; no Herdr, no
 // network.
 //
-//   node --test test/herdr-dead-tab-claim.test.ts
+//   pnpm test:file test/herdr-dead-tab-claim.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";

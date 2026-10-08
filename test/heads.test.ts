@@ -2,7 +2,7 @@
 // broken file reads as no record, a write merges into one ticket's entry and
 // leaves the rest. Plain temp directories; no git, Docker, model or network.
 //
-//   node --test test/heads.test.ts
+//   pnpm test:file test/heads.test.ts
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

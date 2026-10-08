@@ -6,7 +6,7 @@
 // The scheduler is driven through its ports (`createSchedule` with fake attempt and land ports, a pause
 // source and a host whose write the test refuses); the summary through `render`. No Docker, no model, no network.
 //
-//   node --test test/stop-while-paused.test.ts
+//   pnpm test:file test/stop-while-paused.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

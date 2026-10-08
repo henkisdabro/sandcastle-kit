@@ -2,7 +2,7 @@
 // real thirty-issue one, and a run with nothing in it. Every section must be
 // there, in order, with the right tickets in it.
 //
-//   node --test test/report.test.ts
+//   pnpm test:file test/report.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

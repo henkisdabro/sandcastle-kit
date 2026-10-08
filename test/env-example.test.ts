@@ -1,7 +1,7 @@
 // `.env.example` is what `sandcastle setup` and a by-hand install copy: its header must not promise
 // that a project's .sandcastle/.env can override a key the kit refuses there.
 //
-//   node --test test/env-example.test.ts
+//   pnpm test:file test/env-example.test.ts
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 // sooner is not said at all. The clock is the test's own (`now` of the plan's work); the scheduler's
 // one-second wake-up is real time. No git, no Docker, no network.
 //
-//   node --test test/schedule-resolve-settle.test.ts
+//   pnpm test:file test/schedule-resolve-settle.test.ts
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 // must read that as "no such label": the run creates needs-triage, and doctor reports the queue
 // label missing with its FIX line, instead of a JSON error and "not checked".
 //
-//   node --test test/gh-empty-label-list.test.ts
+//   pnpm test:file test/gh-empty-label-list.test.ts
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";

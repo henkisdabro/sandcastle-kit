@@ -6,7 +6,7 @@
 // Paths come from `node:path` and `os.tmpdir()`; nothing here calls a tool that differs between
 // macOS and Linux except `ps`, through `kitLikeProcess`, which uses flags both share.
 //
-//   node --test test/start-split.test.ts
+//   pnpm test:file test/start-split.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

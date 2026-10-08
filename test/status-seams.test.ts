@@ -4,7 +4,7 @@
 // the other, and a legend sized from its own text left joints like ┴┬ beside the table's.
 // A made-up project and a fake `sandcastle` and `docker`; no Docker, no network.
 //
-//   node --test test/status-seams.test.ts
+//   pnpm test:file test/status-seams.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

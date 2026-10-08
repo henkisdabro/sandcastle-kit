@@ -2,7 +2,7 @@
 // repos, so no Docker is needed. It is POSIX sh and uses only `mktemp`, `sed`
 // and git 2.36+'s `git hook run`, which behave alike on macOS and Linux.
 //
-//   node --test test/gate-git-hooks.test.ts
+//   pnpm test:file test/gate-git-hooks.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

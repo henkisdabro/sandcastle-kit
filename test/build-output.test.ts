@@ -3,7 +3,7 @@
 // out before the build watcher knew whether there was real work, so a cached build printed two. A
 // real `sandcastle build` against a fake docker that prints BuildKit's plain progress; no Docker.
 //
-//   node --test test/build-output.test.ts
+//   pnpm test:file test/build-output.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

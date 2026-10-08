@@ -1,7 +1,7 @@
 // A held branch's unmet acceptance criterion is on its Needs-you line, so whoever lands it by hand
 // (`sandcastle land` merges it as partly done) sees it before they do.
 //
-//   node --test test/report-held-unmet.test.ts
+//   pnpm test:file test/report-held-unmet.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

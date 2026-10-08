@@ -4,7 +4,7 @@
 // for the sandbox: no Docker, no gh, no network. What the run record says of each landing is the
 // ledger's (src/ledger.ts): landOne writes no verdict.
 //
-//   node --test test/landing-queue.test.ts
+//   pnpm test:file test/landing-queue.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -2,7 +2,7 @@
 // a ticket file read from disk, and the tracker choice read from docs/agents.
 // Fixtures are written with explicit "\n" line endings in temp directories.
 //
-//   node --test test/tickets.test.ts
+//   pnpm test:file test/tickets.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

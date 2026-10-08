@@ -2,7 +2,7 @@
 // and each refusal with its message. A live run is a registration in the pool's runs directory
 // (what a run writes) under a process that looks like the kit to `ps`. No Docker, model calls or network.
 //
-//   node --test test/cap-command.test.ts
+//   pnpm test:file test/cap-command.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

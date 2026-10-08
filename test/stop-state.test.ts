@@ -2,7 +2,7 @@
 // "starts nothing", "lands nothing" and the headline the closing summary names. A pure table over
 // every cause kind and every mix of them, in every arrival order. No git, no Docker, no network.
 //
-//   node --test test/stop-state.test.ts
+//   pnpm test:file test/stop-state.test.ts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -2,7 +2,7 @@
 // pass's agent log and the run adds them to what the ticket's finished passes spent, on the usage row's tick,
 // so the status view's TOKENS column only reads the record. Temp directories only; no Docker, no model.
 //
-//   node --test test/ticket-live-tokens.test.ts
+//   pnpm test:file test/ticket-live-tokens.test.ts
 
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

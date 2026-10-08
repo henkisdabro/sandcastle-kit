@@ -4,7 +4,7 @@
 // never more than the VM has; the project's `cpus` overrides it, `false` for none. No Docker here:
 // `docker info` is handed in as made-up JSON.
 //
-//   node --test test/sandbox-cpus.test.ts
+//   pnpm test:file test/sandbox-cpus.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

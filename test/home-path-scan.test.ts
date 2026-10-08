@@ -1,7 +1,7 @@
 // The home-path half of test/full-check.sh's outbound scan (`home_paths`): a real home directory
 // fails it, a placeholder home does not, and neither does a repo path with a `home` directory in it.
 //
-//   node --test test/home-path-scan.test.ts
+//   pnpm test:file test/home-path-scan.test.ts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

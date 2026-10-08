@@ -4,7 +4,7 @@
 // MODULE_TYPELESS_PACKAGE_JSON warning on every command. Syntax Node cannot strip is named with
 // its place.
 //
-//   node --test test/config-module-type.test.ts
+//   pnpm test:file test/config-module-type.test.ts
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
