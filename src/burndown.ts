@@ -2756,7 +2756,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     newDockerfiles = changedDockerfiles(project, startTip, base);
     // A red verify on a tree a landing's own gates passed is red for its sandbox, not for the tickets meeting.
     if (verify.some((g) => !g.pass)) {
-      const same = landingOfTree(project.root, `refs/heads/${base}`, landed);
+      const same = landingOfTree(project.root, `refs/heads/${base}`, landed, project.tracker.kind === "files" ? project.tracker.dir : undefined);
       // A tree a landing sandbox gated was green in a clean sandbox already: no sandbox difference, a flaky test.
       if (same && landed.get(same)?.clean) verifyCleanTreeOf = ref(same);
       else if (same) verifyTreeOf = ref(same);

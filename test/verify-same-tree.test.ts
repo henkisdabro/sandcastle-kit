@@ -95,7 +95,7 @@ test("the landing whose tree is the base tip's is found, and none when the tip i
 
 test("the run compares the verified tree with its landings and records the match", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(src, /landingOfTree\(project\.root, `refs\/heads\/\$\{base\}`, landed\)/);
+  assert.match(src, /landingOfTree\(project\.root, `refs\/heads\/\$\{base\}`, landed, project\.tracker\.kind === "files" \? project\.tracker\.dir : undefined\)/);
   assert.match(src, /gatedTree: verifyTreeOf/);
   assert.match(src, /cleanTree: verifyCleanTreeOf/);
   assert.match(src, /if \(same && landed\.get\(same\)\?\.clean\) verifyCleanTreeOf = ref\(same\);/);

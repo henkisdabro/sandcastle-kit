@@ -168,11 +168,22 @@ const treeOf = (root: string, c: string) => sh("git", ["rev-parse", `${c}^{tree}
  * The ticket whose landing left `tip`'s exact tree (the last such landing), or undefined. A landing's tree is
  * the one its gates passed (`landingMade` checks it), so a red verify on that tree is red because of the sandbox
  * it ran in, not because tickets met: the closing summary says so instead of "together".
+ *
+ * With the files tracker the close of a ticket (and a follow-up filed mid-run) is a commit of a ticket file after
+ * the landing, so the tip never has the landing's exact tree: `ticketDir` names the directory whose changes
+ * do not count, which no gate reads. Without it (GitHub) only an exact tree matches.
  */
-export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>): string | undefined => {
+export const landingOfTree = (root: string, tip: string, landed: ReadonlyMap<string, { commit: string }>, ticketDir?: string): string | undefined => {
   try {
     const want = treeOf(root, tip);
-    return [...landed].filter(([, r]) => treeOf(root, r.commit) === want).map(([id]) => id).pop();
+    const prefix = ticketDir ? `${ticketDir.replace(/^(\.\/)+/, "").replace(/\/+$/, "")}/` : undefined;
+    const same = (commit: string) => {
+      if (treeOf(root, commit) === want) return true;
+      if (!prefix || prefix === "/") return false;
+      const changed = sh("git", ["diff", "--no-renames", "--name-only", "-z", commit, tip], root).split("\0").filter(Boolean);
+      return changed.every((f) => f.startsWith(prefix));
+    };
+    return [...landed].filter(([, r]) => same(r.commit)).map(([id]) => id).pop();
   } catch {
     return undefined;
   }
