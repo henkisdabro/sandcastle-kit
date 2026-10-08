@@ -262,7 +262,7 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   a key that neither runs a program nor carries a credential, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
-  `sandcastle gates` before blaming the branch.
+  `sandcastle gates` (once the run has ended: it refuses while one is live) before blaming the branch.
 - **"red on <base> before any agent ran"**: the run spent no allowance, and the cause is the
   image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).
 - **A dry run** ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote

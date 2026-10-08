@@ -604,6 +604,9 @@ try {
       disableHostGitHooks();
       const project = await loadProject(root);
       pinHostGitConfig(project.root);
+      // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
+      // writes, and its commits and landings would read as tampering to the check below.
+      lockRun(project);
       const fingerprint = gitFingerprint(project);
       try {
         await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false);
