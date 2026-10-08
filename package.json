@@ -1,7 +1,7 @@
 {
   "name": "sandcastle-kit",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.11.0",
   "type": "module",
   "description": "Shared Sandcastle setup: one base image, one orchestrator, per-project config.",
   "bin": {
