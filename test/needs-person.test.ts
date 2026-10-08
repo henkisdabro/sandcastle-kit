@@ -31,6 +31,7 @@ const PERSON_PHRASES = [
   "the migration can't be run from here",
   "it needs production data to reproduce",
   "the check needs a login to the vendor site",
+  "the webhook secret needs the dashboard of the payment provider",
   "which of the two formats to keep is the maintainer's decision",
 ];
 const ROUTINE = ["the export module does not use the new rule yet", "the README does not mention the new flag", "the retry path is not covered by a test"];

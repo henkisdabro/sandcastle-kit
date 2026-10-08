@@ -116,7 +116,7 @@ test("a remainder that needs a person is not runnable: the summary suggests the 
   assert.doesNotMatch(section(out, "## Runnable now / Still blocked"), /#7/);
   assert.doesNotMatch(out, /picks up the remainder/);
   assert.match(section(out, "## Needs you"), /needs a person \(the agent's note\).*move it to the hold label \(`ready-for-human`\)/);
-  assert.match(section(out, "## Next step"), /Decide what is left on #7.*hold label \(`ready-for-human`\)/);
+  assert.match(section(out, "## Next step"), /Do or decide what is left on #7.*hold label \(`ready-for-human`\)/);
   assert.deepEqual(rerunnable(f)?.partial, []);
   assert.equal(afterTurn(f, "drain", 1, () => true)?.verdict, "stop");
 });

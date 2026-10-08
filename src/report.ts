@@ -882,7 +882,7 @@ export const render = (f: Facts, plain = false): string => {
   if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
   const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
   if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
-  if (partlyDecide.length) next.push(`Decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is settled, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
+  if (partlyDecide.length) next.push(`Do or decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   if (gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
