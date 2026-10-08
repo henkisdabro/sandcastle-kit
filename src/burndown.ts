@@ -976,7 +976,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -1381,9 +1381,10 @@ export const createPipeline = (ctx: PipelineContext) => {
       // base commits its merge brought in, which read as `commits=1 (review=14)`.
       const ownNow = () => ownCommits(base, branch, project.root);
       // What reviewers said no gate exercises; read whether or not the tracker lets agents write.
-      const ungated: string[] = [];
+      // A land-only branch runs no review: what its reviewers said stands from its head record, as `unmet` does.
+      const ungated: string[] = landOnly ? [readHeads(project.root)[issue.id]?.ungated ?? ""].filter(Boolean) : [];
       // What reviewers said of a gap in prose and filed nowhere (`gapOf`).
-      const gaps: string[] = [];
+      const gaps: string[] = landOnly ? [readHeads(project.root)[issue.id]?.gap ?? ""].filter(Boolean) : [];
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
@@ -1408,6 +1409,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
           changelog: changelog.length ? [...new Set(changelog)] : undefined,
           changelogDropped: changelogDropped || undefined,
+          ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
+          gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         };
       };
       if (landOnly && (mergeConflicted || carriedMerge) && greenHead !== undefined) {
@@ -1759,9 +1762,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       const head = sh("git", ["rev-parse", branch], project.root);
-      const { unmet: unmetNote, changelog: changelogNote } = agentsSaid();
+      const { unmet: unmetNote, changelog: changelogNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined, ungated: ungatedNote, gap: gapNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {
@@ -1779,8 +1782,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         head,
         carried,
         unreviewed,
-        ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
-        gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
+        ungated: ungatedNote,
+        gap: gapNote,
         changelog: changelogNote,
         changelogDropped: changelogDropped || undefined,
         unmet: unmetNote,
