@@ -2659,7 +2659,9 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // (`safety`: the shared .git changed) left in the record to file by hand, so the summary lists them either way.
   const stopLanding = async (error: unknown, safety: boolean): Promise<never> => {
     const why = String((error as Error).message ?? error);
-    run.update({ stopped: why, paused: undefined });
+    // A merge check that could not run before the stop is named in this summary too: the run's end never comes.
+    const mergeUnchecked = mergeCheckGap();
+    run.update({ stopped: why, paused: undefined, ...(mergeUnchecked && { mergeUnchecked }) });
     try {
       await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {

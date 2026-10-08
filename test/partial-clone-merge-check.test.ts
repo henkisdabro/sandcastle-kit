@@ -90,7 +90,11 @@ test("the closing summary names a merge check that could not run", () => {
 test("the call sites tell the run: conflictBefore, the landing precheck, the base merge check and the run record", () => {
   const read = (f: string) => readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
   assert.match(read("burndown.ts"), /noteMissingObjects\(project\.root, error\)/);
-  assert.match(read("burndown.ts"), /mergeUnchecked/);
+  // Both closing summaries: the run's end, and a run that stops mid-way (`stopLanding`), whose end never comes.
+  const burndown = read("burndown.ts");
+  assert.match(burndown, /run\.update\(\{ stage: "report", \.\.\.\(mergeUnchecked && \{ mergeUnchecked \}\) \}\)/);
+  const stopLanding = burndown.slice(burndown.indexOf("const stopLanding = "), burndown.indexOf("closingReport(project)", burndown.indexOf("const stopLanding = ")));
+  assert.match(stopLanding, /const mergeUnchecked = mergeCheckGap\(\);\s+run\.update\(\{ stopped: why, paused: undefined, \.\.\.\(mergeUnchecked && \{ mergeUnchecked \}\) \}\)/);
   assert.match(read("landing.ts"), /noteMissingObjects\(root, error\)/);
   assert.match(read("land.ts"), /noteMissingObjects\(root, error\)/);
 });
