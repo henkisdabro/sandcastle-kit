@@ -16,6 +16,44 @@ const MIN_GIT: [number, number] = [2, 38];
 
 let said = false;
 
+/**
+ * Whether `root` is a partial (promisor) clone: `extensions.partialClone`, or a remote with `promisor` or
+ * `partialclonefilter` set. Some of its objects live only on the remote, which a host merge check cannot fetch.
+ */
+export const isPartialClone = (root: string): boolean => {
+  try {
+    return !!sh("git", ["config", "--get-regexp", "^(extensions\\.partialclone|remote\\..*\\.(promisor|partialclonefilter))$"], root);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * What a partial clone's missing objects cost, in one sentence: the doctor's warning, the run's line and the closing summary share it.
+ * The checks never fetch: the remote's address is read from a `.git/config` that sandboxes can write, and a fetch would use the operator's credentials.
+ */
+export const PARTIAL_CLONE_GAP =
+  "the host's merge checks (a conflict before landing, a conflict resolution against git's own merge) read only the objects held here and never fetch, " +
+  "so on an object only the remote has they cannot run, and the merge is not checked; a full clone holds them all";
+
+let gap: string | undefined;
+/** The note a run records when a host merge check could not run for missing objects (`noteMissingObjects`); undefined while none has. */
+export const mergeCheckGap = () => gap;
+
+/**
+ * Whether `error` is git failing to read an object the partial clone `root` does not hold. Says so once, on screen,
+ * and remembers it for the closing summary: the callers go on as if the merge were clean, and without this nothing shows it.
+ */
+export const noteMissingObjects = (root: string, error: unknown): boolean => {
+  const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+  if (!/unable to read|could not read|missing (blob|tree|commit)|bad object|promisor/i.test(stderr) || !isPartialClone(root)) return false;
+  if (!gap) {
+    gap = `a host merge check could not run, because objects are missing in this partial clone: ${PARTIAL_CLONE_GAP}`;
+    console.log(`${gap}.`);
+  }
+  return true;
+};
+
 /** The refs involved: `ours` and `theirs` are what the merge joined, `resolved` is the resolver's result. */
 export type Resolution = {
   ours: string;
@@ -127,6 +165,7 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
     const inGenerated = (f: string) => generated.some((g) => g.paths.some((p) => covers(p, f)));
     return changed.filter((f) => !conflicted.has(f) && !inGenerated(f));
   } catch (error) {
+    if (noteMissingObjects(root, error)) return undefined;
     return unavailable(`git failed (${String(error).split("\n")[0].slice(0, 120)})`);
   }
 };

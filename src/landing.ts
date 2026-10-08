@@ -24,7 +24,7 @@ import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
 import { withSlot } from "./pool.ts";
-import { mergeTree, mergeTreeSupported } from "./resolution.ts";
+import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
@@ -519,7 +519,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     let conflicted: string[] = [];
     try {
       if (mergeTreeSupported(root, ctx.gitVersion)) conflicted = [...mergeTree(root, before, o.head!).conflicted];
-    } catch {
+    } catch (error) {
+      // Objects a partial clone lacks: said once, and the sandbox's own merge decides, as for any check that cannot run.
+      noteMissingObjects(root, error);
       conflicted = [];
     }
     if (conflicted.length && !regensFor(conflicted, project.generated)) {
