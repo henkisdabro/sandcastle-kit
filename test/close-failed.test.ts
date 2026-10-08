@@ -1,8 +1,10 @@
-// A close the tracker refuses once (a transient error) is tried a second time after a short wait,
-// and only a second refusal is recorded as `close-failed`: landOne (src/landing.ts) on a temp
-// repo with a fake tracker and a host worktree for the sandbox. No Docker, no gh, no network.
+// A close the tracker refuses is recorded as `close-failed`, the merge standing, and is not tried
+// again: a retry after a close that had posted its comment and then failed posted the comment
+// twice. The run releases the ticket's dependants all the same (test/release-dependants.test.ts).
+// landOne (src/landing.ts) on a temp repo with a fake tracker and a host worktree for the sandbox.
+// No Docker, no gh, no network.
 //
-//   node --test test/close-retry.test.ts
+//   pnpm test:file test/close-failed.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -20,7 +22,7 @@ const { gitFingerprint } = await import("../src/guard.ts");
 type Ctx = import("../src/landing.ts").LandContext;
 type Project = import("../src/config.ts").Project;
 
-const TMP = mkdtempSync(join(tmpdir(), "sandcastle-close-retry-"));
+const TMP = mkdtempSync(join(tmpdir(), "sandcastle-close-failed-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
 
@@ -79,21 +81,14 @@ const land = async (refusals: number) => {
     host: createHostGit(project, gitFingerprint(project)),
     gate: async () => ({ gates: [{ name: "test", pass: true }], failures: [] }),
     landed: new Map(),
-    closeRetryMs: 0,
   };
   const head = git(root, "rev-parse", "agent/issue-1");
   const landed = await landOne(ctx, { issue: "1", branch: "agent/issue-1", status: "green", commits: 1, repairs: 0, head });
   return { landed, calls };
 };
 
-test("a close that fails once is retried and the ticket lands as merged", async () => {
+test("a close the tracker refuses is recorded as close-failed, and asked once", async () => {
   const { landed, calls } = await land(1);
-  assert.deepEqual(landed, { kind: "merged" });
-  assert.equal(calls, 2);
-});
-
-test("a close that fails twice is recorded as close-failed, after exactly one retry", async () => {
-  const { landed, calls } = await land(5);
   assert.deepEqual(landed, { kind: "close-failed", error: "HTTP 502" });
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
 });

@@ -179,7 +179,6 @@ const runWith = async (
     host,
     gate: async () => ({ gates: [{ name: "test", pass: true }], failures: [] }),
     landed: new Map(),
-    closeRetryMs: 0,
   };
   const holds = createHoldRecord({ waiting, ref: tracker.ref, say });
 

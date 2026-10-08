@@ -89,7 +89,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   to push.
 
 - **A ticket the run merged but whose tracker close failed no longer holds its dependants** for the
-  rest of the run: a landed ticket counts as closed for them, and a refused close is retried once.
+  rest of the run: a landed ticket counts as closed for them.
 - **A landing merge that git's own merge says conflicts is refused again.** The host's tree check
   read every `merge-tree` failure as a git older than 2.38 and stepped aside; it now asks git's
   version instead.
