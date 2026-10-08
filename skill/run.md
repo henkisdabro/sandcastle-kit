@@ -125,9 +125,13 @@ This continues SKILL.md: run its "Before every action" first.
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git
    state as it is now. Run it from the project root and take the summary from its own stdout, not
    from a pane scrape. With `autonomy` set, one `sandcastle run` can hold several turns, each
-   printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows only
-   the last: read the earlier turns' `Autonomy level` lines and summaries from the run's output
-   (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
+   printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows the
+   last one's, which carries what the earlier turns left for a person: their held branches,
+   partly done remainders, checks by hand, gaps and follow-ups, each line ending `(turn N)`, with
+   their steps under Next step and in the headline's counts (a ticket a later turn ran again shows
+   only its latest ending). A turn the loop goes on from says so in one line instead of its steps.
+   The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
+   output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
    `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
    queued after the run started: quote the cause and name those tickets in the hand-back.
 

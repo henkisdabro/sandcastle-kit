@@ -107,6 +107,8 @@ export type Facts = {
   usage?: PlanUsage;
   /** The Codex plan usage the last record holds, when the run's cross-review spent a ChatGPT plan: the last reading, or none yet. */
   codexUsage?: PlanUsage;
+  /** What the earlier turns of the same `sandcastle run` left, oldest first: each turn's facts, cut to the tickets no later turn attempted (`gather` fills it from history.jsonl). */
+  carried?: { turn: number; facts: Facts }[];
   /** Set when the autonomy loop runs another turn straight after this one: nothing here is the operator's to do yet. */
   next?: { level: Level; turn: number; tickets: string[] };
 };
@@ -241,15 +243,21 @@ export const ticketPasses = (text: string, id: string, runId?: string): TicketPa
   return lines.filter((l) => l.run === run).map((l) => l.pass);
 };
 
-/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */
-export const gather = async (project: Project, probe: Probe = commandOf): Promise<Facts> => {
+type Opened = { number: number; title: string; createdAt: string };
+
+/**
+ * One turn's facts from its record. `earlier` marks a finished turn read back from history to be carried into
+ * the last turn's summary: only what a person owes is gathered (not the blockers, the branches standing, the
+ * tokens or the plan usage, which are the last turn's to say), and `earlier.until` closes the window of issues
+ * opened during it when the record has no end of its own.
+ */
+const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Opened[], earlier?: { until: string }): Promise<Facts> => {
   const root = project.root;
   const base = project.baseBranch;
-  const run = JSON.parse(readFileSync(join(root, ".sandcastle/logs/run.json"), "utf8"));
   const tickets = readTickets(run);
   // The asking process itself is neither another live run nor a killed one: it is summing itself
   // up, before its exit writes the end.
-  const alive = liveness({ record: run, self: process.pid }, probe);
+  const alive = earlier ? { state: "finished" as const } : liveness({ record: run, self: process.pid }, probe);
   const live = alive.state === "live";
 
   // Blockers read again now: this run's own merges close some of them, and a
@@ -257,7 +265,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   const runnable: string[] = [];
   const blocked: Facts["blocked"] = [];
   let blockCheck: string | undefined;
-  const waiting = Object.entries(tickets).filter(([, t]) => t.state === "blocked").map(([id]) => id);
+  const waiting = earlier ? [] : Object.entries(tickets).filter(([, t]) => t.state === "blocked").map(([id]) => id);
   if (waiting.length) {
     try {
       const tracker = makeTracker(project);
@@ -290,11 +298,13 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     }
   }
 
-  const upstream = git(["rev-parse", "--abbrev-ref", `${base}@{upstream}`], root);
+  const upstream = earlier ? undefined : git(["rev-parse", "--abbrev-ref", `${base}@{upstream}`], root);
   const ahead = upstream ? Number(git(["rev-list", "--count", `${upstream}..${base}`], root) ?? NaN) : undefined;
-  const standing = (git(["branch", "--format=%(refname:short)", "--list", "agent/*"], root) ?? "")
-    .split("\n")
-    .filter((b) => b && (git(["cherry", base, b], root) ?? "").split("\n").some((l) => l.startsWith("+")));
+  const standing = earlier
+    ? []
+    : (git(["branch", "--format=%(refname:short)", "--list", "agent/*"], root) ?? "")
+        .split("\n")
+        .filter((b) => b && (git(["cherry", base, b], root) ?? "").split("\n").some((l) => l.startsWith("+")));
   const changed: Record<string, number> = {};
   for (const [id, t] of Object.entries(tickets)) {
     if (t.state !== "held") continue;
@@ -332,17 +342,10 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   // summing itself up has not written its own, so the window closes only for a finished run:
   // otherwise `sandcastle report` would list whatever a person opens afterwards, every time.
   // Dates are compared here, not with a shell `date`, which differs on macOS.
-  let filed: { id: string; title: string }[] = [];
-  if (project.tracker.kind === "github") {
-    try {
-      const open = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", project.tracker.triage, "--limit", "500", "--json", "number,title,createdAt"], root)) as { number: number; title: string; createdAt: string }[];
-      const from = Date.parse(run.startedAt);
-      const to = alive.state === "finished" && run.finishedAt ? Date.parse(run.finishedAt) : Infinity;
-      filed = open.filter((i) => Date.parse(i.createdAt) >= from && Date.parse(i.createdAt) <= to).map((i) => ({ id: String(i.number), title: i.title }));
-    } catch {
-      filed = [];
-    }
-  }
+  // The issues are listed once for the run's turns (`gather`); each turn takes those opened in its own window.
+  const from = Date.parse(run.startedAt);
+  const to = earlier ? Date.parse(run.finishedAt ?? earlier.until) : alive.state === "finished" && run.finishedAt ? Date.parse(run.finishedAt) : Infinity;
+  const filed = opened.filter((i) => Date.parse(i.createdAt) >= from && Date.parse(i.createdAt) <= to).map((i) => ({ id: String(i.number), title: i.title }));
 
   // The record is a file in a repository: an entry without a title and a source says nothing.
   const followUps: FiledFollowUp[] = (Array.isArray(run.followUps) ? run.followUps : []).filter(
@@ -363,7 +366,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   );
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
-  const timed = existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
+  const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
 
   return {
     base,
@@ -409,9 +412,83 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
     mergeUnchecked: typeof run.mergeUnchecked === "string" ? run.mergeUnchecked : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
-    usage: readPlanUsages(run.usage).find((u) => u.provider === "claude"),
-    codexUsage: readPlanUsages(run.usage).find((u) => u.provider === "codex"),
+    usage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "claude"),
+    codexUsage: earlier ? undefined : readPlanUsages(run.usage).find((u) => u.provider === "codex"),
   };
+};
+
+/** Open issues carrying the triage label, with their creation times (GitHub only; an unreadable list is none). */
+const openedIssues = (project: Project): Opened[] => {
+  if (project.tracker.kind !== "github") return [];
+  try {
+    const list = JSON.parse(sh("gh", ["issue", "list", "--state", "open", "--label", project.tracker.triage, "--limit", "500", "--json", "number,title,createdAt"], project.root));
+    return Array.isArray(list) ? (list as Opened[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * The earlier turns of the run `run` is a turn of, oldest first, from the end of history.jsonl: the lines of
+ * the same process and project whose `settings.turn` counts down from this turn - 1 to 1, stopping at the first
+ * line that does not. The copy of this turn's own record a finished turn leaves in history is skipped. A turn
+ * 1, or a record with no `settings.turn` (an older kit), has none.
+ */
+const earlierTurns = (root: string, run: any): any[] => {
+  const turn = run.settings?.turn;
+  const file = join(root, ".sandcastle/logs/history.jsonl");
+  if (!Number.isInteger(turn) || turn < 2 || !existsSync(file)) return [];
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean).reverse();
+  const found: any[] = [];
+  for (const text of lines) {
+    const record = parseRecord(text) as any;
+    if (record?.startedAt === run.startedAt) continue;
+    if (!record || record.pid !== run.pid || record.orchestrator !== run.orchestrator || record.settings?.turn !== turn - 1 - found.length) break;
+    found.unshift(record);
+    if (found.length === turn - 1) break;
+  }
+  // A chain that stops short of turn 1 is not this run's: a line of another run could have the right number.
+  return found.length === turn - 1 ? found : [];
+};
+
+/** Whether a later turn's record of a ticket is an attempt at it: not still waiting, and not a ticket put back in the queue unstarted. */
+const attemptedIn = (t: TicketRecord) => sectionOf(t.state) !== undefined && !LEFT.includes(t.state!) && !(t.state === "queued" && !t.requeued);
+
+/**
+ * What the earlier turns of this run left, each turn's facts cut to the tickets no later turn attempted (a
+ * later ending replaces an earlier one), and a partly done ticket closed since dropped.
+ */
+const carriedTurns = async (project: Project, run: any, probe: Probe, opened: Opened[]): Promise<NonNullable<Facts["carried"]>> => {
+  const turns = earlierTurns(project.root, run);
+  const carried: NonNullable<Facts["carried"]> = [];
+  let tracker: ReturnType<typeof makeTracker> | undefined;
+  for (const [i, record] of turns.entries()) {
+    const replaced = new Set([...turns.slice(i + 1), run].flatMap((later) => Object.entries(readTickets(later)).filter(([, t]) => attemptedIn(t)).map(([id]) => id)));
+    const kept = Object.fromEntries(Object.entries(readTickets(record)).filter(([id]) => !replaced.has(id)));
+    const until = (turns[i + 1] ?? run).startedAt;
+    const facts = await gatherTurn(project, { ...record, tickets: kept }, probe, opened, { until });
+    // Still open: a remainder a person closed since is done. An unreadable tracker keeps it, as a person should look.
+    for (const [id, t] of Object.entries(facts.tickets)) {
+      if (t.state !== "merged" || !t.unmet) continue;
+      try {
+        tracker ??= makeTracker(project);
+        if (!tracker.get(id).open) delete facts.tickets[id];
+      } catch {
+        /* keep it */
+      }
+    }
+    carried.push({ turn: record.settings.turn, facts });
+  }
+  return carried;
+};
+
+/** `probe` is the process check (src/live-runs.ts `commandOf`); a test passes its own. */
+export const gather = async (project: Project, probe: Probe = commandOf): Promise<Facts> => {
+  const run = JSON.parse(readFileSync(join(project.root, ".sandcastle/logs/run.json"), "utf8"));
+  const opened = openedIssues(project);
+  const facts = await gatherTurn(project, run, probe, opened);
+  const carried = await carriedTurns(project, run, probe, opened);
+  return carried.length ? { ...facts, carried } : facts;
 };
 
 const LEVELS = [0, 1, 2, 3, "drain"];
@@ -511,11 +588,15 @@ export const verifySkippedLine = (base: string, proof: { commit: string; by?: st
   return `Merged ${base} re-gated: green at ${String(proof.commit).slice(0, 7)} already${image} (${said}) - not run again`;
 };
 
-/** The closing summary as Markdown-ish text, every section present. */
-export const render = (f: Facts, plain = false): string => {
+const nameOf = (f: Facts, id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
+const listOf = (xs: string[]) => xs.map(refOf).join(" ") || "none";
+
+/**
+ * Where each ticket of a turn stands with a person, as the Needs you section and its Next steps read it.
+ * Both the last turn and each carried one (`Facts.carried`) go through it, so a held branch is worded alike.
+ */
+const owed = (f: Facts) => {
   const ids = (states: TicketState[]) => Object.entries(f.tickets).filter(([, t]) => !!t.state && states.includes(t.state)).map(([id]) => id);
-  const name = (id: string) => `${refOf(id)}${f.tickets[id]?.title ? ` ${f.tickets[id].title}` : ""}`;
-  const list = (xs: string[]) => xs.map(refOf).join(" ") || "none";
   const merged = ids(["merged"]);
   // Merged, but the tracker refused the close: the work is on base, the ticket still open.
   const notClosed = merged.filter((id) => f.tickets[id].closeFailed);
@@ -528,7 +609,6 @@ export const render = (f: Facts, plain = false): string => {
   const partlyDecide = partly.filter((id) => needsDecision(f.tickets[id].unmet!));
   // Still open but out of the queue (a person held or unlabelled it): no run takes it. Unknown when the queue was unreadable.
   const partlyAway = f.partial ? partly.filter((id) => !f.partial!.includes(id) && !partlyDecide.includes(id)) : [];
-  const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
   // Merged with green gates, but the reviewer said no gate exercises the change. Only merged
   // tickets: a held or red one is already in front of a person, and a dry run merges nothing.
   const ungated = merged.filter((id) => f.tickets[id].ungated);
@@ -545,6 +625,121 @@ export const render = (f: Facts, plain = false): string => {
   // Marked for a human by a person mid-run: they took it; the branch is only there if it helps.
   const takenBack = held.filter((id) => !handedBack.includes(id) && f.outcomes?.[id] === "taken back");
   const heldWork = held.filter((id) => !handedBack.includes(id) && !takenBack.includes(id) && !gone.includes(id));
+  // Finished, but the commit was refused: the work sits in a kept worktree.
+  const uncommitted = ids(["uncommitted"]);
+  // The follow-ups, split the way their lines under Needs you are: filed, whose filing failed (a person files it by
+  // hand, so it needs them), and not filed yet - a dry run's, which a real run would file, or those of a run that
+  // ended before its filing. The last are counted to triage with the filed ones: they are what a real run leaves there.
+  const followUps = f.followUps ?? [];
+  // Unfiled in a real run (a failed filing, or a stop after which the kit writes nothing more to the tracker) is
+  // a person's to file; unfiled in a dry run is what a real run would leave for triage.
+  const filingFailed = followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).length;
+  const toTriage = (f.filed ?? []).length + followUps.filter((u) => u.id || (!u.failed && f.dryRun)).length;
+  return { ids, merged, notClosed, partly, closed, partlyRerun, partlyDecide, partlyAway, ungated, gapped, byHand, held, gone, handedBack, takenBack, heldWork, uncommitted, followUps, filingFailed, toTriage };
+};
+type Owed = ReturnType<typeof owed>;
+
+/** One follow-up as a Needs you bullet: filed for triage, whose filing failed, or not filed yet. */
+const followUpLine = (f: Facts, u: FiledFollowUp) => {
+  const from = `from ${refOf(u.from)} (${u.phase})`;
+  return u.id
+    ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
+    : u.failed
+      ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
+      : f.dryRun
+        ? `- ${u.title} - ${from}: a real run files it for triage`
+        : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
+};
+
+/**
+ * The Needs you bullets of a turn's tickets: a held branch, a partly done remainder, a check by hand, a gap. A
+ * carried turn (`carried`) leaves out two kinds a person is not asked about for an earlier turn: a commit that was
+ * refused, and a close that failed (the next run closes it).
+ */
+const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
+  const name = (id: string) => nameOf(f, id);
+  const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
+  const keptAt = (id: string) => f.keptWorktrees.find((k) => k.issue === id)?.path ?? f.tickets[id].note?.replace(/^work left uncommitted in /, "") ?? "its kept worktree";
+  return [
+    ...(carried ? [] : o.uncommitted).map(
+      (id) =>
+        `- ${name(id)} - finished but not committed - the work is in ${keptAt(id)}. Fix what refused the commit (the agent's comment says), then \`sandcastle requeue <ticket>\`: the next run reuses that worktree. Or commit it there yourself.`,
+    ),
+    ...o.heldWork.flatMap((id) => {
+      const t = f.tickets[id];
+      const size = f.changed[id] !== undefined ? ` - ${f.changed[id]} file(s)` : "";
+      const why = t.files?.length ? `changes ${t.files.join(", ")}` : (t.note ?? "held");
+      // A criterion the agents left undone travels with the branch: whoever lands it by hand sees it first
+      // (`sandcastle land` merges it as partly done and leaves the ticket open).
+      const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
+      return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
+    }),
+    ...o.gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
+    ...o.takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
+    ...o.handedBack.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"}, no commits - read the agent's comment: do it yourself and close the ticket, or answer its question and requeue it`),
+    // The next run finds its own merge message and closes the ticket, so
+    // nobody should merge or redo the work.
+    ...(carried ? [] : o.notClosed).map(
+      (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
+    ),
+    // The criterion is the agent's own words, cut at the cap like an ungated note. The implementer may
+    // have said it, not a reviewer, so the pointer names every agent log of the ticket.
+    ...o.partly.map((id) => {
+      const note = f.tickets[id].unmet ?? "";
+      const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
+      const then = o.partlyDecide.includes(id)
+        ? `the remainder needs a person (the agent's note), so a run would only ask it again: do or decide it and close the ticket, or move it to the hold label${holdLabel}`
+        : o.partlyAway.includes(id)
+          ? "the ticket is still open but no longer in the queue, so no run takes it"
+          : "and the next `sandcastle run` picks up the remainder";
+      return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open${o.partlyDecide.includes(id) || o.partlyAway.includes(id) ? "; " : ", "}${then}`;
+    }),
+    // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
+    ...o.ungated.map((id) => {
+      const note = f.tickets[id].ungated ?? "";
+      const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+      return `- ${name(id)} - merged - check by hand: ${note}${more}`;
+    }),
+    // The reviewer's own sentence, cut at the cap like an ungated note.
+    ...o.gapped.map((id) => {
+      const note = f.tickets[id].gap ?? "";
+      const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+      return `- ${name(id)} - merged - the reviewer named a gap it did not file: ${note}${more}`;
+    }),
+  ];
+};
+
+/** The Next steps for what `ticketLines` lists, in the order the summary gives them. */
+const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
+  const list = listOf;
+  const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
+  const next: string[] = [];
+  if (o.heldWork.length) next.push(`Review and merge the ${o.heldWork.length} held branch(es) (commands above).`);
+  if (o.gone.length) next.push(`Decide ${list(o.gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
+  if (o.handedBack.length) next.push(`Read the agent's comment on ${list(o.handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
+  if (o.notClosed.length && !carried) next.push(`Close ${list(o.notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
+  const partlyNext = o.partly.filter((id) => !o.partlyDecide.includes(id) && !o.partlyAway.includes(id));
+  if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
+  if (o.partlyDecide.length) next.push(`Do or decide what is left on ${list(o.partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
+  if (o.partlyAway.length) next.push(`${list(o.partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
+  if (o.ungated.length) next.push(`Check ${list(o.ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
+  if (o.gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(o.gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
+  return next;
+};
+
+/** Ends a carried bullet with the turn it comes from; the indented rows under one are commands to copy, and stay as they are. */
+const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWith("- ") ? `${l} (turn ${turn})` : l));
+
+/** The closing summary as Markdown-ish text, every section present. */
+export const render = (f: Facts, plain = false): string => {
+  const o = owed(f);
+  const { ids, merged, notClosed, partly, closed, partlyRerun, partlyDecide, partlyAway, ungated, gapped, byHand, held, gone, handedBack, heldWork, uncommitted, followUps, filingFailed, toTriage } = o;
+  const name = (id: string) => nameOf(f, id);
+  const list = listOf;
+  // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
+  const carried = (f.carried ?? []).map(({ turn, facts }) => ({ turn, facts, o: owed(facts) }));
+  const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated, ...c.o.gapped]).size + c.o.filingFailed, 0);
+  const carriedTriage = carried.reduce((n, c) => n + c.o.toTriage, 0);
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
   // it runs again next time, and nothing here asks a person to act on it.
@@ -566,23 +761,12 @@ export const render = (f: Facts, plain = false): string => {
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
   const nochange = ids(["nochange"]);
-  // Finished, but the commit was refused: the work sits in a kept worktree.
-  const uncommitted = ids(["uncommitted"]);
-  const keptAt = (id: string) => f.keptWorktrees.find((k) => k.issue === id)?.path ?? f.tickets[id].note?.replace(/^work left uncommitted in /, "") ?? "its kept worktree";
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
   // A dry run's green branches end as "ready": they would have merged.
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
   const attempted = baseRed ? 0 : Object.values(f.tickets).filter((t) => sectionOf(t.state) && !LEFT.includes(t.state!) && !(t.state === "withdrawn" && !t.started)).length - unstarted.length;
-  // The follow-ups, split the way their lines under Needs you are: filed, whose filing failed (a person files it by
-  // hand, so it needs them), and not filed yet - a dry run's, which a real run would file, or those of a run that
-  // ended before its filing. The last are counted to triage with the filed ones: they are what a real run leaves there.
-  const followUps = f.followUps ?? [];
-  // Unfiled in a real run (a failed filing, or a stop after which the kit writes nothing more to the tracker) is
-  // a person's to file; unfiled in a dry run is what a real run would leave for triage.
-  const filingFailed = followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).length;
-  const toTriage = (f.filed ?? []).length + followUps.filter((u) => u.id || (!u.failed && f.dryRun)).length;
   const closedWhere = f.tracker === "github" ? "closed on GitHub" : "marked done in their ticket files (committed on your local " + f.base + ")";
   // The image the verify ran on, from the record (a file in a repository: a value of the wrong type is no image). The
   // run's image is built before any ticket lands, so a Dockerfile a merged ticket changed is not in it: the verify
@@ -601,16 +785,6 @@ export const render = (f: Facts, plain = false): string => {
   const out: string[] = [];
   // NO_COLOR asks for no decoration; the caller decides, so render stays pure.
   const h = (decorated: string, bare: string) => (plain ? bare : decorated);
-  const followUpLine = (u: FiledFollowUp) => {
-    const from = `from ${refOf(u.from)} (${u.phase})`;
-    return u.id
-      ? `- ${refOf(u.id)} ${u.title} - filed for triage ${from}: triage it, then queue or close it`
-      : u.failed
-        ? `- ${u.title} - ${from}: filing it for triage failed (${u.failed}) - file it by hand`
-        : f.dryRun
-          ? `- ${u.title} - ${from}: a real run files it for triage`
-          : `- ${u.title} - ${from}: not filed, as the run stopped before it could - file it by hand`;
-  };
   const section = (heading: string, lines: string[]) => out.push("", heading, ...(lines.length ? lines : ["none"]));
 
   // Headline. A killed run wrote no end: "now" would be whenever the report
@@ -622,9 +796,9 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated, ...gapped]).size + (f.baseRed ?? []).length + filingFailed} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated, ...gapped]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
-      `${toTriage ? `${toTriage} to triage - ` : ""}` +
+      `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
@@ -699,63 +873,30 @@ export const render = (f: Facts, plain = false): string => {
   section(h("## ✅ Done", "## Done"), done);
 
   // Needs you
+  const triaged = (g: Facts, u: FiledFollowUp) => !!u.id || (!u.failed && g.dryRun);
   section(
     h("## 🙋 Needs you", "## Needs you"),
     [
-      ...uncommitted.map(
-        (id) =>
-          `- ${name(id)} - finished but not committed - the work is in ${keptAt(id)}. Fix what refused the commit (the agent's comment says), then \`sandcastle requeue <ticket>\`: the next run reuses that worktree. Or commit it there yourself.`,
-      ),
-      ...heldWork.flatMap((id) => {
-        const t = f.tickets[id];
-        const size = f.changed[id] !== undefined ? ` - ${f.changed[id]} file(s)` : "";
-        const why = t.files?.length ? `changes ${t.files.join(", ")}` : (t.note ?? "held");
-        // A criterion the agents left undone travels with the branch: whoever lands it by hand sees it first
-        // (`sandcastle land` merges it as partly done and leaves the ticket open).
-        const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
-        return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   merge: git merge --no-ff agent/issue-${id}`];
-      }),
-      ...gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
-      ...takenBack.map((id) => `- ${name(id)} - ${f.tickets[id].note} - branch agent/issue-${id} has the agents' work, if it helps`),
-      ...handedBack.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"}, no commits - read the agent's comment: do it yourself and close the ticket, or answer its question and requeue it`),
-      // The next run finds its own merge message and closes the ticket, so
-      // nobody should merge or redo the work.
-      ...notClosed.map(
-        (id) => `- ${name(id)} - merged, but closing the ticket failed: ${f.tickets[id].closeFailed} - the next \`sandcastle run\` closes it, or close it by hand`,
-      ),
-      // The criterion is the agent's own words, cut at the cap like an ungated note. The implementer may
-      // have said it, not a reviewer, so the pointer names every agent log of the ticket.
-      ...partly.map((id) => {
-        const note = f.tickets[id].unmet ?? "";
-        const more = note.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : "";
-        const then = partlyDecide.includes(id)
-          ? `the remainder needs a person (the agent's note), so a run would only ask it again: do or decide it and close the ticket, or move it to the hold label${holdLabel}`
-          : partlyAway.includes(id)
-            ? "the ticket is still open but no longer in the queue, so no run takes it"
-            : "and the next `sandcastle run` picks up the remainder";
-        return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open${partlyDecide.includes(id) || partlyAway.includes(id) ? "; " : ", "}${then}`;
-      }),
-      // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
-      ...ungated.map((id) => {
-        const note = f.tickets[id].ungated ?? "";
-        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
-        return `- ${name(id)} - merged - check by hand: ${note}${more}`;
-      }),
-      // The reviewer's own sentence, cut at the cap like an ungated note.
-      ...gapped.map((id) => {
-        const note = f.tickets[id].gap ?? "";
-        const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
-        return `- ${name(id)} - merged - the reviewer named a gap it did not file: ${note}${more}`;
-      }),
+      ...ticketLines(f, o, false),
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
       // Filing failed or never happened in a real run: a person files it by hand, so it is theirs, not triage's.
-      ...followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).map((u) => followUpLine(u)),
+      ...followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).map((u) => followUpLine(f, u)),
+      // What the earlier turns of this run left, oldest first: the loop's later turns only re-run some tickets, so
+      // the rest would be said nowhere else.
+      ...carried.flatMap((c) => [
+        ...fromTurn(c.turn, ticketLines(c.facts, c.o, true)),
+        ...fromTurn(c.turn, c.o.followUps.filter((u) => !u.id && (u.failed || !c.facts.dryRun)).map((u) => followUpLine(c.facts, u))),
+      ]),
       // The rest are for triage, under a heading of their own so the headline's `need you` and `to triage` each
       // match a group of bullets.
-      ...(toTriage ? ["### To triage"] : []),
-      ...followUps.filter((u) => u.id || (!u.failed && f.dryRun)).map((u) => followUpLine(u)),
+      ...(toTriage + carriedTriage ? ["### To triage"] : []),
+      ...followUps.filter((u) => triaged(f, u)).map((u) => followUpLine(f, u)),
       ...(f.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`),
+      ...carried.flatMap((c) => [
+        ...fromTurn(c.turn, c.o.followUps.filter((u) => triaged(c.facts, u)).map((u) => followUpLine(c.facts, u))),
+        ...fromTurn(c.turn, (c.facts.filed ?? []).map((i) => `- #${i.id} ${i.title} - opened during this run: triage it, then queue or close it`)),
+      ]),
     ],
   );
 
@@ -883,16 +1024,9 @@ export const render = (f: Facts, plain = false): string => {
         `the next \`sandcastle run\` resumes each branch, merging ${f.base} into it first; or fix one yourself and land it: \`sandcastle land <n>\`.`,
     );
   }
-  if (heldWork.length) next.push(`Review and merge the ${heldWork.length} held branch(es) (commands above).`);
-  if (gone.length) next.push(`Decide ${list(gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
-  if (handedBack.length) next.push(`Read the agent's comment on ${list(handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
-  if (notClosed.length) next.push(`Close ${list(notClosed)} (merged, still open), or leave it to the next \`sandcastle run\`.`);
-  const partlyNext = partly.filter((id) => !partlyDecide.includes(id) && !partlyAway.includes(id));
-  if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
-  if (partlyDecide.length) next.push(`Do or decide what is left on ${list(partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
-  if (partlyAway.length) next.push(`${list(partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
-  if (ungated.length) next.push(`Check ${list(ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
-  if (gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
+  next.push(...ticketSteps(f, o, false));
+  // The earlier turns' steps follow, each marked: only the last turn's summary says them, and its own were no help for those tickets.
+  for (const c of carried) next.push(...ticketSteps(c.facts, c.o, true).map((n) => n.replace(/\.$/, ` (turn ${c.turn}).`)));
   const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.
@@ -923,7 +1057,7 @@ export const render = (f: Facts, plain = false): string => {
   if (f.standing.length && !baseRed) next.push("`sandcastle clean` once the branches above are resolved.");
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
   const steps = f.next
-    ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level === "drain" ? `at most ${DRAIN_CAP}` : f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; nothing to do yet.`, ...(push ? [push] : [])]
+    ? [`Autonomy level ${f.next.level} runs turn ${f.next.turn} of ${f.next.level === "drain" ? `at most ${DRAIN_CAP}` : f.next.level} next for ${f.next.tickets.map(refOf).join(", ")}; what needs you from this turn is carried into the last turn's summary.`, ...(push ? [push] : [])]
     : next;
   section(h("## 👉 Next step", "## Next step"), steps.map((n, i) => `${i + 1}. ${n}`));
   return out.join("\n");

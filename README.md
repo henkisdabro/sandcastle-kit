@@ -871,7 +871,7 @@ are now. Then:
 
 `autonomy` (or `AUTONOMY_LEVEL` for one run) lets one `sandcastle run` take further turns by itself:
 after a turn it re-runs only the tickets that ended in a merge conflict, whose blockers have now
-landed, or that merged partly done and are still queued - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary.
+landed, or that merged partly done and are still queued - `1` asks first, `2` re-runs once, `3` up to twice. Each turn prints its own closing summary, and the last one also carries what the earlier turns left for a person (a held branch, a partly done remainder, a check by hand, a follow-up to triage), each line ending `(turn N)`, so `sandcastle report` and `sandcastle wait` never say "Needs you: none" while work waits on you.
 A dry run, a stopped run, a run that hit a usage limit and a merged base that is red never re-run.
 
 `autonomy: "drain"` (or `AUTONOMY_LEVEL=drain`) keeps taking turns until no ticket is left to run
