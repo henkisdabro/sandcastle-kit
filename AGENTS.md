@@ -102,6 +102,7 @@ read a module's section there before changing it.
 | `docs/releasing.md` | Version bumps, the tag and the release notes' shape |
 | `test/full-check.sh` | Every check below on this machine, in a Linux container and the outbound scan of the commits not yet on `origin/main`, all legs side by side; the suite runs as `test/shard.ts`'s shards through `test/run-shards.sh`, their count from `test/shard-count.sh` (the cores shared between the passes at once) |
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
+| `evals/routing/` | The routing eval: landed tickets replayed through the kit under model and effort pairings, graded by the tests the reference landed with; `run --spend` spends allowance, `validate` and `report` make no model calls. Its README has the design |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
 `@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in

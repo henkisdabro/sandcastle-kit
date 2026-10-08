@@ -1,0 +1,679 @@
+[
+  {
+    "issue": 477,
+    "title": "A drain that stops on a red merged base exits 0",
+    "merge": "8e59f98c9d9449323f7a34b03b4bfb248cced18c",
+    "base": "06e2e04227af5b9cedc9f153ab1bb2249bbf795f",
+    "ref": "a74ebaf04fc98433d3be4cdf19ac28e102511c21",
+    "files": 5,
+    "lines": 87,
+    "overlay": [
+      "test/red-base-exit.test.ts"
+    ],
+    "hidden": [
+      "test/red-base-exit.test.ts"
+    ],
+    "sourceReading": [
+      "test/red-base-exit.test.ts"
+    ],
+    "ticket": {
+      "body": "A drain that stops because the merged base is red ends with `sandcastle run ended (exit 0)`, and `run.json` records `exitCode: 0`. `sandcastle wait` hands that code to a harness (`skill/run.md`, README), so an automated caller sees success on a base the summary says not to push.\n\n## Where\n\nThe drain loop in `src/cli.ts` breaks out on a red merged base without setting `process.exitCode`. Today only an `OperatorError` sets 1.\n\n## Fix\n\nExit non-zero (1, or a documented code of its own) when the run's last verify was red, whatever the autonomy level. Name the code in the README beside `sandcastle wait`.\n\n## Done when\n\n- A test of the drain stopping on a red base sees a non-zero exit and `exitCode` in the run record.\n- `pnpm test` passes.\n\nTouches: src/cli.ts, README.md\n\nFound closing the v0.11.0 dogfood run.",
+      "comments": [
+        "Triage: ready as written, pulled into v0.11.0. Exit 1 when the run's last verify was red, at every autonomy level; say so in the README beside `sandcastle wait`."
+      ],
+      "seams": [
+        "- `redBaseExit` exported from `src/autonomy.ts`: `export const redBaseExit = (facts: Pick<Facts, \"verify\"> | undefined): 1 | undefined`"
+      ]
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "S",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.458,
+      "reviewUSD": 0.456,
+      "implementMinutes": 2.8,
+      "implAlone": "no review commit"
+    },
+    "pilot": true
+  },
+  {
+    "issue": 416,
+    "title": "queue --lint: list Touches paths absent from the base branch",
+    "merge": "f70e4d25612d7e4db5a277bbb8406d8bba86921f",
+    "base": "5ba2ee79e3f7872d542a4807b75e59023648d319",
+    "ref": "4a48f7242f5cf946e29d0e55946bb4fb5b7e03fd",
+    "files": 6,
+    "lines": 123,
+    "overlay": [
+      "test/lint-missing-touches.test.ts"
+    ],
+    "hidden": [
+      "test/lint-missing-touches.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "Drafted tickets often name paths that do not exist: 6 of 13 tickets in one queue session had `Touches:` lines naming test files such as `test/pool.test.ts` or `test/prompts.test.ts`, each checked by hand. `expandTouches` (`src/touches.ts`) correctly keeps a plain path that matches nothing (a new file can still overlap), and silently drops a glob that matches nothing; `queue --lint` says nothing about either. `skill/queue.md` says a new file is marked as new in the ticket's prose under `## Fix`, never on the `Touches:` line.\n\n## Fix\n\n- In `lintQueue` (`src/lint.ts`), for each ticket list the plain `Touches:` paths with no match on the base branch, and the globs that match nothing, under its problems: \"#12 names paths not on <base>: a, b - new files (say so under ## Fix) or typos?\".\n- Skip a path the body names, outside the `Touches:` line, next to the word \"new\".\n- It stays advice: the exit status is unchanged.\n- `skill/queue.md`'s lint step mentions the new line.\n- Its tests go in a new file, `test/lint-missing-touches.test.ts`.\n\n## Done when\n\n- A ticket naming a missing path is listed; one naming it as new under `## Fix` is not; a glob matching nothing is listed; existing paths are not.\n\nTouches: src/lint.ts, src/touches.ts, skill/queue.md",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "feature",
+      "size": "M",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.285,
+      "reviewUSD": 0.477,
+      "implementMinutes": 4.1,
+      "implAlone": "caught"
+    },
+    "pilot": true
+  },
+  {
+    "issue": 418,
+    "title": "sandcastle usage: print the plan's usage, read-only",
+    "merge": "e0080be0f5c39773f160cc71b951317972f30a1b",
+    "base": "21a62594d824d3388316e6c9d370106bed979232",
+    "ref": "3b2d2cd11289f3ca89dfbcbf8d0eafdc2356702a",
+    "files": 7,
+    "lines": 276,
+    "overlay": [
+      "test/usage-command.test.ts"
+    ],
+    "hidden": [
+      "test/usage-command.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "Agents have written scratch scripts importing `src/usage.ts` to read the plan's usage between runs (one failed on a wrong signature). No command prints it outside a live run's status view: `doctor --verify` only checks the usage endpoint answers, and the closing summary's \"Plan usage at the end\" line covers the last run only.\n\n## Fix\n\n- A new read-only command, `sandcastle usage`: it prints the newest reading the run record or history holds, with its age; with none recent, it makes one request through `usageToken`'s credential, as the `USAGE_CHECK` guard does (the endpoint is rate-limited, so no more than one).\n- It prints that the sandboxes spend API credits, not a plan, when they would use `ANTHROPIC_API_KEY`. It makes no model calls.\n- A help entry in `src/cli.ts`'s header; its tests go in a new file, `test/usage-command.test.ts`.\n\n## Done when\n\n- With a fresh reading on record, it prints it with its age and makes no request; with none, a faked endpoint is asked once; with an API key in use, it says so.\n\nTouches: src/cli.ts, src/usage.ts, README.md",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "feature",
+      "size": "M",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.813,
+      "reviewUSD": 0.728,
+      "implementMinutes": 4.2,
+      "implAlone": "caught"
+    },
+    "pilot": true
+  },
+  {
+    "issue": 399,
+    "title": "Drain turns re-gate a base commit that verify or a landing just passed",
+    "merge": "0b9587f6f2c03d62aa711aa4cba0aea9ccfb26a0",
+    "base": "2df4c042b1a58611e8a2c5a30d3c3812f8cbf7d1",
+    "ref": "0b4688b397d3bbe14fd98e221394ac13a6eae246",
+    "files": 6,
+    "lines": 277,
+    "overlay": [
+      "test/base-gates-recorded.test.ts",
+      "test/sandbox-cpus-start-line.test.ts"
+    ],
+    "hidden": [
+      "test/base-gates-recorded.test.ts",
+      "test/sandbox-cpus-start-line.test.ts"
+    ],
+    "sourceReading": [
+      "test/sandbox-cpus-start-line.test.ts"
+    ],
+    "ticket": {
+      "body": "## Problem\n\nEach drain turn starts by gating the base, even when that exact commit was gated green moments earlier by the previous turn's verify or the last landing. In one run, turn 2 spent 190 s of the only gate slot gating the commit verify had passed 13 s before, and turn 3 199 s on the commit #384's landing gates had just passed: 6.5 minutes on the critical path.\n\nOnly `requireGreenBase` records a green base (`noteBaseResult` in src/gates.ts, `.sandcastle/.run/base-gates.json`); verify in src/burndown.ts never writes it, and nor does a landing.\n\n## Fix\n\n- After a green verify, record the result with the same key the base check reads (`baseKey`: project, image, plan file), so the next turn's base check skips it.\n- After a green landing whose merge commit is the base tip (the last landing of a turn with a single landing), record it the same way.\n- The start line says `Gates on main: green at <sha> already (verified this run)` when it skips.\n\n## Done when\n\n- A test: a verify that passes writes the base record for that commit; a following `requireGreenBase` on the same commit, image and plan runs no gate and says so.\n- A test: a red verify writes red, and the next base check runs the gates.\n- A change of image or plan file still re-gates.\n\nTouches: src/gates.ts, src/burndown.ts, src/landing.ts, test/base-gates-timings.test.ts",
+      "comments": [],
+      "seams": [
+        "- `verifyBase` exported from `src/gates.ts`: `export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string)`"
+      ]
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "M",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.753,
+      "reviewUSD": 0.95,
+      "implementMinutes": 6.8,
+      "implAlone": "caught",
+      "laterBug": "\"(verified this run)\" keyed on startedAt, which every drain turn rewrites, so it never matched after turn 1 (f52de0a)"
+    },
+    "probes": [
+      {
+        "commit": "f52de0a62bc169e7e98f0bce13512a4612bb3e56",
+        "tests": [
+          "test/base-gates-recorded.test.ts"
+        ],
+        "overlay": [
+          "test/base-gates-recorded.test.ts"
+        ],
+        "bug": "\"(verified this run)\" keyed on startedAt, which every drain turn rewrites, so it never matched after turn 1 (f52de0a)"
+      }
+    ],
+    "pilot": true
+  },
+  {
+    "issue": 461,
+    "title": "The end-of-run verify re-gates a base tip the run has just gated",
+    "merge": "f1d96a45e227d8ae9142fa12babac558c9e2e837",
+    "base": "dce3d6b768d0b416ae191d79cb47a670d59eef59",
+    "ref": "d2f1f4a03b5b20f3d58530b262968de9721ccf4a",
+    "files": 9,
+    "lines": 260,
+    "overlay": [
+      "test/verify-skip-green-base.test.ts"
+    ],
+    "hidden": [
+      "test/verify-skip-green-base.test.ts"
+    ],
+    "sourceReading": [
+      "test/verify-skip-green-base.test.ts"
+    ],
+    "ticket": {
+      "body": "## What happens\n\nThe end-of-run verify re-gates a base tip the run has just gated. In one run, #427 was cut from the base just after the previous landing, its gates passed at 18:30-18:33, and it landed as a merge holding exactly that tree, with no landing gates (18:33:51). Verify then ran the same three gates on the same tree, 18:34:05-18:36:45 (160 s).\n\nEvery base tip in a run is gated, by its landing gates or by the gates of a branch that holds the base, and the green-base record says so. Verify runs whenever two or more tickets merged, and never reads that record (only the next turn's base check does).\n\n## Expected\n\nA decision on what verify is for:\n\n- If it is the check that the merged base is green, skip it when the green record names the current tip on the same image, and say whose gates proved it (`Merged main re-gated: green at <sha> already (gated with #427)`).\n- If a clean re-gate on purpose is wanted (a fresh sandbox, a different order), say so in `docs/architecture.md` and in the summary's re-gated line.\n\n## Where\n\n- `src/burndown.ts` - the verify step (`merged.length > 1`)\n- `src/gates.ts` - `verifyBase`, `requireGreenBase`\n- `src/report.ts` - the re-gated line\n\nFound auditing a dogfood run's orchestration log.\n\n\n\nTouches: src/burndown.ts, src/gates.ts, src/report.ts, docs/architecture.md",
+      "comments": [
+        "Decision (maintainer, at triage): verify is **proof that the merged base is green**. Skip it when the green-base record names the current base tip on the same image and plan, and say whose gates proved it, e.g. \"Merged main re-gated: green at <sha> already (gated with #427)\". It still runs when the record is missing or names another commit (a landing's failed note is swallowed, `src/landing.ts:487-491`). If the record holds no commit today, add it: #466, queued after this ticket, builds on that. Update `docs/architecture.md` and the summary's re-gated wording (`src/report.ts:581-584`)."
+      ],
+      "seams": [
+        "- `greenProofOfBase` exported from `src/gates.ts`: `export const greenProofOfBase = (project: Project, image: string, planFile: string): { commit: string; by?: string } | undefined`",
+        "- `verifySkippedLine` exported from `src/report.ts`: `export const verifySkippedLine = (base: string, proof: { commit: string; by?: string }, image = \"\")`"
+      ]
+    },
+    "history": {
+      "kind": "feature",
+      "size": "M",
+      "clarity": "M",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.693,
+      "reviewUSD": 0.872,
+      "implementMinutes": 3.9,
+      "implAlone": "caught",
+      "laterBug": "the verify skip trusted a ticket sandbox's gates, so a base red in a clean sandbox read green (#473)"
+    },
+    "probes": [
+      {
+        "commit": "191a8a4ea183ccf98571fe1d9bbca3c85daac96b",
+        "tests": [
+          "test/verify-skip-gate-only-proof.test.ts"
+        ],
+        "overlay": [
+          "test/verify-skip-gate-only-proof.test.ts",
+          "test/verify-skip-green-base.test.ts"
+        ],
+        "bug": "the verify skip trusted a ticket sandbox's gates, so a base red in a clean sandbox read green (#473)"
+      }
+    ],
+    "pilot": true
+  },
+  {
+    "issue": 427,
+    "title": "Status view: AGE shows how long ago a finished ticket ended, not how long it took",
+    "merge": "e79756a2afe40fd1bfdc052fb22a651c45026097",
+    "base": "50222c490b82fc35d40ee950a426eb0ff4e590b5",
+    "ref": "99d94eda2d5e0a6424bc2e12780e2a7bc7382307",
+    "files": 9,
+    "lines": 249,
+    "overlay": [
+      "test/status-slow-step.test.ts",
+      "test/status-time-column.test.ts",
+      "test/status.test.sh",
+      "test/ticket-first-start.test.ts"
+    ],
+    "hidden": [
+      "test/status-slow-step.test.ts",
+      "test/status-time-column.test.ts",
+      "test/status.test.sh",
+      "test/ticket-first-start.test.ts"
+    ],
+    "sourceReading": [
+      "test/ticket-first-start.test.ts"
+    ],
+    "ticket": {
+      "body": "## Problem\n\nThe status view's `AGE` column is \"time in state\" for every row. On a live row that is the right figure: it is how long a ticket has been in `impl` or `gates`, and it turns red at twice the usual, which is how a stuck pass shows. On a finished row (`merged`, `held`, `gate red`, `conflict`) the same figure is how long ago the ticket finished - `47m` on a merged row means \"landed 47 minutes ago\". What a person reading a finished row wants is how long the ticket took from start to landing, and the view never shows it: that figure is only in `timings.jsonl` and the closing summary's timings.\n\n## Options weighed\n\n**A. Rename AGE to DURATION everywhere (start to now, or start to end).**\n- For: one meaning per column, and the finished rows get the figure people look for.\n- Against: a live row loses \"time in this state\". A ticket 50 minutes in that has been in `gates` for 2 minutes and one stuck in `impl` for 50 read the same, and the red \"twice the usual\" rule, which compares a phase with that phase's `typical`, has no figure to compare with. That rule is the column's real job while a run is live.\n\n**B. Add a DURATION column beside AGE.**\n- For: no figure lost.\n- Against: width. #392 already adds `TOKENS`, and below 100 columns the table drops columns to keep ACTIVITY readable. Both figures in one row would also be a column of `-` on queued rows, and duplicate figures on live rows.\n\n**C. One column, `TIME`: a live row shows time in its current state (as AGE does now, red rule kept), a finished row shows its whole length, start to end. (Recommended.)**\n- For: each row shows the figure that matters for that row, at no extra width. The data is already in `run.json`: every ticket entry has `started` and `since` (the time it entered its last state), so a finished row's length is `since - started` with no new field.\n- Against: one column with two meanings. The legend line under the table carries it: \"time = in state while working, start to end once finished (red: twice the usual)\".\n\n\"How long ago it finished\" is not lost under C: the rows stay sorted by `since`, newest first.\n\n## Fix (option C)\n\n- Rename the heading `AGE` to `TIME`.\n- In status.sh's live-run rows: for a finished state (`merged`, `held`, `gate red`, `conflict`, `no change`, `crashed` and the other end states), show `since - started` in the `dur` format (`48m`, `1h12m`); for every other state keep `now - since`, with the red rule. `queued` and `blocked` keep `-`.\n- A ticket the run requeued and ran again: check whether `started` is reset on the second attempt. The length should count from the first start, since that is what the ticket cost in wall time. If `started` is reset, record the first start.\n- An ended run's rows (no live record, built from git and the logs) keep their present figure unless a ticket's length can be read cheaply from `timings.jsonl`. Say which one in the PR.\n- The legend line is as above.\n\n## Done when\n\n- `test/status.test.sh`: a live record with a merged ticket (`started` 3000 s before `since`) draws `50m` under `TIME` whatever the clock; a ticket in `gates` draws time in state and turns red at twice its `typical`; the legend reads as above. It passes under `bash32`.\n- README's status view section describes `TIME`.\n\nTouches: status.sh, test/status.test.sh, README.md, src/burndown.ts\n\nRelated: #392 (also changes the table's columns and legend; whichever lands second rebases on the other).",
+      "comments": [
+        "**Triage (maintainer).** Ready, as specified (option C: rename AGE to TIME). Note for the implementer: `started` is rewritten at every attempt's `setup` phase (`src/burndown.ts`, the phase write near :1733), so keeping the first start needs a change there too - `src/burndown.ts` is added to the Touches line. README describes AGE at about :631 and :683."
+      ],
+      "seams": [
+        "- `firstStart` exported from `src/burndown.ts`: `export const firstStart = (prior: TicketRecord | undefined, phase: TicketState, sinceMs: number): { started?: number }`"
+      ]
+    },
+    "history": {
+      "kind": "feature",
+      "size": "M",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.775,
+      "reviewUSD": 1.248,
+      "implementMinutes": 8.8,
+      "implAlone": "caught",
+      "laterBug": "the TIME legend ran past 80 columns and ended rows kept \"time since\" (#457, #456, fixed in #467)"
+    },
+    "probes": [
+      {
+        "commit": "fb141200d2b59b8c7fbaf00538f06f4efb39d553",
+        "tests": [
+          "test/status-ended-time.test.ts"
+        ],
+        "overlay": [
+          "test/gap-in-prose.test.ts",
+          "test/herdr.test.ts",
+          "test/hermetic-env.test.ts",
+          "test/landing-slot-share.test.ts",
+          "test/no-stray.test.ts",
+          "test/no-stray.ts",
+          "test/prompt-test-weakening.test.ts",
+          "test/protected-plan.test.ts",
+          "test/start-base-warning.test.ts",
+          "test/start-output-order.test.ts",
+          "test/start-plan-dependants.test.ts",
+          "test/start-split.test.ts",
+          "test/status-ended-time.test.ts",
+          "test/status-partly-done.test.ts",
+          "test/status-time-column.test.ts",
+          "test/status.test.sh",
+          "test/temp-cleanup.test.ts",
+          "test/ticket-first-start.test.ts"
+        ],
+        "bug": "the TIME legend ran past 80 columns and ended rows kept \"time since\" (#457, #456, fixed in #467)"
+      }
+    ],
+    "pilot": true
+  },
+  {
+    "issue": 458,
+    "title": "A released or requeued ticket waits behind later tickets of its run already parked for a sandbox slot",
+    "merge": "b240a72d7baf4d46d6e8a072b07ef93bef356e81",
+    "base": "f1d96a45e227d8ae9142fa12babac558c9e2e837",
+    "ref": "9c759d5bd556b0e9e14458406b1c2c9c2aa535d6",
+    "files": 16,
+    "lines": 853,
+    "overlay": [
+      "test/heartbeat-in-flight.test.ts",
+      "test/heartbeat-slot-wait.test.ts",
+      "test/resolve-wait-recorded.test.ts",
+      "test/schedule-slot-first.test.ts",
+      "test/schedule-slot-stale-ask.test.ts",
+      "test/slot-wait-timings.test.ts",
+      "test/status-share-wait.test.ts"
+    ],
+    "hidden": [
+      "test/heartbeat-in-flight.test.ts",
+      "test/heartbeat-slot-wait.test.ts",
+      "test/resolve-wait-recorded.test.ts",
+      "test/schedule-slot-first.test.ts",
+      "test/schedule-slot-stale-ask.test.ts",
+      "test/slot-wait-timings.test.ts",
+      "test/status-share-wait.test.ts"
+    ],
+    "sourceReading": [
+      "test/heartbeat-in-flight.test.ts",
+      "test/resolve-wait-recorded.test.ts",
+      "test/slot-wait-timings.test.ts"
+    ],
+    "ticket": {
+      "body": "## What happens\n\nA released or requeued ticket is put at the front of the run's start queue, but the queue only orders who a free *worker* takes next. A worker takes its ticket first and then waits for a machine-wide sandbox slot, so tickets already taken by workers and parked on a slot go first:\n\n- `#432 released: its last blocker has landed; it starts at the next free slot` at 16:05:03. That slot went to #448 (setup 16:05:08); #432 started at 16:26:20, after #448's whole pipeline.\n- `#437: requeued after conflict with #439` at about 17:54, first in line. Both workers held tickets waiting for a slot (#429 since 17:42, #427 since 17:52). #437's 21-second resolve began at 18:11:26, when #429's pipeline ended.\n\nWith a share of 1 beside another project's run, the run had 2 workers (`pipelineWorkers`) for 1 slot, so this happened at every release and requeue. Under the in-run longest-wait rule (the slot goes to the run's longest-waiting ticket), a requeued ticket now loses to every ticket already parked. The wait is recorded nowhere: `slotWaitMs` starts only once a worker has taken the ticket.\n\n## Expected\n\nA ticket's rank decides when a slot is granted, not only when a worker takes it: \"starts at the next free slot\" holds. For example, a worker leases its sandbox slot first and then takes the head of the queue, or the rank is passed to `leaseSlot` and compared before `since` in `earlierAhead`.\n\n## Where\n\n- `src/burndown.ts` - the attempt's `take()` -> `leaseSlot`\n- `src/schedule.ts` - the queue loop and the `REQUEUED` rank\n- `src/pool.ts` - `earlierAhead`\n\nFound auditing a dogfood run's orchestration log.\n\n\n\nTouches: src/burndown.ts, src/schedule.ts, src/pool.ts",
+      "comments": [
+        "Decision (maintainer, at triage): **slot first**. A worker leases its sandbox slot, then takes the head of the pipeline queue, so a ticket's rank decides when the slot is granted. Passing the rank into `leaseSlot` alone fixes neither reported case: in both, every worker was already parked on a later ticket. Per-ticket slot-wait notes become the run's, a ticket's `slotWaitMs` is zero by construction, and the run's demand counting and the pause (no ticket starts while paused) must still hold. Carries `model:claude-opus-5-5`: it reshapes the scheduler."
+      ],
+      "seams": [
+        "- `Slot` exported from `src/schedule.ts`: `export type Slot = { release(): void };`",
+        "- `createSlotWaits` exported from `src/burndown.ts`: `export const createSlotWaits = (share: (held: boolean) => void, now: () => number = Date.now)`"
+      ]
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "L",
+      "clarity": "M",
+      "implement": "claude-opus-5-5/high",
+      "implementUSD": 5.245,
+      "reviewUSD": 1.434,
+      "implementMinutes": 16.7,
+      "implAlone": "caught",
+      "laterBug": "a worker's kept slot skipped slotTurn, so a waiting landing waited out the next ticket's pipeline (#474)"
+    },
+    "probes": [
+      {
+        "commit": "31c4ae14ee0cd0247cb7112c6ba4754a0b24460d",
+        "tests": [
+          "test/schedule-kept-slot-landing.test.ts"
+        ],
+        "overlay": [
+          "test/schedule-kept-slot-landing.test.ts"
+        ],
+        "bug": "a worker's kept slot skipped slotTurn, so a waiting landing waited out the next ticket's pipeline (#474)"
+      }
+    ],
+    "pilot": true
+  },
+  {
+    "issue": 405,
+    "title": "A limit re-check after a re-run can read the old limit message from the appended log",
+    "merge": "f9a265168b066e22492142c1b8e63030810fe692",
+    "base": "04e931b7e8cf98b7b9f69869386e2120e1ed6550",
+    "ref": "e26d25c2a99b120b0465d8d2aaa4c459ecd2476b",
+    "files": 3,
+    "lines": 92,
+    "overlay": [
+      "test/usage-pause.test.ts"
+    ],
+    "hidden": [
+      "test/usage-pause.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "## Problem\n\nAfter a pass hits the plan's limit, its re-run (`pass()` in src/burndown.ts) reuses the same readable log, which Sandcastle appends to. `logSaysLimit` reads only the log's last 8 lines. A re-run that fails early for another reason (an exec error, a sandbox start failure) writes fewer than 8 lines, so the previous limit message is read again: the attempt is taken for another limit hit, and with the windows already reset `limit()` returns false, the attempt crashes, and the queue stops for \"plan limit\" - the wrong reason.\n\n## Fix\n\nRecord the log's size before each retry, and pass only the bytes written after it to `logSaysLimit`.\n\n## Done when\n\n- A test: a log ending with the limit message, then a retry that appends two lines of a different failure; the retry is not read as a limit hit.\n- A retry that itself ends with the limit message is still read as one.\n\nTouches: src/burndown.ts, src/run.ts, test/usage-pause.test.ts",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "S",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.324,
+      "reviewUSD": 0.387,
+      "implementMinutes": 3.6,
+      "implAlone": "no review commit",
+      "laterBug": "the crash path's limit check still read the whole appended log, so an early crash re-reported the plan limit (f621405)"
+    },
+    "pilot": true
+  },
+  {
+    "issue": 474,
+    "title": "Since slot-first, a worker's kept slot skips slotTurn, so a waiting landing waits behind the next ticket",
+    "merge": "31c4ae14ee0cd0247cb7112c6ba4754a0b24460d",
+    "base": "f2b6a9e71fb30fc98959340f89cd84f9eea82c4c",
+    "ref": "a22cba3060afae75466c7d2d9fa32e5293ade89f",
+    "files": 4,
+    "lines": 137,
+    "overlay": [
+      "test/schedule-kept-slot-landing.test.ts"
+    ],
+    "hidden": [
+      "test/schedule-kept-slot-landing.test.ts"
+    ],
+    "sourceReading": [
+      "test/schedule-kept-slot-landing.test.ts"
+    ],
+    "ticket": {
+      "body": "Since #458 (slot first), a worker that keeps its sandbox slot after a ticket goes straight to the queue's next ticket. It never passes through `sandboxSlot` → `slotTurn(slotWanted)`, which is where a ticket's attempt yields to a landing waiting for a sandbox.\n\n## Scenario\n\n1. Requeued ticket A waits to resolve (`waitToResolve`). This happens exactly when a green branch B that shares its files is queued to land.\n2. The worker keeps A's slot and takes ticket C at once (`takeNow()`).\n3. B's landing, which needs a sandbox, waits out C's whole pipeline, and A waits on B. With a pool of 1, everything runs one after another.\n\nBefore #458, C's attempt yielded to the waiting landing in `slotTurn`. `docs/architecture.md` still says \"a landing goes first when a slot frees\".\n\n## Where\n\n`src/schedule.ts`: the worker loop's kept-slot path (`takeNow` after a requeue or release); `slotTurn` in `src/burndown.ts`.\n\n## Fix\n\nWhen a worker holds a leftover slot and a landing is waiting (`slotWanted.n > 0`, through a `Work` port), release the slot and ask again, so the landing goes first.\n\n## Done when\n\n- A schedule test with a kept slot, a waiting landing and a queued ticket shows the landing takes the slot before the ticket starts.\n- `pnpm test` passes.\n\nTouches: src/schedule.ts, src/burndown.ts\n\nFound by the code review of the v0.11.0 dogfood run's landings.",
+      "comments": [
+        "Triage: ready as written. When a worker holds a leftover slot and a landing is waiting, it releases the slot and asks again, so the landing goes first. Carries `model:claude-opus-5-5`: it changes #458's scheduler loop."
+      ],
+      "seams": []
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "M",
+      "clarity": "H",
+      "implement": "claude-opus-5-5/high",
+      "implementUSD": 1.088,
+      "reviewUSD": 0.448,
+      "implementMinutes": 4.3,
+      "implAlone": "no review commit"
+    }
+  },
+  {
+    "issue": 402,
+    "title": "A branch stopped mid-gates gets a whole implement session on re-run",
+    "merge": "7cd9c13689929c0bb196f47029ac696b2d5d4205",
+    "base": "acd0c0e0f435e71278f3a438ba4dd5890ae1ea96",
+    "ref": "c66b6c55c486ae23780c4e7758b5d63b6873734d",
+    "files": 6,
+    "lines": 396,
+    "overlay": [
+      "test/carried.test.ts"
+    ],
+    "hidden": [
+      "test/carried.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "## Problem\n\nA ticket whose branch was implemented and reviewed, then stopped while its gates ran, gets a whole implement session when the next run picks it up. After a stop mid-gates, two such tickets each got an implement pass (218 s and 283 s, about 0.54M tokens) whose agents both said \"the branch already carries the work... re-run the gates\"; only afterwards did the kit note \"only a base merge since its review\" and review the merge alone.\n\nThe re-run shortcut (a reviewed, green branch that has not moved skips implement and review) needs the branch to have been green; a branch stopped mid-gates never got a gate result.\n\n## Fix\n\n`test/carried.test.ts` is a new file (or extend the existing `test/estimate-carried.test.ts` if that is the better home).\n\nA carried branch whose last review passed and which has not moved since that review (the run record's or the ticket comment's reviewed commit equals the branch tip, or the tip is that commit plus a base merge) goes straight to the gates, with a narrow review of the base merge when there is one - as a green carried branch does. Only a red gate result, or new commits after the review, sends it back to implement.\n\n## Done when\n\n- A test: a carried branch whose reviewed commit is its tip, with no gate result, runs gates (and no implement) on re-run.\n- A test: the same with a base merge on top runs the narrow merge review, then gates.\n- A test: a branch with commits after its review still gets implement.\n\nTouches: src/burndown.ts, src/run.ts, test/carried.test.ts",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "L",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.788,
+      "reviewUSD": 0.939,
+      "implementMinutes": 4.6,
+      "implAlone": "caught"
+    }
+  },
+  {
+    "issue": 413,
+    "title": "sandcastle report --changelog: every landed ticket's suggested lines since a ref, across runs",
+    "merge": "3b2b08b17cee5223b5c44702268b0680d9d82c13",
+    "base": "f70e4d25612d7e4db5a277bbb8406d8bba86921f",
+    "ref": "a64dd75fe3b9af9dde3746b82ae730680b096458",
+    "files": 8,
+    "lines": 332,
+    "overlay": [
+      "test/report-changelog.test.ts"
+    ],
+    "hidden": [
+      "test/report-changelog.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "With `changelog: true` (a public project setting), the agents' suggested changelog lines are shown only in the last run's closing summary (`src/report.ts`). Release notes span many runs, so a maintainer has to dig the lines out of archived run logs; before one release about 45 merged tickets were missing from `[Unreleased]`, and a stopped run's lines were missed at first.\n\nThe lines are already stored: each ticket's `changelog` lines go into the run record, and each finished run is appended to `.sandcastle/logs/history.jsonl` (`src/run.ts`). Two gaps: nothing reads them across runs, and a run killed without its exit handler never writes its history line, so `recordRun` overwrites its `run.json` and the lines are gone.\n\n## Fix\n\n- `sandcastle report --changelog [--since <git ref>]` (default: the latest tag, else all history) reads `history.jsonl` plus the current `run.json` and prints each ticket that landed in runs started after the ref's commit time, with its suggested lines grouped Added / Changed / Fixed and Upgrading notes apart, as the closing summary does. A ticket landed in several runs is shown once, with its latest lines. Landed tickets with no suggested line are listed under \"No suggested line - write from the ticket\".\n- When `recordRun` starts and `run.json` holds a record with no `finishedAt` whose process is gone, it appends that record to `history.jsonl` first.\n- The help header of `src/cli.ts`, README.md and skill/run.md document the flag; `docs/releasing.md`'s changelog step runs it.\n- Its tests go in a new file, `test/report-changelog.test.ts`.\n\n## Done when\n\nTests over fixture history files: lines from two runs both shown; a re-landed ticket shown once; a ticket with no line listed; a killed run's record kept in history.\n\nTouches: src/report.ts, src/cli.ts, src/run.ts, README.md, skill/run.md, docs/releasing.md",
+      "comments": [],
+      "seams": [
+        "- `changelogSince` exported from `src/report.ts`: `export const changelogSince = (project: Project, since?: string): string`"
+      ]
+    },
+    "history": {
+      "kind": "feature",
+      "size": "L",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.733,
+      "reviewUSD": 0.607,
+      "implementMinutes": 4.4,
+      "implAlone": "no review commit"
+    }
+  },
+  {
+    "issue": 398,
+    "title": "A requeued conflicting branch is resolved against a base that green branches are about to move",
+    "merge": "bdb750584b8a4e523ba14886eb4c5c59e8763a79",
+    "base": "0b9587f6f2c03d62aa711aa4cba0aea9ccfb26a0",
+    "ref": "fef6e815d8eb607edb8e7b9c004de747d263dee6",
+    "files": 9,
+    "lines": 375,
+    "overlay": [
+      "test/landing-requeue.test.ts",
+      "test/schedule-order.test.ts",
+      "test/schedule-resolve-wait.test.ts"
+    ],
+    "hidden": [
+      "test/landing-requeue.test.ts",
+      "test/schedule-order.test.ts",
+      "test/schedule-resolve-wait.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "## Problem\n\nA ticket sent back after a conflict at landing is resolved straight away against the base as it stands, while green branches queued ahead of it are still to land on the same files. Each of those landings then conflicts with it again.\n\nEvidence from a run (timings.jsonl): #384 conflicted on src/burndown.ts; its first resolve started while four carried green branches touching the same files were queued to land; the second resolve started while #369 was green and next in the landing lane, which landed three minutes later and conflicted it again. The requeue-once rule was spent, so it ended \"conflicted again after a requeue\" and cost a whole extra drain turn. Three resolve rounds took 553 s, 320 s and 294 s, about 3.6M tokens, plus a 14-minute turn.\n\n## Fix\n\nA requeued ticket's resolve waits until no green branch that shares a file with it is waiting to land (the landing lane's queue and the tickets in gates whose branches touch the conflicted files), then merges the base and resolves once. Count a second conflict as a new requeue (not \"conflicted again\") when it came from a landing that happened after the resolve's merge base.\n\n## Done when\n\n- A schedule test: ticket R is sent back after a conflict while G (green, touching the same file) waits to land; R's resolve starts only after G lands, and R lands without a second conflict.\n- A test: a second conflict caused by a landing that finished after R's resolve began requeues R once more instead of ending it conflicted.\n- docs/architecture.md's requeue-once rule says so.\n\nTouches: src/schedule.ts, src/burndown.ts, src/landing.ts, docs/architecture.md, test/schedule.test.ts",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "L",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 1.515,
+      "reviewUSD": 1.416,
+      "implementMinutes": 11.8,
+      "implAlone": "caught",
+      "laterBug": "a third attempt after the requeue exception recorded attempts 2; a stop in the pause wait ended a ticket as parked (#448)"
+    },
+    "probes": [
+      {
+        "commit": "ceec1afafa9a50b28de083c3306ca0a85805e4fa",
+        "tests": [
+          "test/schedule-attempt-count.test.ts",
+          "test/ledger-third-attempt-unstarted.test.ts"
+        ],
+        "overlay": [
+          "test/landing-requeue.test.ts",
+          "test/ledger-third-attempt-unstarted.test.ts",
+          "test/schedule-attempt-count.test.ts",
+          "test/schedule-order.test.ts",
+          "test/schedule-resolve-wait.test.ts"
+        ],
+        "bug": "a third attempt after the requeue exception recorded attempts 2; a stop in the pause wait ended a ticket as parked (#448)"
+      }
+    ]
+  },
+  {
+    "issue": 394,
+    "title": "The burndown() closures for the usage pause are untested",
+    "merge": "a10cecd4af5420940a45542e58096549ce5e227c",
+    "base": "a0243505a792cf0b076814b5c4089d142721d0fe",
+    "ref": "a7e53d66d685009b391f1fa56c46f588d4a5ea3a",
+    "files": 5,
+    "lines": 286,
+    "overlay": [
+      "test/pause-handling.test.ts"
+    ],
+    "hidden": [
+      "test/pause-handling.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "the `tell` handler that writes `paused` to the record and releases keep-awake, and the attempt's wait for a pause before the guard, in src/burndown.ts, need a whole run to drive\n\nReported by the implement agent working on #387 as outside that ticket, and filed by sandcastle for triage: queue it or close it.\n\nTouches: src/burndown.ts, src/usage.ts",
+      "comments": [
+        "**Triage decision (maintainer):** extract and unit-test. Move the usage pause's handling out of `burndown()` - the `paused`/`resumed` cases of `tell` (writing `paused` to the run record, releasing and re-taking keep-awake; `src/burndown.ts:2116-2149`) and the attempt's wait for a pause before the guard (`src/burndown.ts:1988`) - into a small exported function (in `src/burndown.ts` or beside the usage pause in `src/usage.ts`) whose record writer, keep-awake and pause source are injected. `burndown()` calls it with the real ones; behaviour is unchanged.\n\nDone when: a new test file drives that function with fakes and proves: `paused` writes the record and releases keep-awake, `resumed` clears it and re-takes it, and an attempt waits while paused and proceeds on resume. No whole-run harness.\n\nTouches: src/burndown.ts, src/usage.ts"
+      ],
+      "seams": [
+        "- `createPauseHandling` exported from `src/usage.ts`: `export const createPauseHandling = (ports: PauseHandlingPorts)`"
+      ]
+    },
+    "history": {
+      "kind": "feature",
+      "size": "M",
+      "clarity": "L",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.425,
+      "reviewUSD": 0.431,
+      "implementMinutes": 5.7,
+      "implAlone": "passes"
+    }
+  },
+  {
+    "issue": 429,
+    "title": "A ticket held behind another held ticket keeps \"(lands this run)\" after a stop",
+    "merge": "c12e903f90a0619938bdad03417556696d3c3584",
+    "base": "3b33eb2403761a7072e15d39ba94b8e4032f36fe",
+    "ref": "a6075ff47045362310ba9420394e90025ffdf9b8",
+    "files": 3,
+    "lines": 65,
+    "overlay": [
+      "test/schedule-held-chain-note.test.ts",
+      "test/schedule-release.test.ts"
+    ],
+    "hidden": [
+      "test/schedule-held-chain-note.test.ts",
+      "test/schedule-release.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "in `src/schedule.ts`, held dependants stay in `inFlight` and end as `waiting` at line 1119 with no new note, so with a chain 6→4→3 where 3 is stopped, #6 keeps reading `waits for #4 (lands this run)`\n\nReported by the review agent working on #401 as outside that ticket, and filed by sandcastle for triage: queue it or close it.\n\nTouches: src/schedule.ts, test/schedule.test.ts",
+      "comments": [
+        "**Triage (maintainer).** Ready. The line cited has moved to `src/schedule.ts` ~:1222: held tickets that never started end as `waiting`, but nothing calls `waits.ended` for them and no note is told again, so they stay in `inFlight`, and `blockedNote` (`src/blockers.ts` ~:329-352) reads anything in `inFlight` as \"(lands this run)\". Fix: mark those tickets ended and tell the remaining notes again, so the note reads \"#4 (did not land)\" (`endedAs`/`stateWord` in `src/ledger.ts`).\nDone when: a test drives a stop with a ticket held behind another held ticket and asserts its note no longer says \"(lands this run)\"."
+      ],
+      "seams": []
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "S",
+      "clarity": "L",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.329,
+      "reviewUSD": 0.667,
+      "implementMinutes": 5.7,
+      "implAlone": "no review commit"
+    }
+  },
+  {
+    "issue": 469,
+    "title": "Pipeline: a branch that no longer merges skips review and gates and goes straight to resolve",
+    "merge": "c5ea202dabf76898038f6ef17af95194c545115e",
+    "base": "97cc9e236ffee41a54d7b8ada3a0a47d072c8343",
+    "ref": "92b4c81560b4e50220d0404d3c6163a6b1d15077",
+    "files": 10,
+    "lines": 699,
+    "overlay": [
+      "test/ledger-conflict-before-landing.test.ts",
+      "test/ledger.test.ts",
+      "test/pipeline-conflict-before-landing.test.ts"
+    ],
+    "hidden": [
+      "test/ledger-conflict-before-landing.test.ts",
+      "test/ledger.test.ts",
+      "test/pipeline-conflict-before-landing.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "Split from #459 (part b).\n\n\n## Problem\n\nOnce a ticket's branch no longer merges onto the base (another ticket landed over the same lines), its pipeline still runs review and the gates on it. Only at landing is the conflict found and the ticket requeued to resolve. In the case that prompted #459, most of the time lost went to a 12.7-minute review of a branch that was already doomed.\n\n## Decision (maintainer, at triage)\n\n- The check runs **twice**: after implement, before review, and again before the gates. It is a cheap host `git merge-tree`, the same helper #468 adds.\n- A branch that conflicts skips the rest of its pipeline and goes straight to the requeue-and-resolve path. It is a new pipeline outcome, routed through the requeue-once rule in `src/schedule.ts` (which reacts today only to a landing's conflict or red, `src/schedule.ts:1099`). It is never pushed on as \"green\" to reach the landing check, because that would break \"the gates vouched for one commit\" (`src/landing.ts:406`).\n- A conflict only in generated files (`regensFor`) does not count: it goes on as today.\n- The ledger (`src/ledger.ts`, around `:228`) gets this ending's words in `describe`, which stays exhaustive.\n\n## Done when\n\n- Tests driving `createPipeline` over its faked ports (`src/burndown.ts`) show that a branch conflicting before review starts neither review nor gates, that a branch conflicting only before the gates skips the gates, and that both take the requeue-once path. A second conflict after the requeue follows the rule as a landing's conflict does today.\n- `describe` covers the new ending (the ledger tests).\n- `docs/architecture.md` (the scheduler's requeue-once rule) says the pipeline can now requeue too.\n- `pnpm test` passes.\n\nTouches: src/burndown.ts, src/schedule.ts, src/ledger.ts, docs/architecture.md",
+      "comments": [],
+      "seams": []
+    },
+    "history": {
+      "kind": "feature",
+      "size": "L",
+      "clarity": "H",
+      "implement": "claude-opus-5-5/high",
+      "implementUSD": 4.735,
+      "reviewUSD": 1.332,
+      "implementMinutes": 13.6,
+      "implAlone": "no test change",
+      "laterBug": "the host's git merge-tree honours merge drivers a sandbox can write into the shared .git (#472, open)"
+    }
+  },
+  {
+    "issue": 437,
+    "title": "A ticket can wait hours for a sandbox slot while later tickets of the same run go first",
+    "merge": "50222c490b82fc35d40ee950a426eb0ff4e590b5",
+    "base": "c12e903f90a0619938bdad03417556696d3c3584",
+    "ref": "dd950b9780b8e42056aa12b3dd8408d5435d87dc",
+    "files": 8,
+    "lines": 300,
+    "overlay": [
+      "test/heartbeat-slot-wait.test.ts",
+      "test/landing-slot-first.test.ts",
+      "test/pool-run-wait-order.test.ts"
+    ],
+    "hidden": [
+      "test/heartbeat-slot-wait.test.ts",
+      "test/landing-slot-first.test.ts",
+      "test/pool-run-wait-order.test.ts"
+    ],
+    "sourceReading": [],
+    "ticket": {
+      "body": "## Problem\nIn a 29-ticket run, a second project's run started and cut this run's share of the machine's sandbox slots to 1. One ticket then logged `waiting for a machine-wide sandboxes slot` for two hours, while seven tickets queued after it started and landed. `takeSlot` in `src/pool.ts` orders waits across runs (`olderWait`), but not within one run, so whichever worker asks at the moment a slot frees takes it.\n\nThe run's heartbeat lines never mention the waiting ticket, so the stall is invisible while it happens.\n\n## Fix\n- Within one run, a freed sandbox slot goes to that run's longest waiter, as it already does across runs.\n- The heartbeat names a ticket that has waited for a slot longer than a typical issue's length.\n\n## Done when\n- A pool test: two waiters of one run, the earlier one gets the next freed slot.\n- A heartbeat test names a long-waiting ticket.\n\nTouches: src/pool.ts, src/burndown.ts, test/pool-*.test.ts",
+      "comments": [
+        "**Triage (maintainer).** Ready. `olderWait` (`src/pool.ts` ~:540-542) gives way only to waits from other runs; waiters within one run poll and race (comment at ~:25-29). The 5-minute heartbeat (`src/burndown.ts` ~:1903-1908) never names a ticket waiting for a slot. The pool tests are `test/pool-*.test.ts` (there is no `test/pool.test.ts`); the Touches line now says so.\nLands before #439, which changes the same slot-wait loop."
+      ],
+      "seams": [
+        "- `heartbeatLine` exported from `src/burndown.ts`: `export const heartbeatLine = (o: { now: number; clock: string; working: { ref: string; phase: string; since: number }[]; slotWaits: { ref: string; since: number }[]; typicalMs?: number }): string | undefined`",
+        "- `typicalIssueMs` exported from `src/burndown.ts`: `export const typicalIssueMs = (typical: Record<string, number>): number | undefined`"
+      ]
+    },
+    "history": {
+      "kind": "bug fix",
+      "size": "L",
+      "clarity": "H",
+      "implement": "claude-sonnet-5-5/high",
+      "implementUSD": 0.527,
+      "reviewUSD": 1.639,
+      "implementMinutes": 4.2,
+      "implAlone": "caught"
+    }
+  }
+]
