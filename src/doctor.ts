@@ -19,6 +19,7 @@ import { poolWarningsNow, sizePointerNow } from "./size.ts";
 import { apiKeySpend, baseImage, githubToken, KIT, machineSettings, USER_CONFIG } from "./sandbox.ts";
 import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
+import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
 import { resolveVersions } from "./versions.ts";
 
@@ -623,6 +624,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       }
     })();
     if (staleImage) console.log(`warn ${staleImage}`);
+    // A warning, never a FIX: a run still works, but its host merge checks (conflicts before landing, a resolution against git's own merge) cannot read objects only the remote has.
+    if (isPartialClone(repoRoot)) console.log(`warn partial clone: ${PARTIAL_CLONE_GAP}.`);
     // Info, never a FIX. Silent when Docker is down.
     const cache = buildCacheLine();
     if (cache) console.log(`info ${cache}`);

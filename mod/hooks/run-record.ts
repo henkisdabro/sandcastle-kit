@@ -307,6 +307,8 @@ export type RunRecord = {
   baseGates?: unknown;
   /** Tests found red on the base mid-run, each once: a failure no branch caused, so none was repaired. */
   baseRed?: string[];
+  /** Why a host merge check could not run for objects a partial clone lacks (`noteMissingObjects`): the closing summary says so, since those checks read the merge as clean. */
+  mergeUnchecked?: string;
   /** Out-of-scope problems agents named in `<followup>` lines, recorded as each arrives: `id` is the ticket filed for triage, absent until it is filed (and for good in a dry run, or when filing `failed`, which a run that stopped on a `.git` change sets without trying). */
   followUps?: { title: string; from: string; phase: string; id?: string; failed?: string }[];
   /**

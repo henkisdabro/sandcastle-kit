@@ -42,7 +42,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeTree, mergeTreeSupported, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -1052,7 +1052,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The landed tickets this branch has never seen that changed a file of the conflict, as landing names them.
       const others = [...landed].filter(([, r]) => files.some((f) => r.files.includes(f)) && !isAncestor(project.root, r.commit, head)).map(([id]) => id);
       return { files, with: others };
-    } catch {
+    } catch (error) {
+      // Objects a partial clone lacks: said once and kept for the closing summary, not read as a merge that is clean.
+      noteMissingObjects(project.root, error);
       return undefined;
     }
   };
@@ -2762,7 +2764,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       console.log(`Full output: ${VERIFY_LOG}`);
     }
   }
-  run.update({ stage: "report" });
+  const mergeUnchecked = mergeCheckGap();
+  run.update({ stage: "report", ...(mergeUnchecked && { mergeUnchecked }) });
 
   // -------------------------------------------------------------------------
   // Report

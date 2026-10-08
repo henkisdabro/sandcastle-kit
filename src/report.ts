@@ -95,6 +95,8 @@ export type Facts = {
   baseGates?: { gate: string; ok: boolean }[];
   /** Tests found red on the base mid-run (the run record's `baseRed`): no branch was repaired for them. */
   baseRed?: string[];
+  /** The run record's `mergeUnchecked`: a host merge check that could not run for objects a partial clone lacks. */
+  mergeUnchecked?: string;
   /** The run settings the last turn's record carries; absent from an older kit's record. */
   settings?: RunSettings;
   /** The Claude plan usage the last record holds (`usage`), when the run spent a subscription on a Claude model: the last reading, or none yet. */
@@ -395,6 +397,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     exitCode: run.exitCode,
     baseGates: run.baseGates,
     baseRed: Array.isArray(run.baseRed) ? run.baseRed.filter((t: unknown): t is string => typeof t === "string") : undefined,
+    mergeUnchecked: typeof run.mergeUnchecked === "string" ? run.mergeUnchecked : undefined,
     settings: run.settings && typeof run.settings === "object" ? run.settings : undefined,
     usage: readPlanUsages(run.usage).find((u) => u.provider === "claude"),
     codexUsage: readPlanUsages(run.usage).find((u) => u.provider === "codex"),
@@ -631,6 +634,8 @@ export const render = (f: Facts, plain = false): string => {
     out.push(`Tokens by model: ${models.sort(([, a], [, b]) => size(b) - size(a)).map(([model, t]) => `${model} ${tokenLine(t)}`).join(" · ")}`);
   }
   out.push(...settingsLines(f, plain));
+  // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
+  if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
