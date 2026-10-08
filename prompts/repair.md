@@ -10,7 +10,8 @@ their records mid-run. If git ever tells you this worktree is not a git reposito
 `<promise>COMPLETE</promise>` - do not rebuild it.
 
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`. To run a test
-without your change, `git diff > /tmp/p && git checkout -- <files>`, run it, then `git apply /tmp/p`.
+without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- <files>`, run it, then
+`git apply /tmp/p`.
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or

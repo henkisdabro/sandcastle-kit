@@ -15,7 +15,7 @@ change, built under the temp dir and not in the project, takes `git -C <absolute
 plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
-another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
+another agent's change. To run a test without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD --
 <files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
