@@ -27,7 +27,8 @@ import { shq } from "./generated.ts";
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
 type Failure = { name: string; command: string; exitCode: number; output: string };
-// `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
+// `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
+// (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
@@ -321,7 +322,11 @@ export const gitHooksLine = (g: GitHooks) =>
 // the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
 export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true) => {
+  // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
+  // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
+  const asked = Date.now();
   const gated = async () => {
+    const slotWaitMs = Date.now() - asked;
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     try {
@@ -336,6 +341,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
       return {
         ...run,
+        waitMs: slotWaitMs + (run.waitMs ?? 0),
         head,
         hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
         gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
