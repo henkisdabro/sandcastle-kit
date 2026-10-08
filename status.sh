@@ -510,8 +510,9 @@ load_run() {
   #            `sandcastle resume`.
   #   pool     this run's demand and share of the machine pool, live values the run rewrites; an
   #            older kit's record has neither. The cap (`sandcastle cap`) is a person's, and
-  #            absent when there is none. Then 1 while the run waits for a slot its share holds
-  #            back (`waitsForShare`), else 0.
+  #            absent when there is none. Then what holds back the slot the run waits for:
+  #            `share` (`waitsFor`, else an older kit's `waitsForShare`), `landing` (the slot
+  #            kept for landing), else 0.
   #   free     sandboxes the run has yet to fill: queued tickets that fit in them start at once,
   #            so none of them is "behind" another. A ticket that is landing holds no slot: its
   #            merge runs on the host, or in the landing worker's own box.
@@ -529,7 +530,7 @@ load_run() {
     @sh "RUN_STARTED=\(lines(.startedAt // empty))",
     @sh "pid=\(lines(if .finishedAt then empty else (.pid // empty) end))",
     @sh "paused=\(lines(if (.paused | type) == "object" then 1 else 0 end))",
-    @sh "pool=\(lines([(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring), (if .waitsForShare == true then "1" else "0" end)] | join(" ")))",
+    @sh "pool=\(lines([(.demand // "" | tostring), (.share // "" | tostring), (.cap // "-" | tostring), (if .waitsFor == "landing" then "landing" elif .waitsFor == "share" or .waitsForShare == true then "share" else "0" end)] | join(" ")))",
     @sh "issues=\(lines((.issues // [])[] | tostring))",
     @sh "waiting=\(lines((.waiting // [])[] | "\(.issue)|\([.on[] | tostring | if test("^[0-9]+$") then "#" + . else . end] | join(", "))"))",
     @sh "active=\(lines((.active // {}) | to_entries[] | "\(.key)|\(.value.phase)|\(.value.since)"))",
@@ -557,7 +558,7 @@ load_run() {
   read -r POOL_DEMAND POOL_SHARE POOL_CAP SHARE_WAIT <<<"$pool"
   [[ "$POOL_DEMAND" =~ ^[0-9]+$ && "$POOL_SHARE" =~ ^[0-9]+$ ]] || { POOL_DEMAND=""; POOL_SHARE=""; }
   [[ "$POOL_CAP" =~ ^[0-9]+$ ]] || POOL_CAP=""
-  [ "$SHARE_WAIT" = 1 ] || SHARE_WAIT=0
+  case "$SHARE_WAIT" in share|landing) ;; *) SHARE_WAIT=0;; esac
   RUN_ISSUES="$issues"; WAITING="$waiting"; ACTIVE="$active"; TICKETS="$tickets"; TYPICAL="$typical"; RUN_ETA="$eta"
   if [ -n "$TICKETS" ]; then
     RECORD=1
@@ -1158,7 +1159,10 @@ render() {
         [ "$RUN_PAUSED" = 1 ] && activity="waits for the resume"
         # The run waits for a slot its share of the machine's slots holds back, not only a full pool: the slot goes
         # to the ticket next to start. An older kit wrote it as the note of a ticket a worker had taken.
-        if [ "$SHARE_WAIT" = 1 ] && [ "$activity" = "next to start" ]; then activity="waits for the run's share"; fi
+        # A slot the run keeps for a landing is the same wait with another cause, and says so.
+        if [ "$activity" = "next to start" ]; then
+          case "$SHARE_WAIT" in share) activity="waits for the run's share";; landing) activity="waits: a slot is kept for landing";; esac
+        fi
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
       held) if hand_merged "$n"; then state=merged; activity=$(hand_merged_note "$n"); fi;;

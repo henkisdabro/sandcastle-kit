@@ -51,7 +51,7 @@ test("at a share of 3 beside another run, a third ticket waits while a landing t
   // Three slots are free of the machine's, but the third of the share is kept for landing.
   const third = ticket("third", { keep: true });
   await steady(() => !third.taken, "a third ticket took the slot kept for landing");
-  assert.deepEqual(third.why, ["share"]);
+  assert.deepEqual(third.why, ["landing"]);
   const landing = ticket("land", { priority: true });
   await until(() => landing.taken, "the landing to take the kept slot");
   assert.equal(heldBy(), "3,3");
