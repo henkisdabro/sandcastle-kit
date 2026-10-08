@@ -1336,7 +1336,10 @@ A project that always wants different models or effort sets them in `.sandcastle
 (`review: { effort: "medium" }`); the env vars are for one run. Effort levels are `low`,
 `medium`, `high`, `xhigh`, `max`. Anthropic suggests `medium` as a
 starting point for agentic coding on both 5.5 models; the kit defaults to `high` for quality.
-Measure before changing it. One ticket can ask for its own implementer with a `model:` or
+Measure before changing it. Claude Haiku 5.5 is billed at five times its price for a prompt
+over 100K tokens, which most requests of an implement pass at `high` or `max` are, and the default
+effort is `high` for any model: run Haiku at `medium` or below and set its effort with the model
+(`IMPL_MODEL` and `IMPL_EFFORT`, or both under `implement` in the config). One ticket can ask for its own implementer with a `model:` or
 `effort:` label - see [Queue](#-queue-what-agents-work-on).
 
 </details>
