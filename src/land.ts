@@ -200,6 +200,11 @@ export const landInSandbox = async (
           return sh("git", ["commit-tree", `${commit}^{tree}`, "-p", baseTip, ...message], project.root, AGENT_COMMITTER);
         })()
       : commit;
+    // The check above is followed by host git calls, and other tickets' sandboxes keep writing the shared .git
+    // meanwhile: a `filter.<x>.smudge` and an `info/attributes` line planted since would run when the fast-forward
+    // writes the files out, and the config pin only holds the filters that existed at the run's start. The calls
+    // above are synchronous, so nothing of this run interleaves; this check is the last thing before the write.
+    assertGitUnchanged(project, before, `before fast-forwarding ${t.branch}`);
     sh("git", ["merge", "--ff-only", landed], project.root);
     if (expected) {
       // Only what this fast-forward made: a base that names anything else is not ours to adopt.
