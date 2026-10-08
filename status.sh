@@ -1696,7 +1696,8 @@ trap 'RESIZED=1; [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null' WINCH
 
 while true; do
   tty_size
-  if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "$TERM_ROWS" =~ ^[0-9]+$ ]]; then
+  # No terminal (an agent's tool, a pipe) leaves both sizes unset, and set -u would end the view.
+  if [ "$RESIZED" = 1 ] && [ -n "$frame" ] && [[ "${TERM_ROWS:-}" =~ ^[0-9]+$ ]]; then
     printf '\e[H%s\n\e[J' "$(printf '%s\n' "$frame" | head -n $(( TERM_ROWS - 1 )))"
   fi
   RESIZED=0
@@ -1713,7 +1714,7 @@ while true; do
   # stderr is swallowed: a stray warning printed mid-frame lands wherever the
   # cursor happens to be and corrupts the screen.
   frame=$(render 2>>"${STATUS_ERRLOG:-/dev/null}" | while IFS= read -r l; do
-    if [[ "$TERM_COLS" =~ ^[0-9]+$ ]]; then
+    if [[ "${TERM_COLS:-}" =~ ^[0-9]+$ ]]; then
       fit "$l" "$TERM_COLS"; l="$FIT"; printf '%s' "$l"; vlen "$l"; [ "$VN" -lt "$TERM_COLS" ] && printf '\033[K'
     else printf '%s\033[K' "$l"; fi
     printf '\n'

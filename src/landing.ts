@@ -324,7 +324,8 @@ export type LandContext = {
    * commit that landed it. A conflict, or a merged tree that is red, is attributed to these
    * rather than to branches, which a squash deletes.
    */
-  landed: Map<string, { files: string[]; commit: string }>;
+  /** `clean`: merged and gated in a landing sandbox, a gate-only one, rather than fast-forwarded on its ticket's own gates. */
+  landed: Map<string, { files: string[]; commit: string; clean?: true }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
   /** `git --version`'s output, injected by a test to simulate a git older than 2.38 (the conflict precheck then does not run). */
@@ -460,11 +461,11 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   // The landed tickets this branch has never seen: the base gained them after it forked.
   const since = () => [...landed].filter(([, r]) => !isAncestor(root, r.commit, o.head!));
   // Recorded as the landing happens, while the files and the commit are at hand.
-  const record = (before: string, after: string) => {
+  const record = (before: string, after: string, clean?: true) => {
     try {
-      landed.set(o.issue, { commit: after, files: sh("git", ["diff", "--name-only", before, after], root).split("\n").filter(Boolean) });
+      landed.set(o.issue, { commit: after, files: sh("git", ["diff", "--name-only", before, after], root).split("\n").filter(Boolean), ...(clean && { clean }) });
     } catch {
-      landed.set(o.issue, { commit: after, files: [] });
+      landed.set(o.issue, { commit: after, files: [], ...(clean && { clean }) });
     }
   };
   const before = tip();
@@ -598,7 +599,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       return { kind: "red", with: earlier, gates, ...(failing.length ? { failing } : {}) };
     }
     if (result.kind === "merged") {
-      record(before, result.commit);
+      record(before, result.commit, true);
       // The gates ran in the sandbox on exactly this tree (a squash keeps it), and the base now names it.
       try {
         ctx.greenBase?.(result.commit, ref(o.issue), "landing-sandbox");
@@ -644,6 +645,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   const merged = { ...(regenerated && { regenerated }), ...(squash && { squashed: true }), ...(overrun.length ? { overrun } : {}) };
   // Left open on purpose: the ledger's comment (posted after the schedule) names the criterion.
   if (o.unmet) return { kind: "partly-done", unmet: o.unmet, ...merged };
+  // Asked once: a close can post its comment and then fail (`gh issue close --comment`; a ticket file's
+  // comment written before its commit), so a retry posted the comment twice. The run releases the
+  // ticket's dependants all the same, and the next run closes it.
   try {
     await host.write(() => tracker.close(o.issue, words({ kind: "merged", ...merged })), trackerMade(root));
     return { kind: "merged", ...merged };
@@ -788,10 +792,13 @@ export const redSubject = (output: string, tree: string[], read: (file: string) 
 const redWith = (tickets: string[]) => (tickets.length ? `with ${tickets.map(refOf).join(", ")}` : "on the merged tree");
 
 /** "conflicted again with #1, #3 after a requeue", "red again on the merged tree after a requeue (gate test)": what a second conflict or red at landing is held as. */
-export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }) =>
-  kind === "conflict"
-    ? `conflicted again${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} after a requeue`
-    : `red again ${redWith(tickets)} after a requeue${redDetail(red)}`;
+export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }, first: "conflict" | "red" = kind) => {
+  // "Again" only when the first attempt ended the same way: a conflict after a requeue for a red is no repeat.
+  const after = first === kind ? "after a requeue" : `after a requeue for ${first === "red" ? "a red merge" : "a conflict"}`;
+  return kind === "conflict"
+    ? `conflicted${first === kind ? " again" : ""}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""} ${after}`
+    : `red${first === kind ? " again" : ""} ${redWith(tickets)} ${after}${redDetail(red)}`;
+};
 
 /** "requeued after conflict with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)": the second attempt, as the status view and run.json say it. */
 export const requeuedLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }) =>
@@ -853,7 +860,7 @@ export const firstAttemptIdleRepairs = (results: readonly PromiseSettledResult<{
 export const carriedBranch = (landOnly: boolean, requeued: boolean, reviewedOnly = false) => (landOnly ? (reviewedOnly ? "its reviewed branch" : "its green branch") : `its branch from ${carriedFrom(requeued)}`);
 
 /** What a second conflict or red is held as, its `with` naming the tickets of both attempts; the conflict keeps its files. */
-export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>) => {
-  const line = againLine(landed.kind, landed.with, landed.kind === "red" ? landed : undefined);
+export const againNoteOf = (landed: Extract<Landed, { kind: "conflict" | "red" }>, first: "conflict" | "red" = landed.kind) => {
+  const line = againLine(landed.kind, landed.with, landed.kind === "red" ? landed : undefined, first);
   return landed.kind === "conflict" ? `${line}: ${conflictLine({ files: landed.files, with: [] })}` : line;
 };

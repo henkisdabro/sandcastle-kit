@@ -74,9 +74,9 @@
           { "@type": "Question", "name": "What does it cost to run?", "acceptedAnswer": { "@type": "Answer", "text": "The kit is free and MIT-licensed. Agents use your Claude subscription or an Anthropic API key through Claude Code; an API key takes precedence and the kit asks before spending it. Codex cross-review uses your ChatGPT plan or OpenAI API key. Runs using the same account share its allowance. The status view shows subscription usage and reset times from agent events, without extra requests. Between runs, sandcastle usage shows a recent saved reading or requests a fresh one. USAGE_CHECK=1 checks Claude plan usage before starting tickets; USAGE_PAUSE=90 opts into pausing at 90% of a provider's plan window and resuming a minute after its reset. Without usage pause, an agent hitting the limit stops the queue." } },
           { "@type": "Question", "name": "Which models does it use?", "acceptedAnswer": { "@type": "Answer", "text": "By default Claude Sonnet 5.5 implements and Claude Opus 5.5 reviews. A model: or effort: label sets the implementer's model or effort for one ticket, and CROSS_REVIEW=1 adds a third review by an OpenAI model through Codex." } },
           { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch. A completed ticket is closed with a comment; a partly-done ticket stays open with the unmet criterion named. Agents' follow-ups are filed for triage. You push when you are happy with what landed." } },
-          { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. A worktree shares the repository's git config, so do not give a branch an upstream there mid-run (git push -u, gh pr create): that stops the run too." } },
+          { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. You can set an upstream for your own branch in another worktree, including with git push -u or gh pr create. Other changes to the shared git config stop the run, and the stop names the changed keys." } },
           { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
-          { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged." } },
+          { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict, or a resolution that drops lines git had merged, is left for you." } },
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
           { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
@@ -472,13 +472,14 @@
             <ul>
               <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins: each one costs context on every turn.</li>
               <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
+              <li><b>Conflicts before review.</b> A branch that conflicts with the base skips review and gates and goes back to resolve. The host also checks for conflicts before landing.</li>
               <li><b>One fix for a shared failure.</b> Tickets red on a test another ticket is repairing wait for its fix. A test already red on the base is reported once, instead of repaired on every branch.</li>
             </ul>
           </div>
           <div class="bound">
             <h3>Shares the machine</h3>
             <ul>
-              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. <code>sandcastle cap 2</code> limits a live run's share.</li>
+              <li><b>Several projects at once.</b> Runs in different projects split the machine's sandbox slots between them rather than starving each other. A run with at least two sandbox slots keeps one for landing, so a green branch does not wait behind a ticket. <code>sandcastle cap 2</code> limits a live run's share.</li>
               <li><b>CPU and memory counted.</b> Each sandbox has a CPU limit. Landing, base and verify gates take the run's next free gate slot before ticket gates; <code>sandcastle size</code> recommends pool limits from measured memory, and doctor warns when they exceed the VM.</li>
               <li><b>A pause keeps the work.</b> Passes in flight finish and green branches still land. Parked sandboxes close, slots go back to other runs and the machine can sleep until you resume.</li>
               <li><b>Detached.</b> A run started by your agent outlives the session that started it; <code>sandcastle wait</code> and <code>sandcastle stop</code> find it again.</li>
@@ -625,6 +626,7 @@
             <h3>Into the sandbox</h3>
             <ul>
               <li><b>A token that cannot push.</b> Only a fine-grained GitHub token for issues goes in, and <code>sandcastle doctor --verify</code> checks it cannot push. An empty value is refused, so a host API key cannot leak in.</li>
+              <li><b>Sandbox agents cannot add worktrees.</b> Claude Code's worktree tools are denied in sandboxes, and the git guard refuses <code>git worktree add</code> in the shared <code>.git</code>.</li>
               <li><b>Tickets grant no permissions.</b> A ticket that asks an agent to touch <code>.git/</code>, credentials or a push is not the work, and the guards below hold if an agent tries anyway.</li>
             </ul>
           </div>
@@ -639,7 +641,7 @@
             <h3>On your machine</h3>
             <ul>
               <li><b>Nothing is pushed.</b> Green branches merge into your local base branch. The kit never pushes or deploys; on GitHub it labels and comments on issues, closes completed ones and files agents' follow-ups for triage.</li>
-              <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there.</li>
+              <li><b><code>.git</code> is fingerprinted.</b> If a sandbox changes <code>.git/config</code>, <code>HEAD</code>, <code>info/</code> or hooks, or moves your base branch, the run stops before your machine runs another git command there. The stop names each changed <code>.git/config</code> key.</li>
               <li><b>Host hooks stay off.</b> During a run the kit's own git calls on your machine ignore hooks, so a branch that adds one cannot run it as it lands.</li>
             </ul>
           </div>
@@ -682,7 +684,7 @@
       </details>
       <details>
         <summary>What about my own work in that repository?</summary>
-        <p>A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. A worktree shares the repository's git config, so do not give a branch an upstream there mid-run (git push -u, gh pr create): that stops the run too.</p>
+        <p>A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. You can set an upstream for your own branch in another worktree, including with git push -u or gh pr create. Other changes to the shared git config stop the run, and the stop names the changed keys.</p>
       </details>
       <details>
         <summary>What if a branch is green but wrong?</summary>
@@ -690,7 +692,7 @@
       </details>
       <details>
         <summary>What happens on a merge conflict?</summary>
-        <p>A branch that conflicts as it lands goes back for one more try in the same run. A second conflict is left for you, and so is a resolution that drops lines git had merged.</p>
+        <p>If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict, or a resolution that drops lines git had merged, is left for you.</p>
       </details>
       <details>
         <summary>Can the text of a ticket make an agent do something else?</summary>

@@ -94,7 +94,7 @@ test("a run with nothing in it prints every section, each saying none", () => {
   // Local state always speaks: "nothing is pushed" is the line operators most misread.
   for (const s of SECTIONS.slice(1).filter((s) => !s.includes("Local state"))) assert.match(body(out, s), /^none$/m, `${s} should say none`);
   assert.match(body(out, "## 📤 Local state"), /Nothing is pushed by Sandcastle/);
-  assert.match(out, /not re-gated \(fewer than two branches merged in this run\)/);
+  assert.match(out, /not re-gated \(no branch merged in this run\)/);
   // A run that never reached verify says so, whatever its tickets say.
   assert.match(render(facts({ verify: undefined, finished: undefined, killed: true })), /not re-gated \(the run ended before it got there\)/);
 });

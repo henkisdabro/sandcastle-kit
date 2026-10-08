@@ -621,6 +621,18 @@ export const greenProofOfBase = (project: Project, image: string, planFile: stri
 };
 
 /**
+ * What the end-of-run verify does: `due` when at least one ticket merged (or a merge regenerated files), and
+ * `skipped` when the green-base record already holds a gate-only proof of the tip (`greenProofOfBase`). A run that
+ * landed one ticket as a fast-forward records a `ticket-sandbox` proof, which is none, so its verify runs: nothing
+ * else would gate that tip in a clean sandbox, and the next turn's base check reads the record of any kind.
+ */
+export const verifyPlan = (project: Project, image: string, planFile: string, merged: number, regenerated: number): { due: boolean; skipped?: ReturnType<typeof greenProofOfBase> } => {
+  if (merged === 0 && regenerated === 0) return { due: false };
+  const skipped = greenProofOfBase(project, image, planFile);
+  return skipped ? { due: true, skipped } : { due: true };
+};
+
+/**
  * The gates on the merged base at the end of a run (`gateBase`, no hook tests). What they say of the
  * commit they ran on is the base's record, as the base check's own result is: green is the next
  * turn's skip, red removes a record that would skip a base known to be red.

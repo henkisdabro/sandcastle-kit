@@ -57,7 +57,7 @@ This continues SKILL.md: run its "Before every action" first.
    - **Turns.** If the config sets `autonomy` (or the user asks for `AUTONOMY_LEVEL`), say how
      many further turns the run may take by itself. Tickets shown `[waits for ...]` form a chain,
      and a chain whose links are all queued drains in one run: each ticket starts once its last
-     blocker lands and closes. With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
+     blocker lands with its work done (a close the tracker refuses holds nothing back). With no autonomy set, recommend `AUTONOMY_LEVEL=drain` (or
      `autonomy: "drain"`) when the queue may need further turns - a ticket that conflicts twice
      in one run, and the tickets waiting on it. Each later turn runs only the tickets the turn
      before left conflicted, released or partly done (still queued); a red ticket is not run again, and a ticket queued after
@@ -138,7 +138,7 @@ This continues SKILL.md: run its "Before every action" first.
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
-      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge: say that, and still do not push.
+      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent: say which, and still do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
@@ -204,7 +204,7 @@ This continues SKILL.md: run its "Before every action" first.
 
 Tickets land **while others still run**, one at a time on the landing worker, as each goes green -
 not in a batch after the last one. So the summary's merged count includes tickets that landed
-mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when two or more
+mid-run, `Merged <base> re-gated` is still the one check at the end (it runs when one or more
 tickets merged, unless a clean gate-only sandbox already proved that very commit - the last landing's merge gated in its landing sandbox, or the base check - which the line says; a fast-forward's gates ran in the ticket's own sandbox and never skip it), and a ticket's gates passing on its own branch says nothing about the base it
 lands on. Two cases follow from that:
 
@@ -237,7 +237,7 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   merged before it), and it names what moved. For a moved base branch, show the user the commits
   it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
   or `.git/info/`, stop and have them inspect it (the stop names the keys that changed, and for
-  a key that is not a command, the old and new values: a branch of their own tells at once).
+  a key that neither runs a program nor carries a credential, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` before blaming the branch.

@@ -14,7 +14,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **`logs/timings.jsonl` has a `landing` line for every landing that reaches its merge**,
   fast-forwards and conflicts included, with its wait for a machine-wide sandbox slot as `waitMs`.
   A requeued ticket's wait to resolve behind the tickets ahead of it is added to the `waitMs` of its
-  second `setup` line. The estimate and the status view's usual time leave the new line out.
+  second `setup` line. The estimate and a ticket's usual time leave the new line out.
 
 ### Changed
 
@@ -29,7 +29,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   whose gates proved it (`Merged main re-gated: green at <sha> already on image <tag> (gated with
   #427 in its landing sandbox) - not run again`). A fast-forward landing's proof is its ticket's own
   sandbox, which can differ from a clean one (its agent's git identity, say), so after one the
-  verify still runs.
+  verify still runs - for a run that lands a single ticket too, where it used to run only after two.
 - **Beside another run, a run whose share of the machine's sandbox slots is 2 or more keeps one
   slot of that share for landing**, so a green branch no longer waits for a ticket to finish before
   it can land.
@@ -38,10 +38,19 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   tickets next to start, and the closing summary no longer says `waited Xm for a slot` on a
   ticket's line.
 - **When a run stops because `.git/config` changed, the stop names each changed key**, with its
-  old and new values, except for keys that run a program or load more config.
+  old and new values, except for keys that run a program, load more config or carry a credential;
+  a token in a URL is hidden in key names and values alike.
 - **The closing summary's Needs you section lists the follow-ups filed for triage, and the issues
   opened during the run, under a `### To triage` sub-heading** after the run's own items, so the
   headline's "need you" and "to triage" counts each match their bullets.
+
+### Security
+
+- **A merge driver a sandbox wrote into the shared `.git` no longer runs on the host.** Every host
+  `git merge-tree` (the conflict checks before review and before landing, and the check of a
+  conflict resolution) runs in a throwaway git directory that borrows only the project's objects,
+  so a driver set in `.git/config` and mapped in `.git/info/attributes` is never read, and nothing
+  is written into the project's object store.
 
 ### Fixed
 
@@ -65,10 +74,10 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **Follow-up filing no longer merges two findings because their evidence cites the same line**,
   now merges findings that name the same file with close titles, and no longer reads a host and
   port such as `api.example.com:443` as a place.
-
 - **A red end-of-run verify on a tree a ticket's own gates passed is no longer called "RED
   TOGETHER"** (every landing a fast-forward, say). The summary says the red is the verify sandbox's,
-  not the merge's, and its next step says the same.
+  not the merge's, and its next step says the same. On a tree a landing sandbox already passed, a
+  clean one like the verify's, it says a test is likely flaky or order-dependent.
 - **A red end-of-run verify names its failing tests** (up to five, then "and more") above the
   output excerpt and on the summary's re-gated line, not only in `verify-gates.log`.
 - **Sandboxes can no longer call the EnterWorktree, ExitWorktree, Workflow, DesignSync or
@@ -78,6 +87,18 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **A run that ends with a red merged base exits 1**, and records `exitCode: 1` in `run.json`, at
   every autonomy level, so `sandcastle wait` no longer reports success on a base the summary says not
   to push.
+
+- **A ticket the run merged but whose tracker close failed no longer holds its dependants** for the
+  rest of the run: a landed ticket counts as closed for them.
+- **A landing merge that git's own merge says conflicts is refused again.** The host's tree check
+  read every `merge-tree` failure as a git older than 2.38 and stepped aside; it now asks git's
+  version instead.
+- **The live status view keeps running with no terminal** (an agent's tool, a pipe), instead of
+  drawing one frame and ending on `TERM_COLS: unbound variable`.
+- **The status view's ETA floor for landings works again.** The typical landing-gates time is taken
+  over tickets that landed; held, red and conflicted tickets counted as landings of 0 and made it 0.
+- **A ticket requeued after a red landing that then conflicts, or the reverse, is no longer said to
+  have done it "again"**: the note says the requeue was for a red merge, or for a conflict.
 
 ### Upgrading
 

@@ -504,6 +504,9 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
   assert.equal(requeuedLine("red", []), "requeued after red on the merged tree");
   assert.equal(requeuedLine("conflict", ["1"]), "requeued after conflict with #1");
   assert.equal(againLine("conflict", ["1", "3"]), "conflicted again with #1, #3 after a requeue");
+  // A second attempt that ends another way than the first is no repeat.
+  assert.equal(againLine("conflict", ["1"], undefined, "red"), "conflicted with #1 after a requeue for a red merge");
+  assert.equal(againLine("red", [], { gates: ["test"] }, "conflict"), "red on the merged tree after a requeue for a conflict (gate test)");
 });
 
 /** One run over made-up landings, its ledger writing a run record; `o` may read both as the run goes. */

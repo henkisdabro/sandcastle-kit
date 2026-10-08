@@ -313,10 +313,11 @@ export type RunRecord = {
    * The gates on the merged base. `image`: the tag they ran on, the run's own (built before any ticket landed).
    * `failing`: the tests a red verify named, at most five (`failingMore`: it named others), read from the node:test, pytest, jest and similar output; absent when none were named.
    * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
-   * `gatedTree`: a red verify's tree is exactly one a landing's own gates passed - the ticket's ref; the red is the sandbox's, not the merge's.
+   * `gatedTree`: a red verify's tree is exactly one a fast-forward landing's ticket gates passed - the ticket's ref; the red is the sandbox's, not the merge's.
+   * `cleanTree`: the same for a landing merged and gated in a landing sandbox, a clean one - the red is a flaky or order-dependent test.
    * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it and `kind` where they ran.
    */
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;

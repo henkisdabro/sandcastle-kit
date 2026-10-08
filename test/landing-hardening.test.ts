@@ -241,6 +241,18 @@ test("a merge with the right parents but not the host's own merge tree is refuse
   assert.equal(plainMergeNote(root, planted, base, head), supported ? "landing merge does not hold the tree the host's own merge makes" : undefined);
 });
 
+test("a merge the host's own merge says conflicts is refused, not taken for an old git", () => {
+  // The base and the branch change the same line: git's merge conflicts, so any commit claiming to merge them cleanly
+  // did something git would not. The failure's message names `--write-tree`, which once read as "git too old".
+  const root = makeRepo({ 1: { "a.txt": "from the branch\n" } });
+  commitFile(root, "a.txt", "from the base\n", "base changed the same line");
+  const head = git(root, "rev-parse", "agent/issue-1");
+  const base = git(root, "rev-parse", "main");
+  const supported = spawnSync("git", ["merge-tree", "--write-tree", base, base], { cwd: root }).status === 0;
+  const claimed = forge(root, [base, head], "a.txt", "resolved\n");
+  assert.equal(plainMergeNote(root, claimed, base, head), supported ? "the host's own merge of base and the gated head conflicts, but the sandbox's did not" : undefined);
+});
+
 test("HEAD repointed by a sandbox is tampering, and info/refs rewritten by a repack is not", () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" } });
   const p = project(root);

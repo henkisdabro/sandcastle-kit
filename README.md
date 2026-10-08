@@ -340,7 +340,11 @@ agent - both when a re-run merges the base into a branch from an earlier run, an
 landing resolved this way happens in a throwaway sandbox (the host never runs project code), as a
 merge with the usual `Merge agent/issue-N (closes #N)` message. Before the base moves, the host checks
 that the commit merges exactly the base tip and the gated head and changes nothing beyond a plain
-merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. With
+merge outside `generated` paths; otherwise nothing lands and the ticket is left as a conflict. Before
+a landing takes a sandbox at all, the host asks `git merge-tree` (git 2.38+) whether the branch still
+merges, and only a conflict confined to `generated` paths goes on to the sandbox's merge. A file a
+merge driver would resolve inside the sandbox (an npm lockfile driver, say) is therefore a conflict
+unless it is listed under `generated`. With
 `land: "squash"` the checked merge's tree then lands as one commit, as any other squash does. The drift gate still proves the result matches
 the sources: the landing's gates run on that commit, and the merged base is gated again at the end of the run unless
 those gates already ran on its tip.
@@ -388,7 +392,7 @@ labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only a
 
 A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
 A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
-soon as #12 has landed and closed (a chain of tickets drains in one run); a blocker outside the run
+soon as #12 has landed with its work done, even if the tracker then refuses to close it (a chain of tickets drains in one run); a blocker outside the run
 holds it for a later one. A blocker can also live outside
 GitHub; see [Blockers](#-blockers-github-linear-ticket-files). `sandcastle queue` lists the queue
 and what holds each ticket back.
@@ -699,7 +703,7 @@ Claude's, and a run with a Codex reading adds a `Codex plan usage` line beside i
 
 **Landing.** Each green branch lands as soon as its gates pass, while the others still run, on one
 landing worker: landing moves the base branch, which the run guards against sandboxes changing, and
-the kit's own writes are the only moves it accepts. So a dependant of a ticket in this run starts once that ticket has landed and closed. Branches from earlier
+the kit's own writes are the only moves it accepts. So a dependant of a ticket in this run starts once that ticket has landed with its work done, closed or not: a close the tracker refuses holds nothing back. Branches from earlier
 runs land first. Each lands as a merge commit, or as one squashed commit with `land: "squash"`; a
 branch that changes hooks, CI or install scripts is held for you instead (see
 [Safety model](#-safety-model)). The ticket is closed with a comment saying the work is merged
@@ -743,7 +747,7 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
   time cap is met by starting it again. With no run live it prints the last summary at once and
   exits with the recorded code (0 when there is none). A run whose last turn left the merged base
-  red (`RED TOGETHER` in the summary, or red on the tree a ticket's own gates passed) exits **1**, at every autonomy level, so a harness does not
+  red (`RED TOGETHER` in the summary, or red on a tree a ticket's own gates or a landing sandbox passed) exits **1**, at every autonomy level, so a harness does not
   read success on a base the summary says not to push.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
@@ -926,7 +930,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone and changelog lines, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release under a `--- <time>, run pid <pid> ---` line per turn; the screen names each file once |
-| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`): the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) |
+| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`): the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) or one a landing sandbox passed (a flaky or order-dependent test) |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
 | `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit, whose gates proved it and where they ran, so the verify does not run again on a base tip a landing merged in a sandbox, the base check or an earlier verify just proved - never on a fast-forward's, whose gates ran in the ticket's own sandbox; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, unless the record before it covered both and nothing they read changed in between: a diff touching no hook directory, kept hook script, package manifest, lockfile or protected path), and the update record `kit-updated` |
@@ -1433,7 +1437,7 @@ and the kit narrows what can cross it:
   (`branch.<name>.remote` and `.merge`) that another worktree gives its own branch (`git worktree add`
   from a remote branch, `git push -u`, `git branch -u`, `gh pr create`) runs no program, so the run
   prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
-  values, except for keys that run a program): a remote, a hook path, an `include`, `rebase` or
+  values, except for keys that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook path, an `include`, `rebase` or
   `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
