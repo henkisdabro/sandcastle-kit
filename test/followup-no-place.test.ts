@@ -33,8 +33,9 @@ const recording = () => {
   };
 };
 
-const IMPLEMENT = named("Tooling: coverage run fails under the test pool", "c8 exits 1 when the pool is used", "7", "implement");
-const REVIEW = named("Tooling: unit-test coverage cannot run under the test pool", "the coverage step dies in the pool", "7", "review");
+// The ticket's own two wordings: they share exactly three significant words (coverage, test, pool).
+const IMPLEMENT = named("Coverage run fails under the test pool", "c8 exits 1 when the pool is used", "7", "implement");
+const REVIEW = named("Unit-test coverage cannot run under the test pool", "the coverage step dies in the pool", "7", "review");
 
 test("one ticket's two passes wording a path-less finding differently file one issue and comment on it", async () => {
   const { made, comments, tracker } = recording();
@@ -55,7 +56,7 @@ test("the same two titles from different source tickets are filed separately", a
 
 test("path-less titles of one ticket sharing only two significant words are filed separately", async () => {
   const { made, comments, tracker } = recording();
-  const other = named("Coverage report is missing a summary line", "", "7", "review");
+  const other = named("Test pool leaks a worker on exit", "", "7", "review"); // shares test, pool
   await fileFollowUps(tracker, [IMPLEMENT, other], { dryRun: false, write: direct, exists: anyPath });
   assert.equal(made.length, 2);
   assert.deepEqual(comments, []);
