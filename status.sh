@@ -1167,7 +1167,7 @@ render() {
         # to the ticket next to start. An older kit wrote it as the note of a ticket a worker had taken.
         # A slot the run keeps for a landing is the same wait with another cause, and says so.
         if [ "$activity" = "next to start" ]; then
-          case "$SHARE_WAIT" in share) activity="waits for the run's share";; landing) activity="waits: a slot is kept for landing";; esac
+          case "$SHARE_WAIT" in share) activity="waits for the run's share";; landing) activity="waits: slot kept to land";; esac
         fi
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;
