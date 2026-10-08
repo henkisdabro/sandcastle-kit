@@ -1124,6 +1124,10 @@ export type BranchHead = {
   changelog?: string[];
   /** How many `<changelog>` tags by `green` were no changelog line and were left out, carried like `changelog`. */
   changelogDropped?: number;
+  /** What a reviewer said no gate exercises, by `green` (its `<ungated>` line): a later land-only run reads no reviewer, so without it the "check by hand" note would not reach the closing summary. */
+  ungated?: string;
+  /** What a reviewer said of a gap in prose and filed nowhere, carried like `ungated`. */
+  gap?: string;
   /** The commits a repair pass made on the branch, over every attempt: the landing leaves what only they changed out of the `Touches:` overrun. */
   repaired?: string[];
   /** run.json's startedAt of the run that wrote the record last. */
@@ -1142,7 +1146,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
