@@ -159,6 +159,9 @@ export const notLandedComment = (
   );
 };
 
+/** The outcome text of a landing hold (a protected path, a large file, unreviewed repair commits): the report tells it from a held conflict resolution (`needs a human: <note>`) by it. */
+export const LANDING_HOLD = "needs a human merge";
+
 // A branch's outcome as the status view's row shows it, before landing. `uncommitted`: its finished work sits in a kept worktree.
 export const pipelineOutcome = (o: Pick<Finished, "status" | "gates" | "heldNote">, uncommitted: boolean): Outcome =>
   uncommitted
@@ -259,7 +262,7 @@ const describeLanding = (e: Extract<TicketEnding, { kind: "landing" }>, c: Conte
               : `Gated green on \`${g.branch}\` after a repair, but not merged: ${UNREVIEWED}. Review the repair commits and merge by hand.`;
         return {
           record: { state: "held", note: landed.reason, ...(landed.paths.length ? { files: landed.paths } : {}) },
-          outcome: { kind: "held", text: "needs a human merge" },
+          outcome: { kind: "held", text: LANDING_HOLD },
           view: NEEDS_A_HUMAN,
           tracker: { kind: "hold", text },
         };

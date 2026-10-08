@@ -178,7 +178,7 @@ test("a turn-1 record carries nothing, and the facts have no carried turns", asy
 test("a branch an earlier turn held is not said again as held in an earlier run", async (t) => {
   const p = project(t, turn2(), [turn1()]);
   // The ledger records turn 1's hold with turn 1's start, which is not the last turn's.
-  writeFileSync(join(p.root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ "shop-01": { run: turn1().startedAt, kind: "held", text: "changes src/a.ts" } }));
+  writeFileSync(join(p.root, ".sandcastle/logs/outcomes.json"), JSON.stringify({ "shop-01": { run: turn1().startedAt, kind: "held", text: "needs a human merge" } }));
   const out = await summary(p);
   assert.doesNotMatch(out, /in an earlier run/);
   assert.match(body(out, "## Next step"), /Review and merge the 1 held branch\(es\) \(commands above\) \(turn 1\)\./);
