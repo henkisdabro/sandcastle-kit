@@ -20,6 +20,7 @@ import { withExtraSlot, withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
 import { OperatorError } from "./errors.ts";
+import { localStamp } from "./stamp.ts";
 
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
@@ -66,11 +67,14 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     const gates: Gate[] = [];
     const failures: Failure[] = [];
     const log = progress.log;
+    // Said in the log, not only in the timings: the gate lines below are stamped when the gate starts, so a
+    // wait reads as a gap between the section's header and its first gate.
+    if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
         progress.gate?.(i, g.name);
-        if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${new Date().toISOString()}\n`);
+        if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
         const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
         const ms = Date.now() - since;
