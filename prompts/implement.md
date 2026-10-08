@@ -80,6 +80,9 @@ ticket names. The project rules below say what else to read.
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
+  Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
   hook, a full disk or a signing failure can refuse a commit. If one does, quote the last lines of

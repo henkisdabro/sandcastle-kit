@@ -282,6 +282,28 @@ export const unmatchedLines = (u: { keep: string[]; dropHooks: string[] }) => [
   ...u.dropHooks.map((d) => `lean.dropHooks "${d}" matches no hook in .claude/settings.json - nothing is dropped by it`),
 ];
 
+/**
+ * The project's `permissions.ask` rules a sandbox gets: from the tracked .claude/settings.json only
+ * (settings.local.json is untracked, so no sandbox has it). The agents run with permissions bypassed,
+ * yet an ask rule still stops a matching command, and nobody in a sandbox can answer it.
+ */
+export const askRules = (root: string): string[] => {
+  if (!tracked(root, ".claude/settings.json").length) return [];
+  const ask = (readJson(join(root, ".claude/settings.json"))?.permissions as { ask?: unknown } | undefined)?.ask;
+  return Array.isArray(ask) ? ask.filter((r): r is string => typeof r === "string") : [];
+};
+
+/** The lines that name those rules, none when there are none; lean and doctor print the same words. */
+export const askRuleLines = (root: string): string[] => {
+  const rules = askRules(root);
+  if (!rules.length) return [];
+  return [
+    `${rules.length} permissions.ask rule(s) in .claude/settings.json are refused in sandboxes, where nobody can answer:`,
+    ...rules.map((r) => `    ${r.length > 90 ? r.slice(0, 87) + "..." : r}`),
+    "  A command matching one fails with \"you haven't granted it yet\". Move a rule to allow or deny, or drop it if it only guards a person's own session.",
+  ];
+};
+
 export const report = (project: Project, p: Plan) => {
   const rows = p.items.map((i) => [
     i.kept ? "keep" : i.kind === "hook" ? "drop" : "hide",
@@ -328,6 +350,8 @@ export const report = (project: Project, p: Plan) => {
         "  commit it, or un-ignore it, so its guards reach every sandbox.",
     );
   }
+  const [askHead, ...askRest] = askRuleLines(project.root);
+  if (askHead) console.log([`  WARNING: ${askHead}`, ...askRest].join("\n"));
   // The hook check proves a guard CAN run; only a hook test proves it blocks.
   const guards = p.hooks.filter((h) => h.event === "PreToolUse").length;
   if (guards && !project.hookTests.length) {

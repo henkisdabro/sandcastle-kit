@@ -58,6 +58,9 @@ see the whole set, and fix all of them.
   line). The orchestrator files each as a new ticket for triage, naming this ticket, so do not file it
   yourself.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
+  Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 {{KIT_PROJECT_RULES}}
 

@@ -66,7 +66,9 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 **Fix it yourself and commit**, in the same style as the existing commits. You are not writing a
 report for a human - your commits are the deliverable, and they will be gated alongside the
-implementer's.
+implementer's. Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
+then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 Constraints:
 
