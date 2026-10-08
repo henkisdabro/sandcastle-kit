@@ -328,6 +328,8 @@ export type RunRecord = {
    */
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
+  /** Tracked files a gate rewrote and the kit put back, by path, once each. */
+  gateRewrites?: string[];
   dryRunCheck?: string;
   tickets?: Record<string, TicketRecord>;
 };

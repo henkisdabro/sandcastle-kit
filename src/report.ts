@@ -20,7 +20,7 @@ import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHead
 import { commandOf } from "./live-runs.ts";
 import { sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
-import { LANDING_GATES } from "./gates.ts";
+import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
@@ -71,6 +71,8 @@ export type Facts = {
   /** Standing branches whose ticket an earlier run held for a person, by branch: that outcome's text. A branch of this run's own, or with no outcome, is not here. */
   earlierHeld?: Record<string, string>;
   keptWorktrees: { issue: string; path: string }[];
+  /** Tracked files a gate rewrote and the kit put back. */
+  gateRewrites?: string[];
   dryRunCheck?: string;
   /** Why the run stopped before landing, if it did. */
   stopped?: string;
@@ -389,6 +391,7 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
     standing,
     earlierHeld,
     keptWorktrees: run.keptWorktrees ?? [],
+    gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     stoppedBy: run.stoppedBy,
@@ -830,7 +833,11 @@ export const render = (f: Facts, plain = false): string => {
       : `${f.base} is ${f.ahead} commit(s) ahead of ${f.upstream} (as of the last fetch).`,
     "Nothing is pushed by Sandcastle. Push by this repo's own rules (for example `git push`, or a pull request).",
     `Agent branches with unmerged work: ${f.standing.length ? f.standing.map((b) => (b in earlier ? `${b} (held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""})` : b)).join(", ") : "none"}`,
-    ...f.keptWorktrees.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    // By path: a requeued ticket's second pipeline keeps the same worktree, and one line per path is the fact.
+    ...f.keptWorktrees
+      .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i)
+      .map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    ...(f.gateRewrites ?? []).map(rewroteLine),
   ]);
 
   // Next step: the first thing that unblocks the most, then the rest in order.
