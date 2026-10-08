@@ -9,6 +9,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **The review checks where each dependency a branch adds or changes comes from** (the project's
+  registry, a git ref, a URL or a local path), whether it is pinned, and whether the ticket needs
+  it. It removes an unneeded one, switches one to its registry release where there is one, and
+  names one the ticket needs from elsewhere in an `<ungated>` line for a person to check. The
+  implementer is told to take new dependencies from the registry unless the ticket names the
+  source.
+
 ### Changed
 
 - **Implement and repair agents carry text that names a git command the guard refuses through the
@@ -17,6 +26,27 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The README and the init skill tell Playwright and Puppeteer projects to launch Chromium with
   `--disable-dev-shm-usage`**: a sandbox gets the runtime's default `/dev/shm` (64 MB on Docker),
   and heavy pages crash there.
+- **A sandbox agent runs a long command that is not a gate (a download, an install, a build) in the
+  foreground**, and waits on one it backgrounded with a single bounded `timeout 600 bash -c 'until
+  <check>; do sleep 5; done'`, instead of `sleep` or Monitor, which Claude Code blocks and the kit
+  denies.
+- **A request for a short hand-back wins over the seven-section closing summary**, whether made in
+  the conversation or kept as a standing preference in the user's memory or instructions. The short
+  form keeps what must come first (a red merged base, RED TOGETHER, an early end or a stop), what
+  needs the person, that nothing was pushed, and the one next step and question, then offers the
+  full sections. The seven sections stay the default.
+- **`sandcastle status` with no terminal on stdout (a pipe, an agent's tool) prints one frame and
+  exits**, as `status 0` does, instead of refreshing until it is killed. The skill tells agents to
+  run `sandcastle status 0` to check whether a run is live.
+- **The README explains that a sandbox's CPU limit is a time quota, not pinned cores.**
+  `os.availableParallelism()` sees it, but `nproc`, `os.cpus()` and Python's `os.cpu_count()` count
+  the VM's CPUs, so give a test runner sized from those a worker count in its gate command.
+- **The README's setup steps and the skill's init and update actions say that a hand-written
+  `.sandcastle/Dockerfile` is built only once the config names it** with
+  `dockerfile: ".sandcastle/Dockerfile"`.
+- **The models guidance warns that Claude Haiku 5.5, on an API key, bills prompts over 100K tokens
+  at five times its price**, as most requests at `high` or `max` effort are, and advises `medium`
+  or below with the effort set beside the model.
 
 ### Security
 
@@ -24,17 +54,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   landing was being checked can no longer run on the host at the fast-forward.** The `.git` check
   now runs straight before the fast-forward and stops the run first, for runs and for
   `sandcastle land`.
+- **The run's host guard also turns off git's background maintenance (`maintenance.auto=false`)**
+  beside `gc.auto`, so a landing merge can no longer start a detached repack, worktree prune, ref
+  pack or reflog expiry in the shared `.git` on git 2.54 and newer.
 
 ### Fixed
 
 - **`sandcastle doctor --verify` reads the repository with `GH_TOKEN`** and gives a FIX naming the
-  token's Repository access when GitHub answers 404 (the write probe's 404 no longer reads as
-  "cannot push"). `sandcastle run` refuses the same way before any sandbox starts, instead of
-  crashing every ticket.
+  token's Repository access when the read probe gets 404. The read probe alone decides whether the
+  token can see the repository: a 404 from the push probe reads as "cannot push", never as "cannot
+  see". `sandcastle run` refuses the same way before any sandbox starts, instead of crashing every
+  ticket.
 - **In a partial (promisor) clone, the host's merge checks no longer fail quietly** when an object
   is missing locally (the conflict check before landing, the landing pre-check, and the check of a
-  conflict resolution). The run says so once, the closing summary names it, and doctor warns on a
-  partial clone. The checks still never fetch: a full clone is what lets them run.
+  conflict resolution). The run says so once, in each drain turn whose own checks hit it (not again
+  in every later turn), the closing summary names it, and doctor warns on a partial clone. The
+  checks still never fetch: a full clone is what lets them run.
 - **A landing whose host merge check could not run because a git call failed is held with a "could
   not be run" note**, instead of being reported as a merge conflict.
 - **A conflict resolution is held for a person only when it changes a file the base had changed
@@ -42,20 +77,64 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   review of the resolution instead.
 - **A ticket branch an earlier run left with no commits ahead of the base is cut again from the
   base's tip** before its sandbox opens (a crashed attempt, or a remainder whose work already
-  merged), so the agent no longer works on a stale tree and conflicts at landing.
+  merged), so the agent no longer works on a stale tree and conflicts at landing. That holds too
+  when a clean kept worktree under `.sandcastle/worktrees/` still has the branch checked out, as a
+  run killed before its sandboxes closed leaves: the worktree moves with its branch. A worktree
+  with uncommitted or untracked files, or one of your own, is left as it is.
 - **A gate that rewrites a tracked file no longer leaves every worktree dirty**, so merged tickets'
   branches are deleted and no worktree or branch leaks. The closing summary names the rewritten
   file once, with the hint to `.gitignore` it or list it under `generated`, and lists each kept
-  worktree once.
+  worktree once, with a `sandcastle clean` step for one a merged ticket left.
 - **A drain no longer re-runs a partly-done ticket whose remainder only a person can do** (a
   deploy, access an agent lacks, a file agents may not edit): agents mark such a remainder with
   `<unmet who="person">`, and the wording check catches more of these phrasings.
+- **A drain's last closing summary, which `sandcastle report` and `sandcastle wait` show, includes
+  what earlier turns left for a person**: held branches, partly done remainders, checks by hand,
+  gaps the reviewer named and follow-ups, each marked `(turn N)`. It no longer says "Needs you:
+  none" while work waits.
 - **Follow-ups that name no file are deduped when the same ticket's passes word one finding
   differently**: two titles sharing three or more significant words are filed once, and the second
-  becomes a comment on the first's issue.
+  becomes a comment on the first's issue. A follow-up whose file is named by its bare name, cited
+  in the evidence without a line, or named after another file is deduped the same way.
+- **A follow-up's title is no longer cut at a " - " inside double quotes or backticks**, so a title
+  that quotes UI text or a command keeps it whole.
 - **A ticket's gates log heads each section with the kind of gate run** (ticket gates, landing gates
   on the merged tree, or a hand landing by `sandcastle land`), says `# waited Ns for a gates slot`
   after a wait, and stamps its gate lines in the header's local time.
+- **A ticket's gates log, and the logs of its landing gates and `sandcastle land`, hold what each
+  gate wrote to stderr**, under a `# stderr of <gate>` line after its output, so a red gate's
+  failure is in the log and not only in the repair prompt.
+- **A gate's failing tests are read from a coloured vitest run and from a vitest workspace
+  project's `FAIL |web| file` line**, so the "red on the base too" check, the closing summary's
+  `failing:` line and the fix board name the test file. The repair prompt no longer carries colour
+  codes.
+- **`sandcastle gates` takes the run lock, as `land` and `clean` do**, so it refuses while a run of
+  the project is live, instead of rewriting that run's lean plan and green-base record or reporting
+  the run's own commits as tampering.
+- **The end-of-run verify's and the base check's wait for a machine-wide sandbox slot is recorded
+  as `waitMs` in `timings.jsonl`**, not as run time, so the start estimate no longer inflates those
+  steps after a run that waited behind another.
+- **Beside another live run, the start estimate, the run record's `concurrency` and
+  `load.concurrency`, and the start line's share clause count the slot kept for landing**, so a run
+  with a share of 2 is shown and recorded as one ticket at a time, not two.
+- **The start line tells two live runs of one project apart** (a second checkout, say) by their
+  folders, or their pids where the folders are unknown or alike.
+- **The closing summary reads blocked tickets and their blockers from one list of open tickets**,
+  not one tracker call each, so a run with dozens of blocked tickets no longer spends a minute or
+  more building it.
+- **The Claude Code mod's "run ended" prompt names the run by its pid and start time**, and the
+  skill's run action closes a run that a later one replaced from its archived output or history
+  line, not from the live run's report.
+- **`sandcastle queue`, `sandcastle blockers` and the run's start warn of blockers listed under a
+  "Blocked by" heading**, not only `queue --lint`. `queue --lint` gives a `Touches:` glob that
+  matches no file its own advice (name the new files, or fix the glob), and `skill/queue.md` says a
+  colon after `Blocked by` is read.
+- **The agents' "test without your change" recipe saves and reverts the same files, both from
+  `HEAD`**, so an unstaged edit to another tracked file no longer makes `git apply` refuse the
+  patch, and a staged change no longer survives the revert.
+- **The resolve prompt carries the safety sentences of the other prompts**: no `git stash`, no
+  self-matching `pgrep -f` or `pkill -f`, a time limit on every test run by hand, and a safe
+  heredoc delimiter.
 - **The lean hook check no longer warns of an unseen Python import for a hook a passing hook test
   ran cleanly.** The warning stays for hooks no passing test has run, and returns after a commit
   that changes a hook file, manifest or lockfile, until the next base check reruns the hook tests.
@@ -65,22 +144,29 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The status view no longer marks an earlier run's kept worktrees as `stalled`** (or as a working
   phase) while a new run is live; they show as `merged` or `left over` by their branch, as they do
   with no live run.
-- **A ticket waiting because the last slot of the run's share is kept for landing shows `waits: a
-  slot is kept for landing`** in the status view, instead of `waits for the run's share`. The run
-  record gains `waitsFor` (`share` or `landing`) beside the old `waitsForShare`.
-- **The closing summary's wording of hand merges is right.** A GitHub ticket whose hand merge was
-  pushed and closed reads "merged by hand, and closed", not always "closes on push", and a "part of"
-  hand merge reads "merged by hand, partly done: stays open" with its unmet criterion.
-- **The closing summary says when a listed agent branch was held for a human merge in an earlier
-  run**, with the reason, and its Next step says to review and merge it by hand or delete it.
+- **A ticket waiting because the last slot of the run's share is kept for landing shows `waits: slot
+  kept to land`** in the status view, in full at 100 columns, instead of `waits for the run's
+  share`. The run record gains `waitsFor` (`share` or `landing`) beside the old `waitsForShare`.
+- **The wording of hand merges is right, in the closing summary and the status view.** A GitHub
+  ticket whose hand merge was pushed and closed reads "merged by hand, and closed", not always
+  "closes on push", and a "part of" hand merge reads "merged by hand, partly done: stays open"
+  with its unmet criterion.
+- **The closing summary says when a listed agent branch was held in an earlier run**, with the
+  reason. Its Next step for a branch held for its conflict resolution is to check the resolution
+  and `sandcastle land <n>`, which gates the merge; a landing hold (a protected path, a large file,
+  an unreviewed repair) keeps the step to review and merge it by hand or delete it.
 - **A branch carried into a later run keeps its earlier review's "check by hand" note and gap**, so
   they reach that run's closing summary.
 - **The closing summary no longer lists a reviewer's prose as "named a gap it did not file"** when
   the gap word sits in inline code or a heading, or the sentence reports a fix or a deliberate
-  omission. A gap named after its fix, or a fix not made, still counts, and a gap sentence opening
-  with "That" or "This" is quoted with the sentences before it.
+  omission. A gap named after its fix, or a fix not made ("I have not yet fixed it"), still counts,
+  a gap written as a bold sentence is kept (only a short bold label is skipped), and a gap sentence
+  opening with "That" or "This" is quoted with the sentences before it.
 - **With the Markdown ticket-files tracker, a red end-of-run verify on the tree a landing's own
   gates passed says the difference is the sandbox, not the merge**, instead of "RED TOGETHER".
+- **The kit's own test suite no longer flakes on a busy machine**: its environment turns off git's
+  background maintenance, the merge-driver test has a temp directory of its own, and the status
+  view's paused-for-usage scenario passes at any terminal width.
 
 ## [0.11.0] - 2026-10-08
 
