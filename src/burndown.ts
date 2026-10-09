@@ -922,8 +922,33 @@ export const namedTickets = (tracker: Tracker, list: string): Issue[] =>
  */
 export const gatesLabel = (project: { name: string }, ref: (id: string) => string, id: string, what = "gates"): string => `${project.name} ${ref(id)} ${what}`;
 
-/** The tickets a turn runs plus the rest of the queue: a named ticket not queued (hand-picked) stays, as it was. */
-export const wholeQueue = (tracker: Tracker, named: Issue[]): Issue[] => [...named, ...tracker.queued(false).filter((t) => !named.some((n) => n.id === t.id))];
+/**
+ * The tickets a turn runs plus the rest of the queue: a named ticket not queued (hand-picked) stays, as it was.
+ * `scope` is the operator's own list (the ids `sandcastle run 12 15` named, carried across every turn): the
+ * queue then adds only tickets inside it, so a ticket the operator left out is never listed, recorded or reported.
+ */
+export const wholeQueue = (tracker: Tracker, named: Issue[], scope?: ReadonlySet<string>): Issue[] => [
+  ...named,
+  ...tracker.queued(false).filter((t) => !named.some((n) => n.id === t.id) && (!scope || scope.has(t.id))),
+];
+
+/**
+ * The operator's named list as ticket ids, for `wholeQueue`'s `scope`. A ticket the tracker cannot read
+ * keeps the id as typed: a later turn must not throw on a ticket closed or removed since the first.
+ */
+export const scopeIds = (tracker: Tracker, list: string, known: Issue[] = []): Set<string> =>
+  new Set(
+    list.split(",").map((n) => {
+      const typed = n.trim();
+      const hit = known.find((t) => t.id === typed);
+      if (hit) return hit.id;
+      try {
+        return tracker.get(typed).id;
+      } catch {
+        return typed;
+      }
+    }),
+  );
 
 /**
  * Every queued ticket with an open blocker, whether or not this turn runs it. A later autonomy
@@ -2299,7 +2324,10 @@ let unlockOnExit = false;
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
  * runtime check (cli.ts); a turn handed none reads its own.
  */
-export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean }): Promise<boolean> => {
+export const burndown = async (
+  project: Project,
+  turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean; scope?: { list: string; ids?: Set<string> } },
+): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -2358,7 +2386,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // and, if the project configures them, Linear issues and task files
   // (blockers.ts); one that cannot be read counts as open.
   // `waiting` covers the whole queue, not only the named tickets, so a later turn still records the dependants.
-  const whole = named.list ? wholeQueue(tracker, queued) : queued;
+  // A run whose operator named tickets (`turn.scope`, the first turn's list, kept across every turn) covers only
+  // those: a queued ticket they left out is not listed, recorded or reported, and a later turn's list is no wider.
+  const scope = turn?.scope ? (turn.scope.ids ??= scopeIds(tracker, turn.scope.list, queued)) : undefined;
+  const whole = named.list ? wholeQueue(tracker, queued, scope) : queued;
   const wholeOpen = await openOnQueue(project, tracker, whole);
   const held = new Map<string, { ticket: Issue; on: Blocker[] }>(queued.flatMap((i) => (wholeOpen.has(i.id) ? [[i.id, { ticket: i, on: wholeOpen.get(i.id)! }] as const] : [])));
   const waiting = [...wholeOpen].map(([id, on]) => ({ issue: id, on: on.map(refLabel) }));

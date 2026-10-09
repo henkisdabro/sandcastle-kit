@@ -139,7 +139,7 @@ import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { changelogSince, closingReport, type Facts, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
@@ -336,12 +336,16 @@ try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
       }
+      // What the operator named, kept for every turn: a later turn sets TICKETS to its own re-runnable tickets,
+      // which says nothing of a queued ticket the operator left out. Nothing named: the whole queue, as always.
+      const operatorList = namedTicketsFromEnv().list;
+      const scope = operatorList ? { list: operatorList, ids: undefined as Set<string> | undefined } : undefined;
       // The last turn's facts, for the exit code: a turn that ended the loop before gathering (level 0) leaves them unread.
       let lastFacts: Awaited<ReturnType<typeof gather>> | undefined;
       let ranTurn = false;
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -416,7 +420,7 @@ try {
         // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
         const tracker = makeTracker(project);
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
-        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()))) console.log(line);
+        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)) console.log(line);
       }
       // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
       // Level 0 gathered no facts: the run record's verify is enough, where gather() would read the tracker again

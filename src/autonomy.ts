@@ -158,15 +158,17 @@ export const drainLine = (turns: number, landed: number, cause: string): string 
  * started, so the drain does not take them (a turn takes only the last turn's re-runnable tickets,
  * never the whole queue) and the next `sandcastle run` does. `held` names the ones a blocker holds
  * back, which a bare `sandcastle run` would not start either. Unreadable queue: no line, as the
- * run is over and the lines are only a courtesy.
+ * run is over and the lines are only a courtesy. `scope` is a named run's own tickets: one the operator
+ * left out is not late for it, so the lines name none outside the set.
  */
 export const lateQueueLines = async (
   tracker: Tracker,
   inRun: ReadonlySet<string>,
   held: (queue: Ticket[]) => Promise<ReadonlySet<string>>,
+  scope?: ReadonlySet<string>,
 ): Promise<string[]> => {
   try {
-    const late = tracker.queued(false).filter((t) => !inRun.has(t.id));
+    const late = tracker.queued(false).filter((t) => !inRun.has(t.id) && (!scope || scope.has(t.id)));
     if (late.length === 0) return [];
     const blocked = await held(late);
     return late.filter((t) => !blocked.has(t.id)).map((t) => `${tracker.ref(t.id)} was queued after this run started: \`sandcastle run\` takes it`);

@@ -898,6 +898,10 @@ turn's re-runnable tickets, never the whole queue. So a ticket queued after the 
 the next `sandcastle run`, and the closing lines name each one
 (`#151 was queued after this run started: \`sandcastle run\` takes it`).
 
+A run that names its tickets (`sandcastle run 12 15`) keeps to them in every turn: the start lines, the run
+record and the summary hold no queued ticket you left out, and a named ticket that waits on an
+unnamed blocker still shows as waiting.
+
 ### 🔁 Re-runs
 
 A queued ticket with a branch from an earlier run builds on that branch:
