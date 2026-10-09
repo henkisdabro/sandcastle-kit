@@ -4,7 +4,7 @@
 import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
@@ -210,10 +210,39 @@ export const dirtyFiles = (root: string): string[] =>
     .split("\n")
     .filter(Boolean);
 
+// What an earlier git left half-done in the repo: a lock file no git process holds any more, or a merge
+// that was never finished or aborted. `git status` prints nothing for either, so the tree looks clean,
+// yet every merge into it then fails: the lock refuses the index write, and MERGE_HEAD makes git say
+// "commit your changes before you merge", which names the branch and not the repo.
+export const gitLeftovers = (root: string): { file: string; what: string }[] => {
+  const found: { file: string; what: string }[] = [];
+  for (const [name, what] of [
+    ["index.lock", "a lock file git left behind"],
+    ["MERGE_HEAD", "a merge that was never finished or aborted"],
+  ] as const) {
+    // `--git-path` is relative to the working directory, and follows a linked worktree's own git directory.
+    const file = resolve(root, sh("git", ["rev-parse", "--git-path", name], root));
+    if (existsSync(file)) found.push({ file, what });
+  }
+  return found;
+};
+
+// What to do about each leftover, in order: the lock first, as `git merge --abort` needs the index lock too.
+// Only the files that are there: with a lock and no MERGE_HEAD, `git merge --abort` says there is no merge to abort.
+export const leftoverSteps = (left: { file: string; what: string }[]) =>
+  `Once no git process is running, ${left.map((l) => (l.file.endsWith("index.lock") ? `remove ${l.file}` : "run `git merge --abort`")).join(", then ")}, then run again.`;
+
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
 // without the file list the operator had to run git status to find a stray lockfile.
 export const assertCleanBase = (project: Project) => {
+  // First: a leftover lock or merge makes the files below read as dirty or clean for no reason a person can see.
+  const left = gitLeftovers(project.root);
+  if (left.length > 0) {
+    throw new OperatorError(
+      `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
+    );
+  }
   const dirty = dirtyFiles(project.root);
   if (dirty.length > 0) {
     const shown = dirty.slice(0, 10).map((l) => `  ${l}`);

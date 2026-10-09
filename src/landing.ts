@@ -28,7 +28,7 @@ import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
-import { dirtyFiles, readHeads } from "./run.ts";
+import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
@@ -496,18 +496,34 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       // its wording varies by version, so the reason comes from the working tree. A branch
       // that holds the base cannot conflict: this is a dirty index, a full disk. Both are host
       // git calls (`git status` can run an fsmonitor), so they are a write: checked first.
-      const dirty = await host.write(() => {
+      const { dirty, left } = await host.write(() => {
         try {
           abortLanding(root, project.land);
         } catch {
-          /* nothing to abort */
+          // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
+        }
+        let left: { file: string; what: string }[] = [];
+        try {
+          left = gitLeftovers(root);
+        } catch {
+          left = [];
         }
         try {
-          return dirtyFiles(root);
+          return { dirty: dirtyFiles(root), left };
         } catch {
-          return [];
+          return { dirty: [], left };
         }
       });
+      // A landing that cannot undo its own merge leaves the repo half-merged: every landing after it would
+      // fail on that, as a fault of its own branch. The run stops here, naming the first cause.
+      if (left.length > 0) {
+        throw new LandingStop(
+          `${ref(o.issue)} left git half-done in ${root} and the landing could not undo it (${errorLine(error)}): ${left.map((l) => `${l.file} (${l.what})`).join(", ")}. ` +
+            `Nothing more lands. ${leftoverSteps(left)}`,
+          { what: `${ref(o.issue)} left a merge open`, detail: left.map((l) => l.file).join(", ") },
+          { cause: error },
+        );
+      }
       const reason =
         dirty.length > 0
           ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
