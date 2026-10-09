@@ -30,7 +30,11 @@ mkdir -p "$REPO" "$FAKE"
 cat >"$FAKE/sandcastle" <<'EOF'
 #!/usr/bin/env bash
 printf '['; sep=""
-for id in $FAKE_QUEUE; do printf '%s{"id":"%s","title":"t","updated":null,"blockedOn":[]}' "$sep" "$id"; sep=","; done
+# FAKE_BLOCKED: "id:#dep" pairs, the open blocker each named ticket waits for.
+for id in $FAKE_QUEUE; do
+  dep=""; for b in ${FAKE_BLOCKED:-}; do [ "${b%%:*}" = "$id" ] && dep="\"${b#*:}\""; done
+  printf '%s{"id":"%s","title":"t","updated":null,"blockedOn":[%s]}' "$sep" "$id" "$dep"; sep=","
+done
 printf ']\n'
 EOF
 # No containers, unless FAKE_DOCKER names a project: then one sandbox of
@@ -142,10 +146,12 @@ row '#107' blocked 'waits for #103'
 row '#108' held 'human merge: .gi'
 row '#109' conflict 'with #103'
 row '#110' merged
-row '#120' queued 'not in this run'
-# The legend's counts add up to the run (ten tickets), with the rest apart in the note.
+# A labelled ticket outside the run is `later` (greyed, a glyph of its own), not queued for this run.
+row '#120' later 'next run'
+# The legend's counts add up to the run (ten tickets), with the ticket outside it apart as `later`.
 for c in 'working 2' 'ready to land 1' 'needs you 3' 'queued 2' 'blocked 1' 'merged 1'; do has "$c +│"; done
-has '│ +1 not in this run · '
+has 'later 1 +│'
+hasnt 'not in this run'
 has 'landing 2/4'
 has 'implement +live-model/high'
 hasnt 'on its earlier branch'
@@ -172,6 +178,59 @@ sed -i.bak 's/"concurrency": 4/"concurrency": 3/' "$L/run.json"
 render "101 102 103 104 105 106 107 108 109 110 120"
 row '#106' queued 'next to start'
 sed -i.bak 's/"concurrency": 3/"concurrency": 2/' "$L/run.json"
+
+# ---------------------------------------------------------------------------
+SCENARIO="live run, labelled tickets outside it"
+# A ticket the live run does not hold is `later`, not `queued`: queued means waiting for a sandbox of
+# this run. The collapsing view draws no row for it and counts it in a line at the foot; the full list
+# draws it after merged and before left over, in grey. Within merged, this run's landing is above an
+# earlier run's. #701 landed in this run long ago, #710 is an earlier run's merged branch (it has no
+# commits ahead of the base), #711 an earlier run's unmerged one.
+branch 711 1; log 711 impl 'done'
+git_ branch agent/issue-710 main; log 710 impl 'done'
+cat >"$L/run.json" <<EOF
+{ "orchestrator": "fixture", "pid": $LIVE, "startedAt": "$started", "models": "m", "stage": "running",
+  "concurrency": 2, "issues": ["701","702"],
+  "tickets": {
+    "701": { "state": "merged", "since": $((now - 3000)), "note": "merged and closed" },
+    "702": { "state": "queued", "order": 2, "since": $now }
+  } }
+EOF
+export FAKE_BLOCKED="722:#701 723:#721"
+later="720 721 722 723"
+render "702 $later"
+row '#702' queued 'next to start'
+for id in 720 721; do row "#$id" later 'next run'; done
+row '#722' later 'waits for #701'
+row '#723' later 'waits for #721'
+# Sorted after merged, before left over; this run's merged row above the earlier run's.
+ord=$(grep -oE '^│ +#[0-9]+ +│ . [a-z ]+[a-z]' "$TMP/frame" | sed -E 's/^│ +(#[0-9]+) +│ . ([a-z ]+)$/\1 \2/' | grep -E '^#7[0-2]' | tr '\n' ',')
+case "$ord" in
+  "#702 queued,#701 merged,#710 merged,#720 later,#721 later,#722 later,#723 later,#711 left over,") ;;
+  *) echo "FAIL [$SCENARIO] row order is: $ord"; fails=$((fails+1));;
+esac
+# The legend: queued and blocked count the run's own tickets, later gets its own item.
+for c in 'queued 1' 'blocked 0' 'merged 1' 'later 4' 'left over 0'; do has "$c +│"; done
+hasnt 'not in this run'
+# The collapsing view: no row for them, one line at the table's foot (the blocked ones counted in it).
+SHOW=collapse render "702 $later"
+for id in 720 721 722 723; do hasnt "^│ +#$id +│"; done
+row '#702' queued
+has '^│ 4 for a later run \(#720-#723\), 2 blocked +│'
+hasnt 'not shown'
+# A narrow budget cuts the run's own rows into "+N not shown" and keeps the later line.
+SHOW=collapse ROWS=22 render "702 $later"
+has '^│ \+[0-9]+ .* not shown +│'
+has '^│ 4 for a later run \(#720-#723\), 2 blocked +│'
+unset FAKE_BLOCKED
+# No run live: every labelled ticket reads queued, as before.
+mv "$L/run.json" "$L/run.json.live"
+render "702 $later"
+for id in 702 720 721; do row "#$id" queued 'for the next run'; done
+hasnt 'later'
+mv "$L/run.json.live" "$L/run.json"
+rm -f "$L"/agent-issue-71[01]-*.log
+git_ branch -q -D agent/issue-710 agent/issue-711
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, sharing the machine pool"
@@ -656,9 +715,12 @@ has '^│ +#103 .*│ +0s +│'
 SCENARIO="overflow, ticket-file ids"
 # What does not fit is summed up by state. Ticket-file ids have no numeric
 # order: they are named, never made into a range like "#0-#0".
-SHOW=collapse ROWS=26 render "$(printf 'checkout-%02d ' $(seq 1 12))"
+# No run is live here: the earlier scenario's record would make these twelve tickets outside it.
+mv "$L/run.json" "$L/run.json.live"
+SHOW=collapse ROWS=20 render "$(printf 'checkout-%02d ' $(seq 1 12))"
 has '\+.*[0-9]+ queued \(checkout-[0-9]{2}, checkout-[0-9]{2}, checkout-[0-9]{2}, …\)'
 hasnt '#checkout|#0'
+mv "$L/run.json.live" "$L/run.json"
 
 # ---------------------------------------------------------------------------
 SCENARIO="live loop, one frame"

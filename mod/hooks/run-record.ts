@@ -96,9 +96,9 @@ export type OutcomeEntry = Partial<Outcome> & { run?: string; at?: string };
  * The states the status view works out for itself and no run record holds: a run that died
  * (`stalled`, `orphaned`), a branch of an earlier run (`left over`), a branch of this run that
  * waits for landing to decide it (`finished`), and `requeued`, the word it gives an older run's
- * branch whose ticket was labelled again.
+ * branch whose ticket was labelled again, and `later`, the word for a labelled ticket outside the live run.
  */
-export const DERIVED_STATES = ["stalled", "orphaned", "left over", "finished", "requeued"] as const;
+export const DERIVED_STATES = ["stalled", "orphaned", "left over", "finished", "requeued", "later"] as const;
 
 export type DerivedState = (typeof DERIVED_STATES)[number];
 
