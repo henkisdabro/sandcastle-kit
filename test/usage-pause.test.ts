@@ -19,6 +19,7 @@ import { after, test } from "node:test";
 import type { PlanUsage } from "../mod/hooks/run-record.ts";
 import { runKit } from "./cli-spawn.ts";
 import { everyPidIsTheKit, kitLikeProcess } from "./kit-process.ts";
+import { useNoDocker } from "./no-docker.ts";
 import { quietly } from "./quiet.ts";
 
 // sandbox.ts, pool.ts and peaks.ts derive their directories from these at import: nothing here may touch the user's.
@@ -26,6 +27,7 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.USAGE_CHECK = "1";
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
+useNoDocker();
 const { createPipeline } = await import("../src/burndown.ts");
 const { createSchedule } = await import("../src/schedule.ts");
 const { PAUSE_FILE, holdForUsage, pauseRun, readPause, resumeRun } = await import("../src/detach.ts");
@@ -464,7 +466,8 @@ test("a pass that hits the limit with USAGE_PAUSE set pauses the run until the r
   assert.deepEqual(asked, ["implement"]);
   assert.deepEqual(readPause(root, PID, T0), { since: T0, usage: { cause: "usage", provider: "claude", window: "week", percent: 100, resumesAt: WEEK_RESET + 60 } }, "the run paused for the week, not stopped");
   assert.deepEqual(f.events, ["impl in sandbox 0"]);
-  assert.equal(f.sandboxes[0]?.closed, true, "the sandbox closed, as at any juncture");
+  // The ticket says it is paused before its container is stopped and its sandbox closed.
+  await until(() => f.sandboxes[0]?.closed === true, "the sandbox to close, as at any juncture");
   assert.deepEqual(f.writes.find((w) => w.state === "paused"), { state: "paused", note: `before implement at ${head}` });
   assert.equal(git(f.root, "rev-list", "--count", "main..agent/issue-7"), "1", "the commit the pass made before it hit the limit stays on the branch");
   assert.equal(outcomeNow(), undefined, "the pipeline has not ended");

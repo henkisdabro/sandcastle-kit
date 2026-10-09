@@ -48,7 +48,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   at five times its price**, as most requests at `high` or `max` effort are, and advises `medium`
   or below with the effort set beside the model.
 - **A commit made on the base branch while a run's opening base gates are running stops the run**,
-  as a commit on the base already did at any later point in the run.
+  as a commit on the base already did at any later point in the run. So does a commit on the base
+  or an `agent/*` branch while a run is paused, or while `sandcastle land` builds its image: the
+  check before the next sandbox opens finds it.
 
 ### Security
 
@@ -61,13 +63,22 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   pack or reflog expiry in the shared `.git` on git 2.54 and newer. The sandboxes' git has it off
   too (`gc.auto=0`, `maintenance.auto=false` in their environment), so an agent's commit or merge
   no longer starts a detached repack and prune in the `.git` every sandbox shares.
-- **A sandbox's changes to the shared `.git`, or to its own worktree's records, are checked before
-  it closes.** Sandcastle runs a host `git status` in each sandbox's worktree as the sandbox closes,
-  so the `.git` check, and a check of each worktree's records (its `.git` pointer, `commondir` read
-  as git reads it, and no `config.worktree`), now run before every sandbox closes and before the
-  host runs git in a kept worktree, whose status never looks into a nested repository. On a failure
-  the container is removed without that host `git status`, and the run stops, leaving the worktree
-  for a person.
+- **A git filter or driver a sandbox plants can no longer run on your machine through the host git
+  that runs around the sandbox.** Sandcastle runs host git in a sandbox's worktree as it opens (`git
+  worktree add`, and `status`, `fetch` and `merge` on a reused one) and as it closes (`git status`).
+  The kit now checks the shared `.git` immediately before every sandbox opens, and stops a
+  sandbox's container before it checks `.git` and that worktree's records (its `.git` pointer,
+  `commondir` read exactly as git reads it, no `config.worktree`) ahead of every close and every
+  host git in a kept worktree. It refuses a git repository nested in a worktree or a changed
+  `.git/modules/`, and fingerprints the main worktree's `.git/config.worktree`. On a failure the
+  container is removed without the host's git, and the run stops, leaving the worktree for a
+  person. Submodules are not supported in sandboxes.
+- **A filter planted in `.git/config` during a run that was killed is no longer taken as the next
+  run's baseline.** A run, `sandcastle land` and `sandcastle gates` record the program-running keys
+  of the shared `.git/config` (filters, merge and diff drivers, `core.fsmonitor`, `core.hooksPath`,
+  `core.sshCommand`, `include*`) and `info/attributes`, and the next start refuses a difference,
+  naming each key. `sandcastle run --accept-git-config` records the present state as the new
+  baseline.
 
 ### Fixed
 
@@ -186,6 +197,19 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   background maintenance, the merge-driver test has a temp directory of its own, and the status
   view's paused-for-usage scenario passes at any terminal width and in the ten minutes after
   midnight.
+
+### Upgrading
+
+- **The first run after this update records the program-running keys of the shared `.git/config`
+  as its baseline: nothing to run.** If a later start is refused for keys that are yours (a filter
+  you set up yourself, say), start again with `sandcastle run --accept-git-config`.
+- **`sandcastle gates` refuses while a run of the project is live**, and **`sandcastle status`
+  with no terminal on stdout prints one frame and exits**. A script of yours that ran either during
+  a run, or piped the live view, needs `sandcastle status 0` or `sandcastle wait` first.
+- **A run stops when a sandbox has a git repository nested in its worktree.** Sandcastle never
+  initialises submodules, so this changes nothing unless your gates or agents run
+  `git submodule update` (or clone a repository) inside the worktree: move that out of the
+  sandbox, or vendor the code.
 
 ## [0.11.0] - 2026-10-08
 
