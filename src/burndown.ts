@@ -1421,10 +1421,11 @@ export const createPipeline = (ctx: PipelineContext) => {
     let parkedInStep = 0;
     // The sandbox's container was removed without Sandcastle's close, after a failed check: nothing is left to close.
     let removed = false;
-    // Sandcastle's close stops the container, then runs `git status` on the host in the worktree: the `.git` check
-    // (`check`) and the worktree's records come first (`checkBeforeClose`). A failure is the ticket's `tampered` (the
-    // first one stands), which stops the run; the container is then removed without that close, the worktree left as
-    // it stands (still locked), and nothing is returned.
+    // Sandcastle's close runs `git status` on the host in the worktree: before it, the container is stopped and the
+    // `.git` check (`check`) and the worktree's records are made (`checkBeforeClose`). A failure is the ticket's
+    // `tampered` (the first one stands), which stops the run; the container is then removed without that close, the
+    // worktree left as it stands (locked until the run exits, as every worktree the kit locked), and nothing is
+    // returned.
     const closeSandbox = async (when: string, check: () => unknown) => {
       await settleAfter(
         () => checkBeforeClose(project, sandbox.worktreePath, when, check),

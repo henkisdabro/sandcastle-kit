@@ -2,7 +2,7 @@
 
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { createHash } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -108,6 +108,72 @@ export const reapOrphans = (project: Project) => {
   }
 };
 
+/** The two spellings of a worktree's path a container's mount may carry: as recorded, and with its links resolved. */
+const spellings = (worktree: string) => {
+  const paths = new Set([worktree]);
+  try {
+    paths.add(realpathSync(worktree));
+  } catch {
+    /* gone: its recorded spelling is all there is */
+  }
+  return paths;
+};
+
+// Asked at every close, while other pipelines run on: a synchronous call would hold all of them for each answer.
+const dockerAsync = (args: string[]) =>
+  new Promise<string>((resolve, reject) =>
+    execFile("docker", args, { encoding: "utf8", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => (error ? reject(Object.assign(error, { stderr })) : resolve(stdout.trim()))),
+  );
+
+/** The running sandbox containers that mount `worktree`, found as `removeSandboxContainer` finds one. Docker not up: none. */
+const runningContainersOf = async (worktree: string): Promise<string[]> => {
+  const paths = spellings(worktree);
+  let ids: string[];
+  try {
+    ids = (await dockerAsync(["ps", "-q", "--filter", "name=^sandcastle-"])).split("\n").filter(Boolean);
+  } catch {
+    return []; // Docker not up: nothing of ours can be running
+  }
+  const found: string[] = [];
+  for (const id of ids) {
+    try {
+      const mounts = (await dockerAsync(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"])).split("\n");
+      if (mounts.some((m) => paths.has(m))) found.push(id);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
+  return found;
+};
+
+// How long a close's `docker stop` lets the image's own stop signal work before Docker kills the container. The base
+// image stops on SIGKILL at once; a project image with a signal of its own waits this long, not Docker's 10 s.
+const STOP_GRACE_SECONDS = 3;
+
+/**
+ * Stops the container of the sandbox whose worktree is `worktree`, before the `.git` check that comes before its close
+ * (guard.ts, `checkBeforeClose`): a process the sandbox left running there - an agent's background job, a server a
+ * gate started - could otherwise write the shared `.git` after the check passed and before Sandcastle's close runs
+ * `git status` on the host, and the kit's unlock of the worktree in between tells it when. Sandcastle's close then
+ * stops the stopped container again, which Docker accepts. Returns each container still running after Docker refused
+ * its stop, with what Docker said: none when every stop worked, the container is gone, or Docker is not up.
+ */
+export const stopSandboxContainer = async (worktree: string): Promise<{ id: string; said: string }[]> => {
+  const refused: { id: string; said: string }[] = [];
+  for (const id of await runningContainersOf(worktree)) {
+    try {
+      await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id]);
+    } catch (e) {
+      const { stderr, message } = e as { stderr?: string; message: string };
+      refused.push({ id, said: String(stderr ?? "").trim() || message });
+    }
+  }
+  if (!refused.length) return [];
+  // One that stopped or went while Docker refused is no longer listed.
+  const running = new Set(await runningContainersOf(worktree));
+  return refused.filter((r) => running.has(r.id));
+};
+
 /**
  * Removes the container of the sandbox whose worktree is `worktree`, without Sandcastle's close: that close runs
  * `git status` on the host in the worktree, which a failed `.git` check says must not run (guard.ts,
@@ -116,12 +182,7 @@ export const reapOrphans = (project: Project) => {
  * process's exit removes what Sandcastle started. Returns the ids removed.
  */
 export const removeSandboxContainer = (worktree: string): string[] => {
-  const paths = new Set([worktree]);
-  try {
-    paths.add(realpathSync(worktree));
-  } catch {
-    /* gone: its recorded spelling is all there is */
-  }
+  const paths = spellings(worktree);
   let ids: string[];
   try {
     ids = sh("docker", ["ps", "-aq", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);

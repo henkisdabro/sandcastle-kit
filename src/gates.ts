@@ -360,8 +360,9 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       } catch {
         /* closing still has to happen */
       }
-      // Sandcastle's close runs `git status` on the host in the worktree: the `.git` check and the worktree's records
-      // come first, and a failure throws with the container removed, the worktree and its branch left for a person.
+      // Sandcastle's close runs `git status` on the host in the worktree: the container is stopped, and the `.git`
+      // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
+      // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
       await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when));
       unlockWorktree(sandbox.worktreePath);
