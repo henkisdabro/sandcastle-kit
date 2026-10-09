@@ -102,7 +102,7 @@ const readers = (peaks: ReturnType<typeof readPeaks>): Readers => ({
   hostCpus: () => 12,
   freeDisk: () => 100 * GIB,
   exists: () => false,
-  home: () => "/home/made-up",
+  home: () => "/home/user",
   platform: "darwin",
   peaks: () => peaks,
   projectId: () => "p1",
