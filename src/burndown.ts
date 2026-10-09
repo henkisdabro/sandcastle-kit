@@ -1146,7 +1146,7 @@ export const createPipeline = (ctx: PipelineContext) => {
    * worktree as it stands - the worktree a run killed before its sandboxes closed leaves. Such a worktree under
    * `.sandcastle/worktrees/` with nothing uncommitted is moved with its branch (a fast-forward: none ahead, so git
    * refuses rather than lose anything), keeping its installed dependencies; one with uncommitted or untracked
-   * files, or a person's own elsewhere, is left where it is.
+   * files, or a person's own elsewhere, is left where it is; so is one holding an ignored file the base now tracks.
    */
   const cutFromBase = (issue: string, branch: string) => {
     const cut = () => {
@@ -1163,7 +1163,8 @@ export const createPipeline = (ctx: PipelineContext) => {
       try {
         const kept = keptWorktreeOf(project, branch);
         if (kept && worktreeIsClean(project, kept)) {
-          sh("git", ["-C", kept, "merge", "--ff-only", `refs/heads/${base}`], project.root);
+          // worktreeIsClean leaves ignored files out; --no-overwrite-ignore makes git refuse, not overwrite, one the base now tracks.
+          sh("git", ["-C", kept, "merge", "--ff-only", "--no-overwrite-ignore", `refs/heads/${base}`], project.root);
           console.log(`${was} - cut again from ${base}'s tip in its kept worktree.`);
         } else {
           // No worktree holds it, or one that is not clean or not the kit's does: git moves the branch, or refuses to.
