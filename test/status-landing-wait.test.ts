@@ -1,9 +1,9 @@
 // The status view when the run's wait for a sandbox slot is held back by the slot kept for landing, not by
 // its share: the run record's `waitsFor: "landing"` (beside the older `waitsForShare` boolean), and the rows
-// next to start say `waits: a slot is kept for landing`. A record with `waitsFor: "share"`, or only the older
+// next to start say `waits: slot kept to land`. A record with `waitsFor: "share"`, or only the older
 // boolean, still says `waits for the run's share`. A made-up live run record, a fake `sandcastle` and a
 // `docker` that finds nothing; no Docker, no network, no model calls. Also `createSlotWaits`, which writes it.
-// Drawn at 120 columns: the activity cell truncates the words with `…` in a narrower pane, as it does any.
+// Drawn at 100 columns, where the activity cell is 26 characters wide: the words fit whole, as `waits for the run's share` does.
 //
 //   pnpm test:file test/status-landing-wait.test.ts
 
@@ -18,7 +18,7 @@ import { kitLikeProcess } from "./kit-process.ts";
 const { createSlotWaits } = await import("../src/burndown.ts");
 
 const KIT = join(import.meta.dirname, "..");
-const COLS = 120;
+const COLS = 100;
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-status-landing-"));
 const REPO = join(TMP, "my repo");
 const FAKE = join(TMP, "bin");
@@ -98,9 +98,11 @@ const render = (fields: Record<string, unknown>) => {
 
 test("a run whose slot is kept for landing says so on the row next to start, not that it waits for its share", () => {
   const row = render({ waitsForShare: true, waitsFor: "landing" });
-  assert.match(row("302"), /queued.*waits: a slot is kept for landing/);
+  assert.match(row("302"), /queued.*waits: slot kept to land/);
+  assert.doesNotMatch(row("302"), /…/);
   assert.doesNotMatch(row("302"), /run's share/);
-  assert.match(row("303"), /queued.*waits: a slot is kept for landing/);
+  assert.match(row("303"), /queued.*waits: slot kept to land/);
+  assert.doesNotMatch(row("303"), /…/);
   assert.match(row("304"), /queued.*1 ahead of it/);
 });
 
@@ -108,7 +110,8 @@ test("a record with waitsFor share, or only an older kit's boolean, still says t
   for (const fields of [{ waitsForShare: true, waitsFor: "share" }, { waitsForShare: true }, { waitsFor: "share" }]) {
     const row = render(fields);
     assert.match(row("302"), /queued.*waits for the run's share/, JSON.stringify(fields));
-    assert.doesNotMatch(row("302"), /kept for landing/);
+    assert.doesNotMatch(row("302"), /…/, JSON.stringify(fields));
+    assert.doesNotMatch(row("302"), /slot kept to land/);
   }
 });
 

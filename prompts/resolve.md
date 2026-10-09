@@ -9,6 +9,13 @@ by hand. From inside this container no other agent's worktree path exists, so a 
 their records mid-run. If git ever tells you this worktree is not a git repository, stop and output
 `<promise>COMPLETE</promise>` - do not rebuild it.
 
+**Never `git stash` in this worktree:** the stash list lives in the shared `.git`. Never `pgrep -f` or
+`pkill -f` a pattern that also appears in your own command line: it matches your own shell and kills it.
+Every test file you run by hand gets a limit, `timeout 300 <command>`: a test that fails can leave
+something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes
+a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file
+ends the heredoc early and runs the rest as shell.
+
 # The conflicted files
 
 !`git diff --name-only --diff-filter=U`
@@ -46,6 +53,12 @@ Run each gate in the foreground with the tool's longest timeout (`timeout: 60000
 whose 2-minute default moves a longer suite to the background) and its output in a file outside the
 worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite
 to time it.
+
+A long command that is not a gate - a download, an install, a build - also runs in the foreground
+with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
+it with a single foreground command that has its own limit, `timeout 600 bash -c 'until <check>; do sleep 5; done'`,
+where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
+available here.
 
 # Finishing
 

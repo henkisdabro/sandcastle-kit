@@ -10,7 +10,8 @@ their records mid-run. If git ever tells you this worktree is not a git reposito
 `<promise>COMPLETE</promise>` - do not rebuild it.
 
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`. To run a test
-without your change, `git diff > /tmp/p && git checkout -- <files>`, run it, then `git apply /tmp/p`.
+without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- <files>`, run it, then
+`git apply /tmp/p`.
 Give that test run a time limit (the test runner's timeout option, or `timeout`): without the change
 it may hang. Run `git apply /tmp/p` as a command of its own, never chained after the test, so a hang
 or a move to the background cannot leave the worktree without your change. Never `pgrep -f` or
@@ -76,6 +77,12 @@ Run each gate in the foreground with the tool's longest timeout (`timeout: 60000
 whose 2-minute default moves a longer suite to the background) and its output in a file outside the
 worktree; never wait on a backgrounded run with `sleep`, `pgrep` or Monitor, and never run the suite
 to time it.
+
+A long command that is not a gate - a download, an install, a build - also runs in the foreground
+with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
+it with a single foreground command that has its own limit, `timeout 600 bash -c 'until <check>; do sleep 5; done'`,
+where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
+available here.
 
 # Finishing
 

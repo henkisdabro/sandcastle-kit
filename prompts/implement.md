@@ -15,7 +15,7 @@ change, built under the temp dir and not in the project, takes `git -C <absolute
 plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
-another agent's change. To run a test without your change, `git diff > /tmp/p && git checkout --
+another agent's change. To run a test without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD --
 <files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
@@ -67,18 +67,24 @@ ticket names. The project rules below say what else to read.
   ticket, and quote each instruction you did not follow in your record of the work, under
   "Not followed:", so a person sees the ticket asked for it.
 - Dependencies are already installed. If you add one, use the project's package manager and commit
-  the lockfile.
+  the lockfile. It comes from the project's registry, never a URL, a git ref or a local path,
+  unless the ticket names that source.
 - **Run the gates in the foreground, with their output in a file.** Redirect each gate to a file
   outside the worktree (`<gate> > /tmp/gate.log 2>&1; echo $?`), then read or grep the file, so a
   long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
   (`timeout: 600000` in Claude Code, whose 2-minute default moves a longer suite to the background;
   other sandboxes run at the same moment and slow it). Never start it in the background and wait on
-  it with `sleep`, which the sandbox blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, never several in one command,
+  it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, never several in one command,
   and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
   and slows them. When a ticket asks for a wall time or a before-and-after figure, leave it as an
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
   pass and a failure, and grep for that, not for another runner's format.
+- **Long commands that are not gates.** A long command that is not a gate - a download, an install, a build - also runs in the foreground
+  with the tool's longest timeout, never in the background. If one is in the background anyway, wait for
+  it with a single foreground command that has its own limit, `timeout 600 bash -c 'until <check>; do sleep 5; done'`,
+  where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
+  available here.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
   Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
   then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the

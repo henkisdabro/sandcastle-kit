@@ -24,8 +24,8 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
@@ -43,7 +43,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeCheckGap, mergeTree, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -365,12 +365,28 @@ export type FiledFollowUp = { title: string; from: string; phase: string; id?: s
 export const FOLLOWUP_TITLE_MAX = 120;
 // Every own-line `<followup>title - evidence</followup>` of one final message, in order. An agent that
 // left a problem in prose lost it (nobody reads the message), so the kit reads these and files them.
-// The title is what comes before the first " - "; the echoed placeholder counts for nothing.
-const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
+// The title is what comes before the first " - " outside double quotes ("...", “...”) and backticks, so a
+// title quoting UI text or a command that holds one keeps it; with none outside them (an unclosed quote)
+// it is the first " - ". The first and not the last: the evidence is often a command and its output.
+// The echoed placeholder counts for nothing.
+const titleSplit = (said: string): number => {
+  let quote = "";
+  for (let i = 0; i < said.length; i++) {
+    const c = said[i];
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"') quote = '"';
+    else if (c === "“") quote = "”";
+    else if (c === "`") quote = "`";
+    else if (said.startsWith(" - ", i)) return i;
+  }
+  return said.indexOf(" - ");
+};
+export const followUpsOf = (text: string): Omit<FollowUp, "from" | "phase">[] =>
   ownLineTags(text, "followup").flatMap((raw) => {
     const said = raw.replace(/\s+/g, " ").trim();
     if (!said || said === "..." || said === "title - one line of evidence") return [];
-    const at = said.indexOf(" - ");
+    const at = titleSplit(said);
     const title = (at > 0 ? said.slice(0, at) : said).trim();
     return [{ title: cutAtWord(title, FOLLOWUP_TITLE_MAX), evidence: at > 0 ? said.slice(at + 3).trim() : "" }];
   });
@@ -388,16 +404,28 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 const GAP_NEGATED =
   /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b/i;
 // A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
-// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" is no fix.
-const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+// all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" and "I have not yet fixed it" are no fix.
+const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+(?:(?:yet|fully|really|actually|properly)\s+)?)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
 const isGap = (sentence: string): boolean => {
   if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
   const fixed = GAP_FIXED.exec(sentence);
   return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
 };
-// A line that is a heading, not a sentence: a Markdown heading, or a line of nothing but bold text
-// ("**Checked and left as is**"). It would otherwise join the paragraph under it and be quoted with it.
-const HEADING_LINE = /^(?:#{1,6}\s|(?:[-*+•]\s+)?(?:\*\*[^*]+\*\*|__[^_]+__):?$)/;
+// A line that is a heading, not a sentence: a Markdown heading, or a short bold label ("**Checked and left as
+// is**"). It would otherwise join the paragraph under it and be quoted with it.
+const MD_HEADING = /^#{1,6}\s/;
+const BOLD_LINE = /^((?:[-*+•]\s+)?)(?:\*\*([^*]+)\*\*|__([^_]+)__):?$/;
+const LABEL_WORDS = 6;
+// A wholly bold line is a label only when its text reads like one: at most six words, no sentence punctuation,
+// and no colon with words after it. A reviewer who writes the gap itself in bold ("**One gap remains: the
+// Linux path is untested.**") has said a sentence, which is read as prose with its bold markers dropped.
+const boldLine = (line: string): { label: boolean; prose: string } | undefined => {
+  const m = BOLD_LINE.exec(line);
+  if (!m) return undefined;
+  const inner = (m[2] ?? m[3]).trim().replace(/:$/, "");
+  const label = !/[.!?;]|:\s*\S/.test(inner) && inner.split(/\s+/).length <= LABEL_WORDS;
+  return { label, prose: `${m[1]}${inner}` };
+};
 // Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
 const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
@@ -408,8 +436,10 @@ const sentencesOf = (text: string): { text: string; unit: number }[] => {
   const units: string[] = [];
   let open = false;
   for (const raw of prose.split("\n")) {
-    const line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
-    if (!line || HEADING_LINE.test(line)) open = false;
+    let line = raw.replace(/^[ \t]*>+[ \t]?/, "").trim();
+    const bold = boldLine(line);
+    if (bold && !bold.label) line = bold.prose;
+    if (!line || MD_HEADING.test(line) || bold?.label) open = false;
     else if (open && !/^(?:[-*+•]|\d+[.)])\s/.test(line)) units[units.length - 1] += ` ${line}`;
     else {
       units.push(line);
@@ -462,43 +492,51 @@ const FILE_ONLY = /(?<![\w@.:/-])((?:[\w@.-]+\/)*[\w@-]+(?:\.[\w-]*[A-Za-z][\w-]
 const STOPWORDS = new Set(
   ("about after again also because before being between could does doing done each either else from have here into just like make more most much must never only other over same should since some still such than that their them then there these they this those through under until very were what when where which while will with without would your").split(" "),
 );
-// The significant words of a title: 4 letters or more, no stopword, and not the path itself.
-const significantWords = (title: string, path: string): Set<string> =>
+// The significant words of a title: 4 letters or more, no stopword, and not any path the title names.
+const significantWords = (title: string, paths: readonly string[]): Set<string> =>
   new Set(
-    (path ? title.replace(path, " ") : title).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+    [...paths].sort((x, y) => y.length - x.length).reduce((t, p) => t.split(p).join(" "), title).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
   );
-/** Where a finding is: the source ticket's file, and its line when the agent gave one. */
-type Seat = { from: string; path: string; line?: number; firm: boolean; words: Set<string> };
+/** One file a finding names: its line when it gave one, and `firm` when that is a `path:line` of the title. */
+type Spot = { path: string; line?: number; firm: boolean };
+/** Where a finding is: the source ticket's files it names (none: a path-less finding), and its title's words. */
+type Seat = { from: string; spots: Spot[]; words: Set<string> };
 /** What `placeSeat` asks of the base tree: is this path a file there? A host such as `api.example.com` is not. */
 export type PathExists = (path: string) => boolean;
+/** The base tree's one file of a bare name (`client.ts`), when exactly one has it: undefined for none or several. */
+export type NamedOnBase = (name: string) => string | undefined;
 const cleanPath = (p: string) => p.replace(/^(?:\.\/)+/, "");
-// The first match of `re` in `text` whose path is a file of the base tree.
-const firstFile = (re: RegExp, text: string, exists: PathExists) => {
+// Every match of `re` in `text` that is a file of the base tree: by its path, or - a bare name with no `/`, not a
+// file at the root - as the one file of the tree that has the name (`named`). `whole` is the text it was written as.
+const filesIn = (re: RegExp, text: string, exists: PathExists, named?: NamedOnBase) => {
+  const found: { path: string; line?: number; whole: string }[] = [];
   for (const m of text.matchAll(re)) {
-    const path = cleanPath(m[1]);
-    if (exists(path)) return { path, line: m[2] === undefined ? undefined : Number(m[2]), whole: m[1] };
+    const given = cleanPath(m[1]);
+    const path = exists(given) ? given : given.includes("/") ? undefined : named?.(given);
+    if (path) found.push({ path, line: m[2] === undefined ? undefined : Number(m[2]), whole: m[1] });
   }
-  return undefined;
+  return found;
 };
-// A place in the title is used as it is (`firm`). One found only in the evidence, or a file with no line in the
-// title, counts only beside a title that shares significant words (`sameFinding`): the evidence often cites a line
-// another finding is about, and two titles that name a file say little by it. A file the title names comes before
-// a line the evidence cites in another file, which would otherwise hide it from a close title naming the same file;
-// the evidence may still give that file's line. A finding that names no file of the base tree gets a seat with
-// no path, which `sameFinding` matches on its title alone.
-const placeSeat = (f: FollowUp, exists: PathExists): Seat => {
-  const seat = (at: { path: string; line?: number; whole: string }, firm: boolean): Seat => ({
-    from: f.from, path: at.path, line: at.line, firm, words: significantWords(f.title, at.whole),
-  });
-  const inTitle = firstFile(PLACE, f.title, exists);
-  if (inTitle) return seat(inTitle, true);
-  const fileOnly = firstFile(FILE_ONLY, f.title, exists);
-  if (fileOnly) {
-    const line = [...f.evidence.matchAll(PLACE)].find((m) => cleanPath(m[1]) === fileOnly.path)?.[2];
-    return seat({ ...fileOnly, line: line === undefined ? undefined : Number(line) }, false);
-  }
-  const inEvidence = firstFile(PLACE, f.evidence, exists);
-  return inEvidence ? seat(inEvidence, false) : { from: f.from, path: "", firm: false, words: significantWords(f.title, "") };
+// Every file a finding names counts, the title's first, then the evidence's: a `path:line` in the title is used as
+// it is (`firm`). A place found only in the evidence, or a file with no line, counts only beside a title that
+// shares significant words (`sameFinding`): the evidence often cites a line another finding is about, and two titles
+// that name a file say little by it. A file is one place however often it is named; the first wording stands, and
+// a line only a later one gives completes it. A finding that names no file of the base tree gets a seat with no
+// spots, which `sameFinding` matches on its title alone.
+const placeSeat = (f: FollowUp, exists: PathExists, named?: NamedOnBase): Seat => {
+  const spots = new Map<string, Spot>();
+  const wholes: string[] = [];
+  const add = (at: { path: string; line?: number; whole: string }, firm: boolean, inTitle: boolean) => {
+    if (inTitle) wholes.push(at.whole);
+    const had = spots.get(at.path);
+    if (!had) spots.set(at.path, { path: at.path, line: at.line, firm });
+    else if (had.line === undefined && at.line !== undefined) had.line = at.line;
+  };
+  for (const at of filesIn(PLACE, f.title, exists, named)) add(at, true, true);
+  for (const at of filesIn(FILE_ONLY, f.title, exists, named)) add(at, false, true);
+  for (const at of filesIn(PLACE, f.evidence, exists, named)) add(at, false, false);
+  for (const at of filesIn(FILE_ONLY, f.evidence, exists, named)) add(at, false, false);
+  return { from: f.from, spots: [...spots.values()], words: significantWords(f.title, wholes) };
 };
 /** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
 export const onBase = (root: string, base: string): PathExists => (path) => {
@@ -508,24 +546,63 @@ export const onBase = (root: string, base: string): PathExists => (path) => {
     return false;
   }
 };
+/**
+ * The base tree's one file of a bare name, from one `git ls-tree` of the base, taken at the first ask and kept for
+ * the run: the host's `named` for `fileFollowUps`. A name two files share, or none, gives undefined.
+ */
+export const namedOnBase = (root: string, base: string): NamedOnBase => {
+  let byName: Map<string, string[]> | undefined;
+  return (name) => {
+    if (!byName) {
+      byName = new Map();
+      try {
+        for (const path of sh("git", ["ls-tree", "-r", "--name-only", "-z", base], root).split("\0")) {
+          if (!path) continue;
+          const key = path.slice(path.lastIndexOf("/") + 1);
+          byName.set(key, [...(byName.get(key) ?? []), path]);
+        }
+      } catch {
+        // A base that cannot be listed resolves no name, as a caller giving none does.
+      }
+    }
+    const paths = byName.get(name);
+    return paths?.length === 1 ? paths[0] : undefined;
+  };
+};
 const WORDS_SHARED = 2;
 // With no file to agree on, the titles are all there is to go by, so they must share more: the same tooling
 // failure worded twice shares three, and two unrelated findings of one ticket rarely do.
 const WORDS_SHARED_NO_PLACE = 3;
-// Per source ticket: the same place named for another ticket is a different finding. Two findings at one line
-// are one when either names it in its title; otherwise (or with no line on one side) their titles must overlap.
-// Two findings that name no place are one when their titles overlap by more.
+// Per source ticket: the same place named for another ticket is a different finding. Two findings are one when any
+// place of one matches a place of the other: at one line, when either names it in its title; otherwise (or with no
+// line on one side) their titles must overlap. Two findings that name no place are one when their titles overlap by more.
 const sameFinding = (a: Seat, b: Seat): boolean => {
-  if (a.from !== b.from || a.path !== b.path) return false;
-  const overlap = [...a.words].filter((w) => b.words.has(w)).length >= (a.path ? WORDS_SHARED : WORDS_SHARED_NO_PLACE);
-  if (a.line !== undefined && b.line !== undefined) return a.line === b.line && (a.firm || b.firm || overlap);
-  return overlap;
+  if (a.from !== b.from) return false;
+  const shared = [...a.words].filter((w) => b.words.has(w)).length;
+  if (!a.spots.length || !b.spots.length) return !a.spots.length && !b.spots.length && shared >= WORDS_SHARED_NO_PLACE;
+  const overlap = shared >= WORDS_SHARED;
+  return a.spots.some((x) =>
+    b.spots.some((y) => {
+      if (x.path !== y.path) return false;
+      if (x.line !== undefined && y.line !== undefined) return x.line === y.line && (x.firm || y.firm || overlap);
+      return overlap;
+    }),
+  );
 };
 /** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
 export type Places = Map<string, { id: string; seat: Seat }[]>;
-const placesKey = (s: Seat) => `${s.from}\0${s.path}`;
-const placeOf = (places: Places, seat: Seat) => places.get(placesKey(seat))?.find((p) => sameFinding(p.seat, seat));
-const addPlace = (places: Places, seat: Seat, id: string) => places.set(placesKey(seat), [...(places.get(placesKey(seat)) ?? []), { id, seat }]);
+// A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files.
+const placesKeys = (s: Seat) => (s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]);
+const placeOf = (places: Places, seat: Seat) => {
+  for (const key of placesKeys(seat)) {
+    const found = places.get(key)?.find((p) => sameFinding(p.seat, seat));
+    if (found) return found;
+  }
+  return undefined;
+};
+const addPlace = (places: Places, seat: Seat, id: string) => {
+  for (const key of placesKeys(seat)) places.set(key, [...(places.get(key) ?? []), { id, seat }]);
+};
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
   `Named again by the ${f.phase} agent working on ${ref(f.from)}, as the same finding, worded "${f.title}":\n\n${f.evidence || "(no evidence given)"}`;
@@ -549,7 +626,7 @@ const placesThisRun: Places = new Map();
 export const fileFollowUps = async (
   tracker: Pick<Tracker, "create" | "ref" | "comment">,
   followUps: readonly FollowUp[],
-  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists },
+  o: { dryRun: boolean; write: (fn: () => string) => Promise<string>; seen?: Set<string>; places?: Places; exists: PathExists; named?: NamedOnBase },
 ): Promise<FiledFollowUp[]> => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
@@ -558,7 +635,7 @@ export const fileFollowUps = async (
     const key = titleKey(f.title);
     if (seen.has(key)) continue;
     const at = { title: f.title, from: f.from, phase: f.phase };
-    const place = placeSeat(f, o.exists);
+    const place = placeSeat(f, o.exists, o.named);
     const first = o.dryRun ? undefined : placeOf(places, place)?.id;
     if (first !== undefined) {
       try {
@@ -622,6 +699,7 @@ export const createFollowUpBook = (
     seen?: Set<string>;
     places?: Places;
     exists: PathExists;
+    named?: NamedOnBase;
   },
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
@@ -638,7 +716,7 @@ export const createFollowUpBook = (
       const key = titleKey(f.title);
       if (seen.has(key)) return;
       if (!listed.has(key)) {
-        const place = placeSeat(f, o.exists);
+        const place = placeSeat(f, o.exists, o.named);
         if (placeOf(listedPlaces, place) || placeOf(places, place)) {
           repeats.push(f);
           return;
@@ -663,6 +741,7 @@ export const createFollowUpBook = (
         seen,
         places,
         exists: o.exists,
+        named: o.named,
       });
       if (settled.length) {
         for (const s of settled) listed.set(titleKey(s.title), s);
@@ -670,9 +749,9 @@ export const createFollowUpBook = (
       }
       if (!o.dryRun && !refuse) {
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
-        const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists)));
+        const ready = repeats.filter((f) => placeOf(places, placeSeat(f, o.exists, o.named)));
         // A comment that fails is not recorded: it stays held, and the next `file` tries it again.
-        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists });
+        if (ready.length) await fileFollowUps(o.tracker, ready, { dryRun: false, write: o.write, seen, places, exists: o.exists, named: o.named });
         repeats = repeats.filter((f) => !seen.has(titleKey(f.title)));
       }
       if (!settled.length) return [];
@@ -1007,6 +1086,34 @@ export type PipelineContext = {
   tampered: Map<string, unknown>;
 };
 
+/**
+ * The worktree under the project's `.sandcastle/worktrees/` that has `branch` checked out, as the kit's sandboxes
+ * keep theirs; none for a branch no worktree holds, or one a person's own worktree holds elsewhere. Git lists the
+ * real path of a worktree, so the directory is compared under the root and under its realpath (as a project under
+ * macOS's `/tmp` needs).
+ */
+const keptWorktreeOf = (project: Project, branch: string): string | undefined => {
+  const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);
+  for (const entry of sh("git", ["worktree", "list", "--porcelain"], project.root).split("\n\n")) {
+    const lines = entry.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && lines.includes(`branch refs/heads/${branch}`) && under.some((u) => resolve(path).startsWith(u))) return path;
+  }
+};
+
+/**
+ * True when nothing in the worktree is uncommitted or untracked (what Sandcastle's close keeps a worktree for), so
+ * a move of its checkout loses nothing. Asked of git with the options a config could turn off; a worktree git
+ * cannot read (gone, its record rewritten) is not clean.
+ */
+const worktreeIsClean = (project: Project, path: string) => {
+  try {
+    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], project.root) === "";
+  } catch {
+    return false;
+  }
+};
+
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
   const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
@@ -1035,8 +1142,11 @@ export const createPipeline = (ctx: PipelineContext) => {
    * tests, conflict at landing - on the tree of the run that left it. Nothing is lost: with none ahead, every commit
    * of the branch is already the base's. A branch with commits keeps its fork point (the sandbox merges the base in).
    * It runs through the host git's one writer, after `host.begin` so the `.git` check reads the new tip as the
-   * pipeline's own move. A branch a worktree still holds is left: git refuses the move, and that worktree may hold
-   * uncommitted files Sandcastle reuses.
+   * pipeline's own move. A branch a worktree still holds cannot be moved (git refuses), and Sandcastle reuses that
+   * worktree as it stands - the worktree a run killed before its sandboxes closed leaves. Such a worktree under
+   * `.sandcastle/worktrees/` with nothing uncommitted is moved with its branch (a fast-forward: none ahead, so git
+   * refuses rather than lose anything), keeping its installed dependencies; one with uncommitted or untracked
+   * files, or a person's own elsewhere, is left where it is.
    */
   const cutFromBase = (issue: string, branch: string) => {
     const cut = () => {
@@ -1051,8 +1161,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       if (ahead > 0 || behind === 0) return;
       const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it`;
       try {
-        sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
-        console.log(`${was} - cut again from ${base}'s tip.`);
+        const kept = keptWorktreeOf(project, branch);
+        if (kept && worktreeIsClean(project, kept)) {
+          sh("git", ["-C", kept, "merge", "--ff-only", `refs/heads/${base}`], project.root);
+          console.log(`${was} - cut again from ${base}'s tip in its kept worktree.`);
+        } else {
+          // No worktree holds it, or one that is not clean or not the kit's does: git moves the branch, or refuses to.
+          sh("git", ["branch", "-f", branch, `refs/heads/${base}`], project.root);
+          console.log(`${was} - cut again from ${base}'s tip.`);
+        }
       } catch (error) {
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
       }
@@ -1915,6 +2032,8 @@ let unlockOnExit = false;
  */
 export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
+  // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
+  resetMergeCheckGap();
   // A test of the repair path itself. An agent that can read a gate makes it
   // pass before it exits, so a live run almost never reaches a repair; this
   // counts each ticket's first gate run as red, with an output that says so.
@@ -2083,12 +2202,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   for (const line of startLines(split ?? { share: workers, free: limit("sandboxes") }, others.map((m) => {
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
-    return { project: name, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }))) console.log(line);
+    return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
+  }), !DRY_RUN, project.name)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
-  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts.
-  const slots = estimateSlots(workers, split);
+  // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. A dry run keeps no slot for landing.
+  const slots = estimateSlots(workers, split, !DRY_RUN);
   const chainIds = blockerChain(project, tracker, candidates);
   const rough = estimate(
     project, candidates.length, slots, chainIds.length,
@@ -2442,7 +2561,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notes: Note[] = [];
   // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
   // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
-  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun, exists: onBase(project.root, project.baseBranch) });
+  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun, exists: onBase(project.root, project.baseBranch), named: namedOnBase(project.root, project.baseBranch) });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();

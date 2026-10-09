@@ -7,6 +7,9 @@
 #   sandcastle status 0             print once and exit, every row
 #   sandcastle status 10 all        refresh, every row even past the pane
 #
+# With no terminal on stdout (a pipe, an agent's tool) any interval prints once and
+# exits, as 0 does: a refreshing view there only ends when it is killed.
+#
 # The CLI sets SANDCASTLE_PROJECT, SANDCASTLE_NAME and SANDCASTLE_BASE from
 # the project's .sandcastle/config.ts.
 #
@@ -30,6 +33,9 @@ case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
 esac
 
 INTERVAL="${1:-10}"
+# Nobody watches a refreshing view whose output is not a terminal, and a pipe or an agent's
+# tool would wait on it until killed. STATUS_FRAMES keeps the loop for the tests that drive it.
+if [ ! -t 1 ] && [ -z "${STATUS_FRAMES:-}" ]; then INTERVAL=0; fi
 # A live frame taller than its pane scrolls its own top - the header and the
 # working rows - out of sight. So the refreshing view fits the pane unless
 # asked for "all"; a one-off snapshot (0) prints everything.
@@ -646,8 +652,14 @@ hand_merged() {
 # in (the tip as a second parent); a fast-forward has none, so the tip itself -
 # not a later merge onto it, which would wait for a push already made. No
 # origin/<base> ref, or no way to find the commit, keeps "closes on push".
+# A ticket whose newest kit-worded merge on the base is a "part of" one never
+# closes on a push (the report's mergedPartly rule), so it says that, pushed or not.
+# Called in a subshell: the disp below leaves the caller's DISP alone.
 hand_merged_note() {
-  local tip merge
+  local tip merge subj
+  disp "$1"
+  subj=$(git log "$BASE" -1 --format=%s --fixed-strings --grep="Merge agent/issue-$1 (closes $DISP)" --grep="Merge agent/issue-$1 (part of $DISP)" 2>/dev/null)
+  case "$subj" in *"(part of "*) printf 'merged by hand, partly done: stays open'; return;; esac
   if git rev-parse --verify --quiet "refs/remotes/origin/$BASE" >/dev/null 2>&1 \
     && tip=$(git rev-parse --verify --quiet "refs/heads/agent/issue-$1" 2>/dev/null) && [ -n "$tip" ]; then
     merge=$(git rev-list --merges --ancestry-path --parents "$tip..refs/heads/$BASE" 2>/dev/null \
@@ -1161,7 +1173,7 @@ render() {
         # to the ticket next to start. An older kit wrote it as the note of a ticket a worker had taken.
         # A slot the run keeps for a landing is the same wait with another cause, and says so.
         if [ "$activity" = "next to start" ]; then
-          case "$SHARE_WAIT" in share) activity="waits for the run's share";; landing) activity="waits: a slot is kept for landing";; esac
+          case "$SHARE_WAIT" in share) activity="waits for the run's share";; landing) activity="waits: slot kept to land";; esac
         fi
         case "$note" in "waits for the run's share"*) activity="$note";; esac;;
       blocked) age="-";;

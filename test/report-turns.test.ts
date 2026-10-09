@@ -70,13 +70,13 @@ test("a turn the loop continues from: one line for the loop's next turn, then th
   const out = render(turnOne({ next: { level: 3, turn: 2, tickets: ["108", "104", "106"] } }));
   assert.equal(
     body(out, "## 👉 Next step").trim(),
-    "1. Autonomy level 3 runs turn 2 of 3 next for #108, #104, #106; nothing to do yet.\n2. Push main (3 commit(s)) under this repo's rules.",
+    "1. Autonomy level 3 runs turn 2 of 3 next for #108, #104, #106; what needs you from this turn is carried into the last turn's summary.\n2. Push main (3 commit(s)) under this repo's rules.",
   );
 });
 
 test("a continued turn with nothing ahead has the one line only", () => {
   const out = render(turnOne({ ahead: 0, next: { level: 2, turn: 2, tickets: ["108"] } }));
-  assert.equal(body(out, "## 👉 Next step").trim(), "1. Autonomy level 2 runs turn 2 of 2 next for #108; nothing to do yet.");
+  assert.equal(body(out, "## 👉 Next step").trim(), "1. Autonomy level 2 runs turn 2 of 2 next for #108; what needs you from this turn is carried into the last turn's summary.");
 });
 
 test("the last turn's Next step is unchanged", () => {
@@ -222,7 +222,7 @@ test("closingReport marks a turn the loop continues from, and only that one", as
   });
 
   const mid = await closingReport(project, { level: 3, turn: 1 });
-  assert.match(body(mid, "## 👉 Next step"), /Autonomy level 3 runs turn 2 of 3 next for shop-02; nothing to do yet\./);
+  assert.match(body(mid, "## 👉 Next step"), /Autonomy level 3 runs turn 2 of 3 next for shop-02; what needs you from this turn is carried into the last turn's summary\./);
   assert.match(body(mid, "## ▶️ Runnable now"), /Runnable now: shop-02 \(blocker shop-01 closed\)/);
   // The cap turn, a plain run and `sandcastle report` keep the operator's own steps.
   for (const last of [await closingReport(project, { level: 3, turn: 3 }), await closingReport(project, { level: 1, turn: 1 }), await closingReport(project)]) {

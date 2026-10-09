@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { createSandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
@@ -26,7 +27,8 @@ import { shq } from "./generated.ts";
 // `timedOut`: exit 124 from the gate's time bound, which reads as a bare exit code otherwise.
 export type Gate = { name: string; pass: boolean; ms?: number; timedOut?: boolean };
 type Failure = { name: string; command: string; exitCode: number; output: string };
-// `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started.
+// `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
+// (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
@@ -132,10 +134,19 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         const ms = Date.now() - since;
         const timedOut = r.exitCode === 124;
         const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
+        // With `onLine` set the sandbox streams stdout alone and returns stderr apart, so a log written only
+        // from `onLine` has none of it - and a test runner prints its failures there. Not `2>&1` on the command:
+        // the failure output's order would change for logged gates only, and `redOnBase` compares failure keys
+        // between a branch and the base.
+        if (log && r.stderr) appendFileSync(log, `# stderr of ${g.name} (at most its last 64 KiB):\n${r.stderr.endsWith("\n") ? r.stderr : r.stderr + "\n"}`);
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
-        const output = clip([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n").trim());
+        // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
+        // prompt, `failureKey` and `failingTests` read plain text. The gates log, written as the gate ran, keeps them.
+        const output = clip(
+          stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim(),
+        );
         failures.push({ name: g.name, command: g.command, exitCode: r.exitCode, output });
         // A timed-out gate may still be running in this container (or Docker
         // may not be answering): a later gate would run beside it, or wait out
@@ -311,7 +322,11 @@ export const gitHooksLine = (g: GitHooks) =>
 // the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
 export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true) => {
+  // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
+  // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
+  const asked = Date.now();
   const gated = async () => {
+    const slotWaitMs = Date.now() - asked;
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     try {
@@ -326,6 +341,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       const hooks = (JSON.parse(readFileSync(planFile, "utf8")) as { hooks: Hook[] }).hooks;
       return {
         ...run,
+        waitMs: slotWaitMs + (run.waitMs ?? 0),
         head,
         hookTests: hookTests ? await runHookTests(project.hookTests, hooks, sandbox) : [],
         gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
@@ -391,9 +407,13 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // default with its absolute "location:" paths) the ids name no file, and the
 // red stays the branch's own.
 const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
+// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it. The label
+// is skipped, a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a
+// package, and its "0.004s" would pass for a file.
+const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))[^\s/.]+\s+)?(\S+)/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
-  /^\s*FAIL\s+(\S+)/,
+  FAIL_LINE,
   /^\s*not ok \d+ - (.+?)(?:\s+#.*)?$/,
   SPEC_FAILED,
   /^\s*--- FAIL: (\S+)/,
@@ -409,7 +429,8 @@ const CLIPPED = /^\[\.\.\. \d+ characters cut \.\.\.\]$/;
 const idsOf = (line: string) => FAILING_TEST_LINE.map((re) => re.exec(line)?.[1]).filter((id): id is string => id !== undefined);
 // `limit`: the base-red check reads the base's whole list (Infinity): a branch's test sixth on it is still the base's.
 export const failingTests = (output: string, limit = FAILING_TESTS_SHOWN) => {
-  const lines = output.split("\n").map((line) => line.replace(/\r$/, ""));
+  // A runner colours its output when it has no TTY and no NO_COLOR (vitest does), which hides its FAIL lines.
+  const lines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, ""));
   const header = lines.findIndex((line) => SPEC_SUMMARY.test(line));
   // A summary `clip` cut through is not the whole list: a test it lost could be the branch's own.
   const summary = header >= 0 && lines.slice(header).some((line) => CLIPPED.test(line)) ? -1 : header;

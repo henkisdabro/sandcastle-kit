@@ -54,7 +54,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { isKit, type Probe } from "../mod/hooks/run-live.ts";
 import type { RunRecord } from "../mod/hooks/run-record.ts";
 import { OperatorError } from "./errors.ts";
@@ -504,11 +504,19 @@ export const splitAtStart = (demand: number, others: Member[], total = limit("sa
   return { share: shares.get(RUN_ID) ?? 0, free: Math.max(0, total - others.reduce((n, m) => n + m.held, 0)) };
 };
 
-/** The sandboxes the start estimate divides by: the run's workers within its share when another run is live, else within the machine limit. */
-export const estimateSlots = (workers: number, split?: { share: number }, total = limit("sandboxes")) => Math.max(1, Math.min(workers, total, split?.share ?? Infinity));
+/**
+ * The sandboxes the start estimate divides by: the run's workers within the share its tickets can use when another
+ * run is live, else within the machine limit. Beside another run a share of 2 or more keeps one slot for landing
+ * (`keptForLanding`), so the tickets count as share - 1; a share of 1, a run alone and a dry run (`landing` false:
+ * it keeps nothing) count the whole share.
+ */
+export const estimateSlots = (workers: number, split?: { share: number }, landing = true, total = limit("sandboxes")) => {
+  const share = split ? (landing && split.share >= 2 ? split.share - 1 : split.share) : Infinity;
+  return Math.max(1, Math.min(workers, total, share));
+};
 
 /** Another live run as the start line tells it: `wait` is the seconds until its first ticket likely ends, when the history says. */
-export type Neighbour = { project?: string; registered: boolean; held: number; demand: number; wait?: number };
+export type Neighbour = { project?: string; root?: string; pid?: number; registered: boolean; held: number; demand: number; wait?: number };
 
 const slotsOf = (n: number) => `${n} slot${n === 1 ? "" : "s"}`;
 
@@ -520,12 +528,25 @@ const approx = (seconds: number) => {
 
 /**
  * The start lines of a run that begins while others are live: who they are, what each holds and
- * wants, this run's share and, when no slot is free, when the first is likely. A run from an older
+ * wants, this run's share (and, from 2, the slot of it kept for landing) and, when no slot is free, when the first is likely. A run from an older
  * kit gets a line of its own - it takes no share on trust, and the run still starts. No other run:
  * no line. No history for the wait: the line leaves it out.
+ *
+ * A project name is the config's `name`, the same in every checkout of one repository, so a run whose
+ * name another listed run (or this run, `self`) also has is named `site (site-review)`, with the last
+ * component of its root, or `site (pid 4242)` where the root is unknown or another such run's folder
+ * has the same last component. A name nothing shares is printed as it is.
  */
-export const startLines = (split: { share: number; free: number }, others: Neighbour[]): string[] => {
-  const name = (n: Neighbour) => n.project || "another project";
+export const startLines = (split: { share: number; free: number }, others: Neighbour[], landing = true, self?: string): string[] => {
+  const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
+  const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
+  const name = (n: Neighbour) => {
+    if (!n.project) return "another project";
+    if (!shared(n)) return n.project;
+    const dir = folder(n);
+    if (dir && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
+    return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
+  };
   const lines: string[] = [];
   const aware = others.filter((n) => n.registered);
   if (aware.length) {
@@ -535,7 +556,8 @@ export const startLines = (split: { share: number; free: number }, others: Neigh
     const first = waits.length ? `, the first likely in ~${approx(Math.min(...waits))}` : "";
     const finish = `as ${holders.map((n) => `${name(n)}'s`).join(" and ")} tickets finish${first}`;
     const tail = split.free >= split.share ? "it starts at once" : split.free > 0 ? `it starts with ${slotsOf(split.free)} now and takes the rest ${finish}` : `it starts ${finish}`;
-    lines.push(`${live}: this run's share is ${split.share}; ${tail}`);
+    const kept = landing && split.share >= 2 ? `, its tickets ${split.share - 1} at a time (one slot is kept for landing)` : "";
+    lines.push(`${live}: this run's share is ${split.share}${kept}; ${tail}`);
   }
   for (const n of others) if (!n.registered) lines.push(`${name(n)}'s run predates shares: it keeps taking free slots until it ends`);
   return lines;

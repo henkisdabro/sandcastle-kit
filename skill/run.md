@@ -25,7 +25,7 @@ This continues SKILL.md: run its "Before every action" first.
      branch in this checkout (use another worktree): the `.git` guard cannot tell a person's commit
      from a sandbox's, so a base that moves mid-run stops the run - pipelines in flight finish,
      nothing more lands, and the tokens they spent wait for a re-run. The run's start line says the
-     same. Check `sandcastle status` (is a run live?) before any git write to the base in that
+     same. Check `sandcastle status 0` (is a run live?) before any git write to the base in that
      checkout, yours included. Another worktree shares `.git/config`, which the guard reads by key:
      an upstream for your own branch there (`git worktree add ... origin/<x>`, `git push -u`,
      `git branch -u`, `gh pr create` from a local branch) is let through with one line, but any other
@@ -112,7 +112,9 @@ This continues SKILL.md: run its "Before every action" first.
    a background command (Claude Code: 30 minutes by default, 2 hours at most - pass
    `timeout: 7200000`), so give it a timeout under that cap, `sandcastle wait 6600`: at the
    timeout it exits 124 with the run untouched, which is no result - start the same
-   `sandcastle wait` again. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
+   `sandcastle wait` again. N is how long `sandcastle wait N` waits for the run to end; once it
+   has ended, `wait` reads the tracker again to print the closing summary, which takes longer with
+   many blocked tickets, so the harness's own timeout needs room above N. `sandcastle stop` stops the run as Ctrl-C does; use it only when the
    user asks, and `sandcastle wait` then shows how it ended. To hold the run without losing work
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
@@ -124,14 +126,33 @@ This continues SKILL.md: run its "Before every action" first.
    The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git
    state as it is now. Run it from the project root and take the summary from its own stdout, not
-   from a pane scrape. With `autonomy` set, one `sandcastle run` can hold several turns, each
-   printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows only
-   the last: read the earlier turns' `Autonomy level` lines and summaries from the run's output
-   (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
+   from a pane scrape. The mod's end prompt names the run that ended by its pid and start time
+   (`pid 4242, started 14:05`). When the report prints a run that started at another time, or says
+   `still running`, the named run was replaced by a later one in the same project, which the
+   report now shows: do not close that one. Close the named run from its own closing summary - the
+   newest `.sandcastle/logs/archive/run-output-*.log` for a detached run (the file is renamed there
+   when the next detached run starts), or its line in `.sandcastle/logs/history.jsonl` - say in the
+   hand-back that it was replaced, and leave the live run to the end prompt of its own. With `autonomy` set, one `sandcastle run` can hold several turns, each
+   printing its own closing summary, and `sandcastle report` (like `sandcastle wait`) shows the
+   last one's, which carries what the earlier turns left for a person: their held branches,
+   partly done remainders, checks by hand, gaps and follow-ups, each line ending `(turn N)`, with
+   their steps under Next step and in the headline's counts (a ticket a later turn ran again shows
+   only its latest ending). A turn the loop goes on from says so in one line instead of its steps.
+   The earlier turns' other lines (what they merged, the `Autonomy level` lines) are in the run's
+   output only (`.sandcastle/logs/run-output.log` for a detached run). At level `drain`, near its end is
    `Drain: <N> turns, <landed> landed, stopped because <cause>`, then a line for each ticket
    queued after the run started: quote the cause and name those tickets in the hand-back.
 
-   Then write your closing message with **all seven sections, in this order, with these
+   **A shorter hand-back, when the user asked for one.** If the user has asked for a short or plain
+   hand-back - in this conversation, or as a standing preference in their own memory or
+   instructions - that request wins over the seven sections below. Write the short form: it keeps,
+   in this order, (1) anything the `## 🏁 Run finished` section says must come first - RED TOGETHER
+   and "do not push", a red merged base, a run that ended early, was stopped or was killed; (2) one
+   line for each item that needs the person, from Needs you and Needs fixing; (3) that nothing was
+   pushed; (4) the one recommended next step and the one question. It ends with one line offering
+   the full seven sections. The seven sections stay the default when nothing was asked.
+
+   Otherwise write your closing message with **all seven sections, in this order, with these
    headings**, each one present and saying "none" when empty. Copy each `## ` heading **verbatim
    from what `sandcastle report` printed, emoji included** - retyping a heading is how the emoji
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
@@ -230,6 +251,10 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   "merged by hand, partly done: stays open", with its unmet criterion: the push does not close it. That holds after `sandcastle clean` has
   deleted the branch, if the merge's own subject (`Merge agent/issue-<n> (closes|part of ...)`) is on
   the base; a held branch that is gone with no such subject is listed with no merge command.
+  A held conflict resolution (it changed files git had merged cleanly) is checked for lost lines
+  (`git log -p`) and landed with `sandcastle land <n>`, which gates the merge - not merged by hand,
+  which runs no gate - or fixed on the branch, or requeued with a note; the summary lists it with
+  `land:` where the other held branches have `merge:`, in this run and in later ones.
 - **`withdrawn`** tickets were closed or unqueued during the run: someone's decision, nothing to
   fix.
 - **`not landed`** means the branch moved after its gates or the merge failed for a reason other
@@ -241,7 +266,7 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   a key that neither runs a program nor carries a credential, the old and new values: a branch of their own tells at once).
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
-  `sandcastle gates` before blaming the branch.
+  `sandcastle gates` (once the run has ended: it refuses while one is live) before blaming the branch.
 - **"red on <base> before any agent ran"**: the run spent no allowance, and the cause is the
   image, the setup, the lean plan or a hook test (`.sandcastle/logs/base-gates.log`).
 - **A dry run** ends with `dry run held` or `DRY RUN BREACHED` - the latter means an agent wrote
@@ -260,3 +285,13 @@ implementer the order is: the ticket's own `model:` or `effort:` label, then `IM
 `model:` label as it is; to override a label for one run, remove the label. Repair uses the
 implementer's model and effort. A run that is already going keeps its models; the change applies
 from the next one, and it never needs a change to the kit.
+
+A model's price can depend on the length of the prompt, and an agent pass sends its whole context
+with every tool call, so a long pass pays the long-prompt rate on most of its requests. Claude
+Haiku 5.5 is the case to know, billed through an API key: its price covers prompts up to 100K
+tokens, and a longer prompt is billed at five times it, input and output. At `high` or `max`
+effort most of an implement pass's requests run past 100K tokens. The kit's default effort is
+`high` for any model, so `IMPL_MODEL=claude-haiku-5-5` on its own runs Haiku there. If Haiku is the
+implementer, run it at `medium` or below and set its effort with it (`IMPL_EFFORT`, or `effort`
+beside `model` under `implement` in `.sandcastle/config.ts`). Compare runs on their token lines:
+the status view's TOKENS column and the closing summary's tokens.
