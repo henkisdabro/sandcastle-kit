@@ -1,6 +1,20 @@
 // A refusal the operator acts on (a missing config, a red gate, a live run): printed as a message, never a stack trace.
 export class OperatorError extends Error {}
 
+const reported = new WeakSet<object>();
+
+/**
+ * Marks an error whose message the run's closing summary has printed already, and returns it: `cli.ts` then ends
+ * the process on it without printing the message a second time.
+ */
+export const reportedError = <E>(error: E): E => {
+  if (typeof error === "object" && error !== null) reported.add(error);
+  return error;
+};
+
+/** Whether `reportedError` marked this error. */
+export const wasReported = (error: unknown): boolean => typeof error === "object" && error !== null && reported.has(error);
+
 /** Edit distance between two words, for "did you mean" on a typo. */
 export const distance = (a: string, b: string) => {
   let row = Array.from({ length: b.length + 1 }, (_, j) => j);

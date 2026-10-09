@@ -602,12 +602,11 @@ export const causeWords = (c: StopCause, ref: (id: string) => string): string =>
 
 /**
  * The line printed once, as a safety stop first holds (the scheduler's `stopped landing`): the
- * cause with what a person needs to check it, and what the run does from here.
+ * cause in a few words, and what the run does from here. The commits or files to check, and what to do about
+ * them, are the closing summary's one full statement of the stop (the guard's message), not said here as well.
  */
-export const stoppedLine = (c: StopCause, ref: (id: string) => string): string => {
-  const { what, detail } = c.kind === "tampered" || c.kind === "host failed" ? guardWords(c.error) : { what: causeWords(c, ref), detail: "" };
-  return `STOPPED landing: ${what}${detail ? ` ${detail}` : ""} - the run finishes what is in flight and lands nothing more.`;
-};
+export const stoppedLine = (c: StopCause, ref: (id: string) => string): string =>
+  `STOPPED landing: ${causeWords(c, ref)} - the run finishes what is in flight and lands nothing more; the closing summary says what to check.`;
 
 /** A ticket state in the words of a waiting ticket's note. */
 const stateWord = (state: string | undefined): string =>

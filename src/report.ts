@@ -84,6 +84,10 @@ export type Facts = {
   dryRunCheck?: string;
   /** Why the run stopped before landing, if it did. */
   stopped?: string;
+  /** The stop's cause in a few words, when it was the `.git` guard's: tells a moved base from any other change. */
+  stoppedWhat?: string;
+  /** The reason the follow-ups were withheld from the tracker, said once for the set. */
+  followUpsWithheld?: string;
   /** How a person ended the run (`sandcastle stop`, Ctrl-C, a signal): not a crash, though its exit code is not 0. */
   stoppedBy?: string;
   /** Files changed per held branch. */
@@ -470,6 +474,8 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
+    stoppedWhat: run.stoppedWhat,
+    followUpsWithheld: run.followUpsWithheld,
     stoppedBy: run.stoppedBy,
     changed,
     mergedByHand: byHand,
@@ -758,6 +764,21 @@ const followUpLine = (f: Facts, u: FiledFollowUp) => {
 };
 
 /**
+ * The follow-ups a person files by hand, as Needs you lines. Those the run withheld from the tracker (`followUpsWithheld`:
+ * a `.git` stop) share one reason, said once on a line of its own over their bullets - nine repeats of it were nine lines
+ * of noise - and `turn` marks that line the way `fromTurn` marks a bullet.
+ */
+const byHandLines = (f: Facts, us: FiledFollowUp[], turn?: number): string[] => {
+  const withheld = (u: FiledFollowUp) => f.followUpsWithheld !== undefined && !u.id && u.failed === f.followUpsWithheld;
+  const held = us.filter(withheld);
+  return [
+    ...us.filter((u) => !withheld(u)).map((u) => followUpLine(f, u)),
+    ...(held.length ? [`Follow-ups not filed - ${f.followUpsWithheld}${turn ? ` (turn ${turn})` : ""}; file each by hand:`] : []),
+    ...held.map((u) => `- ${u.title} - from ${refOf(u.from)} (${u.phase})`),
+  ];
+};
+
+/**
  * The Needs you bullets of a turn's tickets: a held branch, a partly done remainder, a check by hand, a gap. A
  * carried turn (`carried`) leaves out two kinds a person is not asked about for an earlier turn: a commit that was
  * refused, and a close that failed (the next run closes it).
@@ -920,7 +941,7 @@ export const render = (f: Facts, plain = false): string => {
       : f.verify === undefined || f.verify === null
       // null: the run ended and chose not to (no merge this run - a ticket closed
       // as merged earlier merges nothing); undefined: it never got there.
-      ? `Merged ${f.base} not re-gated (${f.verify === null ? "no branch merged in this run" : early ? "the run ended before it got there" : "no result recorded"}).`
+      ? `Merged ${f.base} not re-gated (${f.verify === null ? "no branch merged in this run" : f.stopped ? "the stop skipped it" : early ? "the run ended before it got there" : "no result recorded"}).`
       : f.verify.green && f.verify.skipped
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
@@ -996,12 +1017,12 @@ export const render = (f: Facts, plain = false): string => {
       // Once, whatever the number of branches that failed on it: it is the base's, not theirs.
       ...(f.baseRed ?? []).map((t) => `- base went red mid-run: ${t} - it fails on ${f.base} itself, so no branch was repaired for it: fix ${f.base} first; the tickets under Needs fixing that failed on it were not repaired`),
       // Filing failed or never happened in a real run: a person files it by hand, so it is theirs, not triage's.
-      ...followUps.filter((u) => !u.id && (u.failed || !f.dryRun)).map((u) => followUpLine(f, u)),
+      ...byHandLines(f, followUps.filter((u) => !u.id && (u.failed || !f.dryRun))),
       // What the earlier turns of this run left, oldest first: the loop's later turns only re-run some tickets, so
       // the rest would be said nowhere else.
       ...carried.flatMap((c) => [
         ...fromTurn(c.turn, ticketLines(c.facts, c.o, true)),
-        ...fromTurn(c.turn, c.o.followUps.filter((u) => !u.id && (u.failed || !c.facts.dryRun)).map((u) => followUpLine(c.facts, u))),
+        ...fromTurn(c.turn, byHandLines(c.facts, c.o.followUps.filter((u) => !u.id && (u.failed || !c.facts.dryRun)), c.turn)),
       ]),
       // The rest are for triage, under a heading of their own so the headline's `need you` and `to triage` each
       // match a group of bullets.
@@ -1123,9 +1144,13 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   if (f.stopped) {
+    const land = stoppedIds.length ? ` - ${list(stoppedIds)} finished and land then.` : ".";
+    // Only a moved base can be a person's own commit; any other `.git` change is read and put right first. A record
+    // from before the cause was kept (`stoppedWhat` absent) keeps the old words.
     next.push(
-      `Check what stopped the run (above). If it is your own commit, \`sandcastle run\` again` +
-        (stoppedIds.length ? ` - ${list(stoppedIds)} finished and land then.` : "."),
+      f.stoppedWhat === undefined || f.stoppedWhat === `${f.base} moved while sandboxes ran`
+        ? `Check what stopped the run (above). If it is your own commit, \`sandcastle run\` again${land}`
+        : `Check what stopped the run (above): it names what changed in the shared .git and how to inspect it. Once that is put right or understood, \`sandcastle run\` again${land}`,
     );
   }
   if (f.verify && !f.verify.green) {

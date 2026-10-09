@@ -54,7 +54,7 @@ import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, reportedError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
@@ -3094,7 +3094,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
         // Said as the stop first holds, not at the run's end: the run goes on printing `working` lines
         // for tickets in flight, and a person would read each as a run that still lands.
         const error = stopError(c.cause);
-        run.update({ stopped: String((error as Error).message ?? error) });
+        run.update({ stopped: String((error as Error).message ?? error), stoppedWhat: guardWords(error).what });
         console.log(stoppedLine(c.cause, ref));
         return view.refresh();
       }
@@ -3119,7 +3119,15 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // Files the follow-ups still unfiled and says what each became. Where the shared .git changed, `unsafe` says
   // why nothing is written to the tracker (a ticket file is a commit on that base): they stay in the record to file by hand.
   const fileTheFollowUps = async (unsafe?: string) => {
-    for (const f of await followUps.file(unsafe)) {
+    const filed = await followUps.file(unsafe);
+    // One line for the set, and the record says it once for the summary: the reason is the same for each.
+    const withheld = unsafe !== undefined ? filed.filter((f) => !f.id && f.failed === unsafe) : [];
+    if (withheld.length) {
+      run.update({ followUpsWithheld: unsafe });
+      console.log(`${withheld.length === 1 ? "1 follow-up was" : `${withheld.length} follow-ups were`} not filed: ${unsafe}. ${withheld.length === 1 ? "It is" : "They are"} listed in the summary to file by hand.`);
+    }
+    for (const f of filed) {
+      if (withheld.includes(f)) continue;
       console.log(
         f.id
           ? `${ref(f.from)}: filed ${ref(f.id)} for triage - ${f.title}`
@@ -3138,6 +3146,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // A merge check that could not run before the stop is named in this summary too: the run's end never comes.
     const mergeUnchecked = mergeCheckGap();
     run.update({ stopped: why, paused: undefined, ...(mergeUnchecked && { mergeUnchecked }) });
+    // The cause in a few words, for the summary's next step: only a guard stop has one.
+    if (safety) run.update({ stoppedWhat: guardWords(error).what });
     try {
       await fileTheFollowUps(safety ? `${guardWords(error).what}, so nothing more was written to the tracker` : undefined);
     } catch (e) {
@@ -3145,7 +3155,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       console.log(`Could not file the agents' follow-ups: ${errorLine(e)}`);
     }
     console.log(`\n${await closingReport(project)}\n`);
-    throw error;
+    // The summary holds the stop's message: the CLI printing it again on exit made it twice.
+    throw reportedError(error);
   };
 
   const { endings, stop } = await schedule
