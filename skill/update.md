@@ -154,8 +154,11 @@ apply it once the user agrees.
        cache directory under the project is fine). Then `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
-   that changed, by the repo's own rules, and report: kit version before and after, what changed
-   for this project, and what the user decided.
+   that changed, by the repo's own rules, and report: this project's release before and after
+   (`sandcastle updated` prints it as `this project: <recorded release> -> <kit version now>`, or
+   says there was no earlier record: say so, do not substitute the kit's version before the pull,
+   which another session may already have moved), what changed for this project, and what the
+   user decided.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every
    harness, but a session that was already open keeps the skill it loaded at its start (and a mod
    linked in step 1 loads only in a new session). Tell the user to start a new session (Claude
