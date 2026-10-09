@@ -273,20 +273,26 @@ const personRecords = (project: Project, common: string): Fingerprint["records"]
   const found: Fingerprint["records"] = {};
   if (!lstatSync(records, { throwIfNoEntry: false })?.isDirectory()) return found;
   for (const name of readdirSync(records).sort()) {
-    if (kitRecord(project, records, name)) continue;
-    const record = join(records, name);
-    const files: Record<string, string> = { ".": entryHash(record) };
-    for (const file of RECORD_FILES) if (lstatSync(join(record, file), { throwIfNoEntry: false })) files[file] = entryHash(join(record, file));
-    found[name] = files;
+    const files = personRecord(project, records, name);
+    if (files) found[name] = files;
   }
   return found;
+};
+
+/** One record of `personRecords`, or none when it is a kit sandbox's. */
+const personRecord = (project: Project, records: string, name: string): Record<string, string> | undefined => {
+  if (kitRecord(project, records, name)) return undefined;
+  const record = join(records, name);
+  const files: Record<string, string> = { ".": entryHash(record) };
+  for (const file of RECORD_FILES) if (lstatSync(join(record, file), { throwIfNoEntry: false })) files[file] = entryHash(join(record, file));
+  return files;
 };
 
 /**
  * What a person's worktree records differ by since `before`, as the stop names them. A record present at the start whose
  * `commondir`, `gitdir` or `config.worktree` differs (present or absent, or content) is named; one that is gone passes
  * (`git worktree remove`); one added since passes only as `git worktree add` writes it: `commondir` is `../..` and
- * there is no `config.worktree`.
+ * there is no `config.worktree`, and `now` then holds it as it passed.
  */
 const recordChanges = (project: Project, before: Fingerprint["records"], now: Fingerprint["records"]): string[] => {
   const records = join(realpathSync(commonDir(project.root)), "worktrees");
@@ -317,7 +323,15 @@ const recordChanges = (project: Project, before: Fingerprint["records"], now: Fi
       if (!problem) break;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
-    if (problem) named.push(problem);
+    if (problem) {
+      named.push(problem);
+      continue;
+    }
+    // What passed is what is expected from here on: the reading `now` took may predate the files git wrote since, and
+    // would name them as added at the next check. A kit sandbox's record whose `gitdir` was not written yet then was one.
+    const passed = personRecord(project, records, name);
+    if (passed) now[name] = passed;
+    else delete now[name];
   }
   return named;
 };

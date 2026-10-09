@@ -7,10 +7,12 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Worker } from "node:worker_threads";
 import type { Project } from "../src/config.ts";
 import { assertGitUnchanged, gitFingerprint } from "../src/guard.ts";
 
@@ -98,6 +100,27 @@ test("a record added mid-run with a commondir git does not write, or a config.wo
   rmSync(join(record, "config.worktree"));
   writeFileSync(join(record, "commondir"), "../../elsewhere\n");
   assert.match(stopMessage(project, before), /worktrees\/pr-fix\/commondir is not \.\.\/\.\., which git writes/);
+});
+
+test("a worktree git is still writing as a check reads it passes that check and the next", async () => {
+  const { dir, project } = repo();
+  const before = gitFingerprint(project);
+  // git writes the record's gitdir, then its commondir, just after the directory: the check reads it in between and
+  // waits for the rest. What it then expects is the record as it passed, not the half-written one it first read.
+  const record = join(project.root, ".git", "worktrees", "pr-fix");
+  mkdirSync(record, { recursive: true });
+  writeFileSync(join(record, "gitdir"), `${join(dir, "pr-fix", ".git")}\n`);
+  const writer = new Worker(
+    `const { parentPort, workerData } = require("node:worker_threads");
+     parentPort.postMessage("ready");
+     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+     require("node:fs").writeFileSync(workerData, "../..\\n");`,
+    { eval: true, workerData: join(record, "commondir") },
+  );
+  await once(writer, "message");
+  assert.doesNotThrow(() => assertGitUnchanged(project, before, "after #1"));
+  await once(writer, "exit");
+  assert.doesNotThrow(() => assertGitUnchanged(project, before, "after #2"));
 });
 
 test("a record added mid-run is watched from then on", () => {
