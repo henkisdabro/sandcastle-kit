@@ -41,7 +41,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
@@ -2506,6 +2506,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
+  // The ticket slots the run could use, over its time: the record keeps their mean, not the start's share, which moves.
+  const load = createLoadMeter(slots);
+  run.finishWith(() => {
+    const concurrency = load.mean();
+    return { concurrency, load: { concurrency, tickets: candidates.length } };
+  });
   // The run record's live values (not settings): what the run wants and its share of the pool now.
   // The share moves as other runs begin and end, so it is read again as well as on a demand change.
   let shown: { demand: number; share: number; cap?: number } = { demand: -1, share: -1 };
@@ -2516,6 +2522,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     if (!mine || (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap)) return;
     // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
     shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
+    // As at the start: beside another run a share keeps a slot for landing; alone, the machine limit and the workers bound it.
+    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN));
     run.update(shown);
   };
   const poolWatch: ReturnType<typeof setInterval> = setInterval(poolValues, 5000);
