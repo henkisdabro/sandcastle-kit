@@ -23,13 +23,15 @@ export class MountRefused extends OperatorError {}
 
 // The path as Sandcastle will mount it (`~` expanded, a relative path from the working directory),
 // with symlinks resolved on the longest part that exists, so a link into the project is no way around.
+// `realpathSync.native` also gives the case the disk stores: the JS one keeps it as written, so on a
+// case-insensitive disk (macOS) a mount written `.GIT` would not compare equal to `.git`.
 const resolvedMountPath = (hostPath: string, from: string): string => {
   const expanded = hostPath === "~" ? homedir() : /^~[\\/]/.test(hostPath) ? join(homedir(), hostPath.slice(2)) : hostPath;
   const absolute = resolve(from, expanded);
   const tail: string[] = [];
   for (let dir = absolute; ; dir = dirname(dir)) {
     try {
-      return join(realpathSync(dir), ...tail.reverse());
+      return join(realpathSync.native(dir), ...tail.reverse());
     } catch {
       if (dirname(dir) === dir) return absolute;
       tail.push(basename(dir));
@@ -375,7 +377,13 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     if (!store) {
       console.warn("pnpmStore is set but pnpm is not on this host (`pnpm store path` failed): no store mounted, each sandbox's install downloads.");
     } else {
-      if (!mounts.some((m) => m.sandboxPath === PNPM_STORE_SANDBOX)) mounts = [...mounts, { hostPath: store, sandboxPath: PNPM_STORE_SANDBOX }];
+      if (!mounts.some((m) => m.sandboxPath === PNPM_STORE_SANDBOX)) {
+        // A project `.npmrc` store-dir can point at the root, `.sandcastle/` or `.git`: the same check as a literal mount.
+        const mount = { hostPath: store, sandboxPath: PNPM_STORE_SANDBOX };
+        const problem = mountProblem(root, mount);
+        if (problem) throw new MountRefused(`${CONFIG_PATH}: pnpmStore (\`pnpm store path\`): ${problem}`);
+        mounts = [...mounts, mount];
+      }
       if (!setup.includes(PNPM_STORE_SETUP)) setup = [PNPM_STORE_SETUP, ...setup];
     }
   }
