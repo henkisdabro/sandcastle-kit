@@ -19,14 +19,12 @@ import { isTicketState, GROUPS, TICKET_STATES } from "../mod/hooks/run-record.ts
 import { liveness } from "../mod/hooks/run-live.ts";
 import { runKit } from "./cli-spawn.ts";
 import { everyPidIsTheKit, kitLikeProcess } from "./kit-process.ts";
-import { useNoDocker } from "./no-docker.ts";
 import { quietly } from "./quiet.ts";
 
 // sandbox.ts, pool.ts and peaks.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-useNoDocker();
 const { createPipeline } = await import("../src/burndown.ts");
 const { createSchedule } = await import("../src/schedule.ts");
 const { PAUSE_FILE, readPause, waitForRun } = await import("../src/detach.ts");

@@ -41,6 +41,24 @@ test("a test sees tmpdir() equal to its realpath, and the running node's directo
   assert.equal(process.env.PATH!.split(delimiter)[0], dirname(process.execPath));
 });
 
+test("a test that runs `docker` gets one that lists nothing, never the machine's own", () => {
+  // `docker ps` is what a sandbox's close asks; a real daemon is slow (macOS), stopped (Docker installed, no daemon) or absent.
+  const ps = spawnSync("docker", ["ps", "-aq", "--filter", "name=sandcastle"], { encoding: "utf8" });
+  assert.deepEqual([ps.error, ps.status, ps.stdout, ps.stderr], [undefined, 0, "", ""]);
+  const dockerDirs = process.env.PATH!.split(delimiter).filter((d) => existsSync(join(d, "docker")));
+  assert.equal(dockerDirs[0], process.env.SANDCASTLE_TEST_NO_DOCKER_DIR, "the no-op docker is the first docker on PATH");
+  assert.equal(readFileSync(join(dockerDirs[0]!, "docker"), "utf8"), "#!/bin/sh\nexit 0\n");
+  // After the node directory, so the order the test above holds stays.
+  assert.equal(process.env.PATH!.split(delimiter)[1], dockerDirs[0]);
+});
+
+test("a docker a test puts ahead of the no-op one is the one that runs", () => {
+  const own = mkdtempSync(join(dir, "own-docker-"));
+  writeFileSync(join(own, "docker"), "#!/bin/sh\necho own\n", { mode: 0o755 });
+  const r = spawnSync("docker", ["ps"], { encoding: "utf8", env: { ...process.env, PATH: `${own}${delimiter}${process.env.PATH}` } });
+  assert.equal(r.stdout, "own\n");
+});
+
 test("a test sees none of the host's Herdr, tmux or kit settings", () => {
   for (const name of Object.keys(process.env)) assert.equal(scrubs(name), false, `${name} leaked into the test's environment`);
 });
@@ -54,8 +72,9 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   const file = join(dir, "probe.test.ts");
   writeFileSync(
     file,
-    `import { writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
-      `test("probe", () => writeFileSync(${JSON.stringify(out)}, JSON.stringify({ tmp: tmpdir(), path: process.env.PATH, env: process.env })));\n`,
+    `import { readFileSync, writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
+      `test("probe", () => writeFileSync(${JSON.stringify(out)}, JSON.stringify({ tmp: tmpdir(), path: process.env.PATH, env: process.env, ` +
+      `docker: readFileSync(process.env.PATH.split(${JSON.stringify(delimiter)})[1] + "/docker", "utf8") })));\n`,
   );
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -68,12 +87,17 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
   };
   delete env.NODE_TEST_CONTEXT;
+  delete env.SANDCASTLE_TEST_NO_DOCKER_DIR;
   const r = runNode(["--import", join(KIT, "test/hermetic-env.ts"), "--test", "--test-reporter=spec", file], { cwd: dir, env, encoding: "utf8", timeoutMs: 120_000 });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const seen = JSON.parse(readFileSync(out, "utf8")) as { tmp: string; path: string; env: Record<string, string> };
+  const seen = JSON.parse(readFileSync(out, "utf8")) as { tmp: string; path: string; docker: string; env: Record<string, string> };
   assert.equal(seen.tmp, realpathSync(real));
   assert.equal(seen.path.split(delimiter)[0], dirname(process.execPath));
   assert.ok(seen.path.split(delimiter).includes("/shim"), "the host's own PATH entries stay");
+  // The polluted shell's own docker (a shim here) never comes first, and a docker answering on it is the no-op one.
+  const seenDocker = seen.path.split(delimiter)[1]!;
+  assert.equal(seen.docker, "#!/bin/sh\nexit 0\n");
+  assert.ok(seenDocker.startsWith(realpathSync(real)), "in the test's own TMPDIR");
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
