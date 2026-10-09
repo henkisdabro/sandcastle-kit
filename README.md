@@ -1478,7 +1478,9 @@ and the kit narrows what can cross it:
   `.git/config.worktree` (which git reads once `extensions.worktreeConfig` is on: created, changed
   or removed, it stops the run, naming its keys) and the base branch are fingerprinted; if a
   sandbox changes them, the run stops before the host runs another git command there, naming the
-  file. A hook planted there would otherwise run on your next checkout or commit. While tickets land during the run, the base may move only by the kit's own
+  file. A hook planted there would otherwise run on your next checkout or commit. `.git/modules/`
+  (the git directories of submodules) is fingerprinted too, since a config a sandbox adds there would
+  run on a `git status` that looks into a submodule. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
@@ -1497,7 +1499,10 @@ and the kit narrows what can cross it:
   checked, and the worktree's record is held to what git writes: the worktree's `.git` file names
   that record, the record's `commondir` names the shared `.git`, and there is no `config.worktree`.
   A record that differs would have that `git status` read config no check has seen, and a filter
-  there would run on your machine. The record check also comes before the host runs git in a
+  there would run on your machine. The same check refuses a git repository nested in the worktree - any
+  `.git` entry below the worktree's root other than its own `.git` file - naming the path, since a
+  `git status` that looks into it reads its own config and filters. Submodules are not supported in
+  sandboxes (Sandcastle never initialises them). The record check also comes before the host runs git in a
   worktree an earlier run kept (cutting a stale branch there, or Sandcastle reusing it as a sandbox
   opens): a fingerprint taken at this run's start would read an earlier sandbox's change as the way
   things are. A failure stops the run, and so does a container Docker refuses to stop; the
