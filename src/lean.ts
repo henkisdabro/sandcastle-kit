@@ -21,7 +21,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, posix, relative } from "node:path";
 import { IMPL_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { credentials, sh } from "./sandbox.ts";
@@ -364,18 +364,48 @@ export const report = (project: Project, p: Plan) => {
     console.log(`  Hook tests: ${project.hookTests.length} configured - run by \`sandcastle gates\` and every run's base check.`);
   }
   const gitHooks = gitHooksDir(project.root);
-  if (gitHooks) {
+  const outside = hooksPathOutside(project.root);
+  if (outside) {
+    console.log(`  WARNING: ${hooksPathLines(outside).join("\n  ")}`);
+  } else if (gitHooks) {
     console.log(`  Git hooks (${gitHooks}) run on every agent commit in the sandbox; \`sandcastle gates\` checks they can.`);
   }
 };
 
-const gitHooksDir = (root: string) => {
+// `--local`: the shared `.git/config` is what a sandbox sees. The host's own hooks are switched off through the
+// environment (`disableHostGitHooks`), which a plain read would answer with, and a global value never reaches a sandbox.
+const localHooksPath = (root: string) => {
   try {
-    return sh("git", ["config", "--get", "core.hooksPath"], root) || undefined;
+    return sh("git", ["config", "--local", "--get", "core.hooksPath"], root) || undefined;
   } catch {
-    return existsSync(join(root, ".husky")) ? ".husky" : undefined;
+    return undefined;
   }
 };
+
+const gitHooksDir = (root: string) => localHooksPath(root) ?? (existsSync(join(root, ".husky")) ? ".husky" : undefined);
+
+/**
+ * The project's `core.hooksPath` when it cannot name a directory of the sandbox's worktree: an absolute host path
+ * (`/Users/...`, `C:\...`, `~/...`) does not exist in the container, and a relative one that climbs out of the
+ * worktree leaves it. Git then finds no hooks and every agent commit runs none, with no error to say so.
+ */
+export const hooksPathOutside = (root: string): string | undefined => {
+  const value = localHooksPath(root);
+  if (!value) return undefined;
+  const absolute = value.startsWith("/") || value.startsWith("~") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+  const climbs = posix.normalize(value.replaceAll("\\", "/")).split("/")[0] === "..";
+  return absolute || climbs ? value : undefined;
+};
+
+/**
+ * What doctor, `lean` and `gates` say of `hooksPathOutside`: the value, what follows, and the fix. The next start
+ * compares the config with its baseline (`assertGitConfigBaseline`): after a clean end it takes a relative path to a
+ * tracked directory of the repo without a question, and asks for `--accept-git-config` once for any other value.
+ */
+export const hooksPathLines = (value: string): string[] => [
+  `core.hooksPath is ${JSON.stringify(value)}, which is not a directory of the project, so it does not exist inside a sandbox: git finds no hooks there and agent commits run none.`,
+  "-> `git config core.hooksPath <relative path>`, the hooks directory relative to the project root (for example `.githooks`). The next start takes that change without a question when the path is a tracked directory of the repo and the last run ended cleanly; any other value needs `--accept-git-config` once.",
+];
 
 // ---------------------------------------------------------------------------
 // Hook check: can every kept hook run in the image? For each command, in a
