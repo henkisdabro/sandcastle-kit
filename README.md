@@ -1268,7 +1268,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle size` | Recommends the machine pool's `maxSandboxes` and `maxGates` from the container runtime's VM and the sandboxes' measured peak memory, shows what set each, the current limits and advice on the runtime's CPU and memory. Writes nothing, not even `config.json` ([Concurrency](#-concurrency)) | ➖ no |
 | `sandcastle usage` | Prints the plan's usage between runs, read-only: the newest reading the run record (`logs/run.json`) or the history holds while it is under 10 minutes old, with its age (Codex's too, when the record has one), and no request. With none that fresh it makes one request to the plan's usage endpoint with the credential the `USAGE_CHECK` guard would use, and says why when that fails (exit 1, as with no credential to ask with). With `ANTHROPIC_API_KEY` in use it says the sandboxes spend API credits, not a plan, and asks nothing | ➖ no |
 | `sandcastle status [secs] [all]` | Live view, refreshed every 10 s by default and fitted to its pane with the overflow summarised on one line (`all` shows every row); `0` prints every row once, as does any interval with no terminal on stdout (a pipe, an agent's tool) | ➖ no |
-| `sandcastle clean [--all]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, archives their logs, and drops the `backup.git` copy of a branch already on the base; lists unmerged ones, which `--all` deletes too, without asking (their backup copy goes with them). Refuses while a run is live | ➖ no |
+| `sandcastle clean [--all] [--accept-git-config]` | Stops any sandbox a killed run left working, removes exited sandbox containers (this project's, or whose worktree is gone) and the kit's dangling images, removes leftover sandbox worktrees and finished `agent/*` branches, archives their logs, and drops the `backup.git` copy of a branch already on the base; lists unmerged ones, which `--all` deletes too, without asking (their backup copy goes with them). Refuses while a run is live. Holds the same start baseline as a run (`--accept-git-config` takes the present state as your own), and leaves a worktree whose records a sandbox changed, or that has a git repository nested in it, as it is - with its branch, named with the reason - while cleaning the rest, then exits non-zero | ➖ no |
 
 ## 🔧 Configuration
 
@@ -1485,7 +1485,7 @@ and the kit narrows what can cross it:
   record and refuses a difference, naming each added, changed or removed key (no value for a key
   that runs a program or carries credentials) and file, and whether the last run ended cleanly.
   Remove what is not yours; if it is your own (a filter, a remote or a hook you added since the last
-  run), start again with `sandcastle run --accept-git-config` (or `land` / `gates` with it), which
+  run), start again with `sandcastle run --accept-git-config` (or `land`, `gates` or `clean` with it), which
   records the present state as the new baseline. With no record - the first run under this kit -
   the run records and starts. A run killed with all of it unchanged starts again with no question.
   With `worktree.useRelativePaths` on, git writes `extensions.relativeWorktrees` the first time it

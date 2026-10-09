@@ -276,6 +276,8 @@ export type CleanResult = {
   deleted: { branch: string; unmerged: boolean }[];
   /** Agent branches kept because they hold work: `ahead` is the count of commits not on base. */
   kept: { branch: string; ahead: number }[];
+  /** Worktrees left as they were because the guard refused to run git in them (`reason`), and the branch each holds. */
+  left: { path: string; branch?: string; reason: string }[];
 };
 
 /**
@@ -284,27 +286,46 @@ export type CleanResult = {
  * the project's run lock, and keep holding it until this returns: a run started meanwhile would
  * lose the worktrees it had just made. A worktree's own git lock (worktree-lock.ts) is released
  * just before that worktree is removed, never earlier and never for one outside the directory.
+ * `refuse` (guard.ts, `worktreeRefusal`; a parameter because guard.ts imports this module) names why git must not run
+ * in a worktree: that worktree is left as it is, with the reason, and so is its branch; the others are cleaned.
  */
-export const cleanProject = (project: Project, all: boolean): CleanResult => {
+export const cleanProject = (project: Project, all: boolean, refuse?: (worktree: string) => string | undefined): CleanResult => {
   const cwd = project.root;
   reapOrphans(project);
   const containers = removeExitedSandboxes(project);
   const images = removeDanglingImages();
   const underWorktrees = join(project.root, ".sandcastle/worktrees/");
-  const worktrees = sh("git", ["worktree", "list", "--porcelain"], cwd)
+  const entries = sh("git", ["worktree", "list", "--porcelain"], cwd)
     .split("\n\n")
-    .map((e) => e.split("\n").find((l) => l.startsWith("worktree "))?.slice("worktree ".length))
-    .filter((p): p is string => !!p && p.startsWith(underWorktrees));
-  for (const path of worktrees) {
+    .map((e) => e.split("\n"))
+    .map((lines) => ({
+      path: lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length),
+      branch: lines.find((l) => l.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length),
+    }))
+    .filter((e): e is { path: string; branch: string | undefined } => !!e.path && e.path.startsWith(underWorktrees));
+  const worktrees: string[] = [];
+  const left: CleanResult["left"] = [];
+  for (const { path, branch } of entries) {
+    // Every git command below reads config the worktree's records name, and a sandbox can write them: one the guard
+    // refuses is left as it stands for a person, and the others go on. A directory already gone has nothing to read.
+    const reason = refuse?.(path);
+    if (reason) {
+      left.push({ path, ...(branch ? { branch } : {}), reason });
+      continue;
+    }
     // `worktree remove` refuses a locked worktree (a killed run left its lock behind).
     unlockWorktree(path, cwd);
     sh("git", ["worktree", "remove", "--force", path], cwd);
+    worktrees.push(path);
   }
   sh("git", ["worktree", "prune"], cwd);
   const base = project.baseBranch;
   const deleted: CleanResult["deleted"] = [];
   const kept: CleanResult["kept"] = [];
+  // Git refuses to delete a branch a worktree has checked out, and the worktree is not to be touched.
+  const held = new Set(left.map((l) => l.branch));
   for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"], cwd).split("\n").filter(Boolean)) {
+    if (held.has(branch)) continue;
     // A base-gate or verify branch is always scratch. An agent branch is
     // finished when every commit is on base, merged or as an equal patch.
     const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch], cwd).split("\n").some((l) => l.startsWith("+"));
@@ -315,7 +336,7 @@ export const cleanProject = (project: Project, all: boolean): CleanResult => {
       kept.push({ branch, ahead: Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], cwd)) });
     }
   }
-  return { containers, images, worktrees, deleted, kept };
+  return { containers, images, worktrees, deleted, kept, left };
 };
 
 /** A failed command's own closing line (its stderr), not Node's "Command failed:" echo of the arguments - a close comment, whole. */

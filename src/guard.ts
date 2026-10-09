@@ -855,6 +855,22 @@ export const assertWorktreeRecords = (project: Project, path: string, when: stri
 };
 
 /**
+ * For `cleanProject`: why git must not run in the worktree at `path`, or undefined when it may - the stop
+ * `assertWorktreeRecords` would throw, said without its "STOPPED <when>: " lead. A directory already gone has nothing
+ * for a host git to read.
+ */
+export const worktreeRefusal = (project: Project) => (path: string): string | undefined => {
+  if (!existsSync(path)) return undefined;
+  try {
+    assertWorktreeRecords(project, path, "in sandcastle clean");
+  } catch (error) {
+    if (!(error instanceof GuardStop)) throw error;
+    return error.message.replace(/^STOPPED in sandcastle clean: /, "");
+  }
+  return undefined;
+};
+
+/**
  * The check before a sandbox closes. Sandcastle's close stops the container, then runs `git status` on the host in its
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
  * drivers configured at the start) or in config a changed record names would run there. The container is stopped
