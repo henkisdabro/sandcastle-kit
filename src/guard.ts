@@ -1318,6 +1318,23 @@ const DEFAULT_PROTECTED = [
 ];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
+/**
+ * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the defaults and the project's `protectedPaths`) and what a
+ * change to one costs. An agent that is not told adds a comment to one for no reason, and the branch it spent a pipeline
+ * on is held for a person. The review is told to revert such a change when the ticket did not need it.
+ */
+export const protectedPathsNote = (project: Project, role: "implement" | "review"): string => {
+  const list = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])].map((p) => `\`${p}\``).join(", ");
+  const ask =
+    role === "review"
+      ? "If the branch changes one and the ticket did not need that change, revert it in a commit of your own: the rest of the work then lands by itself."
+      : "Change one only when the ticket needs it, never for a comment, a tidy-up or a formatting fix on the side.";
+  return (
+    "# Protected paths\n\n" +
+    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ${ask}\n`
+  );
+};
+
 /** The files among `files` that lie in a protected path: the default set and the project's `protectedPaths`. */
 export const protectedAmong = (project: Project, files: string[]): string[] => {
   const prefixes = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])];

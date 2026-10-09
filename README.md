@@ -1617,7 +1617,9 @@ and the kit narrows what can cross it:
   always ends held, so `sandcastle queue --lint` and `sandcastle requeue` warn about one (its `Touches:`
   line, or a kept branch, names the path): merge it by hand rather than queue it. A run still starts
   one whose `Touches:` line names the path, and says so in its start plan (`#N will be held for a
-  person to merge (paths)`); its `needs a human` line at landing names the paths too.
+  person to merge (paths)`); its `needs a human` line at landing names the paths too. The implement
+  and review prompts list the protected paths as well (the defaults and `protectedPaths`), so an
+  agent does not touch one the ticket did not need, and the review reverts such a change.
 - 🚫 **Nothing is pushed or deployed** by the kit. Prompts forbid deploys and production commands;
   put the project's own prohibitions in `rules.md`.
 - 📁 **Sandbox transcripts** stay in the project's `.sandcastle/logs/`, not in `~/.claude/projects`.

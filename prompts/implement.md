@@ -111,6 +111,7 @@ For a change in behaviour:
 
 While working, run single test files and the typecheck. Before you finish, run each gate once.
 
+{{KIT_PROTECTED}}
 {{KIT_PROJECT_RULES}}
 
 # Gates
