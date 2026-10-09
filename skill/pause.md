@@ -46,7 +46,8 @@ how to resume.
      keeps waiting.
    - **Leave the run's branches alone.** The pause frees the machine, not the repository: a commit,
      merge or pull on the base branch or an `agent/*` branch in this checkout stops the run at its
-     next landing. Work done meanwhile goes in another clone or a worktree.
+     next landing, or as its next sandbox opens (the resume's, at the latest). Work done meanwhile
+     goes in another clone or a worktree.
    - **How to resume.** Ask for it in plain words ("carry on", "resume the run"), or run
      `sandcastle resume`. A pause the user takes has no timer: "until tomorrow" means the run stays
      paused until someone resumes it, so say that, and offer to resume when the user comes back. A
