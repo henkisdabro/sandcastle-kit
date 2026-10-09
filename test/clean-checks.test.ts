@@ -125,8 +125,9 @@ test("the clean case checks the baseline before the pins and hands cleanProject 
     assert.ok(i >= 0, needle);
     return i;
   };
+  assert.ok(at("holdAndReap(project)") < at("assertGitConfigBaseline("));
   assert.ok(at("assertGitConfigBaseline(") < at("pinHostGitConfig("));
-  assert.ok(at("lockRun(project)") < at("recordGitConfigStart("));
+  assert.ok(at("holdAndReap(project)") < at("recordGitConfigStart("));
   assert.ok(at("recordGitConfigStart(") < at("cleanProject("));
   assert.match(body, /cleanProject\(project, args\.includes\("--all"\), worktreeRefusal\(project\)\)/);
   assert.match(body, /process\.exitCode = 1/);

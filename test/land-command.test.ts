@@ -219,6 +219,8 @@ test("`sandcastle land` with no ticket prints the usage line, no stack trace", (
   const root = mkdtempSync(join(tmpdir(), "sandcastle-land-cli-"));
   git(root, "init", "-q", "-b", "main");
   write(root, ".sandcastle/config.ts", 'export default { name: "t", gates: [{ name: "g", command: "true" }], tracker: "files" };\n');
+  // As `sandcastle init` writes it: the run lock's own `logs/` is not a dirty tree.
+  write(root, ".sandcastle/.gitignore", "logs/\n");
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "init");
   const r = runKit(["land"], {

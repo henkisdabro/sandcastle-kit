@@ -22,6 +22,8 @@ const project = () => {
   writeFileSync(join(bin, "gh"), "#!/bin/sh\necho 'GraphQL: Could not resolve to an issue or pull request with the number of 999. (repository.issue)' >&2\nexit 1\n");
   chmodSync(join(bin, "gh"), 0o755);
   writeFileSync(join(root, ".gitignore"), "bin/\n");
+  // As `sandcastle init` writes it: the run lock's own `logs/` is not a dirty tree.
+  writeFileSync(join(root, ".sandcastle/.gitignore"), "logs/\n");
   // A clean tree, as `land` requires one before it asks the tracker anything.
   const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...a], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
   git("add", "-A");

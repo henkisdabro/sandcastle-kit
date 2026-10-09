@@ -7,7 +7,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
+import { DockerAnswerError, reapOrphans, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
@@ -1263,4 +1263,16 @@ export const lockRun = (project: Project) => {
   }
   heldLocks.add(file);
   process.on("exit", () => releaseLock(file, mine));
+};
+
+/**
+ * The first thing a command that runs host git over the shared `.git` does (`run`, `land`, `gates`, `clean`): takes
+ * the run lock, then stops what a killed run's sandboxes left working. A container left alive can still write the
+ * shared `.git` until it is reaped, so a baseline check or a pin made before the reap could be followed by a timed
+ * write that is neither refused nor pinned, and would become the fingerprint the first open is compared with. The
+ * reap is only safe under the lock (no live run owns a container then), so a refused lock reaps nothing.
+ */
+export const holdAndReap = (project: Project) => {
+  lockRun(project);
+  reapOrphans(project);
 };
