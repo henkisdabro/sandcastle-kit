@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
@@ -37,9 +37,10 @@ const resolvedMountPath = (hostPath: string, from: string): string => {
   }
 };
 
+// `..` as a whole segment, not a prefix: a project named `..app` is still inside its parent.
 const within = (inner: string, outer: string) => {
   const rel = relative(outer, inner);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 };
 
 /**

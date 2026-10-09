@@ -41,7 +41,16 @@ test("a mount of a directory above the project root is refused", async () => {
   await refuses(root, dirname(root), /contains the project root/);
 });
 
-test("a mount of .sandcastle, or a path inside it, is refused", async () => {
+// A name that starts with `..` is still a name: `relative()` gives `..app`, not a step up.
+test("a mount above a project whose name starts with .. is refused", async () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "sc-mounts-dots-")));
+  const root = join(parent, "..app");
+  mkdirSync(join(root, ".sandcastle"), { recursive: true });
+  execFileSync("git", ["init", "-q", root]);
+  await refuses(root, parent, /contains the project root/);
+});
+
+test("a mount of .sandcastle is refused", async () => {
   const root = repo();
   await refuses(root, join(root, ".sandcastle"), /is .sandcastle\//);
 });
