@@ -17,8 +17,10 @@
 // complete - the agent's hand-back is on its pipeline's result - so nothing is patched in later.
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
+import { agentFailure } from "./agents.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
+import { promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
@@ -393,8 +395,9 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       return describeConflict(e, c);
     case "crashed":
       return {
-        // The land port threw (`green`), or the pipeline did: each says its error as it always has.
-        record: { state: "crashed", note: e.green ? errorLine(e.error) : String(e.error).split("\n")[0].slice(0, 160) },
+        // The land port threw (`green`), or the pipeline did: the pipeline's error is read as an agent's failure is
+        // (no `(FiberFailure) PromptError:` prefix, cut at a word), and a failed prompt expansion keeps its stderr.
+        record: { state: "crashed", note: e.green ? errorLine(e.error) : (promptExpansionLine(e.error) ?? agentFailure(e.error)) },
         outcome: { kind: "crashed", text: "crashed" },
         tracker: comment(notLandedComment(c.report, undefined)),
       };
@@ -408,7 +411,9 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       };
     case "not begun": {
       const { why } = e;
-      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
+      // Only the ticket whose own agent the limit cut short says so: one the stop left unstarted takes the run's last
+      // words, the most severe cause, which may be a `.git` change found after the limit.
+      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
       return { record, tracker: comment(notLandedComment(c.report, undefined)) };
     }
     case "waiting":
@@ -422,9 +427,12 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
   }
 };
 
-/** Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. */
+/**
+ * Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. Not one
+ * the limit cut short: its note is its own, and recorded as it ends, or its row reads as still working until the run ends.
+ */
 const unstarted = (e: TicketEnding) =>
-  e.kind === "not begun" && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
+  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
 
 /** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
 export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);
@@ -474,7 +482,7 @@ export const createLedger = (d: {
   // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
   let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
-    const line = requeuedLine(again.kind, again.with, again);
+    const line = requeuedLine(again.kind, again.with, again, again.found);
     sentBack.set(id, line);
     requeuedAs.set(id, line);
     d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
@@ -598,6 +606,14 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 };
 
 /**
+ * The words of a run that stopped starting tickets because every one crashed expanding its prompt the same way: a
+ * setup problem (a token that cannot see the repo, `gh` not signed in), not the tickets', so the error is quoted once
+ * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer".
+ */
+export const setupProblemWords = (line: string): string =>
+  `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+
+/**
  * How a stop's cause reads in the notes of the tickets it left unstarted and in the closing
  * summary. A `.git` stop says what moved (`main moved while sandboxes ran`), so a ticket never
  * started because the base moved does not read as tampering with the shared `.git`.
@@ -605,9 +621,11 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 export const causeWords = (c: StopCause, ref: (id: string) => string): string => {
   switch (c.kind) {
     case "plan limit":
-      return `${ref(c.ticket)} hit the plan's usage limit`;
+      return `${ref(c.ticket)} hit the plan's usage limit${c.resets ? ` (resets ${c.resets})` : ""}`;
     case "usage limit":
       return c.line;
+    case "setup problem":
+      return setupProblemWords(c.line);
     case "tampered":
     case "host failed":
       return guardWords(c.error).what;

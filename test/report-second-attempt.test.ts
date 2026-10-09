@@ -54,7 +54,7 @@ test("two tickets that landed on a second attempt after a conflict are named on 
     }),
     true,
   );
-  assert.deepEqual(second(out), ["Landed on a second attempt: #2, #3 (sent back after a conflict at landing)"]);
+  assert.deepEqual(second(out), ["Landed on a second attempt: #2, #3 (sent back after a conflict)"]);
 });
 
 test("a ticket sent back after a red gate says so, apart from one sent back after a conflict", () => {
@@ -65,7 +65,7 @@ test("a ticket sent back after a red gate says so, apart from one sent back afte
     }),
     true,
   );
-  assert.deepEqual(second(out), ["Landed on a second attempt: #2 (sent back after a conflict at landing); #3 (sent back after a red gate at landing)"]);
+  assert.deepEqual(second(out), ["Landed on a second attempt: #2 (sent back after a conflict); #3 (sent back after a red gate at landing)"]);
 });
 
 test("a ticket whose second attempt never began (requeued null) and one never sent back are not named", () => {

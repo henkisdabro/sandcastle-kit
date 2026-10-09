@@ -8,9 +8,9 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { quietly } from "./quiet.ts";
 
@@ -19,9 +19,12 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const { createPipeline } = await import("../src/burndown.ts");
+const { gather, render } = await import("../src/report.ts");
+const { fakeTracker } = await import("./fixtures.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type FollowUp = import("../src/burndown.ts").FollowUp;
+type Project = import("../src/config.ts").Project;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-followup-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -167,4 +170,59 @@ test("a gap named after the fix, or a fix not made, is still a gap", async () =>
     "The README gap is real: I have not fixed it.",
   ]) assert.equal(await gapOfReview(`${gap}\n`), gap);
   assert.equal(await gapOfReview("I found the remaining issue in the parser and fixed it.\n"), undefined);
+});
+
+test("a sentence in double quotes is no gap, and the prose around it still is", async () => {
+  // A review of the detector itself quotes its example sentences, even across a sentence end inside the quote.
+  assert.equal(await gapOfReview('The fix leaves these as no gap: "The gap remains; I have not yet fixed it." and "A gap remains. It is not fixed."\n'), undefined);
+  assert.equal(await gapOfReview("The README says “the old flag remains”, which the change keeps.\n"), undefined);
+  assert.equal(await gapOfReview('The README says "use the new flag". One gap remains: the old flag is still named.\n'), "One gap remains: the old flag is still named.");
+});
+
+test("a gap sentence that quotes words is shown with them, and a quoted sentence's full stop ends no sentence", async () => {
+  // Only the test for gap words skips a quote: the line a person reads keeps what the reviewer quoted.
+  assert.equal(await gapOfReview('One gap remains: the "Remaining" heading is still in the doc.\n'), 'One gap remains: the "Remaining" heading is still in the doc.');
+  assert.equal(await gapOfReview('It passes. "Foo" is still named in the README, a gap I did not fix.\n'), '"Foo" is still named in the README, a gap I did not fix.');
+  assert.equal(await gapOfReview('The doc says "Done. Nothing else." and a gap remains in the CLI.\n'), 'The doc says "Done. Nothing else." and a gap remains in the CLI.');
+  // A quote mark inside inline code pairs with nothing, so the quoted sentence after it is still skipped.
+  assert.equal(await gapOfReview('The flag is `--name="x` now, and the help quotes "the gap remains" as an example.\n'), undefined);
+});
+
+/** The closing summary of a run whose merged ticket 7 carries `gap`, a fake `gh` listing no issues. */
+const summaryWithGap = async (gap: string | undefined) => {
+  const root = repo();
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  writeFileSync(
+    join(root, ".sandcastle/logs/run.json"),
+    JSON.stringify({ startedAt: "2026-10-05T06:00:00Z", finishedAt: "2026-10-05T07:00:00Z", pid: 1, tickets: { "7": { state: "merged", title: "seven", ...(gap ? { gap } : {}) } } }),
+  );
+  const bin = mkdtempSync(join(TMP, "bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\n[ \"$1 $2\" = \"issue list\" ] && printf '%s\\n' '[]'\nexit 0\n");
+  chmodSync(join(bin, "gh"), 0o755);
+  const project = { root, baseBranch: "main", tracker: fakeTracker(), gates: [] } as unknown as Project;
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path}`;
+  try {
+    return render(await gather(project, () => undefined), true);
+  } finally {
+    process.env.PATH = path;
+  }
+};
+
+test("approving prose the detector reads as a gap is not counted: no headline need, no Needs you bullet, no Next step", async () => {
+  for (const review of [
+    "The README is unchanged, so it is correctly left alone.\n",
+    "The remaining mentions are in the archive and they are still true.\n",
+    'The reviewer-facing note was checked: "The gap remains; I have not yet fixed it." is the example it quotes.\n',
+    "The fix now lists `docs/a.md` under Implemented instead of Remaining.\n",
+  ]) {
+    const gap = await gapOfReview(review);
+    const out = await summaryWithGap(gap);
+    assert.match(out, / - 0 need you - /, review);
+    assert.doesNotMatch(out, /named a gap it did not file|Read the gap the reviewer named/, review);
+    // What the detector still reads is listed apart from Needs you, for a glance.
+    if (gap) assert.match(out, new RegExp(`^Worth a glance - .*#7 "${gap.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`, "m"), review);
+  }
+  assert.equal(await gapOfReview("A real gap remains: the link step reads the old name.\n"), "A real gap remains: the link step reads the old name.");
+  assert.match(await summaryWithGap("A real gap remains: the link step reads the old name."), /^Worth a glance - the reviewer's prose may name a gap: #7 "A real gap remains/m);
 });

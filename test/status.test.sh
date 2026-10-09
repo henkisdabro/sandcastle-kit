@@ -10,6 +10,7 @@
 #
 #   bash test/status.test.sh
 #   STATUS_BASH=/bin/bash COLS=200 bash test/status.test.sh   # macOS's bash 3.2, a wide pane
+#   COLS=180 bash test/status.test.sh   # the wide header's first band (170 and up); `pnpm test` runs it too
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
 # A UTF-8 locale, so widths count characters: Linux runners often have only C.UTF-8.

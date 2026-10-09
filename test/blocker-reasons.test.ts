@@ -19,7 +19,8 @@ const { fakeTracker } = await import("./fixtures.ts");
 type Project = import("../src/config.ts").Project;
 
 // 10: closed as not planned, 11: open and held, 12: open and not queued, 13: closed as completed.
-// `gh issue view` is logged, to count the lookups.
+// `gh issue view` is logged, to count the lookups - but not the read of a ticket's native
+// blockers (`--json number,blockedBy`), which is not a blocker's lookup.
 const bin = mkdtempSync(join(tmpdir(), "sandcastle-test-bin-"));
 const log = join(bin, "views");
 writeFileSync(
@@ -34,7 +35,7 @@ case "$1" in
       *) exit 1 ;;
     esac ;;
   issue)
-    echo "$3" >> "${log}"
+    case "$*" in *"--json number,blockedBy") ;; *) echo "$3" >> "${log}" ;; esac
     labels='[]'
     [ "$3" = 11 ] && labels='[{"name":"needs-human"}]'
     echo "{\\"number\\":$3,\\"title\\":\\"t\\",\\"state\\":\\"OPEN\\",\\"body\\":\\"\\",\\"comments\\":[],\\"labels\\":$labels}" ;;

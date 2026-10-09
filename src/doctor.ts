@@ -652,8 +652,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     // A warning, never a FIX. Silent when Docker is down or the image is not built yet.
     const staleImage = (() => {
       try {
-        if (!versions) return undefined;
-        const tag = baseImage(versions).tag;
+        const tag = baseImage().tag;
         const created = run("docker", ["image", "inspect", tag, "--format", "{{.Created}}"]);
         return created ? staleImageWarning(created, new Date(), tag) : undefined;
       } catch {

@@ -12,7 +12,9 @@ their records mid-run. `git worktree add` in the project is refused: to compare
 against `{{TARGET_BRANCH}}`, read it with `git show {{TARGET_BRANCH}}:<path>` or
 `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`. A scratch repository to test a
 change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
-plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
+plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). Create it
+in an earlier command, then use `git -C /literal/absolute/path`: the guard reads the command before it runs,
+so a repository made in the same command, or a path in a variable, is refused. To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
 another agent's change. To run a test without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD --
@@ -40,7 +42,8 @@ Files where that merge conflicts (empty when none): !`git diff --name-only --dif
 **If any file is listed, resolve the merge before anything else**, even if the ticket looks done:
 the orchestrator merges this branch into `{{TARGET_BRANCH}}` when you finish, and an unresolved
 conflict leaves all of your work unmerged, run after run. Keep both sides' changes (theirs is
-merged work, not yours to undo), run the gates, then `git commit --no-edit`.
+merged work, not yours to undo), run the typecheck gate and the tests that cover the conflicted files,
+then `git commit --no-edit`.
 
 # Before you write anything
 
@@ -74,8 +77,7 @@ ticket names. The project rules below say what else to read.
   long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
   (`timeout: 600000` in Claude Code, whose 2-minute default moves a longer suite to the background;
   other sandboxes run at the same moment and slow it). Never start it in the background and wait on
-  it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, never several in one command,
-  and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
+  it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
   and slows them. When a ticket asks for a wall time or a before-and-after figure, leave it as an
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
@@ -87,7 +89,7 @@ ticket names. The project rules below say what else to read.
   available here.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
   Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
-  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  then `git commit -F <file>`: never `git commit -m "..."`. Free text on the
   command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
@@ -108,32 +110,40 @@ For a change in behaviour:
    for real.
 5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck. Before you finish, run each gate once,
-in its own command.
+While working, run single test files and the typecheck. Before you finish, run the typecheck gate and
+the tests your change touches or that cover it, each once. Do not run the full suite
+yourself: the orchestrator runs every gate right after you exit.
 
+{{KIT_PROTECTED}}
 {{KIT_PROJECT_RULES}}
 
 # Gates
 
-Before you finish, run these in the repo root and make them pass:
+These are the project's gates. The orchestrator runs all of them after you exit, the full suite
+included, and merges your work only if they are green:
 
 ```
 {{KIT_GATES}}
 ```
+
+Before you finish, run in the repo root only the typecheck gate (the gate above that type-checks or
+builds, if there is one) and the tests your change touches or that cover it, and make them pass. A
+change to a README or another document that no test covers needs the typecheck gate alone. Do not run
+every gate: the orchestrator does, next, and a failure there sends the branch back for a repair pass.
 
 {{KIT_RECORD}}
 
 When a comment on the ticket amends its spec (changes, narrows or adds to what the body asks), that
 record also says which spec you followed: the body's or the comment's.
 
-{{KIT_CHANGELOG}}The same gates are re-run by the orchestrator after you exit, and your work is only merged if all
-of them are green. You cannot talk your way past them, so do not report success you have not
+{{KIT_CHANGELOG}}The orchestrator runs every gate after you exit, and your work is only merged if all of them
+are green. You cannot talk your way past them, so do not report success you have not
 observed.
 
 # Finishing
 
-**If you completed the ticket:** make sure the gates pass, make sure everything is committed, then
-output `<promise>COMPLETE</promise>`.
+**If you completed the ticket:** make sure the typecheck gate and the tests covering your change pass,
+make sure everything is committed, then output `<promise>COMPLETE</promise>`.
 
 **If you knowingly leave an acceptance criterion undone** (you could not do it, or it needs a decision
 that is not yours), commit the rest and say which one, in one sentence, on a line of its own in your

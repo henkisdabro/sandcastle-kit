@@ -770,9 +770,9 @@ paused_cell() {
     disp "$id"; list="${list}${sep}${DISP}${word:+ $word}"; sep=", "
   done
   plain="PAUSED since ${when}"
-  # The cell's text room: its share of the pane (half below 170 columns, a fifth from there) less the bars,
-  # the cell's padding and the row's label.
-  if [ "$cols" -ge 170 ]; then room=$(( (cols - 5) / 5 - 12 )); else room=$(( (cols - 3) / 2 - 12 )); fi
+  # The cell's text room: its width (half the pane below 170 columns; from there the wide header's run
+  # cell) less the cell's padding and the row's label.
+  if [ "$cols" -ge 170 ]; then wide_split; room=$(( WIDE_RUN - 12 )); else room=$(( (cols - 3) / 2 - 12 )); fi
   if [ -n "$uwin" ]; then
     what="weekly"; [ "$uwin" = fiveHour ] && what="5-hour"
     [ "$uprov" = codex ] && what="Codex ${what}"
@@ -1615,6 +1615,34 @@ render() {
   printf '%s%s%s\n%s' "$HDR" "$BUF" "$REPLY" "$FTR"
 }
 
+# The logo in $1 rows (3, or 1 in a short pane) into LG, each padded to the widest so centring keeps the
+# castle's shape; LOGO_M is that width. Reads render's locals.
+logo_rows() {
+  local l i
+  LOGO_M=0
+  if [ "$1" = 3 ]; then
+    LG=(" ${moon}▄ ▄ ▄${off} ${star}+${off}   ${bold}${moon}s a n d c a s t l e${off} ${night}- k i t${off}  ${star}·   +   ·${off}"
+      " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
+      " ${deep}██▀██${off} ${star}·${off}   ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+  else
+    LG=("${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
+  fi
+  for l in "${LG[@]}"; do vlen "$l"; [ "$VN" -gt "$LOGO_M" ] && LOGO_M=$VN; done
+  for (( i=0; i<${#LG[@]}; i++ )); do align "${LG[i]}" "$LOGO_M"; LG[i]="$REPLY"; done
+}
+# The wide header's cells (from 170 columns): the logo cell takes the width the logo needs, in either
+# of its two forms so the run cell's width does not change with the pane's height, and the run, machine
+# and model cells share the rest. Into OW; WIDE_RUN is the run cell's width before any snapping.
+# Reads render's locals.
+wide_split() {
+  local m3 m1 lw
+  logo_rows 3; m3=$LOGO_M; logo_rows 1; m1=$LOGO_M
+  lw=$(( (m3 > m1 ? m3 : m1) + 2 ))
+  split_w $(( WIN - 5 - lw )) 1 1 1
+  OW=("$lw" "${OW[@]}")
+  WIDE_RUN=${OW[1]}
+}
+
 # The header bands into HDR (HDR_N lines): the logo cell, the run band, the
 # models, the settings row and the queue error when there are any, and the
 # table's headings.
@@ -1624,16 +1652,8 @@ build_header() {
   local -a need=()
   # The table's bars, which the band above the headings snaps onto.
   OW=("${TW[@]}"); bars_of; tb="$BARS"
-  if [ "$1" = 3 ]; then
-    LG=(" ${moon}▄ ▄ ▄${off} ${star}+${off}   ${bold}${moon}s a n d c a s t l e${off} ${night}- k i t${off}  ${star}·   +   ·${off}"
-      " ${dusk}█████${off}     ${head}${SANDCASTLE_NAME:-}${off}"
-      " ${deep}██▀██${off} ${star}·${off}   ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
-  else
-    LG=("${bold}${moon}sandcastle-kit${off}  ${head}${SANDCASTLE_NAME:-}${off}  ${mute}base${off} ${accent}${BASE}${off}${unpushed}  ${rule}·${off}  ${accent}${now}${off}")
-  fi
-  # Every logo line padded to the widest, so centring keeps the castle's shape.
-  for l in "${LG[@]}"; do vlen "$l"; [ "$VN" -gt "$m" ] && m=$VN; done
-  for (( i=0; i<${#LG[@]}; i++ )); do align "${LG[i]}" "$m"; LG[i]="$REPLY"; done
+  logo_rows "$1"
+  m=$LOGO_M
   BUF=""; BUF_N=0
   if [ "$cols" -ge 170 ]; then
     # Wide: the logo, the run, the machine and the models side by side.
@@ -1644,7 +1664,7 @@ build_header() {
       vlen "${MAC[i]:-}"; [ $(( VN + 2 )) -gt "${need[2]}" ] && need[2]=$(( VN + 2 ))
       vlen "${MOD[i]:-}"; [ $(( VN + 2 )) -gt "${need[3]}" ] && need[3]=$(( VN + 2 ))
     done
-    split_cols 40 20 20 20; snap_w "$tb" "${need[@]}"; bars_of
+    wide_split; logo_rows "$1"; snap_w "$tb" "${need[@]}"; bars_of
     junction '┌' '┐' '─' "" "$BARS"; put "$REPLY"
     AL=(c l l l)
     for i in 0 1 2; do CELL=("${LG[i]:-}" "${RUNC[i]}" "${MAC[i]}" "${MOD[i]:-}"); cells_line; put "$REPLY"; done

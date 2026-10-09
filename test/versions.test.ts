@@ -1,6 +1,6 @@
 // Which Claude Code and Codex the image gets: channel and version resolution, the six-hour cache,
-// the offline fallbacks, and the versions being part of the image tag. An injected fetcher and a
-// temp XDG_CACHE_HOME: no network, no Docker.
+// the offline fallbacks, and the versions being part of the agents image's tag and not the base's.
+// An injected fetcher and a temp XDG_CACHE_HOME: no network, no Docker.
 //
 //   pnpm test:file test/versions.test.ts
 
@@ -14,11 +14,12 @@ import { fileURLToPath } from "node:url";
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-versions-"));
 process.env.XDG_CACHE_HOME = cache;
 const { resolveVersions } = await import("../src/versions.ts");
-const { baseImage } = await import("../src/sandbox.ts");
+const { agentsImage, baseImage } = await import("../src/sandbox.ts");
 const { loadProject } = await import("../src/config.ts");
 
 const kit = fileURLToPath(new URL("..", import.meta.url));
-const dockerfile = readFileSync(join(kit, "docker/base.Dockerfile"), "utf8");
+// The agents Dockerfile holds the version defaults: the base no longer installs either CLI.
+const dockerfile = readFileSync(join(kit, "docker/agents.Dockerfile"), "utf8");
 const arg = (name: string) => dockerfile.match(new RegExp(`^ARG ${name}=(\\S+)`, "m"))![1];
 
 // A fetcher that answers each URL from a table and records what it was asked.
@@ -176,13 +177,15 @@ test("a bad CLAUDE_CODE_VERSION is refused, naming the variable", async () => {
   await assert.rejects(resolveVersions({}, fake({}).fetcher), /CLAUDE_CODE_VERSION/);
 });
 
-test("the image tag follows the versions", () => {
-  const a = baseImage({ claude: "2.1.1", codex: "0.1.0" });
-  assert.equal(a.tag, baseImage({ claude: "2.1.1", codex: "0.1.0" }).tag);
-  assert.notEqual(a.tag, baseImage({ claude: "2.1.2", codex: "0.1.0" }).tag);
-  assert.notEqual(a.tag, baseImage({ claude: "2.1.1", codex: "0.2.0" }).tag);
+test("the agents image tag follows the versions, and the base image tag does not", () => {
+  const a = agentsImage({ claude: "2.1.1", codex: "0.1.0" });
+  assert.equal(a.tag, agentsImage({ claude: "2.1.1", codex: "0.1.0" }).tag);
+  assert.notEqual(a.tag, agentsImage({ claude: "2.1.2", codex: "0.1.0" }).tag);
+  assert.notEqual(a.tag, agentsImage({ claude: "2.1.1", codex: "0.2.0" }).tag);
   assert.equal(a.ids.CLAUDE_CODE_VERSION, "2.1.1");
   assert.equal(a.ids.CODEX_VERSION, "0.1.0");
+  // A release must not move the base, or every project's layer built on it rebuilds from scratch.
+  assert.deepEqual(Object.keys(baseImage().ids), ["AGENT_UID", "AGENT_GID"]);
 });
 
 test("config validation refuses claudeCode: \"newest\" and accepts a channel or a version", async () => {

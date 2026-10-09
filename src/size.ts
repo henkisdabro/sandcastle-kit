@@ -8,7 +8,7 @@ import { existsSync, statfsSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { OperatorError } from "./errors.ts";
-import { type PeakLine, projectId, readPeaks, SAMPLED } from "./peaks.ts";
+import { type PeakLine, PRESSURE_WARN_FULL, projectId, readPeaks, SAMPLED } from "./peaks.ts";
 import { poolLimit } from "./pool.ts";
 import { readDockerInfo } from "./runtime.ts";
 import { machineSettings, USER_CONFIG } from "./sandbox.ts";
@@ -126,7 +126,8 @@ export type Figure = { mib: number; samples: number; highest: number };
  * on. `peakMib` is the whole-life `memory.peak`, `anonMib` the anonymous memory read while a gate ran,
  * `agentMib` the `memory.peak` read before the first gate and `agentAnonMib` the anonymous memory read
  * while an agent pass ran; each optional one is absent when no run recorded it. `figures` says what each
- * rests on: how many samples, and the highest of them.
+ * rests on: how many samples, and the highest of them. `pressureSome` and `pressureFull` are the highest memory
+ * pressure (`avg10`, percent) any sandbox of those runs read; absent when none was above 0 or recorded. Shown, never priced.
  */
 export type Measured = {
   peakMib: number;
@@ -135,6 +136,8 @@ export type Measured = {
   anonMib?: number;
   agentMib?: number;
   agentAnonMib?: number;
+  pressureSome?: number;
+  pressureFull?: number;
   figures: { peak: Figure; anon?: Figure; agent?: Figure; agentAnon?: Figure };
 };
 
@@ -188,6 +191,8 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
       const anon = figureOf(read.flatMap((l) => (l.anonMib === undefined ? [] : [l.anonMib])));
       const agent = figureOf(lines.flatMap((l) => (l.agentMib === undefined ? [] : [l.agentMib])));
       const agentAnon = figureOf(read.flatMap((l) => (l.agentAnonMib === undefined ? [] : [l.agentAnonMib])));
+      const highest = (key: "pressureSome" | "pressureFull") => Math.max(0, ...lines.map((l) => l[key] ?? 0));
+      const [some, full] = [highest("pressureSome"), highest("pressureFull")];
       best = {
         peakMib: peak.mib,
         project,
@@ -195,6 +200,8 @@ export const measuredPeak = (peaks: PeakLine[], now: number): Measured | undefin
         ...(anon ? { anonMib: anon.mib } : {}),
         ...(agent ? { agentMib: agent.mib } : {}),
         ...(agentAnon ? { agentAnonMib: agentAnon.mib } : {}),
+        ...(some ? { pressureSome: some } : {}),
+        ...(full ? { pressureFull: full } : {}),
         figures: { peak, ...(anon ? { anon } : {}), ...(agent ? { agent } : {}), ...(agentAnon ? { agentAnon } : {}) },
         at: recent[0].at,
       };
@@ -341,10 +348,19 @@ export const sizeLines = (readers: Readers, env: Record<string, string | undefin
         : rec.baselineFrom === "agent-peak"
           ? `Agent baseline: ${gib2(m.agentMib! / 1024)} GiB, \`memory.peak\` read before the first gate pass (${from(m.figures.agent!)}); ${plus} is ${gib2(rec.baselineGib)} GiB. That figure includes page cache, and agents run the project's test suite themselves, so it may sit above the gate figure; it switches to anonymous memory once a run records agent samples, and no pool warning is given until then.`
           : `Agent baseline: no agent baseline measured yet, priced at the gate figure (${gib2(rec.baselineGib)} GiB).`;
+    const pct = (n: number | undefined) => `${Math.round((n ?? 0) * 100) / 100}%`;
+    const pressure =
+      m.pressureSome === undefined && m.pressureFull === undefined
+        ? "Memory pressure: none recorded in those runs (none above 0, or the sandboxes' kernel has no PSI)."
+        : `Memory pressure (PSI \`avg10\`, the highest any sandbox read while a gate or agent pass ran): some ${pct(m.pressureSome)}, full ${pct(m.pressureFull)}.` +
+          ((m.pressureFull ?? 0) >= PRESSURE_WARN_FULL
+            ? ` Full pressure at ${PRESSURE_WARN_FULL}% or more means every task in a sandbox stalled on memory at once: this VM was short of memory at that pool size. The limits below are not yet lowered for it; lower maxSandboxes or maxGates, or give the VM more memory.`
+            : "");
     lines.push(
       `Measured: the last ${m.runs} measured run${m.runs === 1 ? "" : "s"} of ${where}, the heaviest of any project in the last ${FRESH_DAYS} days.`,
       gate,
       baseline,
+      pressure,
       `A gate runs inside a sandbox, so maxGates sandboxes are priced at the gate figure and the rest at the agent baseline. ${rec.byMemory < 1 ? "This VM's memory cannot fit one gate sandbox" : `This VM's memory fits ${rec.byMemory} sandbox${rec.byMemory === 1 ? "" : "es"}`}, so maxSandboxes is ${rec.sandboxes} and maxGates ${rec.gates}${rec.byMemory < 1 ? ", the least a pool takes" : ""}.`,
       `Assumed, not measured: ${HEADROOM_GIB} GiB headroom, ${CPUS_PER_GATE} CPUs per gate, at most ${MAX_SANDBOXES} sandboxes.`,
     );

@@ -181,17 +181,18 @@ const summary = async (record: object) => {
 };
 const needsYou = (out: string) => out.slice(out.indexOf("## Needs you"), out.indexOf("##", out.indexOf("## Needs you") + 3));
 
-test("the closing summary lists a merged ticket with a gap under Needs you with the sentence, and one without does not", async () => {
+test("the closing summary gives a merged ticket's gap sentence an uncounted line of its own, outside Needs you", async () => {
   const out = await summary({
     tickets: {
       "7": { state: "merged", title: "seven", gap: "One gap remains: it fails with SANDCASTLE_LINKS=1." },
       "8": { state: "merged", title: "eight" },
     },
   });
+  assert.deepEqual(needsYou(out).split("\n").filter((l) => l.startsWith("- ")), []);
   assert.deepEqual(
-    needsYou(out).split("\n").filter((l) => l.startsWith("- ")),
-    ["- #7 seven - merged - the reviewer named a gap it did not file: One gap remains: it fails with SANDCASTLE_LINKS=1."],
+    out.split("\n").filter((l) => l.startsWith("Worth a glance")),
+    ['Worth a glance - the reviewer\'s prose may name a gap: #7 "One gap remains: it fails with SANDCASTLE_LINKS=1."'],
   );
-  assert.match(out, / - 1 need you - /);
-  assert.match(out, /Read the gap the reviewer named in prose on #7/);
+  assert.match(out, / - 0 need you - /);
+  assert.doesNotMatch(out, /Read the gap the reviewer named/);
 });

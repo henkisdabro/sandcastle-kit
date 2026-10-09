@@ -155,7 +155,7 @@ export type TicketRecord = {
   failing?: string[];
   /** Files a merge conflicted on, or protected paths a held branch changes. */
   files?: string[];
-  /** The ticket's second attempt after a conflict or red at landing ("requeued after conflict with #3"); null once that attempt is not going to run. */
+  /** The ticket's second attempt after a conflict (at landing, or found before its review or gates) or a red at landing ("requeued after conflict before review with #3"); null once that attempt is not going to run. */
   requeued?: string | null;
   /** Merged, but the tracker refused the close: the error, short. */
   closeFailed?: string;
@@ -169,6 +169,8 @@ export type TicketRecord = {
   changelogDropped?: number;
   /** An agent answered `<changelog>none</changelog>` and no pass gave a line: the ticket needs no entry, so `report --changelog` does not list it as lacking a suggested line. */
   changelogNone?: boolean;
+  /** Why each of those was dropped, in order ("too long (527 characters)", "spans list items", "holds a commit sha"); an older record has none. */
+  changelogDroppedWhy?: string[];
   /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */
   unmet?: string;
   /** Paths the branch changed beyond its ticket's `Touches:` line. */
@@ -261,7 +263,8 @@ export type RunRecord = {
   models?: string;
   issues?: string[];
   dryRun?: boolean;
-  versions?: { claude?: string; codex?: string };
+  /** `kit` is `kitVersion()`'s text (`0.11.0 +3 (1c4f46f)`), read once when the process started; an older record has none. */
+  versions?: { kit?: string; claude?: string; codex?: string };
   /** Tickets held for another that is open: `on` names what each waits for. */
   waiting?: { issue: string; on: string[] }[];
   /** What the run line shows while the run is live. */
@@ -313,6 +316,8 @@ export type RunRecord = {
   stopped?: string;
   /** The stop's cause in a few words (`main moved while sandboxes ran`), beside `stopped`: the summary words its next step by it. */
   stoppedWhat?: string;
+  /** The prompt-expansion error that crashed tickets alike, so the run started no more: a setup problem, which the summary words its next step by. */
+  setupProblem?: string;
   /** Why the agents' follow-ups were not written to the tracker, once for the set: each one's `failed` carries the same text. */
   followUpsWithheld?: string;
   /** How a person ended the run: "sandcastle stop", "Ctrl-C", or the signal's name. Absent for a crash, a kill -9 and a run that ended by itself. */

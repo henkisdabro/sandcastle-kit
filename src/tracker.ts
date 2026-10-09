@@ -111,6 +111,19 @@ export const ensureTriageLabel = (label: string, gh = (args: string[]) => sh("gh
   }
 };
 
+// GitHub's native "blocked by" edges come from gh's `blockedBy` field. A gh too old to know it
+// refuses the whole call, so the first refusal turns the field off for the rest of the process
+// and the call is repeated without it: the queue still lists, and the body's lines still hold.
+let nativeBlockers = true;
+const NATIVE_REFUSED = "this gh cannot read GitHub's native issue dependencies - update gh, or write \"Blocked by #N\" in the body";
+
+// The numbers of the blocking issues in a `blockedBy` value: gh prints an array of issues, and
+// `nodes` is the GraphQL connection's spelling of the same list.
+const nativeNumbers = (blockedBy: unknown): string[] => {
+  const nodes = Array.isArray(blockedBy) ? blockedBy : (blockedBy as { nodes?: unknown } | undefined)?.nodes;
+  return (Array.isArray(nodes) ? nodes : []).map((n: { number?: unknown }) => n?.number).filter((n): n is number => typeof n === "number").map(String);
+};
+
 const github = (project: Project): Tracker => {
   // A failed gh call is the operator's to act on (signed out, no such issue, no network): its own
   // first stderr line, not a stack trace. Callers that match a message (`already exists`) still can.
@@ -133,8 +146,24 @@ const github = (project: Project): Tracker => {
       throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
     }
   };
+  // Each ticket's native blocker numbers, as the list and view calls read them.
+  const native = new Map<string, string[]>();
+  // `fields` with `blockedBy` while gh knows it; the refusal of an old gh is told once, on stderr
+  // (stdout is `queue --json`'s), and the call repeated without the field.
+  const withNative = (fields: string, call: (fields: string) => string): string => {
+    if (!nativeBlockers) return call(fields);
+    try {
+      return call(`${fields},blockedBy`);
+    } catch (e) {
+      if (!(e instanceof OperatorError) || !/unknown json field.*blockedBy/i.test(e.message)) throw e;
+      nativeBlockers = false;
+      console.warn(NATIVE_REFUSED);
+      return call(fields);
+    }
+  };
   const list = (extra: string[], withComments: boolean): Ticket[] => {
-    const listed = JSON.parse(gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", `number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`])) as any[];
+    const listed = JSON.parse(withNative(`number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`, (fields) => gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields]))) as any[];
+    if (nativeBlockers) for (const i of listed) native.set(String(i.number), nativeNumbers(i.blockedBy));
     // Counted before the hold-label filter below: a full page is full whatever
     // is dropped from it. stderr, because `queue --json` is parsed from stdout.
     if (listed.length === LIST_LIMIT) {
@@ -164,7 +193,8 @@ const github = (project: Project): Tracker => {
     queued: (withComments = true) => list(["--label", project.label], withComments).map((t) => ({ ...t, status: project.label })),
     open: (withComments = true) => list([], withComments),
     get: (id) => {
-      const i = JSON.parse(gh(["issue", "view", id, "--json", "number,title,state,body,comments,labels"]));
+      const i = JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])));
+      if (nativeBlockers) native.set(String(i.number), nativeNumbers(i.blockedBy));
       return {
         id: String(i.number),
         title: i.title,
@@ -262,7 +292,23 @@ const github = (project: Project): Tracker => {
         return true;
       }
     },
-    declaredBlockers: () => [],
+    // GitHub's native "blocked by" edges. A ticket neither the list nor `get` has read is asked for.
+    declaredBlockers: (id) => {
+      if (!nativeBlockers) return [];
+      if (!native.has(id)) {
+        // A ticket that cannot be read says nothing, as `isClosed` does: a transient failure here
+        // must not stop a run mid-way, and the list call that found the ticket already needed gh.
+        let read: { blockedBy?: unknown };
+        try {
+          read = JSON.parse(withNative("number", (fields) => gh(["issue", "view", id, "--json", fields])));
+        } catch {
+          return [];
+        }
+        if (!nativeBlockers) return [];
+        native.set(id, nativeNumbers(read.blockedBy));
+      }
+      return native.get(id)!;
+    },
     // Asked of a ticket merged by hand, whose push closes it: the report words it "and closed" once it is.
     // An error (no network, no such issue) is not "open": undefined keeps the report's "closes on push".
     isClosed: (id) => {

@@ -7,7 +7,7 @@
 // and the release of dependants (`createDependants`).
 
 import type { UsagePaused } from "../mod/hooks/run-record.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, promptExpansionLine, sameExpansionFailure } from "./errors.ts";
 import type { Landed } from "./landing.ts";
 
 export type Queue<T> = {
@@ -338,13 +338,18 @@ const createDependants = <T extends { id: string }, B>(
 /**
  * Why a run stopped. A plan limit names the ticket whose agent hit it; a usage limit carries the
  * probe's line; `tampered` is a `.git` check that failed (after a pipeline, or the landing
- * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`).
+ * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`); `setup problem`
+ * is the cleaned line of the prompt-expansion error that crashed `SETUP_CRASHES` tickets alike.
  */
 export type StopCause =
-  | { kind: "plan limit"; ticket: string }
+  | { kind: "plan limit"; ticket: string; resets?: string }
   | { kind: "usage limit"; line: string }
   | { kind: "tampered"; error: unknown }
-  | { kind: "host failed"; error: unknown };
+  | { kind: "host failed"; error: unknown }
+  | { kind: "setup problem"; line: string };
+
+/** How many tickets crash with the same prompt-expansion error before the run starts no more: the second shows it is not the ticket's. */
+export const SETUP_CRASHES = 2;
 
 /**
  * Each kind, once: whether it is a safety stop (nothing more lands - the repo is in a state no
@@ -357,6 +362,7 @@ export const STOP_KINDS = {
   "host failed": { safety: true, rank: 1 },
   "plan limit": { safety: false, rank: 2 },
   "usage limit": { safety: false, rank: 3 },
+  "setup problem": { safety: false, rank: 4 },
 } as const satisfies Record<StopCause["kind"], { safety: boolean; rank: number }>;
 
 /**
@@ -494,10 +500,16 @@ export const createLanding = <G extends Green>(
 };
 
 /** What a ticket's first attempt collided with, at landing or in its pipeline: its second attempt carries it. */
-export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[] };
+export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[]; found?: ConflictFound };
 
-/** A branch that no longer merges onto the base: the files git could not merge, and the landed tickets that changed them. */
-export type Conflict = { files: string[]; with: string[] };
+/** Where a conflict was found: by the merge check before the ticket's review or before its gates, or when landing it. */
+export type ConflictFound = "review" | "gates" | "landing";
+
+/**
+ * A branch that no longer merges onto the base: the files git could not merge, and the landed tickets that changed them.
+ * `found`: the pipeline's check that saw it (a landing's conflict is `landing`, which the scheduler says itself).
+ */
+export type Conflict = { files: string[]; with: string[]; found?: "review" | "gates" };
 
 /** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
 export type Withdrawn = { kind: "withdrawn"; reason: string };
@@ -556,7 +568,8 @@ export type Ending<G, O> =
   | { kind: "crashed"; error: unknown; attempts: number; green?: G }
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
   | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
-  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string } }
+  /** `cutShort`: its agent began and died of the plan's limit (`why` is that limit) - nothing failed, and it is runnable again. */
+  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string }; cutShort?: true }
   /** Parked at a juncture of a paused run when the run stopped: it never resumed, its branch holds every commit and the next run picks it up. */
   | { kind: "parked"; cause: StopCause | undefined }
   /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
@@ -609,6 +622,8 @@ export type Change<G, O, B = unknown> =
    * closing summary may name a more severe one.
    */
   | { kind: "stopped landing"; cause: StopCause }
+  /** Tickets crashed alike expanding their prompt: the run starts no more, told once, with the cleaned error line. */
+  | { kind: "setup problem"; line: string }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
   | { kind: "landing"; at: number; of: number }
   /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
@@ -1173,7 +1188,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         // A second conflict is final, unless a landing that finished after the resolve began caused it: the
         // resolve could not have merged that one, so it is no fault of the resolve and the ticket is sent back again.
         if (first.has(t.id) && !(met.kind === "conflict" && met.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
-        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with };
+        // Where it was found: a pipeline's conflict says which check (`Conflict.found`), a landing's is the landing.
+        const found = "conflict" in back ? back.conflict.found : "landing";
+        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
         first.set(t.id, again);
         if (met.kind === "conflict") conflicted.set(t.id, met.files);
         sentBack.set(t.id, back);
@@ -1212,6 +1229,18 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
+      // The tickets that crashed expanding their prompt, by the failure: the same one for SETUP_CRASHES tickets is the
+      // setup's. The stop holds before the second ticket's ending is told, so nothing starts in between.
+      const setupCrashes: { line: string; ids: Set<string> }[] = [];
+      const noteSetupCrash = (id: string, error: unknown) => {
+        const line = promptExpansionLine(error);
+        if (line === undefined || stop.causes.some((c) => c.kind === "setup problem")) return;
+        const same = setupCrashes.find((c) => sameExpansionFailure(c.line, line)) ?? (setupCrashes.push({ line, ids: new Set() }), setupCrashes.at(-1)!);
+        same.ids.add(id);
+        if (same.ids.size < SETUP_CRASHES) return;
+        stop.add({ kind: "setup problem", line });
+        tell({ kind: "setup problem", line });
+      };
       const last = () => stop.startsNothing || (pipelines.size === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
@@ -1356,9 +1385,14 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
               return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }) });
             }
-            case "crashed":
+            case "crashed": {
               for (const c of r.causes ?? []) stop.add(c);
+              // Its agent died of the plan's limit: nothing failed, the ticket was cut short - not begun, and runnable again.
+              const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
+              if (limit) return await end(t.id, { kind: "not begun", why: limit, cutShort: true });
+              noteSetupCrash(t.id, r.error);
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
+            }
             case "stopped":
               stop.add(r.cause);
               return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });

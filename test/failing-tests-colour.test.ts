@@ -26,6 +26,12 @@ test("a vitest workspace project's label is not the test id, with or without col
   assert.deepEqual(failingTests("\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m \x1b[43m web \x1b[49m src/a.test.ts > adds"), ["src/a.test.ts"]);
 });
 
+test("a vitest project named after a scoped package is not the test id", () => {
+  assert.deepEqual(failingTests(" FAIL   @acme/web  src/a.test.ts > adds"), ["src/a.test.ts"]);
+  assert.deepEqual(failingTests(" FAIL  |@acme/web| src/a.test.ts > adds"), ["src/a.test.ts"]);
+  assert.deepEqual(failingTests("\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m \x1b[43m @acme/web \x1b[49m src/a.test.ts > adds"), ["src/a.test.ts"]);
+});
+
 test("a tab-separated Go package line still names the package, not its duration", () => {
   assert.deepEqual(failingTests("FAIL\tmymod\t0.004s"), ["mymod"]);
 });

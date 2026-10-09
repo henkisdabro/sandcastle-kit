@@ -171,7 +171,7 @@ const newLedger = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) =>
     line: (id: string) => outcomes.get(id)?.text,
     // The one comment the ticket gets after the schedule, in the ledger's words.
     comment: (id: string) => ledger.entries.get(id)?.said.tracker?.text,
-    // "2: requeued after conflict with #1", for each "tried again in this run" line.
+    // "2: requeued after conflict at landing with #1", for each "tried again in this run" line.
     sentBack: () => said.flatMap((line) => (line.endsWith("; it is tried again in this run.") ? [line.replace("; it is tried again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
 };
@@ -286,7 +286,7 @@ test("a conflict is requeued and lands on the second try in one run", async () =
   };
   const r = await run(root, ["1", "2"], slow);
   assert.deepEqual(r.final.map((f) => [f.issue, f.landed.kind]), [["1", "merged"], ["2", "merged"]]);
-  assert.deepEqual(r.sentBack, ["2: requeued after conflict with #1"]);
+  assert.deepEqual(r.sentBack, ["2: requeued after conflict at landing with #1"]);
   assert.deepEqual(mergeOrder(root), ["1", "2"]);
   assert.equal(git(root, "show", "main:shared.txt"), "one\ntwo");
   assert.deepEqual(r.calls, ["close 1", "close 2"]);
@@ -321,7 +321,7 @@ test("a second conflict that a landing during the resolve caused sends the ticke
   const r = await run(root, ["1", "2", "3"], pipeline, async () => GREEN, 3);
   const two = r.final.find((f) => f.issue === "2")!;
   assert.equal(two.landed.kind, "merged");
-  assert.deepEqual(r.sentBack, ["2: requeued after conflict with #1", "2: requeued after conflict with #3"]);
+  assert.deepEqual(r.sentBack, ["2: requeued after conflict at landing with #1", "2: requeued after conflict at landing with #3"]);
   assert.equal(twos, 2, "the second and the third try");
   assert.deepEqual(mergeOrder(root), ["1", "3", "2"]);
   assert.equal(git(root, "show", "main:other.txt"), "three\ntwo");
@@ -492,7 +492,7 @@ test("the requeue-once rule: a first conflict or red is requeued, a second is fi
   assert.deepEqual(
     told.flatMap((c) => (c.kind === "requeued" ? [[c.id, c.again]] : [])),
     [
-      ["2", { kind: "conflict", with: ["1"] }],
+      ["2", { kind: "conflict", with: ["1"], found: "landing" }],
       ["3", { kind: "red", with: ["1"], gates: ["test"] }],
     ],
   );
@@ -530,9 +530,9 @@ test("conflict, requeued, merged: the second landing is the outcome and the stat
     },
   }));
   assert.ok(atSecond, "a second attempt began");
-  assert.deepEqual(r.seen.said, ["#2: requeued after conflict with #1; it is tried again in this run.", "#2: merged."]);
-  assert.deepEqual(atSecond.record, { ...atSecond.record, state: "queued", note: "requeued after conflict with #1", requeued: "requeued after conflict with #1" });
-  assert.equal(atSecond.requeuedAs, "requeued after conflict with #1");
+  assert.deepEqual(r.seen.said, ["#2: requeued after conflict at landing with #1; it is tried again in this run.", "#2: merged."]);
+  assert.deepEqual(atSecond.record, { ...atSecond.record, state: "queued", note: "requeued after conflict at landing with #1", requeued: "requeued after conflict at landing with #1" });
+  assert.equal(atSecond.requeuedAs, "requeued after conflict at landing with #1");
   assert.deepEqual(atSecond.recorded, [], "nothing is accounted while the second attempt is to come");
   assert.deepEqual(accountLanding(r.seen.ledger.entries.values()).merged, ["2"]);
   assert.equal(accountLanding(r.seen.ledger.entries.values()).notLanded, 0);
@@ -629,7 +629,7 @@ test("requeued, then the run stops: the first outcome stands, and the status vie
       return { kind: "not begun", why: usage };
     },
   }));
-  assert.equal(requeued, "requeued after conflict with #1");
+  assert.equal(requeued, "requeued after conflict at landing with #1");
   // Each has one ending: its first landing.
   assert.deepEqual([...r.seen.ledger.entries.keys()].sort(), ["2", "3"]);
   for (const id of ["2", "3"]) {

@@ -23,7 +23,7 @@ test("the implementer runs the gates in the foreground, output in a file, with a
 // to wait for it: half an hour on the run's critical path, and every other sandbox's gates slowed.
 test("the implementer never times the gates, and leaves a requested timing to a person", () => {
   const p = read("prompts", "implement.md");
-  assert.match(p, /never several in one command, and never to time or compare it/);
+  assert.match(p, /Run each gate once per check, and never to time or compare it/);
   assert.match(p, /leave it as an `<unmet>` line for a person/);
   assert.match(p, /do not wait on it with Monitor either/);
 });
