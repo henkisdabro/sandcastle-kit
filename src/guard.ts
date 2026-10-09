@@ -93,7 +93,10 @@ export const pinHostGitConfig = (root: string) => {
 // check the same two objects, hence the sharing in `gitFingerprint`.
 // `config` is `.git/config` as the list of its `key\nvalue` entries (null when git cannot read it as
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
-export type Fingerprint = { files: Record<string, string>; config: { path: string; entries: string[] | null }; base: string; branches: Record<string, string>; flying: Set<string> };
+// `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
+export type Fingerprint = { files: Record<string, string>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
+
+type ConfigReading = { path: string; entries: string[] | null };
 
 const AGENT_BRANCH = /^agent\/issue-/;
 
@@ -136,27 +139,38 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // info/attributes (maps paths to filter, merge and diff drivers), grafts, sparse-checkout, any new file.
   const unwatched = new Set([join(dir, "info", "refs"), join(dir, "info", "exclude")]);
   const info = inside("info").filter((f) => !unwatched.has(f));
-  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
+  // config.worktree: the main worktree's config, which git reads on top of `config` once
+  // `extensions.worktreeConfig` is on (a sandbox can turn that on in `config`, itself watched, but a file
+  // already there waits for it). Listed only while it exists, so creating one, even an empty one, differs
+  // from its absence, which an empty file's hash would not.
+  const worktreeConfigPath = join(dir, "config.worktree");
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks"), ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
   const files: Record<string, string> = {};
   const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
   for (const f of paths) files[f] = hashOf(f);
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
-  const configPath = join(dir, "config");
-  let entries: string[] | null = null;
-  for (let attempt = 0; attempt < 3 && !entries; attempt++) {
-    try {
-      const listed = sh("git", ["config", "--file", configPath, "-z", "--list"], project.root).split("\0").filter(Boolean);
-      const again = hashOf(configPath);
-      if (again === files[configPath]) entries = listed;
-      else files[configPath] = again;
-    } catch {
-      break;
+  const readEntries = (path: string): ConfigReading => {
+    if (!(path in files)) return { path, entries: [] };
+    let entries: string[] | null = null;
+    for (let attempt = 0; attempt < 3 && !entries; attempt++) {
+      try {
+        const listed = sh("git", ["config", "--file", path, "-z", "--list"], project.root).split("\0").filter(Boolean);
+        const again = hashOf(path);
+        if (again === files[path]) entries = listed;
+        else files[path] = again;
+      } catch {
+        break;
+      }
     }
-  }
+    return { path, entries };
+  };
+  const config = readEntries(join(dir, "config"));
+  const worktreeConfig = readEntries(worktreeConfigPath);
   return {
     files,
-    config: { path: configPath, entries },
+    config,
+    worktreeConfig,
     base: tipOf(project.root, `refs/heads/${project.baseBranch}`),
     branches: share?.branches ?? agentBranches(project.root),
     flying: share?.flying ?? new Set(),
@@ -474,13 +488,25 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
     }
   }
+  // No benign key here: nothing a person's own work adds to a worktree's config is let through. An empty
+  // file created or removed has no key to name, so the word says that.
+  const worktreeWords = changed.includes(now.worktreeConfig.path)
+    ? (() => {
+        const { words } = configChange(project, before.worktreeConfig.entries, now.worktreeConfig.entries);
+        if (words.length) return words;
+        const had = before.worktreeConfig.path in before.files;
+        const has = now.worktreeConfig.path in now.files;
+        return [!had ? "created, with no key" : !has ? "removed" : "rewritten, with the same keys"];
+      })()
+    : [];
   if (changed.length) {
     const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
+    const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
     throw new GuardStop(
-      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys} ` +
-        `Inspect \`git -C ${root} config --local --list\` and .git/info/ before running any other git command there.`,
-      { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`})` },
+      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys}${worktreeKeys} ` +
+        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"} before running any other git command there.`,
+      { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }
   const rewritten = rewrittenWorktrees(project);
