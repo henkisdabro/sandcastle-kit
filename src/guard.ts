@@ -96,8 +96,9 @@ export const pinHostGitConfig = (root: string) => {
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
 // `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
 // `files` also holds the shared `.git/modules/` (see `moduleFiles`), whose repositories a host git reaches through a gitlink.
+// `modes` holds the executable bits of the regular files under `hooks/` and `modules/` (`executableBits`), by the same paths: a hook runs only while it is executable.
 // `records` holds the person's own linked worktrees' records (`personRecords`) by name: `.` is the record itself, then each of the three files git reads there that exists.
-export type Fingerprint = { files: Record<string, string>; records: Record<string, Record<string, string>>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
+export type Fingerprint = { files: Record<string, string>; modes: Record<string, string>; records: Record<string, Record<string, string>>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
 
 type ConfigReading = { path: string; entries: string[] | null };
 
@@ -111,7 +112,14 @@ const AGENT_BRANCH = /^agent\/issue-/;
  * `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`): a symlink is its target, a directory a marker, a file its hash.
  */
 const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
-const moduleFiles = (modules: string, hashOf: (f: string) => string) => treeFiles(modules, hashOf, MODULE_DATA);
+const moduleFiles = (modules: string, hashOf: (f: string) => string, modes?: Record<string, string>) => treeFiles(modules, hashOf, MODULE_DATA, modes);
+
+/**
+ * A regular file's executable bits as octal digits (only the x bits: `755` is `"111"`, `644` is `"0"`), the field
+ * kept beside its content hash: git runs a hook only when it is executable, so `chmod +x` on a disabled hook with the same
+ * content changes nothing the hash sees. A separate field, so the hash's form (and every record that holds it) stays as it was.
+ */
+const executableBits = (info: { mode: number }) => (info.mode & 0o111).toString(8);
 
 /**
  * What a path in the shared `.git` holds, for a fingerprint, without ever reading what is not a regular file: a FIFO a
@@ -140,8 +148,11 @@ export const entryHash = (f: string): string => {
   }
 };
 
-/** Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything). */
-const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set()): Record<string, string> => {
+/**
+ * Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything).
+ * `modes`, when given, receives each regular file's `executableBits` by the same path.
+ */
+const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set(), modes?: Record<string, string>): Record<string, string> => {
   const found: Record<string, string> = {};
   const at = lstatSync(top, { throwIfNoEntry: false });
   if (!at) return found;
@@ -155,11 +166,17 @@ const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet
       const info = lstatSync(path);
       if (info.isSymbolicLink()) found[path] = `link ${readlinkSync(path)}`;
       else if (info.isDirectory()) visit(path, !container && name === "modules");
-      else found[path] = hashOf(path);
+      else {
+        found[path] = hashOf(path);
+        if (modes && info.isFile()) modes[path] = executableBits(info);
+      }
     }
   };
   if (at.isDirectory()) visit(top, true);
-  else found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
+  else {
+    found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
+    if (modes && at.isFile()) modes[top] = executableBits(at);
+  }
   return found;
 };
 
@@ -209,12 +226,13 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const worktreeConfigPath = join(dir, "config.worktree");
   const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
   const files: Record<string, string> = {};
+  const modes: Record<string, string> = {};
   const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
-  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf));
-  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf));
+  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf, undefined, modes));
+  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf, modes));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
   const readEntries = (path: string): ConfigReading => {
@@ -236,6 +254,7 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const worktreeConfig = readEntries(worktreeConfigPath);
   return {
     files,
+    modes,
     records: personRecords(project, dir),
     config,
     worktreeConfig,
@@ -336,8 +355,9 @@ const recordChanges = (project: Project, before: Fingerprint["records"], now: Fi
   return named;
 };
 
-const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =>
-  [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f]).sort();
+/** The paths whose content hash or executable bits differ; `modeOnly` of them differ by the bits alone. */
+const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"], beforeModes: Fingerprint["modes"], nowModes: Fingerprint["modes"]) =>
+  [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f] || beforeModes[f] !== nowModes[f]).sort();
 
 // What a change to `.git/config` is, told by key. A person's own work in another worktree of the
 // repo (`git worktree add` from a remote branch, `git push -u`, `git branch -u`, `gh pr create`)
@@ -349,9 +369,16 @@ const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =
 const UPSTREAM_KEY = /^branch\.(.+)\.(remote|merge)$/;
 const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 
+// Keys, beyond `COMMAND_KEYS` and `alias.*`, that run a program on a person's own later git command: a pager per
+// command, the difftool and mergetool commands, a submodule's `update = !cmd`, the interactive diff filter, the
+// key command of ssh signing, the command a fetch reads for alternate refs, and git-lfs's keys (a custom transfer
+// agent, among others). Held by the start record (`PROGRAM_KEYS`) and shown without values.
+const MORE_PROGRAM_KEYS =
+  "pager\\..+|difftool\\..+\\.cmd|mergetool\\..+\\.cmd|submodule\\..+\\.update|interactive\\.difffilter|gpg\\.ssh\\.defaultkeycommand|core\\.alternaterefscommand|lfs\\..+";
+
 // Keys whose values are not shown: they run a program or load more config, and the value is the
 // sandbox's to choose. The others show old and new (a URL's credentials hidden).
-const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
+const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+|${MORE_PROGRAM_KEYS})$`, "i");
 
 // Keys whose values are not shown because they carry credentials: an `extraHeader` (an Authorization
 // header), a credential helper's settings, and any key named for a password, token, secret or cookie
@@ -437,20 +464,27 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
 // and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
 // it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
 // proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
-// `extensions.*`. Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
+// `extensions.*`; and what runs on a person's own later command (`alias.*`, which a repo-local alias overrides the
+// user's with, and `MORE_PROGRAM_KEYS`). Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
 // them, and they run nothing.
 const PROGRAM_KEYS = new RegExp(
   `${COMMAND_KEYS}|^(filter\\..+|merge\\..+\\.driver|diff\\..+\\.(textconv|command)|core\\.(fsmonitor|hookspath|sshcommand|gitproxy)|include.*` +
     "|remote\\..+\\.(url|pushurl|uploadpack|receivepack|proxy)|url\\..+\\.(insteadof|pushinsteadof)|credential\\..+|protocol\\..+" +
-    "|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+)$",
+    `|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+|alias\\..+|${MORE_PROGRAM_KEYS})$`,
   "i",
 );
 
 // `entries` and `worktreeEntries`: those keys of `.git/config` and of `.git/config.worktree` (none when it
 // is absent), `key\nvalue`, sorted. `attributes`: the hash of `info/attributes` ("" when absent). `files`:
-// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory.
-type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string> };
+// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory. `modes`: the
+// executable bits of the regular files among them (`executableBits`), by the same path.
+type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string>; modes: Record<string, string> };
 type BaselineRecord = ProgramState & { clean: boolean };
+
+// The record's version, written beside it. A record of an earlier version (or none) compared with today's state would name
+// every key the version added to the list as added, so the start takes the state again once instead (`readBaseline`).
+// 2: the executable bits (`modes`), and the keys `MORE_PROGRAM_KEYS` and `alias.*` added to the list.
+const BASELINE_VERSION = 2;
 
 const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
 
@@ -468,36 +502,43 @@ const programState = (project: Project): ProgramState => {
   };
   const hashOf = entryHash;
   const files: Record<string, string> = {};
-  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf), ...moduleFiles(join(dir, "modules"), hashOf) })) files[relative(dir, path)] = hash;
+  const modes: Record<string, string> = {};
+  const found: Record<string, string> = {};
+  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf, undefined, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
+  for (const [path, bits] of Object.entries(found)) modes[relative(dir, path)] = bits;
   const attributes = join(dir, "info", "attributes");
   return {
     entries: entries(join(dir, "config")),
     worktreeEntries: entries(join(dir, "config.worktree")),
     attributes: existsSync(attributes) ? hashOf(attributes) : "",
     files,
+    modes,
   };
 };
 
 const strings = (value: unknown) => Array.isArray(value) && value.every((e) => typeof e === "string");
 
-const readBaseline = (project: Project): BaselineRecord | undefined => {
+/** The previous run's record: `record` when it is of today's version, `older` when one an earlier kit wrote is there (it is taken again, not compared), neither when there is none. */
+const readBaseline = (project: Project): { record?: BaselineRecord; older: boolean } => {
   try {
     const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
     const files = record.files;
-    // A record an earlier kit wrote holds fewer keys and no files, so it fails here and is read as none: compared
-    // with today's state it would name every remote's URL and every sample hook as added.
-    if (strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
-      return { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true };
+    const modes = record.modes;
+    // A record an earlier kit wrote holds fewer keys, no executable bits and no version, so it fails here and is read as
+    // none: compared with today's state it would name every remote's URL, every alias and every sample hook as added.
+    if (record.version === BASELINE_VERSION && strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files)) && modes && typeof modes === "object" && strings(Object.values(modes))) {
+      return { record: { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, modes, clean: record.clean === true }, older: false };
     }
+    return { older: record !== null && typeof record === "object" && !Array.isArray(record) };
   } catch {
     // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
   }
-  return undefined;
+  return { older: false };
 };
 
 const writeBaseline = (project: Project, record: BaselineRecord) => {
   mkdirSync(dirname(baselineFile(project)), { recursive: true });
-  writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
+  writeFileSync(baselineFile(project), `${JSON.stringify({ version: BASELINE_VERSION, ...record }, null, 2)}\n`);
 };
 
 // What the start takes as a person's own after a clean end, and refuses otherwise. A person's tools change the
@@ -596,9 +637,12 @@ const differences = (project: Project, was: ProgramState, now: ProgramState) => 
   const word = (inWas: boolean, inNow: boolean) => (!inWas ? "added" : !inNow ? "removed" : "changed");
   const took = [...configs.took.map((t) => `In .git/config: ${t}`), ...worktrees.took.map((t) => `In .git/config.worktree: ${t}`)];
   let filesOwn = true;
-  const files = changedFiles(was.files, now.files).map((f) => {
-    const what = `${clean(f)} ${word(f in was.files, f in now.files)}`;
-    const manager = f in now.files ? hookManager(project, f, now.files[f]) : undefined;
+  const files = changedFiles(was.files, now.files, was.modes, now.modes).map((f) => {
+    // The content is the same and the executable bits are not: a disabled hook enabled, or an enabled one disabled. A
+    // hook manager's marker proves nothing of that, so it is never taken as the person's own.
+    const modeOnly = was.files[f] === now.files[f];
+    const what = modeOnly ? `${clean(f)} executable bit changed` : `${clean(f)} ${word(f in was.files, f in now.files)}`;
+    const manager = f in now.files && !modeOnly ? hookManager(project, f, now.files[f]) : undefined;
     if (!manager) {
       filesOwn = false;
       return what;
@@ -625,7 +669,7 @@ const differences = (project: Project, was: ProgramState, now: ProgramState) => 
 };
 
 /** What a start reads of the baseline: the state to record, and the lines for the changes it took as the person's own. */
-export type GitConfigStart = ProgramState & { took: string[] };
+export type GitConfigStart = ProgramState & { took: string[]; retaken: boolean };
 
 /**
  * Before a run, `land` or `gates` pins anything: holds what the start baseline records (above) to what the
@@ -640,11 +684,12 @@ export type GitConfigStart = ProgramState & { took: string[] };
  */
 export const assertGitConfigBaseline = (project: Project, command: string, accept = false): GitConfigStart => {
   const now = programState(project);
-  const was = readBaseline(project);
-  if (!was || accept) return { ...now, took: [] };
+  const { record: was, older } = readBaseline(project);
+  // An earlier version's record is not compared (it lacks what this version records): the state is taken again, once.
+  if (!was || accept) return { ...now, took: [], retaken: older && !accept };
   const { config, worktree, files, parts, took, ownOnly } = differences(project, was, now);
-  if (!parts.length) return { ...now, took: [] };
-  if (was.clean && ownOnly) return { ...now, took };
+  if (!parts.length) return { ...now, took: [], retaken: false };
+  if (was.clean && ownOnly) return { ...now, took, retaken: false };
   const root = project.root;
   const inspect = [
     ...(config.length ? [`\`git -C ${root} config --local --list\``] : []),
@@ -668,15 +713,23 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
   );
 };
 
-/** The line a start prints for each change `assertGitConfigBaseline` took as the person's own. */
-export const tookLines = ({ took }: GitConfigStart) => took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`);
+/**
+ * The lines a start prints: an earlier version's record taken again, and each change `assertGitConfigBaseline` took as
+ * the person's own. One function, so a `--detach` parent's terminal shows what the child's log does.
+ */
+export const tookLines = ({ took, retaken }: GitConfigStart) => [
+  ...(retaken
+    ? ["The record of the shared .git's program-running keys, hooks and modules, left by an earlier kit version, lacks what this version holds (the executable bit of a hook, more keys): taken again from the present state, once, with no comparison."]
+    : []),
+  ...took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`),
+];
 
 /**
  * Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended,
- * and prints a line for each change it took as the person's own.
+ * and prints its `tookLines`.
  */
 export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
-  const { took: _took, ...state } = start;
+  const { took: _took, retaken: _retaken, ...state } = start;
   writeBaseline(project, { ...state, clean: false });
   for (const line of tookLines(start)) console.log(line);
 };
@@ -687,7 +740,7 @@ export const recordGitConfigStart = (project: Project, start: GitConfigStart) =>
  * next start refuses it: the end never records a state it did not check.
  */
 export const recordGitConfigEnd = (project: Project) => {
-  const was = readBaseline(project);
+  const { record: was } = readBaseline(project);
   if (!was) return;
   if (!differences(project, was, programState(project)).parts.length) writeBaseline(project, { ...was, clean: true });
 };
@@ -930,7 +983,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
   const now = gitFingerprint(project);
   const base = project.baseBranch;
   const root = project.root;
-  let changed = changedFiles(before.files, now.files);
+  let changed = changedFiles(before.files, now.files, before.modes, now.modes);
   let configWords: string[] = [];
   if (changed.includes(now.config.path)) {
     const { benign, words } = configChange(project, before.config.entries, now.config.entries);
@@ -960,7 +1013,8 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       })()
     : [];
   if (changed.length) {
-    const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
+    // The bits alone: the content is what it was, which the name would otherwise suggest it was not.
+    const names = changed.map((f) => relative(realpathSync(root), f) + (before.files[f] === now.files[f] ? " (executable bit)" : "")).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
     const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
     throw new GuardStop(
