@@ -317,6 +317,29 @@ export const implUnmetView = (unmet: string | undefined): string =>
       "finishes nor restates is dropped from the ticket as done.\n\n"
     : "";
 
+// The last paragraph of an implementer's final message, with the kit's own tags (`<promise>`, `<unmet>`,
+// `<changelog>`, `<followup>`, `<ungated>`) and fenced blocks taken out first: a caveat ("I did not check that
+// the new test fails without the change") sits in the closing prose, and no other pass reads that prose. Cut at
+// a word to UNGATED_MAX; undefined when the message has no prose. A `<report>` keeps its words and loses only its
+// tags: with a tracker agents do not write to, the implementer's prose for the ticket, caveat and all, is in it.
+export const closingParagraphOf = (text: string): string | undefined => {
+  const prose = text
+    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "")
+    .replace(/^[ \t]*<(promise|unmet|changelog|followup|ungated)\b[^>\n]*>[\s\S]*?<\/\1>[ \t]*$/gm, "")
+    .replace(/<\/?report>/g, "");
+  const last = prose.split(/\n[ \t]*\n/).map((p) => p.trim()).filter(Boolean).at(-1);
+  return last ? cutAtWord(last, UNGATED_MAX) : undefined;
+};
+// What a full review is shown of it, for `IMPL_SAID`: the paragraph quoted, with the ask to make any check the
+// implementer says it did not make. Empty when there is none, so the prompt carries no heading over nothing.
+export const implSaidView = (said: string | undefined): string =>
+  said
+    ? "# What the implementer said last\n\nThe last paragraph of the implementer's final message, quoted as it wrote it. If it says " +
+      "it did not check something (a test not shown to fail without the change, a platform it did not run), make that check yourself " +
+      "before you accept the claim:\n\n" +
+      `${said.split("\n").map((l) => `> ${l}`).join("\n")}\n\n`
+    : "";
+
 // The `<changelog>...</changelog>` lines of one agent's final message, each one line, in order.
 // Unlike `<ungated>` every own-line tag counts, not the last alone: a ticket may need several lines. An
 // empty tag or the echoed placeholder "..." does not count. A changelog line is one or two sentences, so a
@@ -1233,7 +1256,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -1335,9 +1358,9 @@ export const createPipeline = (ctx: PipelineContext) => {
     // The ticket's own implementer, for the implement and repair passes only.
     const own = overrides.get(issue.id) ?? {};
     const implModel = own.model ?? IMPL_MODEL;
-    // `IMPL_UNMET` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's unmet
-    // line and changelog lines (see `implUnmetView`, `implChangelogView`).
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_CHANGELOG: "", ...tracker.promptArgs(issue.id) };
+    // `IMPL_UNMET`, `IMPL_SAID` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's
+    // unmet line, closing paragraph and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
@@ -1704,6 +1727,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       // review has read the branch after it: the reviewer may have finished the criterion.
       // A land-only branch runs no implementer or review: what its agents said stands from its head record.
       let implUnmet = landOnly ? readHeads(project.root)[issue.id]?.unmet : undefined;
+      // The implementer's closing paragraph, which a full review is shown (`implSaidView`); kept in the head
+      // record like `unmet`, so a land-only or requeued attempt still has it.
+      let implSaid = landOnly ? readHeads(project.root)[issue.id]?.implSaid : undefined;
       let reviewed = false;
       const unmet: string[] = [];
       // What the agents have said so far, as a head record keeps it: a branch stopped mid-gates is re-run
@@ -1712,6 +1738,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const left = reviewed ? unmet : [...(implUnmet ? [implUnmet] : []), ...unmet];
         return {
           unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
+          implSaid,
           changelog: changelog.length ? [...new Set(changelog)] : undefined,
           changelogDropped: changelogDropped || undefined,
           ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
@@ -1762,6 +1789,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         }
         noteChangelog(impl.stdout);
         implUnmet = unmetOf(impl.stdout);
+        implSaid = closingParagraphOf(impl.stdout);
 
         // `impl.commits` counts what THIS run added, which is zero in two very
         // different cases: the agent found nothing to do, and the agent found the
@@ -1805,7 +1833,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             () => {
               return reviewWithFallback(ref(issue.id), (agent, model) => {
                 reviewModel = model;
-                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
+                return reviewRun(`review-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) })(agent);
               });
             },
             undefined,
@@ -1817,7 +1845,7 @@ export const createPipeline = (ctx: PipelineContext) => {
                 issue.id,
                 "cross-review",
                 () => {
-                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_CHANGELOG: implChangelogView(changelog) }));
+                  return crossReview(ref(issue.id), reviewRun(`review-codex-${issue.id}`, prompts.review, { ...promptArgs, IMPL_UNMET: implUnmetView(implUnmet), IMPL_SAID: implSaidView(implSaid), IMPL_CHANGELOG: implChangelogView(changelog) }));
                 },
                 undefined,
                 () => CROSS_REVIEW_MODEL,
@@ -2070,9 +2098,9 @@ export const createPipeline = (ctx: PipelineContext) => {
       }
 
       const head = sh("git", ["rev-parse", branch], project.root);
-      const { unmet: unmetNote, changelog: changelogNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
+      const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined, ungated: ungatedNote, gap: gapNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined, ungated: ungatedNote, gap: gapNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {

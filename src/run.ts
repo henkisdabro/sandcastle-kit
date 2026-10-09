@@ -550,7 +550,8 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // in one pass, so gate output holding `{{...}}` or a shell block stays text.
     if (kind === "repair") for (const k of ["GATE_NAME", "GATE_COMMAND", "GATE_OUTPUT"]) allowed.add(k);
     // The implementer's unmet line, which a full review is asked to finish or restate (empty when there is none, and for a narrow review).
-    if (kind === "review" || kind === "rereview" || kind === "remerge") allowed.add("IMPL_UNMET");
+    // And the closing paragraph of its final message, which the same prompts hold the place of.
+    if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
     // Likewise the implementer's changelog lines, in the full review's changelog ask only (CHANGELOG_REVIEW).
     if (kind === "review") allowed.add("IMPL_CHANGELOG");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
@@ -1134,6 +1135,8 @@ export type BranchHead = {
   red?: string;
   /** The acceptance criterion the agents left undone at `green`: a later land-only run reads no agent, so without it the ticket would close. */
   unmet?: string;
+  /** The last paragraph of the implementer's final message (`closingParagraphOf`), which a full review is shown: carried like `unmet`, for a land-only or requeued attempt. */
+  implSaid?: string;
   /** The gate results at `green`, for a ticket the kit holds after its gates: a land-only re-run runs none before it holds, and would report none. */
   gates?: Gate[];
   /** The `<changelog>` lines the agents gave by `green` (`changelog: true`): a later land-only run reads no agent, so without them the lines never reach a closing summary. */
@@ -1162,7 +1165,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
