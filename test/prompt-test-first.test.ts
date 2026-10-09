@@ -32,7 +32,13 @@ test("neither agent stashes in the shared .git, and both are told how to run a t
   for (const name of ["implement.md", "review.md"]) {
     const p = read("prompts", name);
     assert.match(p, /Never `git stash` in this worktree/, name);
-    assert.match(p, /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>`, run it, then `git apply \/tmp\/p`/, name);
+    assert.match(
+      p,
+      name === "review.md"
+        ? /git diff \{\{TARGET_BRANCH\}\}\.\.\.HEAD -- <files> > \/tmp\/p && git apply -R \/tmp\/p`, run it, then `git apply \/tmp\/p`/
+        : /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>`, run it, then `git apply \/tmp\/p`/,
+      name,
+    );
   }
 });
 
