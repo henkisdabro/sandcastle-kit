@@ -2772,6 +2772,8 @@ export const burndown = async (
   console.log(
     `Lean: hiding ${lean.items.filter((i) => !i.kept && i.kind !== "hook").length} item(s) the repo would load` +
       (kept.length ? `; keeping ${kept.join(", ")}` : "") +
+      // The count and the list are the repo's items; Claude Code's own bundled skills are off in every sandbox (container/managed-settings.json).
+      "; Claude Code's bundled skills off" +
       `; ${lean.hooks.length} hook(s) kept${dropped ? `, ${dropped} dropped by lean.dropHooks` : ""} (\`sandcastle lean\` for detail).`,
   );
   for (const line of unmatchedLines(unmatched(project, lean))) console.log(`Lean: ${line}.`);
