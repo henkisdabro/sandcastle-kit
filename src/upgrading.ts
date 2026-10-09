@@ -56,7 +56,7 @@ export const upgradingNotes = (changelog: string): string[] => {
  * the kit commit instead; its notes are read from the changelog there while git still has it.
  * Read, never rewritten: doctor changes nothing, and the next `sandcastle updated` writes the new form.
  */
-const readRecord = (root: string, kit: string): { version?: string; notes: string[] } | undefined => {
+const readRecord = (root: string, kit: string): { version?: string; commit?: string; notes: string[] } | undefined => {
   if (!existsSync(updateRecord(root))) return undefined;
   const text = readFileSync(updateRecord(root), "utf8").trim();
   if (text.startsWith("{")) {
@@ -67,10 +67,32 @@ const readRecord = (root: string, kit: string): { version?: string; notes: strin
     return undefined;
   }
   const then = text ? git(kit, ["show", `${text}:CHANGELOG.md`]) : undefined;
-  return then === undefined ? undefined : { notes: upgradingNotes(then) };
+  return then === undefined ? undefined : { commit: text, notes: upgradingNotes(then) };
 };
 
 const kitNotes = (kit: string) => upgradingNotes(readFileSync(join(kit, "CHANGELOG.md"), "utf8"));
+
+/**
+ * The release this project last updated at, from its update record (an older record's, from the
+ * kit's package.json at its commit); undefined when there is no record or it names no release. What
+ * `/sandcastle update` reports as "this project: <release> -> <kit now>": the kit's own pre-pull
+ * version is no use there, since another session may have pulled the kit already.
+ */
+export const recordedRelease = (root: string, kit = KIT): string | undefined => {
+  const record = readRecord(root, kit);
+  // A project last updated before records named their release would otherwise read as never updated.
+  if (record?.version || !record?.commit) return record?.version;
+  try {
+    const version = JSON.parse(git(kit, ["show", `${record.commit}:package.json`]) ?? "").version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `sandcastle updated` prints: the earlier recorded release (or that there was none) and the kit version now. Call before `markUpdated`, which replaces the record. */
+export const updatedLine = (before: string | undefined, now: string): string =>
+  `Recorded: this project is up to date with sandcastle-kit ${now} (this project: ${before ?? "no earlier record"} -> ${now}).`;
 
 /**
  * The Upgrading notes this project has not had: those in the kit's changelog and not in its update

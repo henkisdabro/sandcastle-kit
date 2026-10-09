@@ -12,7 +12,8 @@ import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
-import { OperatorError } from "./errors.ts";
+import { protectedPathsNote } from "./guard.ts";
+import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
@@ -409,6 +410,21 @@ export const agentLogging = (project: Project, id: string, name: string, runId: 
 };
 
 /**
+ * The line a pass that died expanding its prompt leaves at the end of its readable log, which otherwise stops at
+ * "Expanding shell expressions" with no error: `! error: <cleaned line>`, the form a failed tool call takes there.
+ * Nothing for any other error (an agent's own log already ends with its cause) and for a pass with no file log.
+ */
+export const logExpansionFailure = (logging: LoggingOption | undefined, error: unknown): void => {
+  const line = promptExpansionLine(error);
+  if (line === undefined || logging?.type !== "file" || typeof logging.path !== "string") return;
+  try {
+    appendFileSync(logging.path, `! error: ${line}\n`);
+  } catch {
+    // A full disk must not hide the crash itself.
+  }
+};
+
+/**
  * `! error: <first line>` (or `! exit N: <first line>` for a command's non-zero exit) for each failed tool
  * result in one raw stream line, else undefined. A result is failed when it says `is_error`, as a call to a
  * tool that does not exist does, or when its text opens with Claude Code's `Exit code N`.
@@ -583,6 +599,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
       .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
+      .replaceAll("{{KIT_PROTECTED}}", () => (kind === "implement" ? protectedPathsNote(project, "implement") : kind === "review" || kind === "rereview" || kind === "remerge" ? protectedPathsNote(project, "review") : ""))
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
       .replaceAll("{{KIT_CHANGELOG}}", () => (!project.changelog ? "" : kind === "implement" ? CHANGELOG_IMPLEMENT : kind === "rereview" || kind === "remerge" ? CHANGELOG_NARROW : CHANGELOG_REVIEW))
       .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? tracker.dryRunNote : ""));
@@ -871,6 +888,12 @@ const LOAD_BAND = 1;
 const LOAD_RUNS = 2;
 /** Tickets of one model in the window that make its own history solid; fewer are blended with all tickets. */
 const SOLID_HISTORY = 5;
+/** A ticket naming this many paths on its `Touches:` line or fewer is small; no line (0) or more is large. */
+const SMALL_PATHS = 2;
+/** Tickets of a size class in the window that price a run's ticket of that class; fewer fall back to the pricing without a class. */
+const SIZE_HISTORY = 3;
+const sizeOf = (paths: number): "small" | "large" => (paths >= 1 && paths <= SMALL_PATHS ? "small" : "large");
+const SIZE_WORDS = { small: `1-${SMALL_PATHS} Touches paths`, large: `${SMALL_PATHS + 1} or more Touches paths or none` };
 
 /**
  * A rough estimate for a run about to start, as a range: the median to the 80th percentile of the
@@ -895,6 +918,13 @@ const SOLID_HISTORY = 5;
  * is blended with all of them, and the line says so (`<model> from 2 tickets, blended`). Without `models` every ticket is estimated
  * from all of them.
  *
+ * `detail.touches` is the path count of each ticket's `Touches:` line (0 with none), and a timings line records the same as
+ * `touches`. A ticket is small with 1-2 paths and large otherwise (none counts as large); it is priced from the window's tickets
+ * of its size when `SIZE_HISTORY` of them are there, on top of the model and carried split, else as without. A line with no
+ * `touches` (older ones) is of unknown size and prices no class. The line says how many tickets were priced by size, and when
+ * the run's tickets are smaller or larger than most of the window's (and no history of their size could price them), that it
+ * may be high or low. Without `detail.touches` no ticket is priced by size.
+ *
  * `detail.carried` says which tickets of the run are carried branches (`isCarried`). A carried
  * ticket is estimated from the history tickets that were carried (a `carried` field on their lines,
  * or a `resolve` pass and no implement), a fresh one from the rest, each falling back to the other
@@ -902,6 +932,11 @@ const SOLID_HISTORY = 5;
  * ticket implemented and requeued in its own run is a fresh sample, and its lines from the first
  * resolve on (resolve, narrow review, gates) a carried one: a carried branch's attempt is not its
  * ticket's first one.
+ *
+ * `detail.remainder` says which tickets are re-runs for what an earlier "part of" merge left (`isRemainder`; a carried one
+ * is a carried branch, not this). A remainder is the third class: a `remainder` field on its lines, priced from past
+ * remainders, which are no longer counted among the fresh tickets. With none in the window it is priced as a fresh ticket
+ * and the line says it may be high: the partly-done work is mostly merged, so the rest costs less than a whole ticket.
  *
  * The gate and landing-gate times (not the bounds that combine them) are priced from the window's runs whose recorded `load` (the
  * run's effective concurrency, in `history.jsonl`, joined by `startedAt`) is within `LOAD_BAND` of `slots`, when `LOAD_RUNS` such
@@ -916,7 +951,7 @@ const SOLID_HISTORY = 5;
  * a row on the one worker, whatever the slots, so they count with or without `gateSlots`.
  */
 export const estimate = (
-  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; chainAt?: number[]; gateSlots?: number } = {},
+  project: Project, tickets: number, slots: number, chain = 0, models?: string[], detail: { carried?: boolean[]; remainder?: boolean[]; chainAt?: number[]; gateSlots?: number; touches?: number[] } = {},
 ): string | undefined => {
   let text: string;
   try {
@@ -924,11 +959,15 @@ export const estimate = (
   } catch {
     return undefined;
   }
-  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
+  type Line = { project?: string; run?: unknown; phase?: unknown; model?: unknown; issue?: unknown; ms?: unknown; carried?: unknown; remainder?: unknown; touches?: unknown; tokens?: { input?: number; cacheWrite?: number; cacheRead?: number; output?: number } };
   type Group = {
     ms: number; gateMs: number; landMs: number; tokened: boolean; inTokens: number; out: number; carried: boolean; model?: string;
+    // The path count of the ticket's `Touches:` line, from the first line that records it; undefined for a ticket of older lines.
+    touches?: number;
     // The run it was timed in: its load, if the history knows it, says whether its gate times are this run's to borrow.
     run?: string;
+    // A `remainder` field on a line: the ticket was re-run for what an earlier "part of" merge left.
+    remainder?: boolean;
     // Seen while grouping: a `carried` field on a line, a resolve pass, an implement pass.
     flagged?: boolean; resolved?: boolean; implemented?: boolean;
     // A ticket implemented and requeued in the same run: what came after its first resolve, the cost of a carried branch's attempt.
@@ -966,6 +1005,8 @@ export const estimate = (
     // A ticket's gate passes (the pre-landing `gates` lines, `waitMs` already out of `ms`): the time it holds a gates slot.
     if (l.phase === "gates") g.gateMs += l.ms as number;
     if (l.carried === true) g.flagged = true;
+    if (l.remainder === true) g.remainder = true;
+    if (g.touches === undefined && typeof l.touches === "number" && Number.isFinite(l.touches) && l.touches >= 0) g.touches = l.touches;
     if (l.phase === "implement") g.implemented = true;
     if (l.phase === "resolve") {
       g.resolved = true;
@@ -1036,22 +1077,48 @@ export const estimate = (
   // Each ticket of the run: the figures at the median and at the high end.
   let unknown = 0;
   let lowCarried = 0;
+  let lowRemainder = 0;
   // The history tickets some ticket of the run was priced from: the line's count, not the window's.
   const pricedFrom = new Set<Group>();
   const thin = new Map<string, number>();
+  // Per ticket of the run (by place): the size it was priced as, and the history tickets of that size it was priced from (0: none).
+  const sizing = new Map<number, { from: number; window?: "small" | "large"; size: "small" | "large" }>();
   const per = Array.from({ length: tickets }, (_, at) => {
     const carried = detail.carried?.[at] ?? false;
+    const remainder = !carried && (detail.remainder?.[at] ?? false);
     const model = models?.[at];
     const ofModel = model === undefined ? counted : counted.filter((g) => (g.model ?? IMPL_MODEL) === model);
     if (!ofModel.length) unknown++;
     else if (ofModel.length < SOLID_HISTORY && model !== undefined) thin.set(model, ofModel.length);
+    const size = detail.touches?.[at] === undefined ? undefined : sizeOf(detail.touches[at]);
     const priced = (pool: Group[]) => {
-      const same = pool.flatMap(samples).filter((g) => g.carried === carried);
-      const use = same.length ? same : pool;
+      // Three classes, a remainder first: its lines say `remainder` whatever else they hold. A remainder with no history of
+      // its own is priced as a fresh ticket, which is the only class it is near; the others fall back to the whole pool.
+      const classOf = (g: Group) => (g.remainder ? "remainder" : g.carried ? "carried" : "fresh");
+      const own = remainder ? "remainder" : carried ? "carried" : "fresh";
+      const all = pool.flatMap(samples);
+      const same = all.filter((g) => classOf(g) === own);
+      const fresh = remainder && !same.length ? all.filter((g) => classOf(g) === "fresh") : [];
+      const base = same.length ? same : fresh.length ? fresh : pool;
+      // A tail is the same ticket as its origin, so it has the origin's size.
+      const sizeKnown = (g: Group) => (g.origin ?? g).touches;
+      const ofSize = size === undefined ? [] : base.filter((g) => sizeKnown(g) !== undefined && sizeOf(sizeKnown(g)!) === size);
+      const use = ofSize.length >= SIZE_HISTORY ? ofSize : base;
+      if (size !== undefined) {
+        const known = base.filter((g) => sizeKnown(g) !== undefined);
+        const smalls = known.filter((g) => sizeOf(sizeKnown(g)!) === "small").length;
+        sizing.set(at, {
+          from: ofSize.length >= SIZE_HISTORY ? ofSize.length : 0,
+          // The window's usual size, when it has any known: a run of a different one, unpriced by size, is off by it.
+          window: known.length ? (smalls * 2 > known.length ? "small" : "large") : undefined,
+          size,
+        });
+      }
       for (const g of use) pricedFrom.add(g.origin ?? g);
       return { mid: figures(use, median as (xs: number[]) => number), high: figures(use, (xs) => percentile(xs, HIGH)) };
     };
     if (carried && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).flatMap(samples).some((g) => g.carried)) lowCarried++;
+    if (remainder && !(ofModel.length >= SOLID_HISTORY ? ofModel : counted).flatMap(samples).some((g) => g.remainder)) lowRemainder++;
     if (!ofModel.length || ofModel.length >= SOLID_HISTORY || model === undefined) return priced(ofModel.length ? ofModel : counted);
     // A model with a few tickets only is blended with all of them, weighted by how many it has: two dear tickets in
     // the window are not a median to price a run by, and the other models' median alone prices it as one of them.
@@ -1098,17 +1165,31 @@ export const estimate = (
   const highSteps = steps((xs) => percentile(xs, HIGH));
   const bound = (t: { serial: number; chained: number; gated: number; landed: number }) => Math.max(t.serial, t.chained, t.gated, t.landed);
   const carriedCount = detail.carried?.slice(0, tickets).filter(Boolean).length ?? 0;
-  const split = carriedCount ? ` (${carriedCount} carried, ${tickets - carriedCount} fresh)` : "";
+  const remainderCount = detail.remainder?.slice(0, tickets).filter((r, at) => r && !detail.carried?.[at]).length ?? 0;
+  const split = carriedCount || remainderCount
+    ? ` (${[carriedCount ? `${carriedCount} carried` : "", remainderCount ? `${remainderCount} remainder` : "", `${tickets - carriedCount - remainderCount} fresh`].filter(Boolean).join(", ")})`
+    : "";
   const sequence = chain > 1 && highMs.chained > highMs.serial ? ` (${chain} tickets in sequence)` : "";
   // At a tie too: the tickets' figure ends with a landing of its own, so landings in a row as long as it still set the time.
   const landBound = highMs.landed > 0 && highMs.landed >= Math.max(highMs.serial, highMs.chained, highMs.gated);
   const gateBound = landBound
     ? " (landing gates, one after another, set the time)"
     : highMs.gated > Math.max(highMs.serial, highMs.chained, highMs.landed) ? ` (gate runs on ${detail.gateSlots} slot(s) set the time)` : "";
+  const sized = [...sizing.values()].filter((v) => v.from > 0);
+  const off = [...sizing.values()].filter((v) => v.from === 0 && v.window !== undefined && v.window !== v.size);
+  const smaller = off.filter((v) => v.size === "small").length;
+  const larger = off.length - smaller;
   const low = [
     ...[...thin].map(([model, n]) => ` ${model} from ${n} ticket${n === 1 ? "" : "s"}, blended.`),
     unknown ? ` ${unknown} ticket(s) use a model with no history here; the estimate is low.` : "",
     lowCarried ? ` ${lowCarried} carried ticket(s) have no carried history here; the estimate is low.` : "",
+    lowRemainder ? ` ${lowRemainder} remainder ticket(s) have no remainder history here; priced as fresh tickets, so it may be high.` : "",
+    ...(["small", "large"] as const).flatMap((size) => {
+      const n = sized.filter((v) => v.size === size).length;
+      return n ? [` ${n} ticket(s) priced from the window's tickets of ${SIZE_WORDS[size]}.`] : [];
+    }),
+    smaller ? ` ${smaller} ticket(s) are smaller (${SIZE_WORDS.small}) than most of the window's, with too little history of their size, so it may be high.` : "",
+    larger ? ` ${larger} ticket(s) are larger (${SIZE_WORDS.large}) than most of the window's, with too little history of their size, so it may be low.` : "",
     byLoad ? "" : ` No history at ${slots} at a time (gate times are from runs of any load), so it may be low.`,
   ].join("");
   return (
@@ -1193,6 +1274,13 @@ export const mergedPartly = (root: string, base: string, id: string): boolean =>
     return false;
   }
 };
+
+/**
+ * Whether ticket `id` is a remainder: re-run for what an earlier "part of" merge (`mergedPartly`) left undone, and no
+ * branch of it is ahead of the base (`isCarried`: that one is carried work). Its first attempt's work is on the base
+ * already, so it costs far less than a new ticket; the estimate prices it apart, and its timings lines say `remainder`.
+ */
+export const isRemainder = (root: string, base: string, id: string): boolean => !isCarried(root, base, id) && mergedPartly(root, base, id);
 
 export const recordOutcomes = (project: Project, run: string, outcomes: Record<string, Outcome>) => {
   const file = join(project.root, ".sandcastle/logs/outcomes.json");

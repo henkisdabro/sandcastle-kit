@@ -88,7 +88,7 @@ comments, and the gates can prove it.
 Whenever this action or the audit writes or rewrites a ticket body, the run reads these lines
 from it, and only in plain text: a line inside a code block or backticks is not read.
 
-- **Blocker line.** GitHub: `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
+- **Blocker line.** GitHub: a native "blocked by" edge holds a ticket as a body line does, so either is enough; otherwise `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
   refs on the same line (a colon after `Blocked by` is read too: `Blocked by: #12, #14` works) - a
   list under a "Blocked by" heading (`## Blocked by`, then `- #12`) is not read, nor is a comment.
   Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`,

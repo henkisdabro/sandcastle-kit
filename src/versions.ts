@@ -64,12 +64,12 @@ const writeCache = (cache: Cache) => {
   }
 };
 
-/** The `ARG` defaults of docker/base.Dockerfile: what an offline machine with no cache builds. */
+/** The `ARG` defaults of docker/agents.Dockerfile: what an offline machine with no cache builds. */
 const dockerfileDefaults = () => {
-  const text = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
+  const text = readFileSync(join(KIT, "docker/agents.Dockerfile"), "utf8");
   const arg = (name: string) => {
     const v = text.match(new RegExp(`^ARG ${name}=(\\S+)\\s*$`, "m"))?.[1];
-    if (!v || !VERSION.test(v)) throw new Error(`docker/base.Dockerfile has no ARG ${name}=<x.y.z> default`);
+    if (!v || !VERSION.test(v)) throw new Error(`docker/agents.Dockerfile has no ARG ${name}=<x.y.z> default`);
     return v;
   };
   return { claude: arg("CLAUDE_CODE_VERSION"), codex: arg("CODEX_VERSION") };
@@ -211,5 +211,6 @@ export const resolveVersions = async (
   return { claude: claude.version, codex: codex.version, channel: VERSION.test(setting) ? "pinned" : setting, source };
 };
 
-/** The line a run and `sandcastle build` print. */
-export const versionsLine = (v: Versions) => `Claude Code ${v.claude} (${v.channel}) · Codex ${v.codex}`;
+/** The line a run and `sandcastle build` print; a run gives the kit version too (`build` does not). */
+export const versionsLine = (v: Versions, kit?: string) =>
+  `${kit ? `sandcastle-kit ${kit} · ` : ""}Claude Code ${v.claude} (${v.channel}) · Codex ${v.codex}`;
