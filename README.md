@@ -193,7 +193,7 @@ flowchart LR
 | 🧱 | **A green base first** | Every gate runs on the base commit in the image before any agent starts. A gate red there would be red on every branch, so the run stops before it spends anything. |
 | 🩹 | **Repair on red** | A red gate gets one repair pass on the same warm sandbox, fed the gate's own output, then the gates run again - and up to two more while each pass turns up a failure the last one did not see. A branch a repair turned green gets the review pass again, on the repair commits, before it can land. A pass that commits nothing (the repairer judged the red a flake) is not counted: the run's per-ticket line says `repair made no change`, and `repaired=N` counts only passes that committed. A failure that is red on the base too, in a test file the branch did not change, gets no repair: the gates run once on the base's tip, and the closing summary names the test once under Needs you. |
 | 🗂️ | **Your tracker** | Tickets are GitHub Issues (the default) or Markdown files in the repo - in the layout [Matt Pocock's setup skill](#-trackers-github-or-ticket-files) uses, so a repo that ran it works with no extra config. |
-| 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
+| 🔗 | **Ticket dependencies** | `Blocked by #12` in a ticket body, or a native "blocked by" edge on GitHub, holds it back until #12 is closed. It can also wait on a Linear issue (`ENG-42`) or an in-repo task file - see [Blockers](#-blockers-github-linear-ticket-files). |
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements and tests at the ticket's seams, Claude Opus 5.5 reviews the tests as well as the code, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands and MCP servers are hidden from sandbox agents unless you keep them, and its plugins always, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
@@ -403,7 +403,7 @@ and your gates could prove it. The `/sandcastle queue` skill action walks every 
 gathers the facts, asks you the open decisions in batches, writes each decision on its ticket, then
 labels it. No tickets yet? `/sandcastle audit` reviews the repo with read-only agents and files what they find, ready to queue.
 
-A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`.
+A ticket that has to wait for another says so in its body: `Blocked by #12` or `Depends on #12`. On GitHub a native "blocked by" edge (the issue's Relationships panel) holds it as well.
 A colon is read too (`Blocked by: #12`); blockers listed under a `## Blocked by` heading are not,
 and `sandcastle queue` warns about them. A run holds it while #12 is open. When #12 is in the same run, the ticket starts in that run, as
 soon as #12 has landed with its work done, even if the tracker then refuses to close it (a chain of tickets drains in one run); a blocker outside the run
@@ -458,7 +458,7 @@ flowchart LR
 
 ### 🧷 Blockers: GitHub, Linear, ticket files
 
-Only the ticket **body** is read: a `Blocked by ...` line in a comment does nothing, and a run
+Only the ticket **body** is read (and, on GitHub, the issue's native "blocked by" edges): a `Blocked by ...` line in a comment does nothing, and a run
 starts the ticket anyway. Both `sandcastle run` and `sandcastle blockers` warn about that, and about
 comments whose blockers are all closed (stale). `sandcastle queue` and `sandcastle run` also warn,
 and `sandcastle blockers` lists, the queued tickets a blocker would hold for good - one that does
@@ -466,9 +466,10 @@ not exist, tickets that wait for each other, a Linear blocker that cannot be rea
 `Blocked by ENG-42` whose key `blockers.linear` does not name, which is ignored, and blockers listed
 under a `## Blocked by` heading, which are not read.
 
-| Named in the body | Waits until | Enable |
+| Named | Waits until | Enable |
 |---|---|---|
 | `Blocked by #12`, `Depends on #12` | issue or pull request #12 is closed or merged | always on |
+| a native "blocked by" edge to issue #12 (GitHub only) | issue #12 is closed; one closed as not planned never lets the ticket start | always on; needs a gh that knows `blockedBy`, else one warning line and the body is read alone |
 | `Blocked by ENG-42` | the Linear issue is in a *completed* or *canceled* state | `blockers.linear: ["ENG"]` and `LINEAR_API_KEY` |
 | `Blocked by .scratch/checkout/issues/03-pay.md` | that file on the base branch has `Status: done` | the files tracker, or `blockers.files: { dir }` |
 | `Blocked by: 01, 02` (a header line in a ticket file) | those tickets of the same feature are done | the files tracker |
