@@ -25,7 +25,7 @@
 
 import { claudeCode, codex } from "@ai-hero/sandcastle";
 import type { ProjectConfig } from "./config.ts";
-import { OperatorError } from "./errors.ts";
+import { cutAtWord, OperatorError } from "./errors.ts";
 import { CODEX_RATE_LIMITS_READOUT } from "./usage.ts";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -177,13 +177,13 @@ export const implAgent = (o: Override = {}) => claude(o.model ?? IMPL_MODEL, o.e
 /**
  * One readable line for an agent that failed. The library's error is "(FiberFailure) AgentError:
  * claude-code exited with code 1:" with the cause on the next line as `[claude-code:<code>] {json}`;
- * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON.
+ * the first line alone hid the cause, the whole thing broke the run pane's line mid-JSON. Cut at a word, not mid-word.
  */
 export const agentFailure = (error: unknown) => {
   const text = (error instanceof Error ? error.message : String(error)).replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "");
   const first = text.split("\n")[0].replace(/:\s*$/, "");
   const code = text.match(/\[[\w-]+:([a-z_]+)\]/)?.[1];
-  return (code ? `${first} - ${code.replace(/_/g, " ")}` : first).slice(0, 160);
+  return cutAtWord(code ? `${first} - ${code.replace(/_/g, " ")}` : first);
 };
 
 // Runs the review with REVIEW_MODEL, and once more with IMPL_MODEL if it throws.

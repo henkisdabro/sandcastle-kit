@@ -7,7 +7,7 @@
 // and the release of dependants (`createDependants`).
 
 import type { UsagePaused } from "../mod/hooks/run-record.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, promptExpansionLine, sameExpansionFailure } from "./errors.ts";
 import type { Landed } from "./landing.ts";
 
 export type Queue<T> = {
@@ -338,13 +338,18 @@ const createDependants = <T extends { id: string }, B>(
 /**
  * Why a run stopped. A plan limit names the ticket whose agent hit it; a usage limit carries the
  * probe's line; `tampered` is a `.git` check that failed (after a pipeline, or the landing
- * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`).
+ * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`); `setup problem`
+ * is the cleaned line of the prompt-expansion error that crashed `SETUP_CRASHES` tickets alike.
  */
 export type StopCause =
   | { kind: "plan limit"; ticket: string; resets?: string }
   | { kind: "usage limit"; line: string }
   | { kind: "tampered"; error: unknown }
-  | { kind: "host failed"; error: unknown };
+  | { kind: "host failed"; error: unknown }
+  | { kind: "setup problem"; line: string };
+
+/** How many tickets crash with the same prompt-expansion error before the run starts no more: the second shows it is not the ticket's. */
+export const SETUP_CRASHES = 2;
 
 /**
  * Each kind, once: whether it is a safety stop (nothing more lands - the repo is in a state no
@@ -357,6 +362,7 @@ export const STOP_KINDS = {
   "host failed": { safety: true, rank: 1 },
   "plan limit": { safety: false, rank: 2 },
   "usage limit": { safety: false, rank: 3 },
+  "setup problem": { safety: false, rank: 4 },
 } as const satisfies Record<StopCause["kind"], { safety: boolean; rank: number }>;
 
 /**
@@ -616,6 +622,8 @@ export type Change<G, O, B = unknown> =
    * closing summary may name a more severe one.
    */
   | { kind: "stopped landing"; cause: StopCause }
+  /** Tickets crashed alike expanding their prompt: the run starts no more, told once, with the cleaned error line. */
+  | { kind: "setup problem"; line: string }
   /** The pipelines are idle and greens wait: the run is landing the `at`th of `of`. */
   | { kind: "landing"; at: number; of: number }
   /** How many sandbox slots the run could use now, told whenever the count changes (`demand` in `createSchedule`). */
@@ -1221,6 +1229,18 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
           return end(g.issue, { kind: "crashed", error, attempts: attempts.get(g.issue) ?? 1, green: g });
         },
       });
+      // The tickets that crashed expanding their prompt, by the failure: the same one for SETUP_CRASHES tickets is the
+      // setup's. The stop holds before the second ticket's ending is told, so nothing starts in between.
+      const setupCrashes: { line: string; ids: Set<string> }[] = [];
+      const noteSetupCrash = (id: string, error: unknown) => {
+        const line = promptExpansionLine(error);
+        if (line === undefined || stop.causes.some((c) => c.kind === "setup problem")) return;
+        const same = setupCrashes.find((c) => sameExpansionFailure(c.line, line)) ?? (setupCrashes.push({ line, ids: new Set() }), setupCrashes.at(-1)!);
+        same.ids.add(id);
+        if (same.ids.size < SETUP_CRASHES) return;
+        stop.add({ kind: "setup problem", line });
+        tell({ kind: "setup problem", line });
+      };
       const last = () => stop.startsNothing || (pipelines.size === 0 && !waits.waitsForFlight && !hold?.size);
 
       // An attempt that does not begin: the ticket's first landing stands, if it had one.
@@ -1370,6 +1390,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               // Its agent died of the plan's limit: nothing failed, the ticket was cut short - not begun, and runnable again.
               const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
               if (limit) return await end(t.id, { kind: "not begun", why: limit, cutShort: true });
+              noteSetupCrash(t.id, r.error);
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
             }
             case "stopped":
