@@ -464,7 +464,9 @@ comments whose blockers are all closed (stale). `sandcastle queue` and `sandcast
 and `sandcastle blockers` lists, the queued tickets a blocker would hold for good - one that does
 not exist, tickets that wait for each other, a Linear blocker that cannot be read - a
 `Blocked by ENG-42` whose key `blockers.linear` does not name, which is ignored, and blockers listed
-under a `## Blocked by` heading, which are not read.
+under a `## Blocked by` heading, which are not read. They also name a queued spec that a queued
+child ticket names under `## Parent`: a run would implement the whole spec as one ticket beside its
+children, so unqueue the spec.
 
 | Named in the body | Waits until | Enable |
 |---|---|---|
@@ -1265,7 +1267,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle queue [--json]` | The queue and what holds each ticket back, from whichever tracker the project uses. The status view reads the `--json` form | ➖ no |
 | `sandcastle queue --lint` | The queue's shape before a run: the longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets that touch a protected path (always held for a human merge), `Touches:` paths absent from the base branch, blocker problems (a blocker listed under a `Blocked by` heading, which is not read, among them, and a queued spec that a queued child names under `## Parent`, which a run would implement whole beside its children) and a rough estimate. Advice only | ➖ no |
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. On GitHub it also reminds you to give the label search a few seconds before `sandcastle run`. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
-| `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key, a list under a `Blocked by` heading). Reads GitHub, and Linear if configured | ➖ no |
+| `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key, a list under a `Blocked by` heading), and a queued spec that a queued child names under `## Parent`. Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight [--api-key]` | One "Reply OK" from every model, in the project image. Asks first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 yes, briefly |
 | `sandcastle run [--detach] [--api-key] [--accept-git-config]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)); `--accept-git-config` takes the shared `.git`'s program and network keys, hooks and modules, as they are now, as your own after a run's start refused them ([Safety model](#-safety-model)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code (1 when the merged base ended red); with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
