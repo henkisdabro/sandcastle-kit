@@ -59,6 +59,11 @@ This continues SKILL.md: run its "Before every action" first.
      allows it. After a clean end the start itself takes a new plain https or ssh remote, a hooks
      path in a tracked directory of the repo and a hook manager's hook files, printing a `Took as
      your own` line for each; quote those lines, there is nothing to answer.
+   - **A refused start naming `.git/index.lock` or `.git/MERGE_HEAD`.** `NOT STARTED: git left
+     something half-done in this repo` means a lock file or an unfinished merge that `git status`
+     does not show. Check that no git process is running (`ps`), then remove the lock or run
+     `git merge --abort`, as the message says for each file - after telling the user, since it is their repo.
+     A landing that cannot undo its own merge stops a run with the same files named.
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
@@ -177,6 +182,8 @@ This continues SKILL.md: run its "Before every action" first.
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent: say which, and still do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
+      A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)
+      says the VM ran short of memory at that pool size: relay it with the pass it names and its fix.
       If it reads `ended early`, `ended without a clean exit` (a crash, a killed process) or
       `stopped by` (`sandcastle stop`, Ctrl-C: a person ended it), say that first: the summary is partial, and the tickets it cut short are listed
       under Runnable now for the next `sandcastle run` to pick up.

@@ -4,6 +4,14 @@ Every step is a check that is safe to repeat, so it does not matter which kit ve
 was set up with. Every change to the project or the user's machine is a **proposal**: show it, and
 apply it once the user agrees.
 
+A proposal the user declines leaves nothing in the project for its check to find, so the project's
+update record keeps it: `declined` in `.sandcastle/.run/kit-updated`, from a step's key (the bold
+key beside each proposal below) to the release it was declined at. Before proposing, read it
+(`cat .sandcastle/.run/kit-updated` from the project's root; no file, no `declined` field or a
+plain commit hash means none declined). For a declined key, say in one line that the user declined
+it at that release and may ask for it now, and do not ask. Step 4 records this update's declines.
+Declining is not skipping: every step still runs its check, and only the asking is left out.
+
 1. **The kit.** Its location is doctor's first line. If `git -C <kit> status --porcelain` shows
    local changes, stop and tell the user - never discard them. Then run `sandcastle doctor` and
    look for its `warn N sandcastle run(s) is/are live on this machine` block before pulling: a live run
@@ -17,7 +25,7 @@ apply it once the user agrees.
      22.18 (or has type stripping turned off in `NODE_OPTIONS`). Tell them, propose Node 24 LTS
      through whatever installed their Node (doctor's FIX names the usual ones), and go on once
      `sandcastle doctor` runs.
-   - If doctor lists `opt  Herdr plugin and sidebar rows`, recommend the kit's Herdr plugin: run
+   - **`herdr-plugin`**: if doctor lists `opt  Herdr plugin and sidebar rows`, recommend the kit's Herdr plugin: run
      `sandcastle herdr configure` (outside a terminal it prints what it would add and stops), show
      the user that block, and once they agree run it again with `--yes`. It edits Herdr's own
      config, not the project, so it is theirs to decline.
@@ -30,7 +38,7 @@ apply it once the user agrees.
      finds none: the block was written by an older kit), run `sandcastle herdr configure --yes`
      once: it replaces its own block, and the sidebar then shows the plan's usage under a run. It is
      optional, and the block is replaced either way, so running it again is safe.
-   - If doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
+   - **`claude-mod`**: if doctor lists `opt  Claude Code mod` with an `ln -sfn` command, recommend the kit's mod: it
      shows a live run above the prompt, says when a ticket needs the user, and tells the session
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the
      README's "The Claude Code mod" says what it reads), so show them doctor's command and run it
@@ -64,7 +72,7 @@ apply it once the user agrees.
       images, and the hook check against them.
       If it refuses the config instead (`unknown key`, `must be ...`: a typo or a wrong type that
       older versions ignored), fix the key it names - it suggests the nearest real one - and run
-      it again.
+      it again. A layer step that fails with `claude: not found` or `codex: not found` is step 17's.
       Fix a `HOOK FAIL` as in init.md step 4. Then `sandcastle gates` (no model calls): a new image
       can turn a gate red or green on base. Fix a red gate as in init.md step 6. It also runs the
       repo's `pre-commit` and `commit-msg` hooks in the sandbox: a refused hook means the tool it
@@ -87,7 +95,7 @@ apply it once the user agrees.
       queue.md's "Writing a ticket body" shows (and, for an unlabelled ticket, adding the queue
       label - only if its spec is otherwise closed). If the project tracks work in Linear or task
       files, check `blockers` in its config covers them.
-   5. **Unproven guards.** If `sandcastle lean` warns that `PreToolUse` guards are kept with no
+   5. **Unproven guards** (**`hook-tests`**). If `sandcastle lean` warns that `PreToolUse` guards are kept with no
       `hookTests`, propose tests as in init.md step 4, then `sandcastle gates`.
    6. **Ignored paths.** If `.sandcastle/.gitignore` lacks any of `.env`, `logs/`, `worktrees/`,
       `.run/`, `triage/`, append the missing ones (commit it with the other project changes in
@@ -96,11 +104,11 @@ apply it once the user agrees.
    7. **Leftovers.** `git branch --list 'agent/*'` and `git worktree list`: if either holds
       entries no run is using, show them and offer `sandcastle clean` (never `--all` without a
       yes).
-   8. **Generated files.** If a gate regenerates committed files (the README's "A gate for
+   8. **Generated files** (**`generated`**). If a gate regenerates committed files (the README's "A gate for
       generated files" recipe, or any gate that runs a build and diffs its output) and `generated`
       is not set in `.sandcastle/config.ts`, propose declaring those paths with the command that
       writes them.
-   9. **Gates and the kit's tokens.** Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
+   9. **Gates and the kit's tokens** (**`gate-token`**). Gates run without `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and
       `ANTHROPIC_API_KEY`. Run `git grep -nE 'GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY'`
       in the project: if a gate's command or a test it runs reads one, it sees nothing. Propose
       giving that test its own variable in `.sandcastle/.env` (a token scoped to what the test
@@ -108,10 +116,10 @@ apply it once the user agrees.
    10. **Chains and overlaps.** Run `sandcastle queue --lint` (read-only, no model calls).
        - A `Blocked by` chain of queued tickets drains in one run whatever the autonomy level. If
          the lint shows tickets that share an unmergeable file or are likely to conflict, and
-         `autonomy` is unset, suggest `autonomy: "drain"`: it re-runs conflicted tickets, and those
+         `autonomy` is unset, suggest `autonomy: "drain"` (**`autonomy-drain`**): it re-runs conflicted tickets, and those
          they release, in further turns and names why it stops. It spends more per
          `sandcastle run`.
-       - If queued tickets have no `Touches:` line, say what that costs: a run holds a ticket back
+       - **`touches-lines`**: if queued tickets have no `Touches:` line, say what that costs: a run holds a ticket back
          for a file git cannot merge that another ticket in flight changes, read from each
          ticket's branch and `Touches:` line. A ticket without the line is never held back at the
          start, and holds another back only once its own branch has such a file. Offer to add the lines (queue.md's "Writing a ticket body") to the
@@ -131,7 +139,7 @@ apply it once the user agrees.
        `pnpm config set store-dir /home/agent/.pnpm-store` line from `setup`: the kit resolves the
        host's store-dir with `pnpm store path` and adds both. Leave any other mount alone. Then
        `sandcastle gates`.
-   13. **API credits.** If `sandcastle doctor`, from the project's root, prints a `warn API
+   13. **API credits** (**`api-key`**). If `sandcastle doctor`, from the project's root, prints a `warn API
        credits` line, an `ANTHROPIC_API_KEY` reaches this project's sandboxes, and Claude Code
        spends it before any `CLAUDE_CODE_OAUTH_TOKEN`: runs bill API credits. Tell the user, naming
        the file the line names; that every run now asks first, and that a run with no terminal
@@ -139,7 +147,7 @@ apply it once the user agrees.
        `SANDCASTLE_API_KEY=1`). If they meant to spend their subscription, propose removing the key
        from that file; add `--api-key` to anything that starts runs only on their explicit yes to
        billing API credits.
-   14. **Upgrading lines.** If `.sandcastle/config.ts` sets `changelog: true` and the project's
+   14. **Upgrading lines** (**`upgrading-line`**). If `.sandcastle/config.ts` sets `changelog: true` and the project's
        rules file names `Added:`, `Changed:` or `Fixed:` but not `Upgrading:`, propose adding a
        sentence there: a change an existing project must act on gets a line starting `Upgrading:`.
        Without it, agents following those rules never suggest one.
@@ -152,10 +160,26 @@ apply it once the user agrees.
        project root, `.sandcastle/` or `.git`, and the config no longer loads. Tell the user which
        entry the line names, and propose removing it or pointing it at a directory elsewhere (a
        cache directory under the project is fine). Then `sandcastle gates`.
+   17. **Layer steps that call the agents.** Claude Code and Codex are no longer in the base image:
+       the kit copies them onto the project's image after the layer named by `dockerfile` is built.
+       Read that file (skip this step when the config names none) for a `RUN` step, continuations
+       joined, that runs `claude` or `codex` (a plugin install, a login, a version check). It
+       finds neither, and `sandcastle build` fails at that step with `not found`. For each, propose
+       moving the command to an entry of `setup` in `.sandcastle/config.ts`, which runs in the
+       finished image before the agents, or dropping it when it only checked a version. The base
+       no longer puts `~/.local/bin` on `PATH` either: a `RUN` step that calls a tool an earlier
+       step installed there (`uv`, `pipx`) by its bare name fails the same way; propose its full
+       path, `/home/agent/.local/bin/<tool>`. Then `sandcastle build` and `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
-   listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
-   that changed, by the repo's own rules, and report: kit version before and after, what changed
-   for this project, and what the user decided.
+   listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
+   <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated
+   --declined claude-mod,autonomy-drain`): it records them at the kit's release and keeps the ones
+   declined before. Commit any project file that changed, by the repo's own rules, and report:
+   this project's release before and after (`sandcastle updated` prints it as
+   `this project: <recorded release> -> <kit version now>`, or says there was no earlier record:
+   say so, do not substitute the kit's version before the pull, which another session may already
+   have moved), what changed for this project, what the user decided, and in one line
+   every key now declined (earlier ones too), so they know what to ask for.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every
    harness, but a session that was already open keeps the skill it loaded at its start (and a mod
    linked in step 1 loads only in a new session). Tell the user to start a new session (Claude

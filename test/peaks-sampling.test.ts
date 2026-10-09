@@ -51,6 +51,8 @@ const kernel = (stat = true) => {
   const k = { peak: 100, anon: 10, stat, reads: 0 };
   const answer = (cmd: string) => {
     if (cmd.includes("memory.peak")) return { exitCode: 0, stdout: `${k.peak * MIB}\n`, stderr: "" };
+    // No PSI in this fake kernel: a read of it must not be taken for the gate command (see test/memory-pressure.test.ts).
+    if (cmd.includes("memory.pressure")) return { exitCode: 1, stdout: "", stderr: "No such file" };
     if (cmd.includes("memory.stat")) {
       k.reads++;
       return k.stat ? { exitCode: 0, stdout: `file 999999999\nanon ${k.anon * MIB}\nkernel 4096\n`, stderr: "" } : { exitCode: 1, stdout: "", stderr: "No such file" };

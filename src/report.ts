@@ -19,13 +19,14 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
+import { PRESSURE_WARN_FULL } from "./peaks.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
-import { LANDING_HOLD } from "./ledger.ts";
-import { STRAY_NOTE_START } from "./resolution.ts";
+import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
+import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -49,6 +50,8 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
+  /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
+  pressure?: { some: number; full: number; where: string };
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
@@ -74,6 +77,8 @@ export type Facts = {
   earlierHeld?: Record<string, string>;
   /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
   heldResolutions?: string[];
+  /** Tickets whose recorded outcome (any run) is a branch the kit could not re-create on a rewritten base: its own commits are rebuilt on the base by hand, never merged as it stands (its old base is in the branch's history). */
+  heldRewritten?: string[];
   keptWorktrees: { issue: string; path: string }[];
   /**
    * Every other worktree left under `.sandcastle/worktrees/`, from any earlier run: `merged` is `clean`'s own rule for its branch
@@ -87,6 +92,8 @@ export type Facts = {
   stopped?: string;
   /** The stop's cause in a few words, when it was the `.git` guard's: tells a moved base from any other change. */
   stoppedWhat?: string;
+  /** The prompt-expansion error that crashed tickets alike, so the run started no more: a setup problem, not the tickets'. */
+  setupProblem?: string;
   /** The reason the follow-ups were withheld from the tracker, said once for the set. */
   followUpsWithheld?: string;
   /** How a person ended the run (`sandcastle stop`, Ctrl-C, a signal): not a crash, though its exit code is not 0. */
@@ -281,6 +288,30 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
   return total ? { total, byModel } : undefined;
 };
 
+/**
+ * One run's highest memory pressure from timings.jsonl text: the largest `full` and `some` of any line of the run (a
+ * gate pass's, src/peaks.ts), and where the largest `full` was read (`ticket 12's gates`, or the step's name).
+ */
+export const pressureFromTimings = (text: string, runId: string): { some: number; full: number; where: string } | undefined => {
+  let found: { some: number; full: number; where: string } | undefined;
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; pressureSome?: unknown; pressureFull?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId) continue;
+    const some = typeof line.pressureSome === "number" && line.pressureSome > 0 ? line.pressureSome : 0;
+    const full = typeof line.pressureFull === "number" && line.pressureFull > 0 ? line.pressureFull : 0;
+    if (!some && !full) continue;
+    const phase = typeof line.phase === "string" ? line.phase : "a pass";
+    const where = typeof line.issue === "string" || typeof line.issue === "number" ? (line.issue === "" ? phase : `ticket ${line.issue}'s ${phase}`) : phase;
+    found = { some: Math.max(found?.some ?? 0, some), full: Math.max(found?.full ?? 0, full), where: !found || full > found.full ? where : found.where };
+  }
+  return found;
+};
+
 /** The phases of a ticket's timings lines that are a pass of it: its sandbox's setup is not one. */
 export const PASS_PHASES = ["implement", "resolve", "review", "cross-review", "gates", "repair", LANDING_GATES] as const;
 
@@ -443,9 +474,13 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   // Matched by its own wording (`needs a human: conflict resolution changed ...`, what `heldResolution` records; the files after it vary, so no whole-line compare): a hold in any other
   // words (an older kit's, a protected path's) keeps the hand merge, which `sandcastle land` would refuse or skip the review of.
   const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
+  // Likewise by its own wording (`rewrittenNote`): merged by hand, such a branch would bring back the commits the rewrite removed.
+  const heldRewritten = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(REWRITTEN_NOTE_START)).map(([id]) => id);
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
-  const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
+  const timingsText = !earlier && existsSync(timingsFile) ? readFileSync(timingsFile, "utf8") : undefined;
+  const timed = timingsText ? tokensFromTimings(timingsText, run.startedAt) : undefined;
+  const pressure = timingsText ? pressureFromTimings(timingsText, run.startedAt) : undefined;
 
   return {
     base,
@@ -459,6 +494,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     tokens: run.tokens,
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
+    ...(pressure ? { pressure } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -473,12 +509,14 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     standing,
     earlierHeld,
     heldResolutions,
+    heldRewritten,
     keptWorktrees: run.keptWorktrees ?? [],
     earlierKept: earlier ? undefined : earlierKeptWorktrees(project, run, tickets, live),
     gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     stoppedWhat: run.stoppedWhat,
+    setupProblem: run.setupProblem,
     followUpsWithheld: run.followUpsWithheld,
     stoppedBy: run.stoppedBy,
     changed,
@@ -820,6 +858,8 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
       // A held conflict resolution is landed with `sandcastle land`, which gates the merge; a hand merge runs no gate.
       const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: git merge --no-ff agent/issue-${id}`;
+      // Its history holds the old base, which a merge or a plain log would show as the branch's own: only the commits since the fork are its work.
+      if (f.heldRewritten?.includes(id)) return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p --no-merges agent/issue-${id} ^${f.base} ^<old ${f.base}>   rebuild: git rebase --onto ${f.base} <old ${f.base}> agent/issue-${id}   (<old ${f.base}> is named above)`];
       return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   ${how}`];
     }),
     ...o.gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
@@ -884,8 +924,10 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   // The last turn's own comes first in `render`; an earlier turn's has no such place, so it leads its own steps.
   if (carried) next.push(...uncommittedSteps(o));
   const resolutions = o.heldWork.filter((id) => f.heldResolutions?.includes(id));
-  const merges = o.heldWork.length - resolutions.length;
+  const rewritten = o.heldWork.filter((id) => f.heldRewritten?.includes(id));
+  const merges = o.heldWork.length - resolutions.length - rewritten.length;
   if (merges) next.push(`Review and merge the ${merges} held branch(es) (commands above).`);
+  if (rewritten.length) next.push(`Rebuild the ${rewritten.length} held branch(es) on the rewritten ${f.base} (commands above), then \`sandcastle requeue <ticket>\` for a run to review and land ${rewritten.length === 1 ? "it" : "each"}.`);
   if (resolutions.length) next.push(`Check and land the ${resolutions.length} held conflict resolution(s) (commands above): \`sandcastle land <ticket>\` gates the merge.`);
   if (o.gone.length) next.push(`Decide ${list(o.gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
   if (o.handedBack.length) next.push(`Read the agent's comment on ${list(o.handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
@@ -991,6 +1033,9 @@ export const render = (f: Facts, plain = false): string => {
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
         : `Merged ${f.base} re-gated: ${sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
+  if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
+    out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
+  }
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
@@ -1001,6 +1046,7 @@ export const render = (f: Facts, plain = false): string => {
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   out.push(...gapLines(f, o, carried));
   if (f.stopped) out.push(f.stopped);
+  if (f.setupProblem) out.push(`Stopped starting tickets: ${setupProblemWords(f.setupProblem)}.`);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
   // Done
@@ -1159,11 +1205,14 @@ export const render = (f: Facts, plain = false): string => {
   // Local state
   const earlier = f.earlierHeld ?? {};
   const isResolution = (b: string) => !!f.heldResolutions?.includes(b.replace(/^agent\/issue-/, ""));
+  const isRewritten = (b: string) => !!f.heldRewritten?.includes(b.replace(/^agent\/issue-/, ""));
   // The landing hold's own text is the generic wording: said once, not again as the reason.
   const earlierWords = (b: string) =>
     isResolution(b)
       ? `its conflict resolution was held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
-      : `held for a human merge in an earlier run${earlier[b] && earlier[b] !== LANDING_HOLD ? `: ${earlier[b]}` : ""}`;
+      : isRewritten(b)
+        ? `held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
+        : `held for a human merge in an earlier run${earlier[b] && earlier[b] !== LANDING_HOLD ? `: ${earlier[b]}` : ""}`;
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
@@ -1230,7 +1279,12 @@ export const render = (f: Facts, plain = false): string => {
   next.push(...ticketSteps(f, o, false));
   // The earlier turns' steps follow, each marked: only the last turn's summary says them, and its own were no help for those tickets.
   for (const c of carried) next.push(...ticketSteps(c.facts, c.o, true).map((n) => n.replace(/\.$/, ` (turn ${c.turn}).`)));
-  const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
+  // Crashed alike expanding their prompt: the setup's fault, so no step asks for a comment on a ticket.
+  const setupCrashed = f.setupProblem ? fixing.filter((id) => f.tickets[id].state === "crashed" && sameExpansionFailure(f.tickets[id].note ?? "", f.setupProblem!)) : [];
+  if (f.setupProblem) {
+    next.push(`Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then \`sandcastle run\` again for ${list([...setupCrashed, ...skipped])} - the tickets themselves are fine.`);
+  }
+  const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)) && !setupCrashed.includes(id));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.
   // `sandcastle land` merges and gates the way a run does; a hand-written merge skips both.
@@ -1238,7 +1292,7 @@ export const render = (f: Facts, plain = false): string => {
   // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} ticket(s) this run unblocked: \`sandcastle run\`.`);
-  if (skipped.length) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
+  if (skipped.length && !f.setupProblem) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (parked.length + cut.length + unstarted.length) {
@@ -1248,11 +1302,12 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   // A red base is red for whoever pulls it too.
-  const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
+  const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules before the next run - not after a plain \`git pull --rebase\`, which flattens this run's landing merges into copies (\`--rebase=merges\` keeps them): a branch carried to the next run that merged the old ${f.base} is then re-created from its own commits and reviewed in full.`) : undefined;
   if (push) next.push(push);
   // `sandcastle land` refuses a branch held for a protected path or a large file, and plain `clean` keeps an unmerged branch: the person merges it or deletes it.
-  const heldEarlier = f.standing.filter((b) => b in earlier && !isResolution(b));
+  const heldEarlier = f.standing.filter((b) => b in earlier && !isResolution(b) && !isRewritten(b));
   const resolvedEarlier = f.standing.filter((b) => b in earlier && isResolution(b));
+  const rewrittenEarlier = f.standing.filter((b) => b in earlier && isRewritten(b));
   if (resolvedEarlier.length) {
     const one = resolvedEarlier.length === 1;
     const b = one ? resolvedEarlier[0] : "<branch>";
@@ -1260,6 +1315,15 @@ export const render = (f: Facts, plain = false): string => {
     next.push(
       `Check the resolution on ${resolvedEarlier.join(", ")}, held in an earlier run: \`git log -p ${f.base}..${b}\`; if no other ticket's lines were lost, \`sandcastle land ${n}\` lands ${one ? "it" : "each"} with the gates; ` +
         `if some were, fix the branch first, or \`sandcastle requeue ${n} --note "..."\`.`,
+    );
+  }
+  if (rewrittenEarlier.length) {
+    const one = rewrittenEarlier.length === 1;
+    const b = one ? rewrittenEarlier[0] : "<branch>";
+    const n = one ? rewrittenEarlier[0].replace(/^agent\/issue-/, "") : "<n>";
+    next.push(
+      `Rebuild ${rewrittenEarlier.join(", ")} on the rewritten ${f.base}, held in an earlier run: merged as ${one ? "it stands" : "they stand"}, ${one ? "it" : "each"} would bring back what the rewrite removed. ` +
+        `\`git rebase --onto ${f.base} <old ${f.base}> ${b}\` (the old ${f.base} is named in the hold note), then \`sandcastle requeue ${n}\` for a run to review and land ${one ? "it" : "each"}.`,
     );
   }
   if (heldEarlier.length) {
@@ -1384,7 +1448,7 @@ export const changelogSince = (project: Project, since?: string): string => {
     const run = parseRecord(text);
     if (run && typeof run.startedAt === "string" && !Number.isNaN(Date.parse(run.startedAt))) runs.set(run.startedAt, run);
   }
-  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; why?: unknown }>();
+  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; why?: unknown; none: boolean }>();
   for (const run of [...runs.values()].sort((a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!))) {
     if (run.dryRun || (after && Date.parse(run.startedAt!) <= Date.parse(after))) continue;
     for (const [id, t] of Object.entries(readTickets(run))) {
@@ -1392,8 +1456,8 @@ export const changelogSince = (project: Project, since?: string): string => {
       const before = landed.get(id);
       const lines = Array.isArray(t.changelog) ? t.changelog.filter((l): l is string => typeof l === "string") : [];
       // The latest run's lines; an earlier run's stand only while no later one gave any.
-      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, why: t.changelogDroppedWhy } : before;
-      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, why: kept.why });
+      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, why: t.changelogDroppedWhy, none: t.changelogNone === true } : before;
+      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, why: kept.why, none: kept.none });
     }
   }
   // Tickets landed with `sandcastle land` after a run stopped: no run record says `merged`, but the kit's merge subject is on
@@ -1407,14 +1471,20 @@ export const changelogSince = (project: Project, since?: string): string => {
     const records = [heads[id], ...[...runs.values()].filter((run) => !run.dryRun).sort((x, y) => Date.parse(y.startedAt!) - Date.parse(x.startedAt!)).map((run) => readTickets(run)[id])].filter((r) => !!r);
     const linesOf = (r: { changelog?: unknown }) => (Array.isArray(r.changelog) ? r.changelog.filter((l): l is string => typeof l === "string") : []);
     const source = records.find((r) => linesOf(r).length) ?? records.find((r) => r.changelogDropped);
-    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0, why: source?.changelogDroppedWhy });
+    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0, why: source?.changelogDroppedWhy, none: !source && records.some((r) => r.changelogNone === true) });
   }
   const ids = [...landed.keys()];
   const out = [`${ids.length} ticket(s) landed in runs started after ${ref ? `${ref} (${after})` : "the start of the history"}.`];
   const all = ids.flatMap((id) => landed.get(id)!.lines.map((line) => ({ id, line })));
   out.push(...changelogLines(all));
   for (const id of ids.filter((id) => landed.get(id)!.dropped)) out.push(...droppedLines(refOf(id), landed.get(id)!.dropped, landed.get(id)!.why));
-  const bare = ids.filter((id) => !landed.get(id)!.lines.length);
+  // A ticket the agents said needs no entry is not one to write from the ticket.
+  const needNone = ids.filter((id) => !landed.get(id)!.lines.length && landed.get(id)!.none);
+  if (needNone.length) {
+    out.push("No entry needed (the agents said none):");
+    for (const id of needNone) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
+  }
+  const bare = ids.filter((id) => !landed.get(id)!.lines.length && !landed.get(id)!.none);
   if (bare.length) {
     out.push("No suggested line - write from the ticket:");
     for (const id of bare) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);

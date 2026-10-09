@@ -54,7 +54,7 @@ comments, and the gates can prove it.
    | Human-only - console, device, secret, production, legal | the hold label - `ready-for-human`, or what `docs/agents/triage-labels.md` maps it to (a run never takes a ticket carrying it, nor the older `needs-human`) - with a comment saying why |
    | Blocked by another ticket | label it, with a blocker line in the ticket body (see "Writing a ticket body"): a run skips it until the blocker is closed |
    | Already fixed or false | comment the evidence; ask before closing |
-   | Epic or too big for one agent run | propose child tickets; ask before creating them |
+   | Epic or too big for one agent run | propose child tickets; ask before creating them. A spec split into child tickets is not queued itself - a run would implement the whole spec as one ticket beside its children - and a spec published by `/to-spec` comes already labelled, so take the label off (`sandcastle queue` and `queue --lint` warn about a queued parent that a queued child names under `## Parent`) |
    | Parked | retitle `PARKED: ...` with the revival condition in a comment, after asking |
 
 3. **Ask in batched rounds**, from the files in `.sandcastle/triage/`, with the harness's
@@ -89,7 +89,7 @@ comments, and the gates can prove it.
 Whenever this action or the audit writes or rewrites a ticket body, the run reads these lines
 from it, and only in plain text: a line inside a code block or backticks is not read.
 
-- **Blocker line.** GitHub: `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
+- **Blocker line.** GitHub: a native "blocked by" edge holds a ticket as a body line does, so either is enough; otherwise `Blocked by #12, #14` in the ticket *body* (`gh issue edit`), with the
   refs on the same line (a colon after `Blocked by` is read too: `Blocked by: #12, #14` works) - a
   list under a "Blocked by" heading (`## Blocked by`, then `- #12`) is not read, nor is a comment.
   Files tracker: a `Blocked by: NN, NN` line in the ticket's header block, next to `Status:`,

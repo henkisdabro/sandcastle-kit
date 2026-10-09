@@ -28,8 +28,8 @@ import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
-import { dirtyFiles, readHeads } from "./run.ts";
-import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
+import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
+import { AGENT_COMMITTER, errorLine, sh, staleBaseParents } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
@@ -439,6 +439,9 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   }
   // The gates vouched for one commit. Anything added after it is ungated.
   if (sh("git", ["rev-parse", o.branch], root) !== o.head) return { kind: "skipped", reason: `${o.branch} moved after its gates passed` };
+  // The pipeline re-creates a branch that merged a base since rewritten before it runs a gate (`rebuildOnBase`); one that
+  // gets here was rewritten after, or the check could not run. Merging it brings back commits the base lost.
+  if (staleBaseParents(base, o.branch, root).length) return { kind: "skipped", reason: `${o.branch} merged a ${base} that has since been rewritten - the next run re-creates it on ${base}'s tip` };
   // A warning, never a hold: the Touches line is written by an agent. A tracker or git failure
   // costs the warning only.
   let overrun: string[] = [];
@@ -496,18 +499,34 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       // its wording varies by version, so the reason comes from the working tree. A branch
       // that holds the base cannot conflict: this is a dirty index, a full disk. Both are host
       // git calls (`git status` can run an fsmonitor), so they are a write: checked first.
-      const dirty = await host.write(() => {
+      const { dirty, left } = await host.write(() => {
         try {
           abortLanding(root, project.land);
         } catch {
-          /* nothing to abort */
+          // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
+        }
+        let left: { file: string; what: string }[] = [];
+        try {
+          left = gitLeftovers(root);
+        } catch {
+          left = [];
         }
         try {
-          return dirtyFiles(root);
+          return { dirty: dirtyFiles(root), left };
         } catch {
-          return [];
+          return { dirty: [], left };
         }
       });
+      // A landing that cannot undo its own merge leaves the repo half-merged: every landing after it would
+      // fail on that, as a fault of its own branch. The run stops here, naming the first cause.
+      if (left.length > 0) {
+        throw new LandingStop(
+          `${ref(o.issue)} left git half-done in ${root} and the landing could not undo it (${errorLine(error)}): ${left.map((l) => `${l.file} (${l.what})`).join(", ")}. ` +
+            `Nothing more lands. ${leftoverSteps(left)}`,
+          { what: `${ref(o.issue)} left a merge open`, detail: left.map((l) => l.file).join(", ") },
+          { cause: error },
+        );
+      }
       const reason =
         dirty.length > 0
           ? `working tree dirty: ${dirty.slice(0, 5).map((l) => l.slice(3)).join(", ")}${dirty.length > 5 ? ` and ${dirty.length - 5} more` : ""} - commit or stash, then run again`
@@ -847,6 +866,12 @@ export const reviewedCarriedLine = (who: string, head: string, requeued: boolean
 export const carriedMergeLine = (who: string, base: string, behind: number, requeued: boolean, regenerated?: { files: string[]; regen: string[] }) =>
   `${who}: merged ${base} (${behind} commit(s)) into its branch from ${carriedFrom(requeued)}` +
   (regenerated ? `; regenerated ${regenerated.files.join(", ")} with ${regenerated.regen.map((c) => `\`${c}\``).join(", ")}.` : ".");
+
+/** The line for a carried branch re-created on the base's tip because the base it merged was rewritten after (`rebuildOnBase`). */
+export const rebuiltLine = (who: string, base: string, r: { was: string; picked: number; dropped: number }) =>
+  `${who}: ${base} was rewritten after this branch merged it - the branch (${r.was.slice(0, 7)}) is re-created on ${base}'s tip from its ${r.picked} own commit(s)` +
+  (r.dropped ? ` (${r.dropped} more left out, ${base} has their work)` : "") +
+  ", and what its earlier review and gates vouched for no longer stands: the full implement, review and gates run.";
 
 /**
  * The review commits a requeued ticket's first attempt made, which stay on its branch when the

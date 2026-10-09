@@ -70,12 +70,35 @@ export const AGENT_COMMITTER = {
   GIT_COMMITTER_EMAIL: "agent@sandcastle.invalid",
 } as const;
 
+/**
+ * The base-side parents of the merge commits in `base..branch` that the base no longer holds: the kit
+ * merges the base into a carried branch on each re-run, and when the base is rewritten between runs (a
+ * `git pull --rebase` that flattens the landing merges into copies, a reset that drops a landing) the
+ * old base stays reachable through those merges. Everything of it the base lacks then reads as the
+ * branch's own work, and landing the branch brings it back: duplicates of what landed, or a commit
+ * someone removed on purpose. A parent is an ancestor of the base exactly when it is not in
+ * `base..branch`, so one `rev-list` answers for every merge. `git cherry` cannot: a commit a reset
+ * dropped has no copy on the base and reads as the branch's own. Empty for a base that only moved forward.
+ */
+export const staleBaseParents = (base: string, branch: string, cwd?: string): string[] => {
+  const commits = sh("git", ["rev-list", "--parents", `${base}..${branch}`], cwd).split("\n").filter(Boolean).map((l) => l.split(" "));
+  const unmerged = new Set(commits.map(([sha]) => sha));
+  return [...new Set(commits.flatMap(([, , ...joined]) => joined).filter((parent) => unmerged.has(parent)))];
+};
+
+/** The revisions of a branch's own commits: since the base, and not the old base a rewrite left reachable (`staleBaseParents`). */
+export const ownRange = (base: string, branch: string, cwd?: string) => [`${base}..${branch}`, ...staleBaseParents(base, branch, cwd).map((parent) => `^${parent}`)];
+
 // A branch's own commits since the base: merges are left out, because the kit
 // merges the base into a carried branch on each re-run and those merge-ins are
-// not the ticket's work. Only for reporting - "carried" and "nochange" count
-// every commit, merge or not.
+// not the ticket's work; nor is the old base a rewrite left behind them. Only
+// for reporting - "carried" and "nochange" count every commit, merge or not.
 export const ownCommits = (base: string, branch: string, cwd?: string) =>
-  Number(sh("git", ["rev-list", "--count", "--no-merges", `${base}..${branch}`], cwd));
+  Number(sh("git", ["rev-list", "--count", "--no-merges", ...ownRange(base, branch, cwd)], cwd));
+
+/** The same commits, oldest first (parents before children): what a branch is rebuilt from. */
+export const ownCommitList = (base: string, branch: string, cwd?: string): string[] =>
+  sh("git", ["rev-list", "--reverse", "--topo-order", "--no-merges", ...ownRange(base, branch, cwd)], cwd).split("\n").filter(Boolean);
 
 const WORKTREES = ".sandcastle/worktrees/";
 
@@ -531,10 +554,12 @@ export const credentials = (project: Project): Record<string, string> => {
 };
 
 // ---------------------------------------------------------------------------
-// Images: `sandcastle-base` for everyone, `sandcastle-<name>` layered on it
-// per project. Each tag is a hash of the Dockerfiles that made it, so a
-// changed pin rebuilds exactly what depends on it and nothing else does.
-// Both build with no context (Dockerfile on stdin): a project's .sandcastle/
+// Images: `sandcastle-base` for everyone, `sandcastle-agents` (Claude Code and
+// Codex) on it, `sandcastle-<name>` layered on the base per project, and
+// `sandcastle-<name>-run` last: that layer with the agents copied in. Each tag is a
+// hash of what made it, so a changed pin rebuilds exactly what depends on it
+// and nothing else does - a release moves the agents' tag and the last image's.
+// All build with no context (Dockerfile on stdin): a project's .sandcastle/
 // holds whole worktrees, which must never be sent to the Docker daemon.
 // ---------------------------------------------------------------------------
 
@@ -710,32 +735,74 @@ const prune = (repo: string, keep: string, now = Date.now()) => {
   }
 };
 
-/** The base image's tag and what it builds from, in one place so doctor finds the image `ensureImage` made. */
-export const baseImage = (versions: Pick<Versions, "claude" | "codex">) => {
+/** The repository of a project's layer; its final image is `<repo>-run`. */
+const projectRepo = (project: Pick<Project, "name">) => `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
+
+// The user ids every image of the kit is built with: they are part of each image's identity.
+const agentIds = () => ({ AGENT_UID: sh("id", ["-u"]), AGENT_GID: sh("id", ["-g"]) });
+
+/**
+ * The base image's tag and what it builds from, in one place so doctor finds the image `ensureImage` made.
+ * The agents' versions are not in it: Claude Code and Codex live in the agents image (`agentsImage`), so a
+ * release leaves this tag, and the project layer's tag that hashes it, where they were.
+ */
+export const baseImage = () => {
   const file = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
-  // The user ids and the agents' versions are baked into the image, so they are part of its identity:
-  // a release rebuilds once, and a Dockerfile that never changes still gets a new tag.
-  const ids = {
-    AGENT_UID: sh("id", ["-u"]),
-    AGENT_GID: sh("id", ["-g"]),
-    CLAUDE_CODE_VERSION: versions.claude,
-    CODEX_VERSION: versions.codex,
-  };
+  // The user ids are baked into the image, so they are part of its identity: a Dockerfile that never
+  // changes still gets a new tag on a machine with other ids.
+  const ids = agentIds();
   return { file, ids, tag: `sandcastle-base:${hash(file, ...Object.values(ids))}` };
 };
 
-/** The lock the base image's build, prune and tag, and the project layer built on it, are taken under, machine-wide. */
+/**
+ * The agents image: Claude Code and Codex, built FROM the base and shared by every project, copied into
+ * each project's image by `finalDockerfile`. A release moves this tag and nothing else. Its content does
+ * not depend on the base's, so a changed base keeps it.
+ */
+export const agentsImage = (versions: Pick<Versions, "claude" | "codex">) => {
+  const file = readFileSync(join(KIT, "docker/agents.Dockerfile"), "utf8");
+  const ids = { ...agentIds(), CLAUDE_CODE_VERSION: versions.claude, CODEX_VERSION: versions.codex };
+  return { file, ids, tag: `sandcastle-agents:${hash(file, ...Object.values(ids))}` };
+};
+
+/**
+ * The last step of a project's image: both CLIs copied from the agents image onto `parent` (the project's
+ * layer, or the base when it has none). Where they sit is what docker/agents.Dockerfile installs: Codex's
+ * package and its `bin` link (a relative symlink, so it resolves in /usr/local too) and Claude Code's
+ * ~/.local. A copy makes root-owned files unless told otherwise, hence `--chown` for the user's home. `USER`
+ * and `PATH` are set again because the layer may have changed `USER`, and the base no longer holds the
+ * `PATH` entry the CLI needs. Built from stdin like the others (no context), with the tags written into the text.
+ */
+const finalDockerfile = (parent: string, agents: string, ids: { AGENT_UID: string; AGENT_GID: string }) =>
+  [
+    `FROM ${parent}`,
+    `COPY --from=${agents} /opt/codex/lib/node_modules/@openai/codex /usr/local/lib/node_modules/@openai/codex`,
+    `COPY --from=${agents} /opt/codex/bin /usr/local/bin`,
+    `COPY --from=${agents} --chown=${ids.AGENT_UID}:${ids.AGENT_GID} /home/agent/.local /home/agent/.local`,
+    `USER ${ids.AGENT_UID}:${ids.AGENT_GID}`,
+    'ENV PATH="/home/agent/.local/bin:$PATH"',
+    "",
+  ].join("\n");
+
+/** The lock the build of the base, agents and project images, their prune and tag, are taken under, machine-wide. */
 export const BASE_LOCK = join(KIT_CACHE, "locks", "base-image.lock");
 
-/** `versions` is what the caller already resolved and showed; left out, they are resolved here. */
+/**
+ * The image every sandbox of a project starts from, built when missing (or all of it again with `force`):
+ * the base, the agents image, the project's layer on the base, and a final image that copies the agents'
+ * CLIs onto the layer. `versions` is what the caller already resolved and showed; left out, they are
+ * resolved here.
+ */
 export const ensureImage = async (project: Project, force = false, versions?: Versions): Promise<string> => {
-  const { file: baseFile, ids, tag: baseTag } = baseImage(versions ?? (await resolveVersions(project)));
-  // The base step and the project layer's build are one machine-wide critical section, for any base tag:
-  // projects share the images, and every project rebuilds after an update. Two builds of one tag race
-  // to `docker tag` an image the other is still making, and two tags (each project's Claude Code version
-  // is in it) have each prune the other's fresh image. The second waits, then finds the image built. The
-  // layer build is inside too: its `FROM` names the base tag, which another project's base build would
-  // otherwise prune before the layer's `docker build` resolved it.
+  const { file: baseFile, ids, tag: baseTag } = baseImage();
+  const agents = agentsImage(versions ?? (await resolveVersions(project)));
+  // The base step, the agents image, the project layer's build and the final image are one machine-wide
+  // critical section, for any base tag: projects share the images, and every project rebuilds after an
+  // update. Two builds of one tag race to `docker tag` an image the other is still making, and two tags
+  // (each project's Claude Code version is in the agents' tag) have each prune the other's fresh image. The
+  // second waits, then finds the image built. The layer build is inside too: its `FROM` names the base tag,
+  // which another project's base build would otherwise prune before the layer's `docker build` resolved it;
+  // so are the agents' build (FROM the base) and the final image's (FROM the layer, COPY from the agents).
   let waited = false;
   return withLock(
     BASE_LOCK,
@@ -745,7 +812,7 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       if (waited) console.log("The other sandcastle build of the base image is done.");
       if (force || !imageExists(baseTag)) {
         // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
-        // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
+        // Dockerfile text). Every image after it builds FROM a local one, which a pull would not find.
         await build(baseTag, baseFile, ids, force, "The base image fails most often on the network (a download or `apt-get`): check it, then `sandcastle build` again.");
         prune("sandcastle-base", baseTag);
       }
@@ -753,19 +820,35 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       // `latest` is only the default a layer's `ARG BASE` names; builds pass the hash.
       dockerCall(`tagging ${baseTag} as sandcastle-base:latest`, ["tag", baseTag, "sandcastle-base:latest"]);
 
-      if (!project.dockerfile) {
-        // Written by hand from the template, it does nothing until the config names it.
-        if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {
-          console.log('Not built: .sandcastle/Dockerfile - the config names no `dockerfile`. Add `dockerfile: ".sandcastle/Dockerfile"` to .sandcastle/config.ts to build it.');
+      if (force || !imageExists(agents.tag)) {
+        await build(agents.tag, agents.file, { BASE: baseTag, ...agents.ids }, false, "The agents image fails most often on the network (Claude Code's installer or npm): check it, then `sandcastle build` again.");
+        prune("sandcastle-agents", agents.tag);
+      }
+      noteUse(agents.tag);
+
+      let parent = baseTag;
+      if (project.dockerfile) {
+        const layerFile = readFileSync(join(project.root, project.dockerfile), "utf8");
+        const tag = `${projectRepo(project)}:${hash(baseTag, layerFile)}`;
+        if (force || !imageExists(tag)) {
+          await build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
+          prune(projectRepo(project), tag);
         }
-        return baseTag;
+        noteUse(tag);
+        parent = tag;
+      } else if (existsSync(join(project.root, ".sandcastle/Dockerfile"))) {
+        // Written by hand from the template, it does nothing until the config names it.
+        console.log('Not built: .sandcastle/Dockerfile - the config names no `dockerfile`. Add `dockerfile: ".sandcastle/Dockerfile"` to .sandcastle/config.ts to build it.');
       }
 
-      const layerFile = readFileSync(join(project.root, project.dockerfile), "utf8");
-      const repo = `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
-      const tag = `${repo}:${hash(baseTag, layerFile)}`;
+      // A release moves the agents' tag and leaves the parent's: this is the one image it rebuilds per project,
+      // and a copy layer takes seconds. The tag hashes the whole text, which names both tags: hashing only
+      // those, a kit that changed what this step copies or sets kept every project on the image without it.
+      const repo = `${projectRepo(project)}-run`;
+      const finalFile = finalDockerfile(parent, agents.tag, ids);
+      const tag = `${repo}:${hash(finalFile)}`;
       if (force || !imageExists(tag)) {
-        await build(tag, layerFile, { BASE: baseTag }, false, `Fix ${project.dockerfile}, then \`sandcastle build\` again.`);
+        await build(tag, finalFile, {}, false, "This step copies Claude Code and Codex onto the project's image; `sandcastle build --force` builds every image again.");
         prune(repo, tag);
       }
       noteUse(tag);
@@ -808,10 +891,25 @@ const withGitMaintenanceOff = (env: Record<string, string>): Record<string, stri
   return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + SANDBOX_GIT_MAINTENANCE_OFF.length) };
 };
 
+// The host's IANA zone name, resolved here and not read from `TZ`: macOS often has none set. A
+// sandbox has no `TZ` of its own, so its commits are dated `+0000` beside the host's merges in
+// local time; the base image has tzdata, so the name works without an image change. Nothing when
+// the host cannot name one: the sandbox then stays on UTC as before.
+export const hostTimeZone = (): string | undefined => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
-// Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`.
-export const sandboxEnv = (project: Project): Record<string, string> =>
-  withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER });
+// Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`,
+// so gates run in the host's zone too, not CI's usual UTC.
+export const sandboxEnv = (project: Project): Record<string, string> => {
+  const TZ = hostTimeZone();
+  return withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+};
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
 // branch's own `disableAllHooks` cannot switch the git guard off. A read-only *directory* mount

@@ -56,7 +56,7 @@ export const upgradingNotes = (changelog: string): string[] => {
  * the kit commit instead; its notes are read from the changelog there while git still has it.
  * Read, never rewritten: doctor changes nothing, and the next `sandcastle updated` writes the new form.
  */
-const readRecord = (root: string, kit: string): { version?: string; notes: string[] } | undefined => {
+const readRecord = (root: string, kit: string): { version?: string; commit?: string; notes: string[] } | undefined => {
   if (!existsSync(updateRecord(root))) return undefined;
   const text = readFileSync(updateRecord(root), "utf8").trim();
   if (text.startsWith("{")) {
@@ -67,10 +67,32 @@ const readRecord = (root: string, kit: string): { version?: string; notes: strin
     return undefined;
   }
   const then = text ? git(kit, ["show", `${text}:CHANGELOG.md`]) : undefined;
-  return then === undefined ? undefined : { notes: upgradingNotes(then) };
+  return then === undefined ? undefined : { commit: text, notes: upgradingNotes(then) };
 };
 
 const kitNotes = (kit: string) => upgradingNotes(readFileSync(join(kit, "CHANGELOG.md"), "utf8"));
+
+/**
+ * The release this project last updated at, from its update record (an older record's, from the
+ * kit's package.json at its commit); undefined when there is no record or it names no release. What
+ * `/sandcastle update` reports as "this project: <release> -> <kit now>": the kit's own pre-pull
+ * version is no use there, since another session may have pulled the kit already.
+ */
+export const recordedRelease = (root: string, kit = KIT): string | undefined => {
+  const record = readRecord(root, kit);
+  // A project last updated before records named their release would otherwise read as never updated.
+  if (record?.version || !record?.commit) return record?.version;
+  try {
+    const version = JSON.parse(git(kit, ["show", `${record.commit}:package.json`]) ?? "").version;
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `sandcastle updated` prints: the earlier recorded release (or that there was none) and the kit version now. Call before `markUpdated`, which replaces the record. */
+export const updatedLine = (before: string | undefined, now: string): string =>
+  `Recorded: this project is up to date with sandcastle-kit ${now} (this project: ${before ?? "no earlier record"} -> ${now}).`;
 
 /**
  * The Upgrading notes this project has not had: those in the kit's changelog and not in its update
@@ -85,10 +107,35 @@ export const pendingUpgrades = (root: string, kit = KIT): { recorded: boolean; s
   return { recorded: true, since: record.version, notes: now.filter((n) => !had.has(n)) };
 };
 
-/** Records every Upgrading note in the kit as acted on by this project. Returns the kit version. */
-export const markUpdated = (root: string, kit = KIT): string => {
+/**
+ * The update steps the user declined, each as the release it was declined at. A proposal the user
+ * turns down changes nothing in the project, so its check would find the same thing at every update;
+ * this is what the update action reads to name it in a line instead of asking again. Empty for no
+ * record, the older plain form (a kit commit) or a record without the field.
+ */
+export const declinedSteps = (root: string): Record<string, string> => {
+  if (!existsSync(updateRecord(root))) return {};
+  const text = readFileSync(updateRecord(root), "utf8").trim();
+  if (!text.startsWith("{")) return {};
+  try {
+    const declined = JSON.parse(text).declined;
+    if (declined === null || typeof declined !== "object" || Array.isArray(declined)) return {};
+    return Object.fromEntries(Object.entries(declined).filter((e): e is [string, string] => typeof e[1] === "string"));
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Records every Upgrading note in the kit as acted on by this project, keeps the steps declined
+ * before and adds `declined` at this release (a step declined again moves to it). Returns the kit version.
+ */
+export const markUpdated = (root: string, kit = KIT, declined: string[] = []): string => {
+  const release = kitRelease(kit);
+  const steps = { ...declinedSteps(root), ...Object.fromEntries(declined.map((key) => [key, release])) };
   mkdirSync(dirname(updateRecord(root)), { recursive: true });
-  writeFileSync(updateRecord(root), `${JSON.stringify({ version: kitRelease(kit), notes: kitNotes(kit) }, null, 2)}\n`);
+  const record = { version: release, notes: kitNotes(kit), ...(Object.keys(steps).length ? { declined: steps } : {}) };
+  writeFileSync(updateRecord(root), `${JSON.stringify(record, null, 2)}\n`);
   return kitVersion(kit);
 };
 
