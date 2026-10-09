@@ -92,6 +92,11 @@ This continues SKILL.md: run its "Before every action" first.
    and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output; the status
    view's bottom shows its last lines while the run is live.
 
+   Watching the run from a Claude Code session in the same checkout is safe: its own writes to
+   `.git/info/exclude` (a `/loop` tick or a scheduled wake-up adds its runtime block there) are not
+   watched by the guard. A commit, pull or merge on the base branch is another matter: use another
+   worktree for that until the run ends.
+
    For a user who wants the run in their own terminal, give them the attached command to run
    there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
    person's terminal alone in a Herdr tab it adopts that tab.
@@ -264,6 +269,9 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   it lists and ask whether they are theirs before offering a re-run; for a changed `.git/config`
   or `.git/info/`, stop and have them inspect it (the stop names the keys that changed, and for
   a key that neither runs a program nor carries a credential, the old and new values: a branch of their own tells at once).
+  For a changed worktree record (`the worktree record of <name> is not the one git wrote`), run no
+  git command in that worktree: have them inspect `.git/worktrees/<name>` and the worktree's `.git`
+  file first - the run removed its container and left the worktree as it was.
 - **A red gate whose repair made no commit** usually means the repair agent judged the failure
   outside the branch: read the repair log and its ticket comment, then check that gate with
   `sandcastle gates` (once the run has ended: it refuses while one is live) before blaming the branch.

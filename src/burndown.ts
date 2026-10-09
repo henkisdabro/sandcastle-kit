@@ -32,7 +32,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { disableHostGitGc, disableHostGitHooks, gitFingerprint, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
+import { assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -144,10 +144,10 @@ export const keptPath = (root: string, path: string) => {
 type Stage = "image" | "preflight" | "hook check" | "base gates" | "verify";
 
 /**
- * The `.git` check after a pipeline's sandbox closed, in the pipeline's `finally`. A failure is
- * kept (`kept`) for the attempt, which stops the run with it, and never thrown: thrown from the
- * `finally`, it replaced a red or no-change pipeline's result, which was then recorded as a
- * finished branch that "lands on a later run".
+ * The `.git` check at a pipeline's end, in its `finally`, before its sandbox closes (Sandcastle's close runs
+ * `git status` on the host in the worktree). A failure is kept (`kept`) for the attempt, which stops the run with
+ * it, and never thrown: thrown from the `finally`, it replaced a red or no-change pipeline's result, which was then
+ * recorded as a finished branch that "lands on a later run".
  */
 export const settleAfter = async (settle: () => Promise<void>, kept: (error: unknown) => void): Promise<void> => {
   try {
@@ -1054,7 +1054,7 @@ export type PipelineContext = {
   timed: Timed;
   run: { ticket(id: string, fields: TicketRecord): void };
   view: Pick<SandboxView, "claim">;
-  host: Pick<HostGit, "begin" | "settle"> & Partial<Pick<HostGit, "write">>;
+  host: Pick<HostGit, "begin" | "settle"> & Partial<Pick<HostGit, "write" | "check">>;
   /** The requeue-once state: a requeued ticket's line, while its second attempt is to come. */
   requeuedAs: ReadonlyMap<string, string>;
   /** This run's pipeline results so far: a requeued ticket's first attempt is among them. */
@@ -1092,23 +1092,44 @@ export type PipelineContext = {
  * real path of a worktree, so the directory is compared under the root and under its realpath (as a project under
  * macOS's `/tmp` needs).
  */
-const keptWorktreeOf = (project: Project, branch: string): string | undefined => {
+const keptWorktreeOf = (project: Project, branch: string): string | undefined => kitWorktrees(project).find((w) => w.branch === branch)?.path;
+
+/**
+ * Every worktree git lists under the project's `.sandcastle/worktrees/`, with the branch it has checked out ("" for none).
+ * Not one whose directory is gone (a person removed it): no git runs there, Sandcastle's open prunes its record, and
+ * its record check would read the missing `.git` file as tampering.
+ */
+const kitWorktrees = (project: Project): { path: string; branch: string }[] => {
   const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);
-  for (const entry of sh("git", ["worktree", "list", "--porcelain"], project.root).split("\n\n")) {
-    const lines = entry.split("\n");
-    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
-    if (path && lines.includes(`branch refs/heads/${branch}`) && under.some((u) => resolve(path).startsWith(u))) return path;
-  }
+  return sh("git", ["worktree", "list", "--porcelain"], project.root)
+    .split("\n\n")
+    .flatMap((entry) => {
+      const lines = entry.split("\n");
+      const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+      const branch = lines.find((l) => l.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length) ?? "";
+      return path && under.some((u) => resolve(path).startsWith(u)) && existsSync(path) ? [{ path, branch }] : [];
+    });
 };
+
+/**
+ * The kit's worktrees Sandcastle's open would reuse for `branch`, as it finds them: the one that has the branch checked
+ * out, and the one at the branch's own path (`agent-issue-<n>`) whatever it has checked out.
+ */
+const reusedWorktrees = (project: Project, branch: string): string[] =>
+  kitWorktrees(project)
+    .filter((w) => w.branch === branch || basename(w.path) === branch.replace(/\//g, "-"))
+    .map((w) => w.path);
 
 /**
  * True when nothing in the worktree is uncommitted or untracked (what Sandcastle's close keeps a worktree for), so
  * a move of its checkout loses nothing. Asked of git with the options a config could turn off; a worktree git
- * cannot read (gone, its record rewritten) is not clean.
+ * cannot read (gone, its record rewritten) is not clean. Submodules are never looked into: recursing runs the status
+ * in a repository the sandbox nested in its worktree, with that repository's own config and filters, on the host -
+ * and only the command-line flag holds, as a `.gitmodules` the sandbox wrote can set `ignore = none`.
  */
 const worktreeIsClean = (project: Project, path: string) => {
   try {
-    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], project.root) === "";
+    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=all"], project.root) === "";
   } catch {
     return false;
   }
@@ -1122,6 +1143,19 @@ export const createPipeline = (ctx: PipelineContext) => {
   const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
   const base = project.baseBranch;
   const ref = tracker.ref;
+  /**
+   * The records of a kit worktree the host is about to run git in, held to git's own (`assertWorktreeRecords`). A
+   * failure is the ticket's `tampered`, which stops the run as a failed `.git` check does, and is thrown.
+   */
+  const checkRecords = (issue: string, path: string, when: string) => {
+    try {
+      assertWorktreeRecords(project, path, when);
+    } catch (error) {
+      tampered.set(issue, error);
+      throw error;
+    }
+  };
+
   // A run that died between merging a branch and closing its issue leaves the
   // issue queued with its work already on base. Re-running it finds nothing
   // to do and reports `nochange`, so the issue would stay open for good. Our
@@ -1146,7 +1180,9 @@ export const createPipeline = (ctx: PipelineContext) => {
    * worktree as it stands - the worktree a run killed before its sandboxes closed leaves. Such a worktree under
    * `.sandcastle/worktrees/` with nothing uncommitted is moved with its branch (a fast-forward: none ahead, so git
    * refuses rather than lose anything), keeping its installed dependencies; one with uncommitted or untracked
-   * files, or a person's own elsewhere, is left where it is.
+   * files, or a person's own elsewhere, is left where it is; so is one holding an ignored file the base now tracks.
+   * A sandbox wrote that worktree's records, so they are held to git's own before the host runs git in it
+   * (`checkRecords`): a changed one stops the run instead.
    */
   const cutFromBase = (issue: string, branch: string) => {
     const cut = () => {
@@ -1162,8 +1198,12 @@ export const createPipeline = (ctx: PipelineContext) => {
       const was = `${ref(issue)}: ${branch} had no commits ahead of ${base} and was ${behind} commit(s) behind it`;
       try {
         const kept = keptWorktreeOf(project, branch);
+        // The status and the merge are host git commands in a worktree a sandbox (an earlier run's) wrote: its records
+        // are held to git's own first, and a failure stops the run.
+        if (kept) checkRecords(issue, kept, `before moving ${branch} in ${keptPath(project.root, kept)}`);
         if (kept && worktreeIsClean(project, kept)) {
-          sh("git", ["-C", kept, "merge", "--ff-only", `refs/heads/${base}`], project.root);
+          // worktreeIsClean leaves ignored files out; --no-overwrite-ignore makes git refuse, not overwrite, one the base now tracks.
+          sh("git", ["-C", kept, "merge", "--ff-only", "--no-overwrite-ignore", `refs/heads/${base}`], project.root);
           console.log(`${was} - cut again from ${base}'s tip in its kept worktree.`);
         } else {
           // No worktree holds it, or one that is not clean or not the kit's does: git moves the branch, or refuses to.
@@ -1171,6 +1211,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           console.log(`${was} - cut again from ${base}'s tip.`);
         }
       } catch (error) {
+        if (error instanceof GuardStop) throw error;
         console.log(`${was}, but could not be cut again from ${base}'s tip (${errorLine(error)}); its sandbox opens on the old tree.`);
       }
     };
@@ -1233,7 +1274,14 @@ export const createPipeline = (ctx: PipelineContext) => {
         () => baseRuns.delete(tip),
       );
     }
-    const onBase = await running.then((r) => r.failures.find((f) => f.name === failure.name), () => undefined);
+    // A run that could not be made is no answer, but a failed `.git` check before its sandbox closed stops the run.
+    const onBase = await running.then(
+      (r) => r.failures.find((f) => f.name === failure.name),
+      (error) => {
+        if (error instanceof GuardStop) throw error;
+        return undefined;
+      },
+    );
     if (!onBase) return undefined;
     // The base's whole list: with five or more red there, the branch's test may be past the first five.
     const there = failingTests(onBase.output, Infinity);
@@ -1287,6 +1335,14 @@ export const createPipeline = (ctx: PipelineContext) => {
     }
     view.claim(issue.id, issue.title);
 
+    // Sandcastle reuses a kit worktree that holds the branch or sits at its path, and runs `git status`, `git fetch`
+    // and `git merge --ff-only` on the host in it as it opens: one kept from an earlier run, or from before a pause,
+    // has its records held to git's own first, and a failure stops the run before the sandbox opens.
+    const openChecked = () => {
+      for (const kept of reusedWorktrees(project, branch)) checkRecords(issue.id, kept, `before reusing ${keptPath(project.root, kept)}`);
+      return open(branch);
+    };
+
     const started = Date.now();
     releaseBranchWorktree(branch, project.root);
     // From here the agent commits to the branch, and the setup may cut it from the base again: the `.git` check lets it move.
@@ -1297,7 +1353,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       "setup",
       async () => {
         await cutFromBase(issue.id, branch);
-        return open(branch);
+        return openChecked();
       },
       requeuedAs.get(issue.id),
       undefined,
@@ -1363,16 +1419,36 @@ export const createPipeline = (ctx: PipelineContext) => {
     let parkCount = 0;
     // The time parked from inside an agent pass (the plan's limit), which the pass reports as the `waitMs` of its step.
     let parkedInStep = 0;
+    // The sandbox's container was removed without Sandcastle's close, after a failed check: nothing is left to close.
+    let removed = false;
+    // Sandcastle's close stops the container, then runs `git status` on the host in the worktree: the `.git` check
+    // (`check`) and the worktree's records come first (`checkBeforeClose`). A failure is the ticket's `tampered` (the
+    // first one stands), which stops the run; the container is then removed without that close, the worktree left as
+    // it stands (still locked), and nothing is returned.
+    const closeSandbox = async (when: string, check: () => unknown) => {
+      await settleAfter(
+        () => checkBeforeClose(project, sandbox.worktreePath, when, check),
+        (error) => {
+          removed = true;
+          if (!tampered.has(issue.id)) tampered.set(issue.id, error);
+        },
+      );
+      if (removed) return undefined;
+      unlockWorktree(sandbox.worktreePath, project.root);
+      return sandbox.close();
+    };
     const juncture = (phase: TicketState, inPass = false) =>
       at?.juncture(phase, {
         suspend: async () => {
           const head = sh("git", ["rev-parse", "--short", branch], project.root);
           console.log(`${ref(issue.id)}: paused before ${phase} - its sandbox closes, ${branch} stays at ${head}`);
           run.ticket(issue.id, { state: "paused", note: `before ${phase} at ${head}` });
-          unlockWorktree(sandbox.worktreePath, project.root);
           await recordPeak(sandbox, project.root, runId);
-          const closed = await sandbox.close();
-          if (closed.preservedWorktreePath) lockWorktree(closed.preservedWorktreePath, project.root);
+          const when = `before closing ${ref(issue.id)}'s sandbox for the pause`;
+          const closed = await closeSandbox(when, () => host.check?.(when));
+          // The check failed: the ticket parks no more, and its attempt stops the run with it.
+          if (removed) throw tampered.get(issue.id);
+          if (closed?.preservedWorktreePath) lockWorktree(closed.preservedWorktreePath, project.root);
           parkedAt = Date.now();
           parkCount++;
           closedWhileParked = true;
@@ -1382,7 +1458,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (inPass) parkedInStep += parked;
           else waited.set(issue.id, (waited.get(issue.id) ?? 0) + parked);
           releaseBranchWorktree(branch, project.root);
-          sandbox = await timed(issue.id, "setup", () => open(branch), `resumed before ${phase}`);
+          sandbox = await timed(issue.id, "setup", openChecked, `resumed before ${phase}`);
           lockWorktree(sandbox.worktreePath, project.root);
           closedWhileParked = false;
         },
@@ -1815,7 +1891,10 @@ export const createPipeline = (ctx: PipelineContext) => {
         red = gated.failure
       ) {
         const failure = red;
-        const onBase = await redOnBase(failure, branch);
+        const onBase = await redOnBase(failure, branch).catch((error) => {
+          if (error instanceof GuardStop) tampered.set(issue.id, error);
+          throw error;
+        });
         if (onBase) {
           const fresh = onBase.filter((t) => !toldRed.has(t));
           for (const t of fresh) {
@@ -2003,22 +2082,25 @@ export const createPipeline = (ctx: PipelineContext) => {
     } finally {
       // Added up: a requeued ticket's second pipeline is more time on it, not a replacement.
       took.set(issue.id, (took.get(issue.id) ?? 0) + Date.now() - started);
-      // A ticket parked by a pause when the run stopped closed its sandbox at the juncture, and keeps its lock like a
-      // ticket whose run was killed while paused: the next run's resume releases it.
-      if (!closedWhileParked) {
-        unlockWorktree(sandbox.worktreePath, project.root);
+      // A pause's close whose check failed removed the container (`removed`): the run stops, and nothing is left here.
+      if (!removed && !closedWhileParked) {
         // The sandbox's peak memory, for `sandcastle size`: last read before it closes.
         await recordPeak(sandbox, project.root, runId);
-        // Sandcastle keeps a worktree with uncommitted files rather than lose
-        // them. Say so, or it lingers unexplained in .sandcastle/worktrees/.
-        const closed = await sandbox.close();
-        if (closed.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
+        // The `.git` check is the settle's, before the close; a failure stops the run, and the pipeline keeps its own
+        // result, or its own error. Sandcastle keeps a worktree with uncommitted files rather than lose them. Say so,
+        // or it lingers unexplained in .sandcastle/worktrees/.
+        const closed = await closeSandbox(`after ${ref(issue.id)}`, () => host.settle(branch, `after ${ref(issue.id)}`));
+        if (closed?.preservedWorktreePath) keptWorktrees.push({ issue: issue.id, path: closed.preservedWorktreePath });
+      } else if (!removed) {
+        // A ticket parked by a pause when the run stopped closed its sandbox at the juncture, and keeps its lock like a
+        // ticket whose run was killed while paused: the next run's resume releases it. A failed check stops the run.
+        await settleAfter(
+          () => host.settle(branch, `after ${ref(issue.id)}`),
+          (error) => {
+            if (!tampered.has(issue.id)) tampered.set(issue.id, error);
+          },
+        );
       }
-      // A failed check stops the run; the pipeline keeps its own result, or its own error.
-      await settleAfter(
-        () => host.settle(branch, `after ${ref(issue.id)}`),
-        (error) => tampered.set(issue.id, error),
-      );
     }
   };
 };
@@ -2203,7 +2285,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }), !DRY_RUN, project.name)) console.log(line);
+  }), !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. A dry run keeps no slot for landing.
@@ -2643,7 +2725,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     overrides,
     open: (branch) => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }),
     gate: (box, id) => runGates(box, id),
-    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false),
+    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when)),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
@@ -2974,7 +3056,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     else {
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
-      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId)).finally(() => setDemand(0));
+      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when))).finally(() => setDemand(0));
     }
     verify = gated.gates;
     const verifyRed = verifyFailing(gated.failures);

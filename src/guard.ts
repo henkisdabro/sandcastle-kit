@@ -3,11 +3,11 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { sh } from "./sandbox.ts";
+import { removeSandboxContainer, sh } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -77,8 +77,9 @@ export const pinHostGitConfig = (root: string) => {
 // `.git/info/`, plant a hook in `.git/hooks/` (it runs on the operator's next
 // checkout or commit, long after the run's own hooks-off environment is gone),
 // or move the base branch. Fingerprinted at start and checked
-// after every pipeline and before landing; any change stops the run before
-// the host runs another git command in the repo.
+// before every sandbox closes and before landing; any change stops the run before
+// the host runs another git command in the repo. A sandbox's own worktree record
+// is held to what git writes instead (below, `assertWorktreeRecords`).
 // ---------------------------------------------------------------------------
 
 // `files` maps each fingerprinted path to its content's hash, so a change can name the file.
@@ -129,7 +130,12 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // while the base - and so the check - stays where it was.
   // Not info/refs: `git repack` rewrites it (an auto gc in a sandbox's commit does), it is only an
   // index for the dumb HTTP transport and runs nothing - fingerprinted, it read as tampering.
-  const info = inside("info").filter((f) => f !== join(dir, "info", "refs"));
+  // Not info/exclude either: ignore patterns only, nothing runs from it, and the kit never writes it,
+  // but the host's own tools do (Claude Code adds its runtime block to it while a session in the
+  // checkout schedules a wake-up) - fingerprinted, a person watching the run stopped it. Still watched:
+  // info/attributes (maps paths to filter, merge and diff drivers), grafts, sparse-checkout, any new file.
+  const unwatched = new Set([join(dir, "info", "refs"), join(dir, "info", "exclude")]);
+  const info = inside("info").filter((f) => !unwatched.has(f));
   const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
   const files: Record<string, string> = {};
   const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
@@ -527,6 +533,82 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
         `The commit it had is still in the object store unless a gc ran: \`git -C ${root} update-ref refs/heads/<branch> <old tip>\` puts a branch back, and ${relative(root, backupRepo(project))} holds a copy of each branch a pipeline ended with.`,
       { what: "an agent branch moved while its ticket was not running", detail: `(${moved.join(", ")})` },
     );
+  }
+};
+
+// ---------------------------------------------------------------------------
+// The worktree records, and the check before a sandbox closes. A sandbox works in a linked worktree of the shared
+// `.git`: the worktree's `.git` file names its record, `<common>/worktrees/<name>`, and the record's `commondir`
+// names the directory whose config git reads (and `config.worktree` beside it, under `extensions.worktreeConfig`).
+// The sandbox can write all three, and the host runs git in that worktree: Sandcastle's close (`git status`, then
+// `git worktree remove`), Sandcastle's reuse of a kept worktree as the next sandbox opens (`git status`,
+// `git fetch`, `git merge --ff-only`), and the pipeline's cut of a stale branch in a kept worktree. A record that
+// names another common directory, or carries a `config.worktree`, has that git read config no check has seen, and a
+// filter there runs on the host, past the pins. A kept worktree can be an earlier run's, whose change a fingerprint
+// taken at this run's start would take as its baseline, so a record is held to what git itself writes, not compared
+// with a reading.
+// ---------------------------------------------------------------------------
+
+/** What differs from what git writes in the records of the worktree at `path`, in a few words; undefined when nothing. */
+const recordProblem = (project: Project, path: string): string | undefined => {
+  const common = realpathSync(commonDir(project.root));
+  const record = join(common, "worktrees", basename(path));
+  const shown = relative(realpathSync(project.root), record) || record;
+  const entry = (p: string) => lstatSync(p, { throwIfNoEntry: false });
+  // A symlink in place of either directory has git read whatever it points at.
+  if (!entry(join(common, "worktrees"))?.isDirectory() || !entry(record)?.isDirectory()) return `${shown} is not a directory`;
+  const pointer = join(path, ".git");
+  if (!entry(pointer)?.isFile()) return "the worktree's .git is not a file";
+  // Git strips only the line ends; `worktree.useRelativePaths` (git 2.48+) writes the path relative to the worktree.
+  const text = readFileSync(pointer, "utf8").replace(/[\r\n]+$/, "");
+  if (!text.startsWith("gitdir: ")) return "the worktree's .git names no git directory";
+  let named = "";
+  try {
+    named = realpathSync(resolve(path, text.slice("gitdir: ".length)));
+  } catch {
+    /* names nothing that exists */
+  }
+  const names = clean(text.slice("gitdir: ".length));
+  if (named !== record) return `the worktree's .git names ${JSON.stringify(names.length > 200 ? `${names.slice(0, 200)}...` : names)}, not ${shown}`;
+  // Git strips only the line end and reads what is left as a path relative to the record, so `../.. ` (a trailing
+  // space) names a directory `.. ` the sandbox made there: compare as git reads it, never trimmed further. With no
+  // file at all git takes the record itself for the common directory, and would read a `config` the sandbox put there.
+  const commondir = join(record, "commondir");
+  if (!entry(commondir)?.isFile() || readFileSync(commondir, "utf8").replace(/[\r\n]+$/, "") !== "../..") return `${shown}/commondir no longer names the shared .git (git writes ../..)`;
+  if (entry(join(record, "config.worktree"))) return `${shown}/config.worktree exists, which git reads as that worktree's config`;
+  return undefined;
+};
+
+/**
+ * Holds the records of the worktree at `path` to what git writes (above): its `.git` file names
+ * `<common>/worktrees/<name>`, that record's `commondir` is `../..`, and it has no `config.worktree`. A difference
+ * throws a `GuardStop` naming it. Before every host git command in a sandbox's worktree.
+ */
+export const assertWorktreeRecords = (project: Project, path: string, when: string) => {
+  const problem = recordProblem(project, path);
+  if (!problem) return;
+  const name = clean(basename(path));
+  throw new GuardStop(
+    `STOPPED ${when}: the worktree record of ${name} is not the one git wrote: ${problem}. A sandbox may have tampered with it, and a git command run in that worktree would read config no check has seen, so the kit runs none there. ` +
+      `Inspect .git/worktrees/${name} and the worktree's .git file before running any git command in ${clean(path)}.`,
+    { what: "a sandbox's worktree record was changed", detail: `(${name}: ${problem})` },
+  );
+};
+
+/**
+ * The check before a sandbox closes. Sandcastle's close stops the container, then runs `git status` on the host in its
+ * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
+ * drivers configured at the start) or in config a changed record names would run there. `check` is the site's `.git`
+ * check; the worktree's records follow. On a failure the container is removed here, without that close - the caller
+ * must not call it - the worktree is left as it stands for a person, and the error is thrown.
+ */
+export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
+  try {
+    await check();
+    assertWorktreeRecords(project, worktree, when);
+  } catch (error) {
+    removeSandboxContainer(worktree);
+    throw error;
   }
 };
 

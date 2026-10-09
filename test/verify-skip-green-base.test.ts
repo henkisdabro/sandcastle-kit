@@ -164,7 +164,7 @@ test("the summary says whose gates proved a merged base the verify did not run a
 
 test("burndown asks the record before the verify, and a landing tells it whose gates ran", () => {
   const burndown = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(burndown, /verifySkipped = verifyDue\.skipped;\n[\s\S]{0,400}if \(verifySkipped\)[\s\S]{0,200}else \{[\s\S]{0,300}verifyBase\(gateProject, image, planFile, runId\)/);
+  assert.match(burndown, /verifySkipped = verifyDue\.skipped;\n[\s\S]{0,400}if \(verifySkipped\)[\s\S]{0,200}else \{[\s\S]{0,300}verifyBase\(gateProject, image, planFile, runId[,)]/);
   assert.match(burndown, /greenBase: \(commit, by, kind\) => noteGreenCommit\(gateProject, image, planFile, commit, by, kind\)/);
   const landing = readFileSync(join(import.meta.dirname, "../src/landing.ts"), "utf8");
   assert.equal([...landing.matchAll(/ctx\.greenBase\?\.\([^;]*ref\(o\.issue\), "ticket-sandbox"\);/g)].length, 1);

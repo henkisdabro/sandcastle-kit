@@ -108,6 +108,40 @@ export const reapOrphans = (project: Project) => {
   }
 };
 
+/**
+ * Removes the container of the sandbox whose worktree is `worktree`, without Sandcastle's close: that close runs
+ * `git status` on the host in the worktree, which a failed `.git` check says must not run (guard.ts,
+ * `checkBeforeClose`). The container is found as `reapOrphans` finds one, by its mount of the worktree, under either
+ * spelling of the path. Never throws: with Docker down, or the container gone, there is nothing to remove, and the
+ * process's exit removes what Sandcastle started. Returns the ids removed.
+ */
+export const removeSandboxContainer = (worktree: string): string[] => {
+  const paths = new Set([worktree]);
+  try {
+    paths.add(realpathSync(worktree));
+  } catch {
+    /* gone: its recorded spelling is all there is */
+  }
+  let ids: string[];
+  try {
+    ids = sh("docker", ["ps", "-aq", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const id of ids) {
+    try {
+      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      if (!mounts.some((m) => paths.has(m))) continue;
+      sh("docker", ["rm", "-f", id]);
+      removed.push(id);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
+  return removed;
+};
+
 const WORKTREE_MARK = ".sandcastle/worktrees/agent-issue-";
 
 /**
@@ -584,8 +618,30 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
 // keeps the copies from needing a refresh of their own.
 const CODEX_AUTH = "/home/agent/.codex-host/auth.json";
 
+// An agent's commit or merge ends by starting `git maintenance run --auto` (from git 2.29), which
+// can run `git gc --auto`: a detached repack and prune in the `.git` every sandbox shares, in a
+// container that may be stopped before it ends. The prompt and `git-guard.sh` forbid `git gc` by
+// hand; these pairs stop git starting it on its own, as `disableHostGitGc` does for the host (the
+// host's `GIT_CONFIG_*` never reach a container). Command-scope config wins over every config
+// file, so a project's own `.git/config` cannot turn it back on. In the environment, not the
+// image: no rebuild, and a project layer is covered too.
+export const SANDBOX_GIT_MAINTENANCE_OFF = [["gc.auto", "0"], ["maintenance.auto", "false"]] as const;
+
+/** `env` with the maintenance-off pairs appended after any `GIT_CONFIG_*` pairs it already carries. */
+const withGitMaintenanceOff = (env: Record<string, string>): Record<string, string> => {
+  const count = Number(env.GIT_CONFIG_COUNT);
+  const n = Number.isInteger(count) && count >= 0 ? count : 0;
+  const pairs = SANDBOX_GIT_MAINTENANCE_OFF.flatMap(([key, value], i) => [
+    [`GIT_CONFIG_KEY_${n + i}`, key],
+    [`GIT_CONFIG_VALUE_${n + i}`, value],
+  ]);
+  return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + SANDBOX_GIT_MAINTENANCE_OFF.length) };
+};
+
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
-export const sandboxEnv = (project: Project): Record<string, string> => ({ ...credentials(project), ...AGENT_COMMITTER });
+// Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`.
+export const sandboxEnv = (project: Project): Record<string, string> =>
+  withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER });
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
 // branch's own `disableAllHooks` cannot switch the git guard off. A read-only *directory* mount

@@ -35,6 +35,9 @@ apply it once the user agrees.
    no record, if it was never updated this way: then read the notes of every release since it was
    set up). Read those notes in full: they name what an existing project may act on.
 3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise skip to 5):
+   Every `sandcastle gates` below refuses while a run of the project is live (it never waits): run
+   `sandcastle status 0` first, and if a run is live, wait for it with `sandcastle wait` (or
+   come back to the gates step once it has ended).
    1. `sandcastle build` - or `sandcastle build --force` when doctor warns that the base image is
       more than 30 days old (it pulls Debian and Node updates) - then `sandcastle lean`: new
       images, and the hook check against them.

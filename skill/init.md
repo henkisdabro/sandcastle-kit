@@ -78,6 +78,8 @@ This continues SKILL.md: run its "Before every action" first.
    usual cause), never the test. A gate red there is red on every branch, so fix the cause (an
    image missing a tool or too old for a test, a setup step, a hidden item or dropped hook a test
    reads) and run it again. The red gates' full output is in `.sandcastle/logs/base-gates.log`.
+   It refuses while a run of the project is live (it never waits): check `sandcastle status 0`
+   first, and if a run is live, wait for it with `sandcastle wait`.
    Every run repeats this check and stops while a gate is red on base.
 7. **Show the user** the config, rules, lean table, hook decisions and the green gate line. Offer
    (costs a little allowance) `sandcastle preflight`, and optionally `sandcastle lean --measure`

@@ -1,16 +1,18 @@
 // The shared-.git check (src/guard.ts) in a throwaway repo: a moved base
-// branch and a changed .git/config are told apart, and each says what moved.
+// branch and a changed .git/config are told apart, and each says what moved;
+// made before a sandbox closes, a failure keeps the close from running.
 //
 //   pnpm test:file test/guard.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { assertGitUnchanged, gitFingerprint } from "../src/guard.ts";
+import { assertGitUnchanged, checkBeforeClose, gitFingerprint } from "../src/guard.ts";
+import { dockerStub } from "./docker-stub.ts";
 
 // Inside a sandbox the kit sets GIT_COMMITTER_* (AGENT_COMMITTER), which beats `-c user.name`;
 // drop every identity variable so the commits here are T's wherever the suite runs.
@@ -66,4 +68,40 @@ test("a new file under .git/info is tampering", () => {
   const before = gitFingerprint(project);
   writeFileSync(join(project.root, ".git/info/attributes"), "* filter=evil\n");
   assert.throws(() => assertGitUnchanged(project, before, "before landing"), /tampered/);
+});
+
+test("a filter a sandbox adds to the shared .git/config stops its close: the host's git status never runs in its worktree", async () => {
+  // Sandcastle's close runs `git status` on the host in the worktree, which reads a tracked file whose stat moved
+  // through its clean filter: a filter named at the run's start is pinned, a new one is not.
+  const { project, git } = repo();
+  writeFileSync(join(project.root, "tracked.txt"), "tracked\n");
+  git("add", "tracked.txt");
+  git("commit", "-q", "-m", "tracked");
+  const wt = join(project.root, ".sandcastle", "worktrees", "agent-issue-1");
+  git("worktree", "add", "-q", "-b", "agent/issue-1", wt);
+  const before = gitFingerprint(project);
+  const marker = join(mkdtempSync(join(tmpdir(), "sandcastle-guard-filter-")), "ran");
+  git("config", "filter.evil.clean", `touch ${marker}`);
+  writeFileSync(join(project.root, ".git/info/attributes"), "* filter=evil\n");
+  utimesSync(join(wt, "tracked.txt"), new Date(2001, 0, 1), new Date(2001, 0, 1));
+  const docker = dockerStub();
+  const path = process.env.PATH;
+  process.env.PATH = docker.first(path);
+  let closed = false;
+  const close = () => {
+    closed = true;
+    execFileSync("git", ["status", "--porcelain"], { cwd: wt, env });
+  };
+  try {
+    await assert.rejects(
+      checkBeforeClose(project, wt, "after #1", () => assertGitUnchanged(project, before, "after #1")).then(close),
+      /^Error: STOPPED after #1: \.git\/config, \.git\/info\/attributes changed while sandboxes ran\. .*In \.git\/config: filter\.evil\.clean added\./s,
+    );
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.equal(closed, false);
+  assert.equal(existsSync(marker), false, "the planted filter ran on the host");
+  // Its container is looked for by its mount of the worktree, to be removed: this Docker is down, so there is none.
+  assert.match(readFileSync(docker.calls, "utf8"), /^ps -aq --filter name=\^sandcastle-$/m);
 });
