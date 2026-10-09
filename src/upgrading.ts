@@ -85,10 +85,35 @@ export const pendingUpgrades = (root: string, kit = KIT): { recorded: boolean; s
   return { recorded: true, since: record.version, notes: now.filter((n) => !had.has(n)) };
 };
 
-/** Records every Upgrading note in the kit as acted on by this project. Returns the kit version. */
-export const markUpdated = (root: string, kit = KIT): string => {
+/**
+ * The update steps the user declined, each as the release it was declined at. A proposal the user
+ * turns down changes nothing in the project, so its check would find the same thing at every update;
+ * this is what the update action reads to name it in a line instead of asking again. Empty for no
+ * record, the older plain form (a kit commit) or a record without the field.
+ */
+export const declinedSteps = (root: string): Record<string, string> => {
+  if (!existsSync(updateRecord(root))) return {};
+  const text = readFileSync(updateRecord(root), "utf8").trim();
+  if (!text.startsWith("{")) return {};
+  try {
+    const declined = JSON.parse(text).declined;
+    if (declined === null || typeof declined !== "object" || Array.isArray(declined)) return {};
+    return Object.fromEntries(Object.entries(declined).filter((e): e is [string, string] => typeof e[1] === "string"));
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Records every Upgrading note in the kit as acted on by this project, keeps the steps declined
+ * before and adds `declined` at this release (a step declined again moves to it). Returns the kit version.
+ */
+export const markUpdated = (root: string, kit = KIT, declined: string[] = []): string => {
+  const release = kitRelease(kit);
+  const steps = { ...declinedSteps(root), ...Object.fromEntries(declined.map((key) => [key, release])) };
   mkdirSync(dirname(updateRecord(root)), { recursive: true });
-  writeFileSync(updateRecord(root), `${JSON.stringify({ version: kitRelease(kit), notes: kitNotes(kit) }, null, 2)}\n`);
+  const record = { version: release, notes: kitNotes(kit), ...(Object.keys(steps).length ? { declined: steps } : {}) };
+  writeFileSync(updateRecord(root), `${JSON.stringify(record, null, 2)}\n`);
   return kitVersion(kit);
 };
 
