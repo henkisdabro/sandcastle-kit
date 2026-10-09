@@ -113,8 +113,12 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
 // gate, for a report that says which of them are red, not just the first.
 // `priority` is for the gates the run's end waits on - a landing's, the base check's, the verify's: when a
 // machine-wide gates slot frees, they take it before the same run's ticket gates (`withSlot` in src/pool.ts).
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false) => {
+// `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
+// from the red one, in config order, since the gates before it already passed on this tree. The log and the
+// progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string) => {
   const asked = Date.now();
+  const start = Math.max(0, project.gates.findIndex((g) => g.name === from));
   return withSlot("gates", label, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     const gates: Gate[] = [];
@@ -127,6 +131,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
+        if (i < start) continue;
         progress.gate?.(i, g.name);
         if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
