@@ -154,7 +154,7 @@ project to record that it is up to date. You do not have to remember which notes
 pull, `sandcastle doctor` in a project lists the Upgrading notes that project has not had since its
 last update, and `sandcastle run` warns about them in one line, until `/sandcastle update` (or
 `sandcastle updated`) records the notes as acted on. The record is per project and per machine
-(`.sandcastle/.run/kit-updated`, gitignored); a project with none is told to update once. Existing `.sandcastle/config.ts` files keep
+(`.sandcastle/.run/kit-updated`, gitignored); a project with none is told to update once. The record also keeps `declined`, the update steps you said no to (`sandcastle updated --declined claude-mod,autonomy-drain`, each at the release it was declined at), so the next update names them in a line instead of proposing them again. Existing `.sandcastle/config.ts` files keep
 working - a new field is always optional, with a default - as long as they use only type
 annotations, `satisfies`, `as` and `import type`, as `sandcastle init` writes them (an `enum`, a
 `namespace` or a parameter property is refused, naming the file and the place) - but a new default can change what a

@@ -92,9 +92,13 @@
 //                    with and without the extras (asking first, as a run does,
 //                    when it would spend ANTHROPIC_API_KEY)
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
-//   updated          record that this project has acted on the kit's upgrading notes (the
+//   updated [--declined KEY[,KEY...]]
+//                    record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them;
-//                    prints the release recorded before and the kit's version now
+//                    prints the release recorded before and the kit's version now;
+//                    --declined also records the update steps the user declined, each at the
+//                    kit's release, in the update record (`declined`), so the next update
+//                    names them and does not ask again; earlier ones are kept
 //   changes [--since RELEASE]
 //                    the CHANGELOG entries of every release after the one this project last
 //                    updated at (or after RELEASE), up to the kit's own: per release grouped
@@ -725,9 +729,14 @@ try {
       break;
     }
     case "updated": {
+      const at = args.indexOf("--declined");
+      const keys = at === -1 ? [] : (args[at + 1] ?? "").split(",");
+      if (args.length !== (at === -1 ? 0 : 2) || keys.some((k) => !/^[a-z0-9][a-z0-9-]*$/.test(k))) {
+        throw new OperatorError("Usage: sandcastle updated [--declined KEY[,KEY...]] - each KEY is an update step's key, such as claude-mod or autonomy-drain.");
+      }
       // Read first: marking replaces the record, and the update action reports where the project was.
       const before = recordedRelease(root);
-      console.log(updatedLine(before, markUpdated(root)));
+      console.log(updatedLine(before, markUpdated(root, KIT, keys)));
       break;
     }
     case "changes": {
