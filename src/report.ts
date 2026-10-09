@@ -880,10 +880,12 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
         : o.partlyAway.includes(id)
           ? "the ticket is still open but no longer in the queue, so no run takes it"
           : "and the next `sandcastle run` picks up the remainder";
-      return `- ${name(id)} - merged, partly done: ${note}${more} - the ticket is still open${o.partlyDecide.includes(id) || o.partlyAway.includes(id) ? "; " : ", "}${then}`;
+      // A reviewer's check-by-hand note on the same ticket goes on its one bullet: often the same check in other words.
+      const check = o.ungated.includes(id) ? `; check by hand: ${f.tickets[id].ungated ?? ""}` : "";
+      return `- ${name(id)} - merged, partly done: ${note}${more}${check} - the ticket is still open${o.partlyDecide.includes(id) || o.partlyAway.includes(id) ? "; " : ", "}${then}`;
     }),
     // A note cut at the cap ends with "…": the whole of it is only in the reviewer's log.
-    ...o.ungated.map((id) => {
+    ...o.ungated.filter((id) => !o.partly.includes(id)).map((id) => {
       const note = f.tickets[id].ungated ?? "";
       const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
       return `- ${name(id)} - merged - check by hand: ${note}${more}`;
@@ -936,7 +938,8 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   if (partlyNext.length) next.push(`Read what is left on ${list(partlyNext)} (merged, partly done, ticket open): the next \`sandcastle run\` picks up the remainder, or finish it yourself and close the ticket.`);
   if (o.partlyDecide.length) next.push(`Do or decide what is left on ${list(o.partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (o.partlyAway.length) next.push(`${list(o.partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
-  if (o.ungated.length) next.push(`Check ${list(o.ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
+  const checkOnly = o.ungated.filter((id) => !o.partly.includes(id));
+  if (checkOnly.length) next.push(`Check ${list(checkOnly)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
   return next;
 };
 

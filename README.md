@@ -319,7 +319,8 @@ Commit `config.ts`, `rules.md`, the Dockerfile and `.sandcastle/.gitignore` in t
 When the repo commits files that a build generates (minified CSS, a data file built from JSON, a
 sitemap), a gate should prove they match the sources. Otherwise a branch can land sources and
 generated output that disagree. A reviewer that finds a change no gate exercises says so, and the
-closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check.
+closing summary lists the ticket under Needs you as `merged - check by hand`, with what to check (on its
+`merged, partly done` bullet instead, when it has one).
 
 Gates run under `sh -c` in the sandbox (dash on Debian), so write the recipe in POSIX sh. This one
 names the build's outputs in `OUT`, runs the build, records which of those paths changed, restores

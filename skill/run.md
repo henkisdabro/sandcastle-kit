@@ -209,7 +209,8 @@ This continues SKILL.md: run its "Before every action" first.
       held, its size, the review and merge commands, the criterion an agent left unmet if the line
       names one (`sandcastle land` leaves that ticket open), and anything that needs a decision.
       Each ticket listed `merged - check by hand`: what the reviewer said to check, and offer to
-      check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
+      check it if you can (open the page, rebuild the file) - the gates did not; a ticket also merged partly
+      done carries its check on that bullet, as `; check by hand: ...`. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder needs a person (a decision, a deploy, access),
       when the summary suggests moving the ticket to the hold label instead). A follow-up the summary says to file by hand is one the kit
