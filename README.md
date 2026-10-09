@@ -1485,9 +1485,23 @@ and the kit narrows what can cross it:
   they run nothing. Before anything is pinned, the next start compares the present state with that
   record and refuses a difference, naming each added, changed or removed key (no value for a key
   that runs a program or carries credentials) and file, and whether the last run ended cleanly.
-  Remove what is not yours; if it is your own (a filter, a remote or a hook you added since the last
+  Remove what is not yours; if it is your own (a filter, a driver or a hook you added since the last
   run), start again with `sandcastle run --accept-git-config` (or `land`, `gates` or `clean` with it), which
-  records the present state as the new baseline. With no record - the first run under this kit -
+  records the present state as the new baseline.
+  A start after a run that ended **cleanly** takes a narrow class of changes without the flag, since
+  nothing a sandbox ran can have written them, and your own tools make them all the time: a **new remote**
+  whose URL is plain https or ssh (`git remote add`, the fork remote `gh pr create` adds; no credentials in
+  the URL, no `http://`, `file:`, `ext::`), `core.hooksPath` set to an existing directory in a **tracked
+  directory of the repo** (husky's `.husky/_`, which its own `.gitignore` hides, counts as the tracked
+  `.husky/`), and a **hook file a hook manager writes** (lefthook, pre-commit, husky 4: a script directly
+  under `.git/hooks/` that carries the tool's marker). It prints one line for each change it took
+  (`Took as your own, since the last run ended cleanly - ...`) and records the new baseline. Everything else is
+  still refused, and a refusal that has one such change beside others refuses all of them: a filter, a
+  driver, a transport command, `insteadOf`, a changed URL on an existing remote (`origin` included), a
+  removed remote, a remote's `pushurl`, `proxy` or program, a hooks path anywhere else, `info/attributes`,
+  and any other hook. After an unclean end (killed, stopped) every change is refused, as before. Each refusal
+  says whether the last run ended cleanly, and marks a change that looks like your own tooling
+  (`looks like your own tooling: ...`) apart from the rest. With no record - the first run under this kit -
   the first of those four commands to start records and goes on, `sandcastle gates` included. A run killed with all of it unchanged starts again with no question.
   With `worktree.useRelativePaths` on, git writes `extensions.relativeWorktrees` the first time it
   adds a worktree, after the record was taken, so the next start names that key once.

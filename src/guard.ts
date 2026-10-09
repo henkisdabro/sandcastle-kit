@@ -279,8 +279,12 @@ const shown = (value: string | null) => {
   return JSON.stringify(text.length > 100 ? `${text.slice(0, 100)}...` : text);
 };
 
-const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"]) => {
-  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"] };
+// What a key's change is when it looks like a person's own tooling, for the start baseline: told by key, value
+// and the keys the config held before, and the kind of change in words (`undefined`: not that kind).
+type OwnKey = (key: string, old: (string | null)[], next: (string | null)[], was: Map<string, (string | null)[]>) => string | undefined;
+
+const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"], own?: OwnKey) => {
+  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"], took: [] as string[], ownOnly: false };
   // A key with no value (`[core] bare`, true) is not one with an empty value (`bare =`, false).
   const values = (entries: string[]) => {
     const by = new Map<string, (string | null)[]>();
@@ -295,7 +299,9 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
   const is = values(now);
   const benign: string[] = [];
   const words: string[] = [];
+  const took: string[] = [];
   let allBenign = true;
+  let ownOnly = true;
   for (const key of [...new Set([...was.keys(), ...is.keys()])].sort()) {
     const old = was.get(key) ?? [];
     const next = is.get(key) ?? [];
@@ -305,12 +311,18 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
     else allBenign = false;
     const name = hidden(key);
-    if (COMMAND_KEY.test(key) || SECRET_KEY.test(key)) words.push(`${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`);
-    else if (!old.length) words.push(`${name} added: ${next.map(shown).join(", ")}`);
-    else if (!next.length) words.push(`${name} removed (was ${old.map(shown).join(", ")})`);
-    else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
+    const kind = own?.(key, old, next, was);
+    if (!kind) ownOnly = false;
+    // A hooks path that is the person's own shows its value: it is a path of the repo, not a program.
+    let word: string;
+    if (!kind && (COMMAND_KEY.test(key) || SECRET_KEY.test(key))) word = `${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`;
+    else if (!old.length) word = `${name} added: ${next.map(shown).join(", ")}`;
+    else if (!next.length) word = `${name} removed (was ${old.map(shown).join(", ")})`;
+    else word = `${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`;
+    if (kind) took.push(`${word} - ${kind}`);
+    words.push(kind ? `${word} (looks like your own tooling: ${kind})` : word);
   }
-  return { benign: allBenign ? benign : [], words };
+  return { benign: allBenign ? benign : [], words, took, ownOnly };
 };
 
 // ---------------------------------------------------------------------------
@@ -394,17 +406,122 @@ const writeBaseline = (project: Project, record: BaselineRecord) => {
   writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
 };
 
-/** What differs between a record and the present state, as the refusal says it: one part per place, none when nothing does. */
+// What the start takes as a person's own after a clean end, and refuses otherwise. A person's tools change the
+// config between runs - `git remote add`, the fork remote `gh pr create` adds, husky's `core.hooksPath`, lefthook's
+// hooks - and a person asked after each of them passes `--accept-git-config` by reflex, which defeats it after a
+// killed run. So, and only when the last run ended cleanly (nothing a sandbox ran can have written it), the start takes
+// exactly these and says so: a new remote whose URL is plain https or ssh, `core.hooksPath` set to a directory in a
+// tracked directory of the repo, and a hook file a hook manager writes. Everything else - a filter, a driver, a transport
+// command, `insteadOf`, a changed URL on an existing remote (origin included), a remote's other keys - is refused as ever.
+const HOST = "[A-Za-z0-9][A-Za-z0-9.-]*";
+const USER = "[A-Za-z0-9][A-Za-z0-9._-]*";
+const URL_PATH = "[A-Za-z0-9._~%+/-]+";
+// No credentials in an https URL, no query, no `::` (a transport helper): the shapes `git remote add` is given for GitHub, GitLab and the like.
+const PLAIN_URLS: [string, RegExp][] = [
+  ["https", new RegExp(`^https://${HOST}(:\\d+)?/${URL_PATH}$`)],
+  ["ssh", new RegExp(`^ssh://(${USER}@)?${HOST}(:\\d+)?/${URL_PATH}$`)],
+  ["ssh", new RegExp(`^${USER}@${HOST}:${URL_PATH}$`)],
+];
+
+/** Whether a remote's URL is plain https or ssh, and which. */
+const plainRemote = (url: string) => PLAIN_URLS.find(([, shape]) => shape.test(url))?.[0];
+
+/**
+ * A `core.hooksPath` value that names a directory inside the repository, in a tracked directory: relative, no `..`, not
+ * in `.git`, an existing directory whose real path is inside the project's, and the directory or one above it
+ * (husky's `.husky/_` is ignored by its own `.gitignore`, in the tracked `.husky/`) holds tracked files. `git ls-files`
+ * runs with `core.fsmonitor` off: this runs before the pins, over a config nobody has vetted yet.
+ */
+const trackedHooksPath = (project: Project, value: string) => {
+  // oxlint-disable-next-line no-control-regex -- a control character in a path is never a person's own tooling
+  if (!value || value.length > 200 || /[\x00-\x1f\x7f\\]/.test(value) || /^[/~-]/.test(value)) return false;
+  const parts = value.split("/").filter((p) => p && p !== ".");
+  if (!parts.length || parts.some((p) => p === ".." || p.toLowerCase() === ".git") || value.split("/").some((p) => p === ".git")) return false;
+  try {
+    const inside = relative(realpathSync(project.root), realpathSync(join(project.root, ...parts)));
+    if (!inside || inside.startsWith("..") || !lstatSync(join(project.root, ...parts)).isDirectory()) return false;
+    for (let i = 1; i <= parts.length; i++) {
+      const listed = sh("git", ["-c", "core.fsmonitor=false", "ls-files", "-z", "--", `:(literal)${parts.slice(0, i).join("/")}/`], project.root);
+      if (listed) return true;
+    }
+  } catch {
+    // A path that is not there, or a git that cannot list: not a tracked directory.
+  }
+  return false;
+};
+
+const ownConfigKey = (project: Project): OwnKey => (key, old, next, was) => {
+  const value = next.length === 1 ? next[0] : null;
+  if (value === null) return undefined;
+  const remote = /^remote\.(.+)\.url$/i.exec(key);
+  if (remote && !old.length) {
+    const kind = plainRemote(value);
+    const prefix = `remote.${remote[1]}.`.toLowerCase();
+    // A new remote is one the record holds no key of (a changed URL on an existing remote is refused, origin included).
+    if (kind && ![...was.keys()].some((k) => k.toLowerCase().startsWith(prefix))) return `a new remote at a plain ${kind} URL`;
+  }
+  if (/^core\.hookspath$/i.test(key) && trackedHooksPath(project, value)) return "a hooks path in a tracked directory of the repo";
+  return undefined;
+};
+
+// The hook managers whose hook files the start recognises: each writes a script of a known shape into `.git/hooks/`
+// and leaves a marker in it. A marker names the tool and proves nothing of the rest of the file, which is why this is
+// taken only after a clean end, when no sandbox can have written it.
+const HOOK_MANAGERS: [string, RegExp][] = [
+  ["lefthook", /^if \[ "\$LEFTHOOK" = "0" \]/m],
+  ["pre-commit", /^# File generated by pre-commit: https:\/\/pre-commit\.com$/m],
+  ["husky", /^# husky$/m],
+];
+
+/** The hook manager that wrote a file directly under `hooks/` (a regular file of a script's size), if one did. */
+const hookManager = (project: Project, file: string, hash: string) => {
+  if (!/^hooks\/[^/]+$/.test(file) || file.endsWith(".sample") || !/^[0-9a-f]{64}$/.test(hash)) return undefined;
+  try {
+    const path = join(commonDir(project.root), file);
+    const at = lstatSync(path);
+    if (!at.isFile() || at.size > 65536 || entryHash(path) !== hash) return undefined;
+    const text = readFileSync(path, "utf8");
+    if (!text.startsWith("#!")) return undefined;
+    return HOOK_MANAGERS.find(([, marker]) => marker.test(text))?.[0];
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What differs between a record and the present state, as the refusal says it: one part per place, none when nothing
+ * does. `took` holds, for each change that looks like a person's own tooling (above), the words the start prints when it
+ * takes them; `ownOnly` is true when nothing differs that is not one of them.
+ */
 const differences = (project: Project, was: ProgramState, now: ProgramState) => {
-  const config = configChange(project, was.entries, now.entries).words;
-  const worktree = configChange(project, was.worktreeEntries, now.worktreeEntries).words;
+  const own = ownConfigKey(project);
+  const configs = configChange(project, was.entries, now.entries, own);
+  const worktrees = configChange(project, was.worktreeEntries, now.worktreeEntries, own);
+  const config = configs.words;
+  const worktree = worktrees.words;
   const word = (inWas: boolean, inNow: boolean) => (!inWas ? "added" : !inNow ? "removed" : "changed");
-  const files = changedFiles(was.files, now.files).map((f) => `${clean(f)} ${word(f in was.files, f in now.files)}`);
-  if (was.attributes !== now.attributes) files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  const took = [...configs.took.map((t) => `In .git/config: ${t}`), ...worktrees.took.map((t) => `In .git/config.worktree: ${t}`)];
+  let filesOwn = true;
+  const files = changedFiles(was.files, now.files).map((f) => {
+    const what = `${clean(f)} ${word(f in was.files, f in now.files)}`;
+    const manager = f in now.files ? hookManager(project, f, now.files[f]) : undefined;
+    if (!manager) {
+      filesOwn = false;
+      return what;
+    }
+    took.push(`Under .git/: ${what} - a hook written by ${manager}`);
+    return `${what} (looks like your own tooling: a hook written by ${manager})`;
+  });
+  if (was.attributes !== now.attributes) {
+    filesOwn = false;
+    files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  }
   return {
     config,
     worktree,
     files,
+    took,
+    ownOnly: (config.length > 0 || worktree.length > 0 || files.length > 0) && configs.ownOnly && worktrees.ownOnly && filesOwn,
     parts: [
       ...(config.length ? [`In .git/config: ${config.join("; ")}.`] : []),
       ...(worktree.length ? [`In .git/config.worktree: ${worktree.join("; ")}.`] : []),
@@ -413,21 +530,27 @@ const differences = (project: Project, was: ProgramState, now: ProgramState) => 
   };
 };
 
+/** What a start reads of the baseline: the state to record, and the lines for the changes it took as the person's own. */
+export type GitConfigStart = ProgramState & { took: string[] };
+
 /**
  * Before a run, `land` or `gates` pins anything: holds what the start baseline records (above) to what the
  * previous run recorded. A difference throws an `OperatorError` that names each added, changed or removed
  * key (no value for a key that runs a program or carries credentials, as the `.git` stop says it) and file,
- * and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's own. No record
- * (the first run under this kit) is no difference. A previous run that never ended cleanly says so in the
- * refusal, since a sandbox may have written the difference. Writes nothing: `recordGitConfigStart` does,
- * once the run holds its lock. Returns the state it read.
+ * marks the ones that look like a person's own tooling, says whether the last run ended cleanly, and says how to go
+ * on: remove it, or `<command> --accept-git-config` when it is the operator's own. When the last run ended cleanly
+ * and every difference is of the kind a person's own tooling makes (`ownConfigKey`, `hookManager`), the start takes
+ * them: it returns `took`, one line for each, for `recordGitConfigStart` to print. No record (the first run under
+ * this kit) is no difference. A previous run that never ended cleanly refuses every difference, since a sandbox may
+ * have written it. Writes nothing: `recordGitConfigStart` does, once the run holds its lock. Returns the state it read.
  */
-export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramState => {
+export const assertGitConfigBaseline = (project: Project, command: string, accept = false): GitConfigStart => {
   const now = programState(project);
   const was = readBaseline(project);
-  if (!was || accept) return now;
-  const { config, worktree, files, parts } = differences(project, was, now);
-  if (!parts.length) return now;
+  if (!was || accept) return { ...now, took: [] };
+  const { config, worktree, files, parts, took, ownOnly } = differences(project, was, now);
+  if (!parts.length) return { ...now, took: [] };
+  if (was.clean && ownOnly) return { ...now, took };
   const root = project.root;
   const inspect = [
     ...(config.length ? [`\`git -C ${root} config --local --list\``] : []),
@@ -440,16 +563,29 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
     ...(files.length ? ["a file by deleting it"] : []),
   ];
   const listed = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0]);
+  const ended = was.clean
+    ? `The last run ended cleanly. Something wrote them between the runs. That is most likely you or a tool of yours.${ownOnly || !took.length ? "" : " Changes marked as looking like your own tooling are taken without a question when nothing else differs; this start has others."}`
+    : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them.";
   throw new OperatorError(
     `NOT STARTED: the shared .git differs from what the last run left, in what makes git run a program or reach the network. ${parts.join(" ")} ` +
-      `${was.clean ? "Something wrote them between the runs." : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them."} ` +
+      `${ended} ` +
       `Inspect ${listed(inspect)} before running any other git command there. Remove what is not yours (${remove.join(", ")}), ` +
       `or, if it is your own, start again with \`${command} --accept-git-config\`, which records the present state as the new baseline.`,
   );
 };
 
-/** Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended. */
-export const recordGitConfigStart = (project: Project, state: ProgramState) => writeBaseline(project, { ...state, clean: false });
+/** The line a start prints for each change `assertGitConfigBaseline` took as the person's own. */
+export const tookLines = ({ took }: GitConfigStart) => took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`);
+
+/**
+ * Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended,
+ * and prints a line for each change it took as the person's own.
+ */
+export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
+  const { took: _took, ...state } = start;
+  writeBaseline(project, { ...state, clean: false });
+  for (const line of tookLines(start)) console.log(line);
+};
 
 /**
  * At a run's clean end: marks the record clean when the `.git` still holds what the run started
