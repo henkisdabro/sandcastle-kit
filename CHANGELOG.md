@@ -9,6 +9,11 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Changed
+
+- **The kit's own repository lints with oxlint** (`pnpm lint`), in CI, `test/full-check.sh` and its
+  own runs' gates.
+
 ## [0.12.0] - 2026-10-09
 
 ### Added

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Every check a kit change needs before it is pushed, in one place, so it is not retyped after
 # each change or run:
-#   1. this machine: types, the tests, the tests again under an agent's committer identity, and
+#   1. this machine: lint, types, the tests, the tests again under an agent's committer identity, and
 #      on macOS the status view under /bin/bash (3.2). Agents' sandboxes are Linux, so BSD tools
 #      and the old bash break only here.
-#   2. Linux, in a node container: types and the tests, from the files this checkout tracks (a
+#   2. Linux, in a node container: lint, types and the tests, from the files this checkout tracks (a
 #      worktree's .git is a pointer the container cannot follow, so git history is not copied).
 #   3. the outbound scan of the commits not yet on the base: gitleaks, the personal denylist (the
 #      pre-commit hook's rules), and home-directory paths.
@@ -33,6 +33,10 @@ export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=fal
 # once, in the background, each into its own file, and the output is printed in a fixed order once
 # they are done: the longest leg (the suite, or the Linux container's) sets the wall time, not the
 # sum of them. The tests are the files test/shard.ts packs by weight, in shards side by side.
+
+leg_lint() {
+  pnpm lint >"$logs/lint.log" 2>&1 && echo "lint: ok" || { echo "lint: FAIL"; cat "$logs/lint.log"; return 1; }
+}
 
 leg_types() {
   pnpm exec tsc --noEmit >"$logs/tsc.log" 2>&1 && echo "tsc: ok" || { echo "tsc: FAIL"; cat "$logs/tsc.log"; return 1; }
@@ -83,6 +87,7 @@ leg_linux() {
         git init -q && git add -A
         git config --global user.email t@example.com && git config --global user.name t
         CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
+        pnpm lint
         pnpm exec tsc --noEmit
         bash test/status.test.sh >/tmp/status.log 2>&1 || { tail -20 /tmp/status.log; exit 1; }
         # The host worked out the count against its own cores; the VM may have fewer.
@@ -190,6 +195,7 @@ export FULL_CHECK_SHARDS="$shards"
 # The Linux leg is the slowest (an image, an install), so it starts first.
 [ -n "$docker_note" ] || start linux leg_linux
 start scan leg_scan
+start lint leg_lint
 start types leg_types
 start view leg_view
 start tests leg_tests
@@ -198,6 +204,7 @@ start agent leg_agent
 wait
 
 echo "== $(uname -s)"
+show lint
 show types
 show view
 show tests

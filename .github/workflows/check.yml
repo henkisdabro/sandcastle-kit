@@ -1,7 +1,7 @@
 name: Check
 
 # The checks AGENTS.md asks of every change that need neither Docker nor a
-# model: types, the tests (shell syntax among them), and the status view
+# model: lint, types, the tests (shell syntax among them), and the status view
 # against a fixture run. The view once showed a live run's green branches as
 # queued for over an hour, and nothing here would have noticed.
 #
@@ -54,6 +54,8 @@ jobs:
           node-version: lts/*
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - if: matrix.part == 'status'
+        run: pnpm lint
       - if: matrix.part == 'status'
         run: pnpm exec tsc --noEmit
       # macOS draws the view under its own bash 3.2 as well. Every frame starts processes, slow to

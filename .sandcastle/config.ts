@@ -19,6 +19,7 @@ export default {
   pnpmStore: true,
   setup: ["pnpm install --frozen-lockfile"],
   gates: [
+    { name: "lint", command: "pnpm run lint" },
     { name: "typecheck", command: "pnpm run typecheck" },
     { name: "shell-syntax", command: "bash -n status.sh bin/sandcastle .githooks/pre-commit container/git-guard.sh" },
     { name: "test", command: "pnpm run test" },
