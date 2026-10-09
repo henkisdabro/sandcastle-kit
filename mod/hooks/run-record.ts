@@ -261,7 +261,8 @@ export type RunRecord = {
   models?: string;
   issues?: string[];
   dryRun?: boolean;
-  versions?: { claude?: string; codex?: string };
+  /** `kit` is `kitVersion()`'s text (`0.11.0 +3 (1c4f46f)`), read once when the process started; an older record has none. */
+  versions?: { kit?: string; claude?: string; codex?: string };
   /** Tickets held for another that is open: `on` names what each waits for. */
   waiting?: { issue: string; on: string[] }[];
   /** What the run line shows while the run is live. */

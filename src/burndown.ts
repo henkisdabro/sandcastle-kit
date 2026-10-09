@@ -44,6 +44,7 @@ import {
   createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
+import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
@@ -2326,6 +2327,10 @@ export const createPipeline = (ctx: PipelineContext) => {
 
 let unlockOnExit = false;
 
+// The kit this process loaded, read on the first turn: a later turn of an autonomy run runs the same code, so
+// a kit pulled mid-run must not be named by it.
+let kitAtStart: string | undefined;
+
 /**
  * False when the queue was empty or all of it waiting: nothing ran, so there is no turn to follow.
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
@@ -2473,6 +2478,7 @@ export const burndown = async (
   const overrides = new Map([...issues.map((i) => [i.id, ticketOverride(ref(i.id), i.labels ?? [])] as const), ...laterOverrides]);
   // Resolved once here: the image, the start lines and run.json all name the same versions.
   const versions = await resolveVersions(project);
+  kitAtStart ??= kitVersion();
 
   // A dry run lands nothing, so it needs no sandbox slot for it.
   const workers = pipelineWorkers(CONCURRENCY, candidates.length, limit("sandboxes"), !DRY_RUN);
@@ -2500,7 +2506,7 @@ export const burndown = async (
   // Asked before the run (cli.ts), and said on every turn's start lines too: a run that bills API credits is never silent.
   const spend = projectApiKeySpend(project);
   if (spend) console.log(red(runApiKeyLine(spend)));
-  console.log(versionsLine(versions));
+  console.log(versionsLine(versions, kitAtStart));
   // Before any sandbox: every one this turn opens takes a CPU limit by its kind, so agents' own full-suite
   // runs cannot crowd out each other and the gates beside them, nor starve the landing, base and verify
   // gates, which run one at a time and set the run's end (`gateProject` below opens those).
@@ -2566,7 +2572,7 @@ export const burndown = async (
   const run = recordRun(project, {
     issues: candidates.map((i) => i.id),
     dryRun: DRY_RUN,
-    versions: { claude: versions.claude, codex: versions.codex },
+    versions: { kit: kitAtStart, claude: versions.claude, codex: versions.codex },
     waiting,
     stage: "starting",
     concurrency: slots,
