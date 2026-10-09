@@ -170,7 +170,7 @@ This continues SKILL.md: run its "Before every action" first.
    from what `sandcastle report` printed, emoji included** - retyping a heading is how the emoji
    get lost; the headings below are the ones it prints (without the emoji when NO_COLOR is set):
 
-   1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, tokens, and whether the
+   1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent: say which, and still do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a

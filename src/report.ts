@@ -874,7 +874,10 @@ export const render = (f: Facts, plain = false): string => {
   const parked = f.live ? [] : Object.keys(f.tickets).filter((id) => f.tickets[id].state === "paused");
   const cut = early ? Object.keys(f.tickets).filter((id) => sectionOf(f.tickets[id].state) === "working" && f.tickets[id].state !== "paused" && !(f.dryRun && f.tickets[id].state === "ready")) : [];
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
-  const notStarted = ids(baseRed ? ["queued", ...LEFT] : LEFT).concat(unstarted);
+  // Blocked tickets are counted apart: the run would not have started them, and the sections below name only
+  // the skipped and unstarted ones as "Not started", so a headline folding them in disagreed with its own lines.
+  const notStarted = ids(baseRed ? ["queued", "skipped"] : ["skipped"]).concat(unstarted);
+  const blockedCount = ids(["blocked"]).length;
   const nochange = ids(["nochange"]);
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
@@ -914,7 +917,7 @@ export const render = (f: Facts, plain = false): string => {
       `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated, ...gapped]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
-      `${notStarted.length} not started${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
+      `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
     baseRed
       ? `Base gates: red - ${f.baseGates?.filter((g) => !g.ok).map((g) => g.gate).join(", ") || "failing gates not recorded; see .sandcastle/logs/base-gates.log"}`
       : f.verify === undefined || f.verify === null
