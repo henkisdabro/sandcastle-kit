@@ -9,10 +9,177 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **`sandcastle changes [--since RELEASE]`** prints the CHANGELOG entries of every release after the
+  one the project last updated at, cut to their bold leads, and the config keys, settings,
+  environment variables, commands and flags added, removed or changed between the two releases
+  (read from the kit's tags; a shallow clone says so). `/sandcastle update` opens with a "What's
+  new" step built from it: what to act on, decisions about new settings asked one by one, and a
+  line for the rest.
+- **`sandcastle updated --declined KEY[,KEY...]`** records the update steps you declined, so the
+  next `/sandcastle update` names each in one line instead of asking again; **`--accepted KEY`**
+  takes one off that list once you have asked for it after all.
+- **`sandcastle queue --lint` takes the tickets a run names** (`sandcastle queue --lint 12 15`) and
+  lints only those, listing a blocker outside them as a wait.
+- **Sandboxes' memory pressure** (PSI `some` and `full`) is recorded on each gate's
+  `timings.jsonl` line and each sandbox's `peaks.jsonl` line, shown by `sandcastle size`, and
+  warned of in the closing summary when `full` pressure reached 5%.
+- **The implement and review prompts name the protected paths**, so agents stop editing a path
+  that holds the branch for a person, and the review reverts such an edit the ticket did not need.
+- **The run's start line and run record name the kit's version** (`versions.kit`).
+- **A queued spec named under `## Parent` by a queued child is warned of** by `sandcastle queue`,
+  `queue --lint`, `sandcastle blockers` and a run's start: a run would implement the whole spec as
+  one ticket beside its children.
+- **`sandcastle doctor` lists the runs live on the machine** and says to wait for them before
+  pulling the kit, since a live run reads the kit's prompts and scripts from disk; the update
+  action checks before its pull.
+- **`/sandcastle init` suggests oxlint to a Node project with no linter**, and warns that an oxlint
+  `lint` script needs `--deny-warnings` for the gate to go red on a warning.
+
 ### Changed
 
 - **The kit's own repository lints with oxlint** (`pnpm lint`), in CI, `test/full-check.sh` and its
   own runs' gates.
+- **Claude Code and Codex are built into a shared `sandcastle-agents` image** and copied onto each
+  project's image, so a new agent release rebuilds that image and a copy layer, not every project's
+  own Dockerfile layer (browsers, toolchains).
+- **A red gate is re-run once, with no model, before any repair pass.** A red that was only a busy
+  machine goes on as green, with the line `<gate> red, then green on a re-run - a flake, no repair
+  pass`. A ticket sent back after a red landing gate on an unmoved base re-runs that gate the same
+  way. Never done for a timeout.
+- **The implementer runs the typecheck and the tests that cover its change before finishing**, not
+  the full suite, which the ticket and landing gates already run.
+- **Sandboxes run Claude Code with its bundled skills off** (`schedule`, `loop`, `deep-research` and
+  others), saving prompt tokens on every pass; the repo's own skills are kept.
+- **Every sandbox gets the host's time zone as `TZ`**, so agents' commits carry the same offset as
+  the host's merge commits.
+- **On GitHub, a native "blocked by" issue dependency holds a ticket back** like a `Blocked by #N`
+  line, in `sandcastle queue`, `queue --lint` and a run; a gh or GitHub server that cannot read the
+  field prints one warning and the body alone is read.
+- **After a run that ended cleanly, the next start takes your own tooling's `.git` changes without
+  a question**: a new remote at a plain https or ssh URL, `core.hooksPath` set to a tracked
+  directory, and hooks written by lefthook, pre-commit or husky 4, each with a `Took as your own`
+  line. Anything else, and anything after an unclean end, is still refused, and a refusal now says
+  whether the last run ended cleanly and marks what looks like your own tooling.
+- **The full review sees the end of the implementer's final message**, so a check the implementer
+  says it skipped reaches the reviewer; agents are shown the run's other tickets and the follow-ups
+  already named, so they stop filing those again.
+- **The start estimate prices a ticket by the size of its `Touches:` line** once earlier runs have
+  three tickets of that size, and a re-run remainder from earlier remainders.
+- **While a run is live, the status view shows labelled tickets outside it as grey `later` rows**
+  (`next run`, or `waits for #N to close`); `queued` and `blocked` count only the run's own.
+- **A gap read out of a reviewer's prose is listed on its own `Worth a glance` line**, not under
+  Needs you, so it no longer counts towards "N need you".
+- **`sandcastle updated` prints the release the project was recorded at before**, and the update
+  action reports that, not the kit's version before the pull.
+- **The closing summary's push step warns that a plain `git pull --rebase` flattens the run's
+  landing merges.**
+- **The implement, review and repair prompts no longer forbid a heredoc for a commit message**, and
+  no longer ask for each gate in its own command.
+- **Agents are told never to write an issue-closing keyword (`Closes #N`) in a commit**, which
+  closed a partly done ticket the kit had left open once the branch was pushed, and the changelog
+  ask names its limits: one or two sentences under 500 characters, and no `Upgrading:` line when
+  there is nothing to do.
+
+### Security
+
+- **The start record of the shared `.git` also holds `alias.*`, `pager.*`, `difftool.*.cmd`,
+  `mergetool.*.cmd`, `submodule.*.update`, `interactive.diffFilter`,
+  `gpg.ssh.defaultKeyCommand`, `core.alternateRefsCommand` and `lfs.*`**, keys that run a program
+  on your own later git command, and each hook's executable bit: `chmod +x` on a disabled hook is
+  caught during a run and at the next start. An older record is taken again once after a clean
+  end, and compared after one that was not.
+- **The `.git` fingerprint watches the records of worktrees you made by hand beside a run**; a
+  sandbox changing one stops the run.
+- **A run's start, `land`, `gates` and `clean` stop a killed run's leftover containers before
+  checking the start record**, so a late write by one is refused instead of becoming the baseline.
+- **The mount check sees a `hostPath` written in another case on a case-insensitive disk**, and
+  checks the `pnpmStore` mount like any other.
+- **The tracked directory `core.hooksPath` names is a protected path**, as `.husky/` and
+  `.githooks/` are: a branch editing a hook there is held for a person.
+
+### Fixed
+
+- **A carried branch that merged a base since rewritten** (a `git pull --rebase` that flattened the
+  landing merges, a reset that dropped one) is re-created on the current base from its own commits
+  and reviewed again, instead of landing duplicates. A rewrite whose lost commits hold no merge is
+  not yet detected (#655).
+- **A failed landing names git's error**, not its "Preparing worktree" progress line.
+- **A drain re-runs a green branch whose landing did not happen** (a sandbox that would not open, a
+  branch that moved), as its summary promised; the same one failing twice running stops the drain.
+- **A plan session or weekly limit hit mid-run is a usage stop, not a crash**: the cut-short tickets
+  are listed as runnable again, with the reset time.
+- **A run whose tickets all crash expanding their prompt the same way stops after the second**,
+  naming a setup problem and `sandcastle doctor --verify`; a crash note loses its
+  `(FiberFailure)` prefix.
+- **A run refuses to start on a stale `.git/index.lock` or an unfinished merge**, and a landing
+  whose merge cannot be aborted stops the run instead of failing every later landing.
+- **A run that names its tickets lists, records and reports only those**, in every turn, and warns
+  of their blockers against the whole queue.
+- **A review and a re-run no longer file follow-ups again**: a repeat of one an earlier run filed
+  becomes a comment on that issue.
+- **A hung Docker daemon no longer hangs a run's start or `sandcastle clean`**: after 30 seconds
+  they stop, naming the docker call.
+- **A sandbox slower than 120 s to start ends with the cause and the fix**, not a stack trace, and
+  a failed sandbox open removes its container, worktree and branch; `sandcastle clean` stops any
+  kit container of the project's worktrees.
+- **`sandcastle doctor`, `lean` and the base check flag a `core.hooksPath` that is an absolute host
+  path or climbs out of the project.**
+- **A red `sandcastle gates`, and a red `sandcastle land` whose `.git` check passed, record a clean
+  end**, so the next start does not blame a sandbox for your own config change.
+- **`sandcastle report --changelog`** lists a ticket landed with `sandcastle land` after a run
+  stopped, lists a ticket the agents said needs no entry apart from one with no line, and no longer
+  prints `<changelog>none</changelog>` as a line. A suggested line that quotes a tag in backticks is
+  kept, and one left out says why (too long, with its length).
+- **Closing summary fixes**: a held conflict resolution is offered `sandcastle land` only when the
+  hold is in the kit's own words; tickets waiting on a blocker count as blocked, not "not started";
+  "Landed on a second attempt" says where the conflict was found; every kept worktree is counted
+  with its disk use; earlier turns' kept worktrees and uncommitted tickets are carried into the last
+  summary; an earlier run's hold gives its recorded reason; a partly done ticket's check by hand
+  goes on its one bullet; a blocker merged by hand as "part of" its ticket is said to stay open;
+  `failing:` lines name the test file, not a scoped vitest project.
+- **Blocker warnings** come once per ticket for refs quoted in code, and tell a native GitHub
+  edge's owner to remove the relationship on GitHub, not a line the body does not have.
+- **A finished run records the time-weighted mean of the slots it could use as its concurrency**,
+  and a second worker no longer prints a misleading wait line.
+- **A start plan prints a ticket's file hold once**, and a ticket freed from one is reported as
+  released, not started.
+- **After a `.git` guard stop**, the next step no longer calls a changed `.git` file "your own
+  commit", and a stop at a gate sandbox's close names the `sandcastle/base-gates-*` worktree and
+  branch it leaves.
+- **The git guard's refusals and the prompts explain the scratch repository** an agent may use
+  instead, and the review's "test without the change" recipe reverts committed work against the
+  target branch; review and resolve passes route text naming a refused git command through a file.
+- **The status view's header at 170 to 195 columns** no longer cuts the run, machine and model
+  cells.
+- **The gap detector ignores text inside double quotes.**
+- **A command that waited for another build of the base image** says when the wait ended.
+- **The kit's own tests**: the suite no longer reaches a developer's real Docker; the home-path
+  check also scans files not yet committed; `test/full-check.sh`'s Linux leg keeps its shard logs.
+
+### Upgrading
+
+- **The first start after this update takes the shared `.git`'s start record again, once**, since
+  the record now holds more keys and each hook's executable bit: a line says so, and nothing is
+  refused - unless the last run under the earlier kit did not end cleanly, when what that record
+  holds is compared first. (This corrects 0.12.0's note: the first run, `land`, `gates` or `clean`
+  records the baseline, so fix a wrong value such as an absolute `core.hooksPath` before it, or use
+  `--accept-git-config` after.)
+- **A `dockerfile` layer step can no longer run `claude` or `codex`**, which are copied in after
+  the layer, and `~/.local/bin` is off `PATH` while the layer builds: move such work to a `setup`
+  command, and call a tool installed there by its full path. Then `sandcastle build`.
+  `/sandcastle update` checks for both.
+- **Tickets whose only blocker is a native GitHub "blocked by" edge now wait for it**: check that
+  nothing queued is natively blocked by an issue you do not mean to wait for.
+- **Sandboxes no longer have Claude Code's bundled skills**: a prompt or ticket that relied on one
+  inside a sandbox needs it as one of the repo's own skills.
+- **Gates now run in the host's time zone, not UTC**: a date or time test can behave differently
+  from CI.
+- **A red gate is run again once before any repair**, so a gate must stay safe to run twice in the
+  same sandbox (as it already had to be after a repair).
+- **A tracked directory that `core.hooksPath` names is now protected**: a branch that changes a
+  hook there is held for a person to merge.
 
 ## [0.12.0] - 2026-10-09
 
