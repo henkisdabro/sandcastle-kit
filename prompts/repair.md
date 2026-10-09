@@ -21,7 +21,7 @@ or a move to the background cannot leave the worktree without your change. Never
 
 {{KIT_TICKET_VIEW}}
 
-# What the branch changed
+{{FOLLOWUPS_NAMED}}# What the branch changed
 
 !`git log {{TARGET_BRANCH}}..HEAD --format='%h %s'`
 

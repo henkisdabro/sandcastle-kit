@@ -523,7 +523,7 @@ const significantWords = (title: string, paths: readonly string[]): Set<string> 
 /** One file a finding names: its line when it gave one, and `firm` when that is a `path:line` of the title. */
 type Spot = { path: string; line?: number; firm: boolean };
 /** Where a finding is: the source ticket's files it names (none: a path-less finding), and its title's words. */
-type Seat = { from: string; spots: Spot[]; words: Set<string> };
+type Seat = { from: string; spots: Spot[]; words: Set<string>; key: string };
 /** What `placeSeat` asks of the base tree: is this path a file there? A host such as `api.example.com` is not. */
 export type PathExists = (path: string) => boolean;
 /** The base tree's one file of a bare name (`client.ts`), when exactly one has it: undefined for none or several. */
@@ -559,7 +559,7 @@ const placeSeat = (f: FollowUp, exists: PathExists, named?: NamedOnBase): Seat =
   for (const at of filesIn(FILE_ONLY, f.title, exists, named)) add(at, false, true);
   for (const at of filesIn(PLACE, f.evidence, exists, named)) add(at, false, false);
   for (const at of filesIn(FILE_ONLY, f.evidence, exists, named)) add(at, false, false);
-  return { from: f.from, spots: [...spots.values()], words: significantWords(f.title, wholes) };
+  return { from: f.from, spots: [...spots.values()], words: significantWords(f.title, wholes), key: titleKey(f.title) };
 };
 /** Whether `path` is a file of the base branch (`git cat-file`): the host's `exists` for `fileFollowUps`. */
 export const onBase = (root: string, base: string): PathExists => (path) => {
@@ -601,6 +601,8 @@ const WORDS_SHARED_NO_PLACE = 3;
 // line on one side) their titles must overlap. Two findings that name no place are one when their titles overlap by more.
 const sameFinding = (a: Seat, b: Seat): boolean => {
   if (a.from !== b.from) return false;
+  // The same title from the same ticket is the same finding, however few words it has: how an earlier run's filing is met.
+  if (a.key === b.key) return true;
   const shared = [...a.words].filter((w) => b.words.has(w)).length;
   if (!a.spots.length || !b.spots.length) return !a.spots.length && !b.spots.length && shared >= WORDS_SHARED_NO_PLACE;
   const overlap = shared >= WORDS_SHARED;
@@ -614,8 +616,9 @@ const sameFinding = (a: Seat, b: Seat): boolean => {
 };
 /** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
 export type Places = Map<string, { id: string; seat: Seat }[]>;
-// A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files.
-const placesKeys = (s: Seat) => (s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]);
+// A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files;
+// and under its title, so an earlier run's filing, placed by its title alone, meets the same title whatever its evidence names.
+const placesKeys = (s: Seat) => [...(s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]), `${s.from}\0\0${s.key}`];
 const placeOf = (places: Places, seat: Seat) => {
   for (const key of placesKeys(seat)) {
     const found = places.get(key)?.find((p) => sameFinding(p.seat, seat));
@@ -624,7 +627,11 @@ const placeOf = (places: Places, seat: Seat) => {
   return undefined;
 };
 const addPlace = (places: Places, seat: Seat, id: string) => {
-  for (const key of placesKeys(seat)) places.set(key, [...(places.get(key) ?? []), { id, seat }]);
+  // Not twice: each turn of a run seeds the earlier filings again (`createFollowUpBook`'s `earlier`).
+  for (const key of placesKeys(seat)) {
+    const had = places.get(key) ?? [];
+    if (!had.some((p) => p.id === id && p.seat.key === seat.key)) places.set(key, [...had, { id, seat }]);
+  }
 };
 // What was said again about an issue already filed, as the comment on it.
 const repeatComment = (f: FollowUp, ref: (id: string) => string) =>
@@ -712,7 +719,11 @@ export const fileFollowUps = async (
 export type FollowUpBook = {
   push(f: FollowUp): void;
   file(unsafe?: string): Promise<FiledFollowUp[]>;
+  /** What is named already from one ticket, for its agents' prompts: earlier runs' filings, then this run's lines (`alreadyNamedView`). */
+  namedFrom(from: string): NamedFollowUp[];
 };
+/** A follow-up named from a ticket already: `id` is the issue it was filed as, absent while this run has yet to file it; `phase` the pass of this run that named it. */
+export type NamedFollowUp = { title: string; id?: string; phase?: string };
 export const createFollowUpBook = (
   run: { update(fields: { followUps: FiledFollowUp[] }): void },
   o: {
@@ -723,10 +734,14 @@ export const createFollowUpBook = (
     places?: Places;
     exists: PathExists;
     named?: NamedOnBase;
+    /** What earlier runs filed (`filedBefore`): the same finding named again is a comment on that issue, as a repeat within a run is. */
+    earlier?: readonly FiledFollowUp[];
   },
 ): FollowUpBook => {
   const seen = o.seen ?? new Set<string>();
   const places = o.places ?? new Map();
+  // Without the evidence the record never kept, a filing is met by its title: the same one, or a match under the place rules.
+  for (const e of o.earlier ?? []) if (e.id !== undefined) addPlace(places, placeSeat({ title: e.title, evidence: "", from: e.from, phase: e.phase }, o.exists, o.named), e.id);
   const heard: FollowUp[] = [];
   // The same finding as a listed one, in other words: comments on its issue once there is one.
   let repeats: FollowUp[] = [];
@@ -780,7 +795,53 @@ export const createFollowUpBook = (
       if (!settled.length) return [];
       return [...new Set(settled.map((s) => titleKey(s.title)))].map((key) => listed.get(key)!);
     },
+    namedFrom(from) {
+      const out = new Map<string, NamedFollowUp>();
+      for (const e of o.earlier ?? []) if (e.from === from && e.id !== undefined && !out.has(titleKey(e.title))) out.set(titleKey(e.title), { title: e.title, id: e.id });
+      for (const l of listed.values()) if (l.from === from) out.set(titleKey(l.title), { title: l.title, ...(l.id !== undefined ? { id: l.id } : { phase: l.phase }) });
+      return [...out.values()];
+    },
   };
+};
+
+/**
+ * The follow-ups an agent is shown as already named from its ticket (`FOLLOWUPS_NAMED`): each with the issue it was
+ * filed as, or, when this run has yet to file it, the pass that named it. A review never saw the implementer's
+ * lines, and a later run never knew what an earlier one filed, so each restated the problem in other words.
+ * Empty when there are none, so the prompt carries no heading over nothing.
+ */
+export const alreadyNamedView = (named: readonly NamedFollowUp[], ref: (id: string) => string): string =>
+  named.length
+    ? "# Follow-ups already named from this ticket\n\nThese problems outside this ticket are filed already, or will be when this run lands. " +
+      "Do not give a `<followup>` line for any of them again, in any wording; a problem not on this list gets its own line.\n\n" +
+      named.map((n) => (n.id !== undefined ? `- ${ref(n.id)} ${n.title}` : `- ${n.title} (named by this ticket's ${n.phase ?? "earlier"} pass)`)).join("\n") +
+      "\n\n"
+    : "";
+
+/**
+ * The follow-ups earlier runs filed (an issue id on the entry), from the project's `logs/history.jsonl`, read as
+ * `changelogSince` reads it: a line that does not parse is skipped, and so is a dry run's. Only the tickets in `from`
+ * when given. A ticket's follow-up filed in two runs (one the earlier missed) is listed twice.
+ */
+export const filedBefore = (root: string, from?: ReadonlySet<string>): FiledFollowUp[] => {
+  const file = join(root, ".sandcastle/logs/history.jsonl");
+  if (!existsSync(file)) return [];
+  const out: FiledFollowUp[] = [];
+  for (const text of readFileSync(file, "utf8").split("\n")) {
+    if (!text.includes('"followUps"')) continue;
+    try {
+      const run = JSON.parse(text);
+      if (!Array.isArray(run?.followUps) || run.dryRun) continue;
+      for (const f of run.followUps) {
+        if (typeof f?.title === "string" && typeof f.from === "string" && typeof f.phase === "string" && (typeof f.id === "string" || typeof f.id === "number") && (!from || from.has(f.from))) {
+          out.push({ title: f.title, from: f.from, phase: f.phase, id: String(f.id) });
+        }
+      }
+    } catch {
+      /* a line that does not parse is skipped */
+    }
+  }
+  return out;
 };
 
 /** The tickets `TICKETS` (or `ISSUES`, its older name; or `sandcastle run 12 15`) names, refused before anything starts when one is closed. */
@@ -1092,7 +1153,7 @@ export type PipelineContext = {
   reports: Map<string, string>;
   notes: Note[];
   /** Where the `<followup>` lines of every agent pass go as the pass ends: the run's book (`createFollowUpBook`), which records and later files them. A pipeline given none keeps none. */
-  followUps?: { push(f: FollowUp): unknown };
+  followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[] };
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -1360,7 +1421,8 @@ export const createPipeline = (ctx: PipelineContext) => {
     const implModel = own.model ?? IMPL_MODEL;
     // `IMPL_UNMET`, `IMPL_SAID` and `IMPL_CHANGELOG` are empty here: only a full review is shown the implementer's
     // unmet line, closing paragraph and changelog lines (see `implUnmetView`, `implSaidView`, `implChangelogView`).
-    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", ...tracker.promptArgs(issue.id) };
+    // `FOLLOWUPS_NAMED` is empty here too, and filled at every agent pass (`pass`) from the run's follow-up book.
+    const promptArgs = { ISSUE_NUMBER: issue.id, TICKET: ref(issue.id), IMPL_UNMET: "", IMPL_SAID: "", IMPL_CHANGELOG: "", FOLLOWUPS_NAMED: "", ...tracker.promptArgs(issue.id) };
     const merge = mergedEarlier(issue.id, branch);
     if (merge) {
       return { issue: issue.id, branch, status: "merged-earlier", commits: 0, reviewCommits: 0, repairs: 0, gates: [], head: merge };
@@ -1409,8 +1471,12 @@ export const createPipeline = (ctx: PipelineContext) => {
     // until the window resets, this ticket parks like any other at a juncture (sandbox closed, branch kept), and
     // the same pass runs again in a fresh sandbox after the resume. Its time parked is `waitMs` of the step.
     let agentsRan = false;
-    const pass = async (opts: Parameters<typeof sandbox.run>[0]) => {
+    const pass = async (given: Parameters<typeof sandbox.run>[0]) => {
       agentsRan = true;
+      // What the ticket's earlier passes and earlier runs named, as of this pass: the review sees the implementer's lines.
+      const opts = given.promptArgs && "FOLLOWUPS_NAMED" in given.promptArgs
+        ? { ...given, promptArgs: { ...given.promptArgs, FOLLOWUPS_NAMED: alreadyNamedView(ctx.followUps?.namedFrom?.(issue.id) ?? [], ref) } }
+        : given;
       const phase = phaseOf(opts.name ?? "");
       const parkedBefore = parkedInStep;
       for (;;) {
@@ -2696,7 +2762,17 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notes: Note[] = [];
   // Out-of-scope problems the agents named in `<followup>` lines: in the run record as they arrive, filed after the notes below
   // or, when the run stops before then, by the stop. A title filed by an earlier turn of this run is not listed again.
-  const followUps = createFollowUpBook(run, { tracker, dryRun: DRY_RUN, write: (fn) => host.write(fn, trackerMade(project.root)), seen: filedThisRun, places: placesThisRun, exists: onBase(project.root, project.baseBranch), named: namedOnBase(project.root, project.baseBranch) });
+  // And what earlier runs filed from the tickets this turn runs, from the history: a repeat of one is a comment on its issue.
+  const followUps = createFollowUpBook(run, {
+    tracker,
+    dryRun: DRY_RUN,
+    write: (fn) => host.write(fn, trackerMade(project.root)),
+    seen: filedThisRun,
+    places: placesThisRun,
+    exists: onBase(project.root, project.baseBranch),
+    named: namedOnBase(project.root, project.baseBranch),
+    earlier: filedBefore(project.root, new Set(candidates.map((c) => c.id))),
+  });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
