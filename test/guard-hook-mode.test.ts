@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, gitFingerprint, recordGitConfigEnd, recordGitConfigStart } from "../src/guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, gitFingerprint, recordGitConfigEnd, recordGitConfigStart, tookLines } from "../src/guard.ts";
 import { quietly } from "./quiet.ts";
 
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)));
@@ -168,6 +168,17 @@ test("an older version's record is taken again without a refusal even when the c
   writeFileSync(baselinePath(project.root), `${JSON.stringify({ version: 1, entries: [], worktreeEntries: [], attributes: "", files: {}, modes: {}, clean: false })}\n`);
   const { lines } = await quietly(() => assert.doesNotThrow(() => start(project)));
   assert.equal(lines.length, 1);
+});
+
+test("a detached start shows the line of an older record taken again on its own terminal, as the child's log does", async () => {
+  const { project } = repo();
+  mkdirSync(join(project.root, ".sandcastle", ".run"), { recursive: true });
+  writeFileSync(baselinePath(project.root), `${JSON.stringify({ entries: [], worktreeEntries: [], attributes: "", files: {}, clean: true })}\n`);
+  // The `--detach` parent's check records nothing and prints `tookLines` of it: the child's start prints the same.
+  const parent = tookLines(assertGitConfigBaseline(project, "sandcastle run"));
+  assert.equal(parent.length, 1);
+  assert.match(parent[0], /taken again from the present state, once/);
+  assert.deepEqual((await quietly(() => start(project))).lines, parent);
 });
 
 test("a first run, with no record, prints no line", async () => {

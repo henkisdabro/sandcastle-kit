@@ -713,17 +713,24 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
   );
 };
 
-/** The line a start prints for each change `assertGitConfigBaseline` took as the person's own. */
-export const tookLines = ({ took }: GitConfigStart) => took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`);
+/**
+ * The lines a start prints: an earlier version's record taken again, and each change `assertGitConfigBaseline` took as
+ * the person's own. One function, so a `--detach` parent's terminal shows what the child's log does.
+ */
+export const tookLines = ({ took, retaken }: GitConfigStart) => [
+  ...(retaken
+    ? ["The record of the shared .git's program-running keys, hooks and modules, left by an earlier kit version, lacks what this version holds (the executable bit of a hook, more keys): taken again from the present state, once, with no comparison."]
+    : []),
+  ...took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`),
+];
 
 /**
  * Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended,
- * and prints a line for each change it took as the person's own.
+ * and prints its `tookLines`.
  */
 export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
-  const { took: _took, retaken, ...state } = start;
+  const { took: _took, retaken: _retaken, ...state } = start;
   writeBaseline(project, { ...state, clean: false });
-  if (retaken) console.log("The record of the shared .git's program-running keys, hooks and modules, left by an earlier kit version, lacks what this version holds (the executable bit of a hook, more keys): taken again from the present state, once, with no comparison.");
   for (const line of tookLines(start)) console.log(line);
 };
 
