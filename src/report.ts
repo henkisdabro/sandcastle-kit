@@ -833,13 +833,26 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
       return `- ${name(id)} - merged - check by hand: ${note}${more}`;
     }),
-    // The reviewer's own sentence, cut at the cap like an ungated note.
-    ...o.gapped.map((id) => {
-      const note = f.tickets[id].gap ?? "";
-      const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
-      return `- ${name(id)} - merged - the reviewer named a gap it did not file: ${note}${more}`;
-    }),
   ];
+};
+
+/**
+ * The reviewer prose `gapOf` read as a gap, on a line of its own and counted nowhere: no Needs you bullet, no
+ * `need you` in the headline, no Next step. The detector reads sentences, and approving prose ("correctly left
+ * alone", "the remaining mentions are still true") keeps finding phrasings it takes for a gap, so a find is a
+ * thing worth a glance, not work a person owes. Each sentence is cut at the cap like an ungated note; the earlier
+ * turns' finds follow, marked with their turn.
+ */
+const gapLines = (f: Facts, o: Owed, carried: { turn: number; facts: Facts; o: Owed }[]): string[] => {
+  const finds = [
+    ...o.gapped.map((id) => ({ id, facts: f, turn: 0 })),
+    ...carried.flatMap((c) => c.o.gapped.map((id) => ({ id, facts: c.facts, turn: c.turn }))),
+  ].map(({ id, facts, turn }) => {
+    const note = facts.tickets[id].gap ?? "";
+    const more = note.endsWith("…") ? ` (cut short - full text in .sandcastle/logs/agent-issue-${id}-review-${id}.log)` : "";
+    return `${refOf(id)} "${note}"${more}${turn ? ` (turn ${turn})` : ""}`;
+  });
+  return finds.length ? [`Worth a glance - the reviewer's prose may name a gap: ${finds.join("; ")}`] : [];
 };
 
 /** The Next steps for what `ticketLines` lists, in the order the summary gives them. */
@@ -859,7 +872,6 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   if (o.partlyDecide.length) next.push(`Do or decide what is left on ${list(o.partlyDecide)} (merged, partly done; the agent's note says it needs a person): close the ticket once it is done, or move it to the hold label${holdLabel} so a run does not spend an agent on it.`);
   if (o.partlyAway.length) next.push(`${list(o.partlyAway)} merged partly done and is no longer in the queue: finish the remainder yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to pick up.`);
   if (o.ungated.length) next.push(`Check ${list(o.ungated)} by hand: merged, but no gate exercises the change (what to check is under Needs you).`);
-  if (o.gapped.length) next.push(`Read the gap the reviewer named in prose on ${list(o.gapped)} (merged; under Needs you): file it as a ticket, or decide it needs nothing.`);
   return next;
 };
 
@@ -869,12 +881,12 @@ const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWi
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
-  const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, gapped, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;
+  const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;
   const name = (id: string) => nameOf(f, id);
   const list = listOf;
   // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
   const carried = (f.carried ?? []).map(({ turn, facts }) => ({ turn, facts, o: owed(facts) }));
-  const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated, ...c.o.gapped]).size + c.o.filingFailed, 0);
+  const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated]).size + c.o.filingFailed, 0);
   // The kept worktrees of the earlier turns' tickets, oldest first, one per path and none the last turn lists itself.
   const earlierTurnKept = carried
     .flatMap((c) => carriedKept(c.facts).map((k) => ({ ...k, turn: c.turn, state: c.facts.tickets[k.issue]?.state })))
@@ -940,7 +952,7 @@ export const render = (f: Facts, plain = false): string => {
       : `${h("## 🏁 Run", "## Run")} ${f.stopped ? (merged.length ? `STOPPED - ${merged.length} merged before it stopped` : "STOPPED before landing - nothing was merged") : f.live ? (f.paused ? `still running, paused since ${hhmm(new Date(f.paused.since * 1000).toISOString())} - partial summary` : "still running - partial summary") : f.stoppedBy ? `${stoppedByText(f.stoppedBy)} - partial summary` : f.killed ? "ended without a clean exit (killed?) - partial summary" : early ? `ended early (exit ${f.exitCode}) - partial summary` : "finished"}${f.dryRun ? " (dry run)" : ""}`,
     (end ? `${hhmm(f.started)} to ${hhmm(end)} (${span(Date.parse(end) - Date.parse(f.started))})` : `From ${hhmm(f.started)}, end not recorded`) +
       ` - ${attempted} attempted - ` +
-      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated, ...gapped]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
+      `${f.dryRun ? `${wouldMerge.length} would merge` : `${merged.length} merged`} - ${held.length + uncommitted.length + new Set([...notClosed, ...partly, ...ungated]).size + (f.baseRed ?? []).length + filingFailed + carriedNeed} need you - ${fixing.length} need fixing - ` +
       // Its own count, and only when there is one: a person triages these, no ticket of the run needs them.
       `${toTriage + carriedTriage ? `${toTriage + carriedTriage} to triage - ` : ""}` +
       `${notStarted.length} not started${blockedCount ? ` - ${blockedCount} blocked` : ""}${f.tokenTotal ? ` - tokens ${tokenLine(f.tokenTotal)}` : f.tokens ? ` - tokens ${f.tokens}` : ""}`,
@@ -964,6 +976,7 @@ export const render = (f: Facts, plain = false): string => {
   out.push(...settingsLines(f, plain));
   // Those checks read an unanswered merge as clean, so the summary is where a person learns they did not run.
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
+  out.push(...gapLines(f, o, carried));
   if (f.stopped) out.push(f.stopped);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 

@@ -203,12 +203,14 @@ This continues SKILL.md: run its "Before every action" first.
       check it if you can (open the page, rebuild the file) - the gates did not. Each ticket listed
       `merged, partly done`: the criterion an agent left undone (the ticket is still open, and the
       next run picks up the remainder - unless the line says the remainder needs a person (a decision, a deploy, access),
-      when the summary suggests moving the ticket to the hold label instead). Each ticket listed `the reviewer named a gap it did not file`: a sentence the reviewer left in prose, with no
-      `<followup>` or `<unmet>` line, so nothing was filed - file it as a ticket (offer to), or say it needs nothing. A follow-up the summary says to file by hand is one the kit
+      when the summary suggests moving the ticket to the hold label instead). A follow-up the summary says to file by hand is one the kit
       could not file, after a stop or a failed filing: file it, or offer to. The rest are under a `### To triage`
       sub-heading, after the run's own items, and the headline's `to triage` counts them (`need you` counts the items
       above it): each follow-up `filed for triage` (the kit filed it from an agent's `<followup>` line) and each
       `needs-triage` issue opened during the run. One line on what it asks, and offer the `queue` action for it.
+      The header's `Worth a glance - the reviewer's prose may name a gap: #N "..."` line (outside Needs you, and not in
+      the headline's `need you`) is the kit's guess at a gap a reviewer put in prose and filed nowhere: read the
+      sentence, and if it is a real gap file it as a ticket (offer to); most are approving prose and need nothing.
    4. `## ❌ Needs fixing (failed or conflicted)` - each red, conflicted, crashed or unlanded branch: the cause in one line,
       the file or test, whether it shares a cause with another, and the concrete fix path. The
       summary's `Same failing test` lines are likely one cause; its `Same file` lines are only a

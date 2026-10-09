@@ -390,8 +390,10 @@ nothing more to the tracker, and the summary lists each as one to file by hand.
 
 A reviewer that names a known gap in prose ("left alone", "remains", "a gap", "not fixed") and ends its
 message with neither a `<followup>` nor an `<unmet>` line has lost it, so the kit reads each review's
-message for such a sentence (not one that says nothing is left, such as "nothing remains") and, for a
-merged ticket, lists the sentence under Needs you: `the reviewer named a gap it did not file`.
+message for such a sentence (not one that says nothing is left, such as "nothing remains", and not text in
+double quotes or backticks) and, for a merged ticket, gives the sentence a line of its own: `Worth a glance - the
+reviewer's prose may name a gap`. It is a guess at a person's wording, so it is not under Needs you, not in the
+headline's `need you` and adds no Next step.
 
 ## 📋 Queue: what agents work on
 
