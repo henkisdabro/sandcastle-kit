@@ -15,7 +15,7 @@ import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
 import { mergedByHand, mergedPartly } from "./run.ts";
 import { USER_CONFIG } from "./sandbox.ts";
-import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
+import { DEFAULT_DONE, refOf, slug, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
 // `closed-unmerged`: closed as not planned, so the work it stood for will never land.
@@ -255,12 +255,32 @@ export const commentBlockLine = (f: Awaited<ReturnType<typeof commentOnlyBlocks>
 // before its blocker lands, and nothing else says so.
 const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[-*+][ \t]/im;
 
+// The to-tickets template names a child's spec under a `## Parent` heading. A queued spec that
+// has queued children is run as one ticket beside them, so the parents a body names are read here:
+// `#12`, the issue's URL, or (files tracker) the parent's ticket-file path. Plain text, no tracker call.
+const parentsOf = (project: Project, body: string): string[] => {
+  const dir = project.tracker.kind === "files" ? project.tracker.dir.replace(/^\.?\/+|\/+$/g, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : undefined;
+  const found = new Set<string>();
+  let inside = false;
+  for (const line of stripCode(body).split("\n")) {
+    if (/^#{1,6}[ \t]/.test(line)) {
+      inside = /^#{1,6}[ \t]+parent:?[ \t]*#*[ \t]*\r?$/i.test(line);
+      continue;
+    }
+    if (!inside) continue;
+    for (const m of line.matchAll(/(?:^|[^\w/&])#(\d+)\b|\/issues\/(\d+)(?![\d-])/g)) found.add(m[1] ?? m[2]);
+    if (dir) for (const m of line.matchAll(new RegExp(`${dir}/([^/\\s]+)/issues/(\\d+)-[^\\s,;)]*\\.md`, "gi"))) found.add(`${slug(m[1])}-${String(Number(m[2])).padStart(2, "0")}`);
+  }
+  return [...found];
+};
+
 /**
  * Queued tickets that will never start, or start too soon, because of how their blockers are
  * written: a blocker that does not exist or cannot be read (it counts as open, so the ticket
  * waits for good), tickets that wait for each other, a Linear-style id the config does not
  * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
- * (not read, so the ticket starts at once). Each line says what to change.
+ * (not read, so the ticket starts at once). Also a queued spec that queued children name under
+ * `## Parent`: a run would implement it whole beside them. Each line says what to change.
  */
 export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
   const queuedIds = new Set(queued.map((t) => t.id));
@@ -302,6 +322,15 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
       if (linear.has(m[1].toUpperCase())) continue;
       lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (README: Blockers), or remove the line.`);
     }
+  }
+  const children = new Map<string, string[]>();
+  for (const t of queued) {
+    for (const parent of parentsOf(project, t.body ?? "")) {
+      if (parent !== t.id && queuedIds.has(parent)) children.set(parent, [...(children.get(parent) ?? []), t.id]);
+    }
+  }
+  for (const [parent, kids] of children) {
+    lines.push(`${refOf(parent)} is the parent of ${kids.map(refOf).join(", ")} - a run would implement the whole spec as one ticket: unqueue ${refOf(parent)}`);
   }
   // Tickets that wait, through each other, for themselves: none of them can ever start.
   const seen = new Set<string>();

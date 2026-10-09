@@ -261,7 +261,8 @@ export type RunRecord = {
   models?: string;
   issues?: string[];
   dryRun?: boolean;
-  versions?: { claude?: string; codex?: string };
+  /** `kit` is `kitVersion()`'s text (`0.11.0 +3 (1c4f46f)`), read once when the process started; an older record has none. */
+  versions?: { kit?: string; claude?: string; codex?: string };
   /** Tickets held for another that is open: `on` names what each waits for. */
   waiting?: { issue: string; on: string[] }[];
   /** What the run line shows while the run is live. */
@@ -313,6 +314,8 @@ export type RunRecord = {
   stopped?: string;
   /** The stop's cause in a few words (`main moved while sandboxes ran`), beside `stopped`: the summary words its next step by it. */
   stoppedWhat?: string;
+  /** The prompt-expansion error that crashed tickets alike, so the run started no more: a setup problem, which the summary words its next step by. */
+  setupProblem?: string;
   /** Why the agents' follow-ups were not written to the tracker, once for the set: each one's `failed` carries the same text. */
   followUpsWithheld?: string;
   /** How a person ended the run: "sandcastle stop", "Ctrl-C", or the signal's name. Absent for a crash, a kill -9 and a run that ended by itself. */

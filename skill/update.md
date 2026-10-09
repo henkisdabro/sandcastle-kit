@@ -72,7 +72,7 @@ Declining is not skipping: every step still runs its check, and only the asking 
       images, and the hook check against them.
       If it refuses the config instead (`unknown key`, `must be ...`: a typo or a wrong type that
       older versions ignored), fix the key it names - it suggests the nearest real one - and run
-      it again.
+      it again. A layer step that fails with `claude: not found` or `codex: not found` is step 17's.
       Fix a `HOOK FAIL` as in init.md step 4. Then `sandcastle gates` (no model calls): a new image
       can turn a gate red or green on base. Fix a red gate as in init.md step 6. It also runs the
       repo's `pre-commit` and `commit-msg` hooks in the sandbox: a refused hook means the tool it
@@ -160,13 +160,26 @@ Declining is not skipping: every step still runs its check, and only the asking 
        project root, `.sandcastle/` or `.git`, and the config no longer loads. Tell the user which
        entry the line names, and propose removing it or pointing it at a directory elsewhere (a
        cache directory under the project is fine). Then `sandcastle gates`.
+   17. **Layer steps that call the agents.** Claude Code and Codex are no longer in the base image:
+       the kit copies them onto the project's image after the layer named by `dockerfile` is built.
+       Read that file (skip this step when the config names none) for a `RUN` step, continuations
+       joined, that runs `claude` or `codex` (a plugin install, a login, a version check). It
+       finds neither, and `sandcastle build` fails at that step with `not found`. For each, propose
+       moving the command to an entry of `setup` in `.sandcastle/config.ts`, which runs in the
+       finished image before the agents, or dropping it when it only checked a version. The base
+       no longer puts `~/.local/bin` on `PATH` either: a `RUN` step that calls a tool an earlier
+       step installed there (`uv`, `pipx`) by its bare name fails the same way; propose its full
+       path, `/home/agent/.local/bin/<tool>`. Then `sandcastle build` and `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated
    --declined claude-mod,autonomy-drain`): it records them at the kit's release and keeps the ones
    declined before. Commit any project file that changed, by the repo's own rules, and report:
-   kit version before and after, what changed for this project, what the user decided, and in one
-   line every key now declined (earlier ones too), so they know what to ask for.
+   this project's release before and after (`sandcastle updated` prints it as
+   `this project: <recorded release> -> <kit version now>`, or says there was no earlier record:
+   say so, do not substitute the kit's version before the pull, which another session may already
+   have moved), what changed for this project, what the user decided, and in one line
+   every key now declined (earlier ones too), so they know what to ask for.
 5. **Fresh sessions.** The skill is a link into the kit, so the pull updated it for every
    harness, but a session that was already open keeps the skill it loaded at its start (and a mod
    linked in step 1 loads only in a new session). Tell the user to start a new session (Claude

@@ -95,6 +95,7 @@
 //   updated [--declined KEY[,KEY...]]
 //                    record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them;
+//                    prints the release recorded before and the kit's version now;
 //                    --declined also records the update steps the user declined, each at the
 //                    kit's release, in the update record (`declined`), so the next update
 //                    names them and does not ask again; earlier ones are kept
@@ -147,7 +148,7 @@ import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTi
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { changesDiffLines, changesLines, kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
+import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -733,7 +734,9 @@ try {
       if (args.length !== (at === -1 ? 0 : 2) || keys.some((k) => !/^[a-z0-9][a-z0-9-]*$/.test(k))) {
         throw new OperatorError("Usage: sandcastle updated [--declined KEY[,KEY...]] - each KEY is an update step's key, such as claude-mod or autonomy-drain.");
       }
-      console.log(`Recorded: this project is up to date with sandcastle-kit ${markUpdated(root, KIT, keys)}.`);
+      // Read first: marking replaces the record, and the update action reports where the project was.
+      const before = recordedRelease(root);
+      console.log(updatedLine(before, markUpdated(root, KIT, keys)));
       break;
     }
     case "changes": {

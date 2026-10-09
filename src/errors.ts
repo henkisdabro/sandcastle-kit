@@ -53,6 +53,43 @@ export const containerStartTimeout = (error: unknown): SlowStartError | undefine
   return Object.assign(slowStart(Math.round(ms / 1000), "start a container"), { cause: error });
 };
 
+/**
+ * `text` cut to at most `max` characters at a word, with "…" when it was cut. A text with no space to cut at is cut
+ * at `max`.
+ */
+export const cutAtWord = (text: string, max = 160): string => {
+  if (text.length <= max) return text;
+  const room = text.slice(0, max - 1);
+  const at = room.lastIndexOf(" ");
+  return `${(at > 0 ? room.slice(0, at) : room).replace(/[\s,;:-]+$/, "")}…`;
+};
+
+/**
+ * Whether two prompt-expansion lines are the same failure: equal once the command (which names the ticket) and an
+ * elapsed time are set aside. The command's own output stays: a 404 and a 500 are two failures.
+ */
+export const sameExpansionFailure = (a: string, b: string): boolean => {
+  const key = (line: string) => line.replace(/`[^`]*`/g, "``").replace(/\d+ms/g, "#ms");
+  return key(a) === key(b);
+};
+
+/**
+ * The cleaned line of a failed prompt expansion (a shell expression of the prompt that exited non-zero, or timed out), or
+ * undefined for any other error. It is the ticket's setup, not its work, when every ticket fails the same way: the
+ * token cannot see the repo, `gh` is not signed in. The library runs its effects through `runPromise`, so the error
+ * arrives as a `FiberFailure` whose name or message carries the tag (`(FiberFailure) PromptError`); both are read. The
+ * command's stderr is on the lines after the first, so the first non-empty line of it follows the command.
+ */
+export const promptExpansionLine = (error: unknown): string | undefined => {
+  const e = error as { _tag?: string; name?: string; message?: string } | undefined;
+  const raw = error instanceof Error ? e?.message ?? "" : String(error);
+  if (!/\bPrompt(?:Expansion\w*)?Error\b/.test(`${e?._tag ?? ""} ${e?.name ?? ""} ${raw}`)) return undefined;
+  const lines = raw.replace(/^\(FiberFailure\)\s*/, "").replace(/^\w*Error:\s*/, "").split("\n").map((l) => l.trim());
+  const first = lines.find(Boolean) ?? "";
+  const rest = first.endsWith(":") ? lines.slice(lines.indexOf(first) + 1).find(Boolean) : undefined;
+  return cutAtWord(rest ? `${first} ${rest}` : first.replace(/:$/, ""));
+};
+
 /** A `docker run` that `execFileSync` or `spawnSync` ended at its time limit (`ETIMEDOUT`), as an `OperatorError` naming `what` ran too long. */
 export const dockerRunTimeout = (error: unknown, seconds: number, what: string): SlowStartError | undefined =>
   (error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ? Object.assign(slowStart(seconds, what), { cause: error }) : undefined;
