@@ -117,3 +117,11 @@ test("report --changelog lists a ticket the agents said none for apart from one 
   assert.doesNotMatch(out, /Changed: none/);
   assert.match(out, /^ {2}Fixed: a bug\. \(#23\)$/m);
 });
+
+// burndown() needs Docker, so no test drives it: its run-record write is held here, without which the
+// pipeline's `changelogNone` never reaches run.json and `report --changelog` lists the ticket as bare.
+test("burndown() writes the pipeline's changelogNone to the ticket's run record", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
+  const write = src.slice(src.indexOf("run.ticket(issue.id, {\n          commits: value.commits"));
+  assert.match(write.slice(0, write.indexOf("\n        });")), /\.\.\.\(value\.changelogNone \? \{ changelogNone: true \} : \{\}\)/);
+});
