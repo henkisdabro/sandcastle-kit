@@ -5,7 +5,7 @@
 // line is an agent-written hint, so every figure here is a rough one.
 
 import type { Project } from "./config.ts";
-import { blockerProblems, refsOf } from "./blockers.ts";
+import { blockerProblems, blockerResolver, openBlockers, refLabel, refsOf } from "./blockers.ts";
 import { protectedAmong, protectedWarning } from "./guard.ts";
 import { expandTouches, isGlob, missingTouches, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
@@ -60,8 +60,12 @@ const longestChain = (queued: Queued[], waits: Map<string, string[]>): string[] 
 /** The longest in-run `Blocked by` chain among `queued`: what `queue --lint` calls the blocker depth, and the run's estimate counts. */
 export const blockerChain = (project: Project, tracker: Tracker, queued: Queued[]): string[] => longestChain(queued, blockerWaits(project, tracker, queued));
 
-/** The report, one line each; the caller prints it. */
-export const lintQueue = async (project: Project, tracker: Tracker, queued: Queued[]): Promise<string[]> => {
+/**
+ * The report, one line each; the caller prints it. `named` says `queued` is the tickets a run was
+ * named (`sandcastle run 12 15`), not the whole queue: the figures are those of that run, and a
+ * blocker outside the set is listed as the wait a run would make.
+ */
+export const lintQueue = async (project: Project, tracker: Tracker, queued: Queued[], named = false): Promise<string[]> => {
   if (!queued.length) return [`queue "${project.label}" is empty - nothing to lint.`];
 
   const waits = blockerWaits(project, tracker, queued);
@@ -82,7 +86,9 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   const twice = [...declaredBy].filter(([, by]) => by.length >= 2);
   const hard = new Set(unmergeableFiles(project.root, project.baseBranch, twice.map(([f]) => f), project.generated ?? []));
   const shared = twice.filter(([f]) => hard.has(f));
-  const problems = await blockerProblems(project, tracker, queued);
+  // Named tickets are some of the queue: a blocker queued outside them is a wait, not "not queued".
+  const inQueue = new Set([...queued.map((t) => t.id), ...(named ? tracker.queued(false).map((t) => t.id) : [])]);
+  const problems = await blockerProblems(project, tracker, queued, inQueue);
 
   // A plain path no file matches is kept by expandTouches (it may be a new file) and an empty glob is dropped: neither shows above.
   for (const t of queued) {
@@ -100,10 +106,25 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
     return paths.length ? [`${refOf(t.id)} ${protectedWarning(paths)}`] : [];
   });
 
-  const out = [`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}": ${queued.length} ticket(s)`];
+  // A run of named tickets holds one back for any open blocker, in the set or not: the ones outside the set are not in the chain above.
+  const outside: string[] = [];
+  if (named) {
+    const resolve = blockerResolver(project, tracker, inQueue);
+    for (const t of queued) {
+      const set = new Set(waits.get(t.id));
+      const open = (await openBlockers(project, tracker, resolve, t)).filter((b) => !((b.kind === "ticket" || b.kind === "github") && (set.has(b.id) || b.id === t.id)));
+      if (open.length) outside.push(`${refOf(t.id)} waits for ${open.map(refLabel).join(", ")}`);
+    }
+  }
+
+  const out = [`${project.tracker.kind} tracker (${project.tracker.source}), queue "${project.label}": ${named ? `${queued.length} named ticket(s), not the whole queue` : `${queued.length} ticket(s)`}`];
   out.push(`  blocker depth: ${chain.length} - ${chain.length > 1 ? chain.map(refOf).join(" -> ") : `no queued ticket waits for another (${refOf(chain[0])} is first)`}`);
   out.push(`  blocked-by edges: ${edges.length}, ${overlapping.length} between tickets whose Touches overlap (they only order shared files), ${real.length} that do not (real dependencies)`);
   for (const e of real) out.push(`    real: ${refOf(e.id)} waits for ${refOf(e.on)}`);
+  if (named) {
+    out.push(outside.length ? "  waits for a blocker outside the named tickets (a run holds them back until it closes):" : "  waits for a blocker outside the named tickets: none");
+    for (const o of outside) out.push(`    ${o}`);
+  }
   out.push(wide.length ? `  wide tickets (more than ${WIDE_FILES} declared files): ${wide.map((t) => `${refOf(t.id)} (${files.get(t.id)!.length})`).join(", ")}` : `  wide tickets (more than ${WIDE_FILES} declared files): none`);
   out.push(hot.length ? `  hot files (declared by ${HOT_TICKETS}+ tickets):` : `  hot files (declared by ${HOT_TICKETS}+ tickets): none`);
   for (const [f, by] of hot) out.push(`    ${f}: ${names(by)}`);

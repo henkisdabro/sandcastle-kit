@@ -35,7 +35,8 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   `shellcheck -S error` it; both are installed here. Users' Macs run `#!/usr/bin/env bash` scripts
   under 3.2, which has no associative arrays, `mapfile`, `${x,,}` or `source <(...)`.
 - **Never run** `sandcastle run`, `preflight`, `build`, `lean --measure`, `setup` or `clean` here:
-  they need Docker or spend model allowance. `pnpm lint`, `pnpm exec tsc --noEmit`, `bash -n` and
+  they need Docker or spend model allowance. AGENTS.md's `doctor`, `status 0` and `lean` checks
+  are for the maintainer's machine: here they only report that Docker is missing. `pnpm lint`, `pnpm exec tsc --noEmit`, `bash -n` and
   `pnpm test` are the checks.
 - **Do not edit `CHANGELOG.md`**, even where AGENTS.md or the ticket asks for a line: tickets in one
   run all add at the same spot and would conflict at landing. The maintainer writes the entries
@@ -48,7 +49,9 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
 - `skill/SKILL.md`'s `description` stays under 1,024 characters and the skill stays portable across
   Claude Code, Codex and OpenCode (`docs/architecture.md` -> `skill/`).
 - Nothing personal in any file, commit or ticket comment: no names, emails, tokens, home paths or
-  private repo names. Write a lesson as a pattern, not as an incident.
+  private repo names. A path in a test or fixture uses a placeholder home - `/home/user`, `/home/node`
+  or `/home/agent` - never a made-up name under `/home` or `/Users`: `test/source-hygiene.test.ts` refuses any
+  other. Write a lesson as a pattern, not as an incident.
 - Leave `docker/base.Dockerfile` version pins alone unless the ticket is about them.
 - **How the test runner reports.** `pnpm test` runs `node:test` with its spec output: a pass is
   `ℹ pass N`, a failure is a line starting `✖` and `ℹ fail N`. It does not print TAP, so grepping

@@ -137,6 +137,16 @@ test("the home-path rule is the one test/full-check.sh scans with", () => {
   assert.ok(scan.includes(`'${PLACEHOLDER_HOME}'`), "test/full-check.sh's home_paths drifted from PLACEHOLDER_HOME");
 });
 
+// Untracked files too: an agent writes a test, runs the suite green and only then commits, so a check of
+// tracked files alone passed in its sandbox and failed at the ticket's gate.
+const untracked = () => {
+  try {
+    return execFileSync("git", ["ls-files", "-z", "--others", "--exclude-standard"], { cwd: KIT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
 test("no tracked file names a real home directory", () => {
-  assert.deepEqual(homePathHits(tracked, text), [], "a real home directory in a tracked file (the rule is home_paths in test/full-check.sh): write a placeholder such as /home/user");
+  assert.deepEqual(homePathHits([...tracked, ...untracked()], text), [], "a real home directory in a tracked file (the rule is home_paths in test/full-check.sh): write a placeholder such as /home/user");
 });

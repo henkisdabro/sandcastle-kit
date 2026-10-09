@@ -11,8 +11,10 @@ import { linearKey } from "./blockers.ts";
 import { CONFIG_PATH, loadProject, MountRefused, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
-import { askRuleLines } from "./lean.ts";
-import { pluginState } from "./herdr-plugin.ts";
+import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { liveRuns, pluginState } from "./herdr-plugin.ts";
+import type { Probe } from "../mod/hooks/run-live.ts";
+import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
@@ -304,6 +306,22 @@ export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot
   !!repoRoot && (existsSync(join(repoRoot, CONFIG_PATH)) || realpathSync(repoRoot) !== realpathSync(kit));
 
 /**
+ * The warn block for the runs live on this machine, or none: a run keeps its code loaded but reads
+ * `prompts/` as each ticket starts, `container/` as each sandbox opens and `status.sh` as the view
+ * redraws, so a pull of the kit under it changes what its later tickets get. A run that ended with
+ * its Herdr tab still to be told is parked for the plugin, as the tab bar does, never dropped.
+ */
+export const liveRunLines = (dir = RUNS_DIR, probe?: Probe): string[] => {
+  const runs = liveRuns(dir, probe, tabAwaitsReport);
+  if (!runs.length) return [];
+  return [
+    `warn ${runs.length} sandcastle run${runs.length === 1 ? " is" : "s are"} live on this machine, and a live run reads the kit's \`prompts/\`, \`container/\` and \`status.sh\` from disk`,
+    "       -> Wait for them to finish before pulling the kit (`sandcastle wait` in each project): a pull changes what their later tickets are built from.",
+    ...runs.map((r) => `       - ${r.root}${r.pid ? ` (pid ${r.pid})` : ""}`),
+  ];
+};
+
+/**
  * `pointToSize` is false for `sandcastle setup`, which runs doctor and prints the pointer itself
  * after it, so the line is not said twice.
  */
@@ -569,6 +587,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   for (const line of poolWarns) console.log(`warn ${line}`);
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
+  for (const line of liveRunLines()) console.log(line);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
   if (process.env.HERDR_ENV === "1") {
     const plugin = pluginState();
@@ -621,14 +640,19 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       if (p.LINEAR_API_KEY) check(false, ".sandcastle/.env holds LINEAR_API_KEY", `Move the LINEAR_API_KEY line from ${projectEnv} to ${envFile}: Sandcastle would forward it into every sandbox.`);
       if (p.GH_TOKEN) check(p.GH_TOKEN.startsWith("github_pat_"), ".sandcastle/.env GH_TOKEN is fine-grained (it overrides the shared one)", `Replace it in ${projectEnv} with a fine-grained token, or delete its GH_TOKEN line to use the shared one.`);
     }
+    // A FIX: git finds no hooks in a sandbox with this value, and nothing else says so.
+    const outsideHooks = hooksPathOutside(repoRoot);
+    if (outsideHooks) {
+      const [what, fix] = hooksPathLines(outsideHooks);
+      check(false, what, fix.replace(/^-> /, ""));
+    }
     // A warning, never a FIX: the rules are the project's own, and only a person can say which to move.
     const [askHead, ...askRest] = askRuleLines(repoRoot);
     if (askHead) console.log([`warn ${askHead}`, ...askRest].join("\n"));
     // A warning, never a FIX. Silent when Docker is down or the image is not built yet.
     const staleImage = (() => {
       try {
-        if (!versions) return undefined;
-        const tag = baseImage(versions).tag;
+        const tag = baseImage().tag;
         const created = run("docker", ["image", "inspect", tag, "--format", "{{.Created}}"]);
         return created ? staleImageWarning(created, new Date(), tag) : undefined;
       } catch {

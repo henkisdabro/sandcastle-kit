@@ -21,6 +21,9 @@
 //                    and refuses a difference, naming each key and file (a sandbox of a killed
 //                    run may have planted it): remove it, or if it is yours
 //                    --accept-git-config records the present state as the new baseline
+//                    After a clean end the start takes a new plain https or ssh remote, a
+//                    hooks path in a tracked directory and a hook manager's hooks itself,
+//                    printing a line for each
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
@@ -63,8 +66,11 @@
 //                    does, when it would spend ANTHROPIC_API_KEY
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
 //                    GitHub issues or ticket files; see README, Trackers); no model calls
-//   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
-//                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0
+//   queue --lint [TICKET ...]
+//                    the queue's shape before a run: blocker chain, Touches overlaps, wide
+//                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0;
+//                    given tickets, only those are linted (pass the run's own), and a blocker
+//                    outside them is listed as a wait, as the run would hold it
 //   requeue <ticket> [--note TEXT]
 //                    put a ticket back in the queue (hold label off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
@@ -89,8 +95,23 @@
 //                    with and without the extras (asking first, as a run does,
 //                    when it would spend ANTHROPIC_API_KEY)
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
-//   updated          record that this project has acted on the kit's upgrading notes (the
-//                    update action's last step); doctor and run then stop listing them
+//   updated [--declined KEY[,KEY...]] [--accepted KEY[,KEY...]]
+//                    record that this project has acted on the kit's upgrading notes (the
+//                    update action's last step); doctor and run then stop listing them;
+//                    prints the release recorded before and the kit's version now;
+//                    --declined also records the update steps the user declined, each at the
+//                    kit's release, in the update record (`declined`), so the next update
+//                    names them and does not ask again; earlier ones are kept;
+//                    --accepted takes a step declined before, now applied, off that list
+//   changes [--since RELEASE]
+//                    the CHANGELOG entries of every release after the one this project last
+//                    updated at (or after RELEASE), up to the kit's own: per release grouped
+//                    Added, Changed, Security, Fixed, Upgrading, each cut to its bold lead;
+//                    with no record and no --since, the current release's; then, from
+//                    the kit's git tags of the two releases, the config keys, personal
+//                    settings, environment variables, commands and flags added, removed
+//                    or changed (a missing tag is said, the changelog stands alone);
+//                    read-only, no model calls
 //   clean [--all] [--accept-git-config]
 //                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
@@ -115,23 +136,23 @@ import { confirmApiKey } from "./api-key.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
-import { burndown, openOnQueue } from "./burndown.ts";
+import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, holdAndReap, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
 import { dockerRunner, preview, previewLines, unlanded } from "./preview.ts";
 import { changelogSince, closingReport, type Facts, gather, operatorSteps, summary } from "./report.ts";
 import { LABEL_LAG_REMINDER, makeTracker, parseRequeueArgs, requeueTicketWithEffect } from "./tracker.ts";
-import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
+import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTicketsFromEnv, parseRunArgs, preflight, readOutcomes, rewordLibraryLines } from "./run.ts";
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
+import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -139,7 +160,7 @@ import { doctor, requireRepoAccess } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
-import { nearest, OperatorError } from "./errors.ts";
+import { nearest, OperatorError, wasReported } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 import { realReaders, sizeLines } from "./size.ts";
@@ -203,7 +224,8 @@ try {
     process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
-    console.log(HELP.join("\n"));
+    // `help changes` is the one entry; `helpFor` gives the whole text for a name the help does not list.
+    console.log(args[0] ? helpFor(args[0]) : HELP.join("\n"));
     process.exit(0);
   }
   if (command === "cap") {
@@ -269,7 +291,7 @@ try {
         }
         sandboxPanes(project);
         // The child checks again for itself; this one refuses before a process starts.
-        assertGitConfigBaseline(project, "sandcastle run", given.acceptGitConfig);
+        const baseline = assertGitConfigBaseline(project, "sandcastle run", given.acceptGitConfig);
         assertCleanBase(project);
         await requireRepoAccess(project);
         const owner = livePid(root);
@@ -281,6 +303,8 @@ try {
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
         const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR, dockerInfo: reading?.text });
+        // The child prints what its start took into its log, which nobody reads at once: this terminal shows it too.
+        if (started.code === 0) for (const line of tookLines(baseline)) console.log(line);
         for (const line of started.lines) console.log(line);
         process.exitCode = started.code;
         break;
@@ -321,12 +345,16 @@ try {
           queuedAtStart = new Set(makeTracker(project).queued(false).map((t) => t.id));
         } catch {}
       }
+      // What the operator named, kept for every turn: a later turn sets TICKETS to its own re-runnable tickets,
+      // which says nothing of a queued ticket the operator left out. Nothing named: the whole queue, as always.
+      const operatorList = namedTicketsFromEnv().list;
+      const scope = operatorList ? { list: operatorList, ids: undefined as Set<string> | undefined } : undefined;
       // The last turn's facts, for the exit code: a turn that ended the loop before gathering (level 0) leaves them unread.
       let lastFacts: Awaited<ReturnType<typeof gather>> | undefined;
       let ranTurn = false;
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(scope ? { scope } : {}), ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -356,6 +384,7 @@ try {
             released: left.unblocked.filter((id) => !drain.unblocked.includes(id)),
             conflicted: conflictedIn(readOutcomes(root), facts.started),
             partial: left.partial,
+            unlanded: left.unlanded,
           };
           const why = drainStop(now, drain.last, tracker.ref);
           drain.last = now;
@@ -401,7 +430,7 @@ try {
         // One more queue read: a ticket queued while the drain ran is not in any turn's list, so it waits for the next run.
         const tracker = makeTracker(project);
         const known = queuedAtStart && new Set([...queuedAtStart, ...drain.inRun]);
-        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()))) console.log(line);
+        if (known) for (const line of await lateQueueLines(tracker, known, async (late) => new Set((await openOnQueue(project, tracker, late)).keys()), scope?.ids)) console.log(line);
       }
       // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
       // Level 0 gathered no facts: the run record's verify is enough, where gather() would read the tracker again
@@ -531,12 +560,16 @@ try {
       // The queue and what holds each ticket back; `--json` is what the status view reads.
       const project = await loadProject(root);
       const tracker = makeTracker(project);
-      const queued = tracker.queued(false);
       if (args.includes("--lint")) {
-        // Advice only: exit 0 whatever it finds.
-        for (const line of await lintQueue(project, tracker, queued)) console.log(line);
+        // Advice only: exit 0 whatever it finds. Tickets named here are the run's own: the same
+        // set `sandcastle run N N` takes (a closed one is refused alike), not the whole queue.
+        const given = args.filter((a) => !a.startsWith("-"));
+        if (given.length) {
+          for (const line of await lintQueue(project, tracker, namedTickets(tracker, given.join(",")), true)) console.log(line);
+        } else for (const line of await lintQueue(project, tracker, tracker.queued(false))) console.log(line);
         break;
       }
+      const queued = tracker.queued(false);
       const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
       const rows = await Promise.all(
         queued.map(async (t) => ({
@@ -617,20 +650,22 @@ try {
       // The sandbox shares the repo's .git, so the run's host guards apply.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
+      // writes, and its commits and landings would read as tampering to the check below. A killed run's
+      // containers are reaped under the lock before the config is read: one still alive could write it past the pins.
+      holdAndReap(project);
       // Before the pins take the config as it is: what an earlier, killed run's sandbox planted there is refused, not pinned.
       const baseline = assertGitConfigBaseline(project, "sandcastle gates", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
-      // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
-      // writes, and its commits and landings would read as tampering to the check below.
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const fingerprint = gitFingerprint(project);
       try {
-        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when));
+        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when, true));
       } finally {
-        assertGitUnchanged(project, fingerprint, "after the gates");
+        assertGitUnchanged(project, fingerprint, "after the gates", true);
+        // Red gates end cleanly too: the check above passed, so the next start must not blame a sandbox for a change made since.
+        recordGitConfigEnd(project);
       }
-      recordGitConfigEnd(project);
       console.log("All gates green on the base branch.");
       break;
     }
@@ -638,10 +673,11 @@ try {
       // The merge lands in this checkout, so it must be clean and no run may be merging into it.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // The lock and the reap of a killed run's containers come before the config is read, as a run's start has them.
+      holdAndReap(project);
       const baseline = assertGitConfigBaseline(project, "sandcastle land", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       assertCleanBase(project);
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const landed = await landTicket(project, makeTracker(project), args.find((a) => a !== "--accept-git-config"), async () => {
         const image = await ensureImage(project);
@@ -702,7 +738,29 @@ try {
       break;
     }
     case "updated": {
-      console.log(`Recorded: this project is up to date with sandcastle-kit ${markUpdated(root)}.`);
+      const keysOf = (flag: string) => {
+        const at = args.indexOf(flag);
+        return at === -1 ? [] : (args[at + 1] ?? "").split(",");
+      };
+      const declined = keysOf("--declined");
+      const accepted = keysOf("--accepted");
+      const given = ["--declined", "--accepted"].filter((f) => args.includes(f)).length;
+      if (args.length !== given * 2 || [...declined, ...accepted].some((k) => !/^[a-z0-9][a-z0-9-]*$/.test(k))) {
+        throw new OperatorError("Usage: sandcastle updated [--declined KEY[,KEY...]] [--accepted KEY[,KEY...]] - each KEY is an update step's key, such as claude-mod or autonomy-drain.");
+      }
+      // Read first: marking replaces the record, and the update action reports where the project was.
+      const before = recordedRelease(root);
+      console.log(updatedLine(before, markUpdated(root, KIT, declined, accepted)));
+      break;
+    }
+    case "changes": {
+      const at = args.indexOf("--since");
+      const since = at === -1 ? undefined : args[at + 1];
+      if (args.length !== (at === -1 ? 0 : 2) || (at !== -1 && !/^v?\d+\.\d+\.\d+$/.test(since ?? ""))) {
+        throw new OperatorError("Usage: sandcastle changes [--since RELEASE] - RELEASE is a kit version such as 0.10.0.");
+      }
+      const diff = changesDiffLines(root, KIT, since);
+      for (const line of [...changesLines(root, KIT, since), ...(diff.length ? [""] : []), ...diff]) console.log(line);
       break;
     }
     case "clean": {
@@ -711,10 +769,11 @@ try {
       // live run's own worktrees must survive, so this takes the run lock.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // The lock and the reap come first: a container a killed run left could still write the config being checked.
+      holdAndReap(project);
       // Clean runs host git over whatever a killed run's sandbox left: what was planted in the config is refused, not pinned.
       const baseline = assertGitConfigBaseline(project, "sandcastle clean", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const { containers, images, worktrees, deleted, kept, left } = cleanProject(project, args.includes("--all"), worktreeRefusal(project));
       recordGitConfigEnd(project);
@@ -745,10 +804,13 @@ try {
   // A full disk is the operator's to fix, wherever the write was; its stack trace says nothing more.
   const full = (error as NodeJS.ErrnoException)?.code === "ENOSPC";
   if (!(error instanceof OperatorError) && !full) throw error;
-  console.error(
-    full
-      ? `\nThe disk is full: writing ${(error as NodeJS.ErrnoException).path ?? "a file"} failed. Free some space (\`sandcastle clean\` removes finished worktrees; \`docker system df\` shows what Docker holds), then try again.`
-      : `\n${(error as Error).message}`,
-  );
+  // A stopped run's summary printed its message already (`reportedError`).
+  if (!wasReported(error)) {
+    console.error(
+      full
+        ? `\nThe disk is full: writing ${(error as NodeJS.ErrnoException).path ?? "a file"} failed. Free some space (\`sandcastle clean\` removes finished worktrees; \`docker system df\` shows what Docker holds), then try again.`
+        : `\n${(error as Error).message}`,
+    );
+  }
   process.exitCode = 1;
 }

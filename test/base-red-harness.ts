@@ -65,7 +65,7 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
   const toldRed: string[][] = [];
   const lines: string[] = [];
   const gates = new Map<string, GateRun[]>();
-  const agents: Record<string, (id: string, worktree: string) => void> = {
+  const agents: Record<string, (id: string, worktree: string) => string | void> = {
     impl: (id, wt) => commit(wt, `src/ticket-${id}.ts`, `${id}\n`),
   };
 
@@ -83,9 +83,9 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
         const [kind, id] = (opts.name ?? "").split("-");
         if (kind === "repair") repairs.push(id);
         const before = git(path, "rev-parse", "HEAD");
-        agents[kind]?.(id, path);
+        const said = agents[kind]?.(id, path);
         const commits = git(path, "rev-list", `${before}..HEAD`).split("\n").filter(Boolean).map((sha) => ({ sha }));
-        return { iterations: [], stdout: "", commits };
+        return { iterations: [], stdout: typeof said === "string" ? said : "", commits };
       },
       close: async () => {
         git(root, "worktree", "remove", "--force", path);

@@ -716,7 +716,8 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       if (kept) return (yielded = "kept"), "landing";
       if (olderWait(pool, countedFrom(wait), ms, seen)) return (yielded = "run"), "slots";
       if (priorityAhead(wait)) return (yielded = "priority"), "slots";
-      if (earlierAhead(wait)) return (yielded = "earlier"), "slots";
+      // Every slot taken is the reason to say; a free one is about to go to the earlier wait, which says nothing new.
+      if (earlierAhead(wait)) return (yielded = liveSlots(pool, seen).length >= limit(pool) ? undefined : "earlier"), "slots";
       slot = tryAcquire(pool, `run=${RUN_ID} ${label}`);
       return slot ? undefined : "slots";
     };
@@ -725,14 +726,13 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       // The line is said when the wait starts and again after REPRINT_MS, not at every change of reason:
       // with a second run live the reason alternates and one wait printed about 30 lines. `onWait` still
       // fires at each change, since the run's note of waiting for its share follows it.
-      if (printedAt === undefined || clock() - printedAt >= REPRINT_MS) {
+      if (yielded !== "earlier" && (printedAt === undefined || clock() - printedAt >= REPRINT_MS)) {
         printedAt = clock();
         const me = why === "share" || why === "landing" ? myShare() : undefined;
         const reason = yielded === "kept" ? `this run's share is ${me?.share ?? 0} and its tickets hold ${keeping}: one slot of it is kept for landing`
           : why === "share" ? `this run's share is ${me?.share ?? 0} and it holds ${me?.held ?? 0}, ${me?.cap !== undefined && me.held >= me.cap ? `capped at ${me.cap}` : "another run waits below its own"}`
           : yielded === "run" ? "another run has waited longer"
           : yielded === "priority" ? "a landing, base or verify gate of this run goes first"
-          : yielded === "earlier" ? "an earlier wait of this run goes first"
           : `${limit(pool)} in use`;
         console.log(`  ${label}: waiting for a machine-wide ${pool} slot (${reason})`);
       }

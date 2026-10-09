@@ -43,9 +43,9 @@ const body = (text: string, heading: string) => {
   return lines.slice(at + 1, next < 0 ? undefined : next).join("\n");
 };
 
-test("a branch held in an earlier run says so with the reason, and the next step merges it by hand or drops it", () => {
+test("a branch held in an earlier run says so once, and the next step merges it by hand or drops it", () => {
   const out = render(facts({ standing: ["agent/issue-7"], earlierHeld: { "agent/issue-7": "needs a human merge" } }));
-  assert.match(body(out, "## 📤 Local state"), /Agent branches with unmerged work: agent\/issue-7 \(held for a human merge in an earlier run: needs a human merge\)/);
+  assert.match(body(out, "## 📤 Local state"), /Agent branches with unmerged work: agent\/issue-7 \(held for a human merge in an earlier run\)/);
   const next = body(out, "## 👉 Next step");
   assert.match(next, /git log -p main\.\.agent\/issue-7/);
   assert.match(next, /git merge --no-ff agent\/issue-7/);
@@ -56,7 +56,7 @@ test("a branch held in an earlier run says so with the reason, and the next step
 
 test("only the earlier-held branch among several standing ones is annotated", () => {
   const out = render(facts({ standing: ["agent/issue-7", "agent/issue-8"], earlierHeld: { "agent/issue-8": "needs a human merge" } }));
-  assert.match(body(out, "## 📤 Local state"), /agent\/issue-7, agent\/issue-8 \(held for a human merge in an earlier run: needs a human merge\)/);
+  assert.match(body(out, "## 📤 Local state"), /agent\/issue-7, agent\/issue-8 \(held for a human merge in an earlier run\)/);
 });
 
 test("a standing branch with no recorded outcome prints as before", () => {
@@ -98,5 +98,45 @@ test("gather: only a standing branch whose held outcome is from an earlier run i
   const facts = await gather(project, () => undefined);
   assert.deepEqual(facts.earlierHeld, { "agent/issue-7": "needs a human merge" });
   const state = body(render(facts), "## 📤 Local state");
-  assert.match(state, /agent\/issue-7 \(held for a human merge in an earlier run: needs a human merge\), agent\/issue-8, agent\/issue-9$/m);
+  assert.match(state, /agent\/issue-7 \(held for a human merge in an earlier run\), agent\/issue-8, agent\/issue-9$/m);
+});
+
+test("gather: the reason an earlier run recorded (path and unmet criterion) is printed, not the generic hold wording twice", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sandcastle-earlier-held-"));
+  git(root, "init", "-q", "-b", "main");
+  git(root, "commit", "-q", "--allow-empty", "-m", "base");
+  for (const id of ["7", "8"]) {
+    git(root, "checkout", "-q", "-b", `agent/issue-${id}`, "main");
+    writeFileSync(join(root, `work-${id}.txt`), "work\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", `work ${id}`);
+  }
+  git(root, "checkout", "-q", "main");
+  mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
+  const earlierRun = "2026-10-01T08:00:00.000Z";
+  const started = "2026-10-02T08:00:00.000Z";
+  const record = (at: string, tickets: object) => JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: at, finishedAt: "2026-10-01T09:00:00.000Z", exitCode: 0, stage: "report", tickets });
+  writeFileSync(
+    join(root, ".sandcastle/logs/history.jsonl"),
+    [
+      // A different run's line, with another reason for the same ticket: not the one asked for.
+      record("2026-09-29T08:00:00.000Z", { "7": { state: "held", note: "human merge: other/path.sh" } }),
+      record(earlierRun, {
+        "7": { state: "held", note: "human merge: .claude/hooks/pre.sh", files: [".claude/hooks/pre.sh"], unmet: "the decision on retries is open" },
+      }),
+    ].join("\n") + "\n",
+  );
+  writeFileSync(
+    join(root, ".sandcastle/logs/outcomes.json"),
+    JSON.stringify({
+      "7": { run: earlierRun, kind: "held", text: "needs a human merge" },
+      // Held in a run history has no line for: the generic words, once.
+      "8": { run: "2026-09-01T08:00:00.000Z", kind: "held", text: "needs a human merge" },
+    }),
+  );
+  writeFileSync(join(root, ".sandcastle/logs/run.json"), JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: started, finishedAt: "2026-10-02T09:00:00.000Z", exitCode: 0, stage: "report", tickets: {} }));
+  const project = { root, name: "t", baseBranch: "main", label: "ready-for-agent", gates: [], tracker: fakeTracker({ kind: "files" }) } as unknown as Project;
+  const state = body(render(await gather(project, () => undefined)), "## 📤 Local state");
+  assert.match(state, /agent\/issue-7 \(held for a human merge in an earlier run: \.claude\/hooks\/pre\.sh; unmet: the decision on retries is open\), agent\/issue-8 \(held for a human merge in an earlier run\)$/m);
+  assert.doesNotMatch(state, /other\/path|needs a human merge/);
 });

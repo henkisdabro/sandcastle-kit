@@ -36,7 +36,7 @@ const ticketFile = (title: string, status: string, head = "") => `# ${title}\n\n
  * shop-01 is held (its outcome says why), shop-02 waits for it. `how` is what became of shop-01's
  * branch: merged by hand, left unmerged, or handed back with no commits.
  */
-const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01", heldText = HELD) => {
+const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01", heldText = HELD, subject = `Merge agent/issue-${id}`) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-hand-merged-"));
   git(root, "init", "-q", "-b", "main");
   mkdirSync(join(root, ".scratch/shop/issues"), { recursive: true });
@@ -52,7 +52,7 @@ const repo = (how: "merged" | "unmerged" | "handed back", id = "shop-01", heldTe
     git(root, "add", "-A");
     git(root, "commit", "-qm", "the work");
     git(root, "checkout", "-q", "main");
-    if (how === "merged") git(root, "merge", "--no-ff", "-qm", `Merge agent/issue-${id}`, `agent/issue-${id}`);
+    if (how === "merged") git(root, "merge", "--no-ff", "-qm", subject, `agent/issue-${id}`);
   }
   mkdirSync(join(root, ".sandcastle/logs"), { recursive: true });
   const outcome = how === "handed back" ? { kind: "held", text: "needs a human: handed back" } : { kind: "held", text: heldText };
@@ -81,6 +81,25 @@ test("queue: a dependant waits for a blocker merged locally, which closes on pus
   assert.deepEqual(lines, ["shop-02 waits for shop-01, which is merged locally and closes on push - it starts once shop-01 is closed."]);
   const b = { kind: "ticket" as const, id: "shop-01", state: "open" as const };
   assert.equal(blockerWhy(project, tracker)(b), "merged-by-hand");
+});
+
+test("queue: a dependant of a blocker merged by hand as 'part of' it is told the blocker stays open", async () => {
+  const { project, tracker } = repo("merged", "shop-01", HELD, "Merge agent/issue-shop-01 (part of shop-01)");
+  const lines = await blockerProblems(project, tracker, tracker.queued(false));
+  assert.deepEqual(lines, ["shop-02 waits for shop-01, which is merged by hand but only partly done, so it stays open - it starts once shop-01 is closed."]);
+  const b = { kind: "ticket" as const, id: "shop-01", state: "open" as const };
+  assert.equal(blockerWhy(project, tracker)(b), "merged-partly");
+  // The closing summary's blocker note, for a dependant this run left blocked.
+  writeFileSync(
+    join(project.root, ".sandcastle/logs/run.json"),
+    JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: started, finishedAt: "2026-10-01T09:00:00.000Z", exitCode: 0, stage: "report", tickets: { "shop-02": { state: "blocked", title: "B" } } }),
+  );
+  const facts = await gather(project, () => undefined);
+  assert.deepEqual(facts.blocked, [{ id: "shop-02", on: ["shop-01"], why: { "shop-01": "merged by hand, partly done: stays open" } }]);
+  assert.match(render(facts, true), /shop-02 waits for shop-01.* - merged by hand, partly done: stays open/);
+  // A merge worded "closes" is still the push-closes case.
+  const closing = repo("merged", "shop-01", HELD, "Merge agent/issue-shop-01 (closes shop-01)");
+  assert.equal(blockerWhy(closing.project, closing.tracker)(b), "merged-by-hand");
 });
 
 test("queue: an unmerged or handed-back blocker is still held for a human", async () => {

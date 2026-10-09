@@ -65,7 +65,7 @@ export const viewRecord = (root: string) => join(root, ".sandcastle/logs/herdr-v
  * a run that ends after it (or is stopped by the restart's hangup) has nothing else to say so: the
  * plugin reports there, from the awaiting directory.
  */
-const tabAwaitsReport = (root: string) => {
+export const tabAwaitsReport = (root: string) => {
   try {
     const view = JSON.parse(readFileSync(viewRecord(root), "utf8")) as { adopted?: boolean; reported?: boolean };
     // Only the plugin's readers remove a kept file: without the plugin it would stay for good.

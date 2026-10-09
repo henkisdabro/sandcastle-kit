@@ -1,6 +1,6 @@
 // Preloaded into every test file's process, beside test/no-stray.ts (`--import ./test/hermetic-env.ts` in
 // package.json's `test`, `test:shard` and `test:weights`, and test/run-shards.sh): every test starts from the
-// same environment, whatever shell the developer runs it in. Five things in a developer's shell change what
+// same environment, whatever shell the developer runs it in. Six things in a developer's shell change what
 // the code under test does, and a Linux sandbox with a clean environment passes them all:
 //
 //  - `TMPDIR` is the realpath of `os.tmpdir()`: on macOS it is a `/var/...` path that git and `process.cwd()`
@@ -8,6 +8,12 @@
 //  - The running node's directory leads `PATH`: a version-manager shim (mise, asdf) found first fails in a temp
 //    cwd ("No version is set for shim: node") when a child runs `bin/sandcastle` or `herdr/entry.sh`, which find
 //    node through the inherited `PATH`, and a test that prepends fakes to `PATH` keeps it.
+//  - A `docker` that lists nothing and does nothing (`exit 0`) follows it on `PATH`: a test never reaches the machine's
+//    real Docker. A sandbox's close first asks `docker ps` whether its container has stopped, and a real daemon that
+//    answers slowly makes a test race it (a Mac with OrbStack), a stopped daemon fails the call (Docker installed on
+//    Linux, no daemon), and a `docker stop` there would reach a live run's containers. Neither a Linux sandbox (no
+//    `docker`) nor CI would show it. A test that needs a `docker` of its own puts it ahead (test/docker-stub.ts), and
+//    one that needs none at all points `PATH` elsewhere.
 //  - No git identity is inherited: `GIT_CONFIG_GLOBAL` is an empty file, `GIT_CONFIG_NOSYSTEM` is 1, the author and
 //    committer variables are removed and `user.useConfigOnly=true` is appended to the `GIT_CONFIG_*` pairs (any pair
 //    already set, such as the gate's `commit.gpgsign=false`, stays). A fixture repo that never sets its own identity
@@ -26,7 +32,7 @@
 // Only a test file's own process is changed (node:test's child sets NODE_TEST_CONTEXT, the runner process
 // that prints the reporter lines does not), as in test/no-stray.ts.
 
-import { realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -60,11 +66,25 @@ const addGitConfig = (key: string, value: string): void => {
   process.env.GIT_CONFIG_COUNT = String(n + 1);
 };
 
+/** The directory holding only the no-op `docker`, set in the environment so a child that loads this preload again reuses it. */
+export const NO_DOCKER_DIR = "SANDCASTLE_TEST_NO_DOCKER_DIR";
+
 if (process.env.NODE_TEST_CONTEXT) {
   process.env.TMPDIR = realpathSync(tmpdir());
   const node = dirname(process.execPath);
   const path = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
-  if (path[0] !== node) process.env.PATH = [node, ...path].join(delimiter);
+  if (path[0] !== node) path.unshift(node);
+  let bin = process.env[NO_DOCKER_DIR];
+  if (!bin) {
+    bin = mkdtempSync(join(process.env.TMPDIR, "sandcastle-no-docker-"));
+    writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(bin, "docker"), 0o755);
+    process.env[NO_DOCKER_DIR] = bin;
+    const owned = bin;
+    process.on("exit", () => rmSync(owned, { recursive: true, force: true }));
+  }
+  if (!path.includes(bin)) path.splice(1, 0, bin);
+  process.env.PATH = path.join(delimiter);
   for (const name of Object.keys(process.env)) if (scrubs(name)) delete process.env[name];
   // An empty file, not /dev/null: a test that runs `git config --global` can write to it.
   const globalConfig = join(process.env.TMPDIR, `hermetic-gitconfig-${process.pid}`);

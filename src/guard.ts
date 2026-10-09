@@ -7,8 +7,9 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
-import { OperatorError } from "./errors.ts";
+import { DockerAnswerError, reapOrphans, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
+import { containerStartTimeout, OperatorError } from "./errors.ts";
+import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
 // ---------------------------------------------------------------------------
@@ -95,7 +96,9 @@ export const pinHostGitConfig = (root: string) => {
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
 // `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
 // `files` also holds the shared `.git/modules/` (see `moduleFiles`), whose repositories a host git reaches through a gitlink.
-export type Fingerprint = { files: Record<string, string>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
+// `modes` holds the executable bits of the regular files under `hooks/` and `modules/` (`executableBits`), by the same paths: a hook runs only while it is executable.
+// `records` holds the person's own linked worktrees' records (`personRecords`) by name: `.` is the record itself, then each of the three files git reads there that exists.
+export type Fingerprint = { files: Record<string, string>; modes: Record<string, string>; records: Record<string, Record<string, string>>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
 
 type ConfigReading = { path: string; entries: string[] | null };
 
@@ -109,7 +112,14 @@ const AGENT_BRANCH = /^agent\/issue-/;
  * `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`): a symlink is its target, a directory a marker, a file its hash.
  */
 const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
-const moduleFiles = (modules: string, hashOf: (f: string) => string) => treeFiles(modules, hashOf, MODULE_DATA);
+const moduleFiles = (modules: string, hashOf: (f: string) => string, modes?: Record<string, string>) => treeFiles(modules, hashOf, MODULE_DATA, modes);
+
+/**
+ * A regular file's executable bits as octal digits (only the x bits: `755` is `"111"`, `644` is `"0"`), the field
+ * kept beside its content hash: git runs a hook only when it is executable, so `chmod +x` on a disabled hook with the same
+ * content changes nothing the hash sees. A separate field, so the hash's form (and every record that holds it) stays as it was.
+ */
+const executableBits = (info: { mode: number }) => (info.mode & 0o111).toString(8);
 
 /**
  * What a path in the shared `.git` holds, for a fingerprint, without ever reading what is not a regular file: a FIFO a
@@ -138,8 +148,11 @@ export const entryHash = (f: string): string => {
   }
 };
 
-/** Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything). */
-const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set()): Record<string, string> => {
+/**
+ * Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything).
+ * `modes`, when given, receives each regular file's `executableBits` by the same path.
+ */
+const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set(), modes?: Record<string, string>): Record<string, string> => {
   const found: Record<string, string> = {};
   const at = lstatSync(top, { throwIfNoEntry: false });
   if (!at) return found;
@@ -153,11 +166,17 @@ const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet
       const info = lstatSync(path);
       if (info.isSymbolicLink()) found[path] = `link ${readlinkSync(path)}`;
       else if (info.isDirectory()) visit(path, !container && name === "modules");
-      else found[path] = hashOf(path);
+      else {
+        found[path] = hashOf(path);
+        if (modes && info.isFile()) modes[path] = executableBits(info);
+      }
     }
   };
   if (at.isDirectory()) visit(top, true);
-  else found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
+  else {
+    found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
+    if (modes && at.isFile()) modes[top] = executableBits(at);
+  }
   return found;
 };
 
@@ -207,12 +226,13 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const worktreeConfigPath = join(dir, "config.worktree");
   const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
   const files: Record<string, string> = {};
+  const modes: Record<string, string> = {};
   const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
   // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
   // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
-  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf));
-  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf));
+  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf, undefined, modes));
+  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf, modes));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
   const readEntries = (path: string): ConfigReading => {
@@ -234,6 +254,8 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const worktreeConfig = readEntries(worktreeConfigPath);
   return {
     files,
+    modes,
+    records: personRecords(project, dir),
     config,
     worktreeConfig,
     base: tipOf(project.root, `refs/heads/${project.baseBranch}`),
@@ -242,8 +264,100 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   };
 };
 
-const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =>
-  [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f]).sort();
+// The files of a linked worktree's record that decide which config git reads there.
+const RECORD_FILES = ["commondir", "config.worktree", "gitdir"];
+
+/**
+ * Whether the record `name` is one the kit made for a sandbox: a kit name whose `gitdir` sits under the project's
+ * `.sandcastle/worktrees/`. Those keep their own checks (`rewrittenWorktrees`, `assertWorktreeRecords`).
+ */
+const kitRecord = (project: Project, records: string, name: string): boolean => {
+  if (!/^(agent-issue-|sandcastle-)/.test(name)) return false;
+  try {
+    const at = resolve(join(records, name), readFileSync(join(records, name, "gitdir"), "utf8").trim());
+    return [...new Set([project.root, realpathSync(project.root)])].some((r) => at.startsWith(join(r, ".sandcastle", "worktrees") + sep));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The records of worktrees a person made by hand beside a run (`git worktree add` for a pull request's branch, say), by
+ * name: `.` is the record itself (a directory, else its kind), then the content of each of `commondir`,
+ * `config.worktree` and `gitdir` that exists. A file that is absent has no key, so creating one differs from its absence.
+ * A sandbox that changes one makes the person's next git command in that worktree read config no check has seen.
+ */
+const personRecords = (project: Project, common: string): Fingerprint["records"] => {
+  const records = join(common, "worktrees");
+  const found: Fingerprint["records"] = {};
+  if (!lstatSync(records, { throwIfNoEntry: false })?.isDirectory()) return found;
+  for (const name of readdirSync(records).sort()) {
+    const files = personRecord(project, records, name);
+    if (files) found[name] = files;
+  }
+  return found;
+};
+
+/** One record of `personRecords`, or none when it is a kit sandbox's. */
+const personRecord = (project: Project, records: string, name: string): Record<string, string> | undefined => {
+  if (kitRecord(project, records, name)) return undefined;
+  const record = join(records, name);
+  const files: Record<string, string> = { ".": entryHash(record) };
+  for (const file of RECORD_FILES) if (lstatSync(join(record, file), { throwIfNoEntry: false })) files[file] = entryHash(join(record, file));
+  return files;
+};
+
+/**
+ * What a person's worktree records differ by since `before`, as the stop names them. A record present at the start whose
+ * `commondir`, `gitdir` or `config.worktree` differs (present or absent, or content) is named; one that is gone passes
+ * (`git worktree remove`); one added since passes only as `git worktree add` writes it: `commondir` is `../..` and
+ * there is no `config.worktree`, and `now` then holds it as it passed.
+ */
+const recordChanges = (project: Project, before: Fingerprint["records"], now: Fingerprint["records"]): string[] => {
+  const records = join(realpathSync(commonDir(project.root)), "worktrees");
+  const named: string[] = [];
+  for (const [name, files] of Object.entries(now)) {
+    const shown = (file: string) => `worktrees/${clean(name)}${file === "." ? "" : `/${file}`}`;
+    const was = before[name];
+    if (was) {
+      for (const file of [".", ...RECORD_FILES]) {
+        if (was[file] !== files[file]) named.push(`${shown(file)} ${!(file in was) ? "added" : !(file in files) ? "removed" : "changed"}`);
+      }
+      continue;
+    }
+    // git writes the record's files a moment after its directory exists: one added just now is read again before it is blamed.
+    let problem: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const record = join(records, name);
+      const commondir = join(record, "commondir");
+      problem = undefined;
+      try {
+        const text = lstatSync(commondir, { throwIfNoEntry: false })?.isFile() ? readFileSync(commondir, "utf8").replace(/[\r\n]+$/, "") : undefined;
+        if (!lstatSync(record).isDirectory()) problem = `${shown(".")} is not a directory`;
+        else if (text !== "../..") problem = `${shown("commondir")} is ${text === undefined ? "missing" : "not ../.."}, which git writes`;
+        else if (lstatSync(join(record, "config.worktree"), { throwIfNoEntry: false })) problem = `${shown("config.worktree")} added`;
+      } catch {
+        problem = `${shown(".")} cannot be read`;
+      }
+      if (!problem) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    if (problem) {
+      named.push(problem);
+      continue;
+    }
+    // What passed is what is expected from here on: the reading `now` took may predate the files git wrote since, and
+    // would name them as added at the next check. A kit sandbox's record whose `gitdir` was not written yet then was one.
+    const passed = personRecord(project, records, name);
+    if (passed) now[name] = passed;
+    else delete now[name];
+  }
+  return named;
+};
+
+/** The paths whose content hash or executable bits differ; `modeOnly` of them differ by the bits alone. */
+const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"], beforeModes: Fingerprint["modes"], nowModes: Fingerprint["modes"]) =>
+  [...new Set([...Object.keys(before), ...Object.keys(now)])].filter((f) => before[f] !== now[f] || beforeModes[f] !== nowModes[f]).sort();
 
 // What a change to `.git/config` is, told by key. A person's own work in another worktree of the
 // repo (`git worktree add` from a remote branch, `git push -u`, `git branch -u`, `gh pr create`)
@@ -255,9 +369,16 @@ const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =
 const UPSTREAM_KEY = /^branch\.(.+)\.(remote|merge)$/;
 const PLAIN_REMOTE = /^[A-Za-z0-9._-]+$/;
 
+// Keys, beyond `COMMAND_KEYS` and `alias.*`, that run a program on a person's own later git command: a pager per
+// command, the difftool and mergetool commands, a submodule's `update = !cmd`, the interactive diff filter, the
+// key command of ssh signing, the command a fetch reads for alternate refs, and git-lfs's keys (a custom transfer
+// agent, among others). Held by the start record (`PROGRAM_KEYS`) and shown without values.
+const MORE_PROGRAM_KEYS =
+  "pager\\..+|difftool\\..+\\.cmd|mergetool\\..+\\.cmd|submodule\\..+\\.update|interactive\\.difffilter|gpg\\.ssh\\.defaultkeycommand|core\\.alternaterefscommand|lfs\\..+";
+
 // Keys whose values are not shown: they run a program or load more config, and the value is the
 // sandbox's to choose. The others show old and new (a URL's credentials hidden).
-const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+)$`, "i");
+const COMMAND_KEY = new RegExp(`${COMMAND_KEYS}|^(core\\.(fsmonitor|hookspath)|include\\.path|includeif\\..+\\.path|alias\\..+|${MORE_PROGRAM_KEYS})$`, "i");
 
 // Keys whose values are not shown because they carry credentials: an `extraHeader` (an Authorization
 // header), a credential helper's settings, and any key named for a password, token, secret or cookie
@@ -279,8 +400,12 @@ const shown = (value: string | null) => {
   return JSON.stringify(text.length > 100 ? `${text.slice(0, 100)}...` : text);
 };
 
-const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"]) => {
-  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"] };
+// What a key's change is when it looks like a person's own tooling, for the start baseline: told by key, value
+// and the keys the config held before, and the kind of change in words (`undefined`: not that kind).
+type OwnKey = (key: string, old: (string | null)[], next: (string | null)[], was: Map<string, (string | null)[]>) => string | undefined;
+
+const configChange = (project: Project, before: Fingerprint["config"]["entries"], now: Fingerprint["config"]["entries"], own?: OwnKey) => {
+  if (!before || !now) return { benign: [] as string[], words: ["it cannot be read as git config"], took: [] as string[], ownOnly: false };
   // A key with no value (`[core] bare`, true) is not one with an empty value (`bare =`, false).
   const values = (entries: string[]) => {
     const by = new Map<string, (string | null)[]>();
@@ -295,7 +420,9 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
   const is = values(now);
   const benign: string[] = [];
   const words: string[] = [];
+  const took: string[] = [];
   let allBenign = true;
+  let ownOnly = true;
   for (const key of [...new Set([...was.keys(), ...is.keys()])].sort()) {
     const old = was.get(key) ?? [];
     const next = is.get(key) ?? [];
@@ -305,12 +432,18 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     if (upstream && upstream[1] !== project.baseBranch && !AGENT_BRANCH.test(upstream[1]) && valid) benign.push(key);
     else allBenign = false;
     const name = hidden(key);
-    if (COMMAND_KEY.test(key) || SECRET_KEY.test(key)) words.push(`${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`);
-    else if (!old.length) words.push(`${name} added: ${next.map(shown).join(", ")}`);
-    else if (!next.length) words.push(`${name} removed (was ${old.map(shown).join(", ")})`);
-    else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
+    const kind = own?.(key, old, next, was);
+    if (!kind) ownOnly = false;
+    // A hooks path that is the person's own shows its value: it is a path of the repo, not a program.
+    let word: string;
+    if (!kind && (COMMAND_KEY.test(key) || SECRET_KEY.test(key))) word = `${name} ${!old.length ? "added" : !next.length ? "removed" : "changed"}`;
+    else if (!old.length) word = `${name} added: ${next.map(shown).join(", ")}`;
+    else if (!next.length) word = `${name} removed (was ${old.map(shown).join(", ")})`;
+    else word = `${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`;
+    if (kind) took.push(`${word} - ${kind}`);
+    words.push(kind ? `${word} (looks like your own tooling: ${kind})` : word);
   }
-  return { benign: allBenign ? benign : [], words };
+  return { benign: allBenign ? benign : [], words, took, ownOnly };
 };
 
 // ---------------------------------------------------------------------------
@@ -331,20 +464,28 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
 // and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
 // it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
 // proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
-// `extensions.*`. Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
+// `extensions.*`; and what runs on a person's own later command (`alias.*`, which a repo-local alias overrides the
+// user's with, and `MORE_PROGRAM_KEYS`). Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
 // them, and they run nothing.
 const PROGRAM_KEYS = new RegExp(
   `${COMMAND_KEYS}|^(filter\\..+|merge\\..+\\.driver|diff\\..+\\.(textconv|command)|core\\.(fsmonitor|hookspath|sshcommand|gitproxy)|include.*` +
     "|remote\\..+\\.(url|pushurl|uploadpack|receivepack|proxy)|url\\..+\\.(insteadof|pushinsteadof)|credential\\..+|protocol\\..+" +
-    "|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+)$",
+    `|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+|alias\\..+|${MORE_PROGRAM_KEYS})$`,
   "i",
 );
 
 // `entries` and `worktreeEntries`: those keys of `.git/config` and of `.git/config.worktree` (none when it
 // is absent), `key\nvalue`, sorted. `attributes`: the hash of `info/attributes` ("" when absent). `files`:
-// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory.
-type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string> };
+// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory. `modes`: the
+// executable bits of the regular files among them (`executableBits`), by the same path.
+type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string>; modes: Record<string, string> };
 type BaselineRecord = ProgramState & { clean: boolean };
+
+// The record's version, written beside it. A record of an earlier version (or none) compared with today's state would name
+// every key the version added to the list as added, so the start takes the state again once instead (`readBaseline`).
+// 2: the executable bits (`modes`), and the keys `MORE_PROGRAM_KEYS` and `alias.*` added to the list.
+const BASELINE_VERSION = 2;
+const LISTED_SINCE_V1 = new RegExp(`^(alias\\..+|${MORE_PROGRAM_KEYS})$`, "i");
 
 const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
 
@@ -362,49 +503,172 @@ const programState = (project: Project): ProgramState => {
   };
   const hashOf = entryHash;
   const files: Record<string, string> = {};
-  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf), ...moduleFiles(join(dir, "modules"), hashOf) })) files[relative(dir, path)] = hash;
+  const modes: Record<string, string> = {};
+  const found: Record<string, string> = {};
+  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf, undefined, found), ...moduleFiles(join(dir, "modules"), hashOf, found) })) files[relative(dir, path)] = hash;
+  for (const [path, bits] of Object.entries(found)) modes[relative(dir, path)] = bits;
   const attributes = join(dir, "info", "attributes");
   return {
     entries: entries(join(dir, "config")),
     worktreeEntries: entries(join(dir, "config.worktree")),
     attributes: existsSync(attributes) ? hashOf(attributes) : "",
     files,
+    modes,
   };
 };
 
 const strings = (value: unknown) => Array.isArray(value) && value.every((e) => typeof e === "string");
 
-const readBaseline = (project: Project): BaselineRecord | undefined => {
+/**
+ * The previous run's record: `record` when it is of today's version, `older` when one an earlier kit wrote is there,
+ * neither when there is none. `olderRecord`: that earlier record's own fields, when it has them, with no `modes` (it
+ * held no executable bits).
+ */
+const readBaseline = (project: Project): { record?: BaselineRecord; older: boolean; olderRecord?: Omit<BaselineRecord, "modes"> } => {
   try {
     const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
     const files = record.files;
-    // A record an earlier kit wrote holds fewer keys and no files, so it fails here and is read as none: compared
-    // with today's state it would name every remote's URL and every sample hook as added.
-    if (strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
-      return { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true };
+    const modes = record.modes;
+    // A record an earlier kit wrote holds fewer keys, no executable bits and no version, so it fails here and is read as
+    // none: compared with today's state it would name every remote's URL, every alias and every sample hook as added.
+    if (record.version === BASELINE_VERSION && strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files)) && modes && typeof modes === "object" && strings(Object.values(modes))) {
+      return { record: { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, modes, clean: record.clean === true }, older: false };
     }
+    const older = record !== null && typeof record === "object" && !Array.isArray(record);
+    if (older && strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
+      return { older, olderRecord: { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true } };
+    }
+    return { older };
   } catch {
     // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
   }
-  return undefined;
+  return { older: false };
 };
 
 const writeBaseline = (project: Project, record: BaselineRecord) => {
   mkdirSync(dirname(baselineFile(project)), { recursive: true });
-  writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
+  writeFileSync(baselineFile(project), `${JSON.stringify({ version: BASELINE_VERSION, ...record }, null, 2)}\n`);
 };
 
-/** What differs between a record and the present state, as the refusal says it: one part per place, none when nothing does. */
+// What the start takes as a person's own after a clean end, and refuses otherwise. A person's tools change the
+// config between runs - `git remote add`, the fork remote `gh pr create` adds, husky's `core.hooksPath`, lefthook's
+// hooks - and a person asked after each of them passes `--accept-git-config` by reflex, which defeats it after a
+// killed run. So, and only when the last run ended cleanly (nothing a sandbox ran can have written it), the start takes
+// exactly these and says so: a new remote whose URL is plain https or ssh, `core.hooksPath` set to a directory in a
+// tracked directory of the repo, and a hook file a hook manager writes. Everything else - a filter, a driver, a transport
+// command, `insteadOf`, a changed URL on an existing remote (origin included), a remote's other keys - is refused as ever.
+const HOST = "[A-Za-z0-9][A-Za-z0-9.-]*";
+const USER = "[A-Za-z0-9][A-Za-z0-9._-]*";
+const URL_PATH = "[A-Za-z0-9._~%+/-]+";
+// No credentials in an https URL, no query, no `::` (a transport helper): the shapes `git remote add` is given for GitHub, GitLab and the like.
+const PLAIN_URLS: [string, RegExp][] = [
+  ["https", new RegExp(`^https://${HOST}(:\\d+)?/${URL_PATH}$`)],
+  ["ssh", new RegExp(`^ssh://(${USER}@)?${HOST}(:\\d+)?/${URL_PATH}$`)],
+  ["ssh", new RegExp(`^${USER}@${HOST}:${URL_PATH}$`)],
+];
+
+/** Whether a remote's URL is plain https or ssh, and which. */
+const plainRemote = (url: string) => PLAIN_URLS.find(([, shape]) => shape.test(url))?.[0];
+
+/**
+ * A `core.hooksPath` value that names a directory inside the repository, in a tracked directory: relative, no `..`, not
+ * in `.git`, an existing directory whose real path is inside the project's, and the directory or one above it
+ * (husky's `.husky/_` is ignored by its own `.gitignore`, in the tracked `.husky/`) holds tracked files. `git ls-files`
+ * runs with `core.fsmonitor` off: this runs before the pins, over a config nobody has vetted yet.
+ */
+const trackedHooksPath = (project: Project, value: string) => {
+  // oxlint-disable-next-line no-control-regex -- a control character in a path is never a person's own tooling
+  if (!value || value.length > 200 || /[\x00-\x1f\x7f\\]/.test(value) || /^[/~-]/.test(value)) return false;
+  const parts = value.split("/").filter((p) => p && p !== ".");
+  if (!parts.length || parts.some((p) => p === ".." || p.toLowerCase() === ".git") || value.split("/").some((p) => p === ".git")) return false;
+  try {
+    const inside = relative(realpathSync(project.root), realpathSync(join(project.root, ...parts)));
+    if (!inside || inside.startsWith("..") || !lstatSync(join(project.root, ...parts)).isDirectory()) return false;
+    for (let i = 1; i <= parts.length; i++) {
+      const listed = sh("git", ["-c", "core.fsmonitor=false", "ls-files", "-z", "--", `:(literal)${parts.slice(0, i).join("/")}/`], project.root);
+      if (listed) return true;
+    }
+  } catch {
+    // A path that is not there, or a git that cannot list: not a tracked directory.
+  }
+  return false;
+};
+
+const ownConfigKey = (project: Project): OwnKey => (key, old, next, was) => {
+  const value = next.length === 1 ? next[0] : null;
+  if (value === null) return undefined;
+  const remote = /^remote\.(.+)\.url$/i.exec(key);
+  if (remote && !old.length) {
+    const kind = plainRemote(value);
+    const prefix = `remote.${remote[1]}.`.toLowerCase();
+    // A new remote is one the record holds no key of (a changed URL on an existing remote is refused, origin included).
+    if (kind && ![...was.keys()].some((k) => k.toLowerCase().startsWith(prefix))) return `a new remote at a plain ${kind} URL`;
+  }
+  if (/^core\.hookspath$/i.test(key) && trackedHooksPath(project, value)) return "a hooks path in a tracked directory of the repo";
+  return undefined;
+};
+
+// The hook managers whose hook files the start recognises: each writes a script of a known shape into `.git/hooks/`
+// and leaves a marker in it. A marker names the tool and proves nothing of the rest of the file, which is why this is
+// taken only after a clean end, when no sandbox can have written it.
+const HOOK_MANAGERS: [string, RegExp][] = [
+  ["lefthook", /^if \[ "\$LEFTHOOK" = "0" \]/m],
+  ["pre-commit", /^# File generated by pre-commit: https:\/\/pre-commit\.com$/m],
+  ["husky", /^# husky$/m],
+];
+
+/** The hook manager that wrote a file directly under `hooks/` (a regular file of a script's size), if one did. */
+const hookManager = (project: Project, file: string, hash: string) => {
+  if (!/^hooks\/[^/]+$/.test(file) || file.endsWith(".sample") || !/^[0-9a-f]{64}$/.test(hash)) return undefined;
+  try {
+    const path = join(commonDir(project.root), file);
+    const at = lstatSync(path);
+    if (!at.isFile() || at.size > 65536 || entryHash(path) !== hash) return undefined;
+    const text = readFileSync(path, "utf8");
+    if (!text.startsWith("#!")) return undefined;
+    return HOOK_MANAGERS.find(([, marker]) => marker.test(text))?.[0];
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What differs between a record and the present state, as the refusal says it: one part per place, none when nothing
+ * does. `took` holds, for each change that looks like a person's own tooling (above), the words the start prints when it
+ * takes them; `ownOnly` is true when nothing differs that is not one of them.
+ */
 const differences = (project: Project, was: ProgramState, now: ProgramState) => {
-  const config = configChange(project, was.entries, now.entries).words;
-  const worktree = configChange(project, was.worktreeEntries, now.worktreeEntries).words;
+  const own = ownConfigKey(project);
+  const configs = configChange(project, was.entries, now.entries, own);
+  const worktrees = configChange(project, was.worktreeEntries, now.worktreeEntries, own);
+  const config = configs.words;
+  const worktree = worktrees.words;
   const word = (inWas: boolean, inNow: boolean) => (!inWas ? "added" : !inNow ? "removed" : "changed");
-  const files = changedFiles(was.files, now.files).map((f) => `${clean(f)} ${word(f in was.files, f in now.files)}`);
-  if (was.attributes !== now.attributes) files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  const took = [...configs.took.map((t) => `In .git/config: ${t}`), ...worktrees.took.map((t) => `In .git/config.worktree: ${t}`)];
+  let filesOwn = true;
+  const files = changedFiles(was.files, now.files, was.modes, now.modes).map((f) => {
+    // The content is the same and the executable bits are not: a disabled hook enabled, or an enabled one disabled. A
+    // hook manager's marker proves nothing of that, so it is never taken as the person's own.
+    const modeOnly = was.files[f] === now.files[f];
+    const what = modeOnly ? `${clean(f)} executable bit changed` : `${clean(f)} ${word(f in was.files, f in now.files)}`;
+    const manager = f in now.files && !modeOnly ? hookManager(project, f, now.files[f]) : undefined;
+    if (!manager) {
+      filesOwn = false;
+      return what;
+    }
+    took.push(`Under .git/: ${what} - a hook written by ${manager}`);
+    return `${what} (looks like your own tooling: a hook written by ${manager})`;
+  });
+  if (was.attributes !== now.attributes) {
+    filesOwn = false;
+    files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  }
   return {
     config,
     worktree,
     files,
+    took,
+    ownOnly: (config.length > 0 || worktree.length > 0 || files.length > 0) && configs.ownOnly && worktrees.ownOnly && filesOwn,
     parts: [
       ...(config.length ? [`In .git/config: ${config.join("; ")}.`] : []),
       ...(worktree.length ? [`In .git/config.worktree: ${worktree.join("; ")}.`] : []),
@@ -413,21 +677,35 @@ const differences = (project: Project, was: ProgramState, now: ProgramState) => 
   };
 };
 
+/** What a start reads of the baseline: the state to record, and the lines for the changes it took as the person's own. */
+export type GitConfigStart = ProgramState & { took: string[]; retaken: boolean };
+
 /**
  * Before a run, `land` or `gates` pins anything: holds what the start baseline records (above) to what the
  * previous run recorded. A difference throws an `OperatorError` that names each added, changed or removed
  * key (no value for a key that runs a program or carries credentials, as the `.git` stop says it) and file,
- * and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's own. No record
- * (the first run under this kit) is no difference. A previous run that never ended cleanly says so in the
- * refusal, since a sandbox may have written the difference. Writes nothing: `recordGitConfigStart` does,
- * once the run holds its lock. Returns the state it read.
+ * marks the ones that look like a person's own tooling, says whether the last run ended cleanly, and says how to go
+ * on: remove it, or `<command> --accept-git-config` when it is the operator's own. When the last run ended cleanly
+ * and every difference is of the kind a person's own tooling makes (`ownConfigKey`, `hookManager`), the start takes
+ * them: it returns `took`, one line for each, for `recordGitConfigStart` to print. No record (the first run under
+ * this kit) is no difference. A previous run that never ended cleanly refuses every difference, since a sandbox may
+ * have written it. Writes nothing: `recordGitConfigStart` does, once the run holds its lock. Returns the state it read.
  */
-export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramState => {
+export const assertGitConfigBaseline = (project: Project, command: string, accept = false): GitConfigStart => {
   const now = programState(project);
-  const was = readBaseline(project);
-  if (!was || accept) return now;
-  const { config, worktree, files, parts } = differences(project, was, now);
-  if (!parts.length) return now;
+  const { record: recorded, older, olderRecord } = readBaseline(project);
+  // An earlier version's record after a clean end is not compared (it lacks what this version records, so every key
+  // the list gained would read as added): the state is taken again, once. After a run that did not end cleanly a
+  // sandbox may have written the difference, so the fields that record does hold are compared (executable bits it
+  // never held are taken as they are now), and any difference refuses, as with today's record.
+  const was = recorded ?? (olderRecord && !olderRecord.clean ? { ...olderRecord, modes: now.modes } : undefined);
+  if (!was || accept) return { ...now, took: [], retaken: older && !accept };
+  // The keys this version added to the list were never watched by the earlier kit: they are left out of that comparison.
+  const listedSince = (entries: string[], had: string[]) => entries.filter((e) => !LISTED_SINCE_V1.test(e.split("\n")[0]) || had.includes(e));
+  const held = recorded ? now : { ...now, entries: listedSince(now.entries, was.entries), worktreeEntries: listedSince(now.worktreeEntries, was.worktreeEntries) };
+  const { config, worktree, files, parts, took, ownOnly } = differences(project, was, held);
+  if (!parts.length) return { ...now, took: [], retaken: false };
+  if (was.clean && ownOnly) return { ...now, took, retaken: false };
   const root = project.root;
   const inspect = [
     ...(config.length ? [`\`git -C ${root} config --local --list\``] : []),
@@ -440,16 +718,37 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
     ...(files.length ? ["a file by deleting it"] : []),
   ];
   const listed = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0]);
+  const ended = was.clean
+    ? `The last run ended cleanly. Something wrote them between the runs. That is most likely you or a tool of yours.${ownOnly || !took.length ? "" : " Changes marked as looking like your own tooling are taken without a question when nothing else differs; this start has others."}`
+    : `The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them.${recorded ? "" : " Its record was written by an earlier kit version, which listed fewer keys: a key named here may only be new to the list."}`;
   throw new OperatorError(
     `NOT STARTED: the shared .git differs from what the last run left, in what makes git run a program or reach the network. ${parts.join(" ")} ` +
-      `${was.clean ? "Something wrote them between the runs." : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them."} ` +
+      `${ended} ` +
       `Inspect ${listed(inspect)} before running any other git command there. Remove what is not yours (${remove.join(", ")}), ` +
       `or, if it is your own, start again with \`${command} --accept-git-config\`, which records the present state as the new baseline.`,
   );
 };
 
-/** Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended. */
-export const recordGitConfigStart = (project: Project, state: ProgramState) => writeBaseline(project, { ...state, clean: false });
+/**
+ * The lines a start prints: an earlier version's record taken again, and each change `assertGitConfigBaseline` took as
+ * the person's own. One function, so a `--detach` parent's terminal shows what the child's log does.
+ */
+export const tookLines = ({ took, retaken }: GitConfigStart) => [
+  ...(retaken
+    ? ["The record of the shared .git's program-running keys, hooks and modules, left by an earlier kit version, lacks what this version holds (the executable bit of a hook, more keys): taken again from the present state, once, with no comparison."]
+    : []),
+  ...took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`),
+];
+
+/**
+ * Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended,
+ * and prints its `tookLines`.
+ */
+export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
+  const { took: _took, retaken: _retaken, ...state } = start;
+  writeBaseline(project, { ...state, clean: false });
+  for (const line of tookLines(start)) console.log(line);
+};
 
 /**
  * At a run's clean end: marks the record clean when the `.git` still holds what the run started
@@ -457,7 +756,7 @@ export const recordGitConfigStart = (project: Project, state: ProgramState) => w
  * next start refuses it: the end never records a state it did not check.
  */
 export const recordGitConfigEnd = (project: Project) => {
-  const was = readBaseline(project);
+  const { record: was } = readBaseline(project);
   if (!was) return;
   if (!differences(project, was, programState(project)).parts.length) writeBaseline(project, { ...was, clean: true });
 };
@@ -696,11 +995,11 @@ const rewrittenWorktrees = (project: Project): string[] => {
 // what moved, instead of calling every commit tampering. An agent branch that vanished is
 // restored (the work is the kit's and the copy is exact); one that moved while its ticket was not
 // running is a stop.
-export const assertGitUnchanged = (project: Project, before: Fingerprint, when: string) => {
+export const assertGitUnchanged = (project: Project, before: Fingerprint, when: string, gatesOnly = false) => {
   const now = gitFingerprint(project);
   const base = project.baseBranch;
   const root = project.root;
-  let changed = changedFiles(before.files, now.files);
+  let changed = changedFiles(before.files, now.files, before.modes, now.modes);
   let configWords: string[] = [];
   if (changed.includes(now.config.path)) {
     const { benign, words } = configChange(project, before.config.entries, now.config.entries);
@@ -715,7 +1014,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       before.config = now.config;
     }
     if (benign.length) {
-      console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
+      console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - ${gatesOnly ? "the gates go on" : "the run goes on"}.`);
     }
   }
   // No benign key here: nothing a person's own work adds to a worktree's config is let through. An empty
@@ -730,7 +1029,8 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       })()
     : [];
   if (changed.length) {
-    const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
+    // The bits alone: the content is what it was, which the name would otherwise suggest it was not.
+    const names = changed.map((f) => relative(realpathSync(root), f) + (before.files[f] === now.files[f] ? " (executable bit)" : "")).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
     const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
     throw new GuardStop(
@@ -739,6 +1039,19 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }
+  const records = recordChanges(project, before.records, now.records);
+  if (records.length) {
+    const names = records.join(", ");
+    const inspect = [...new Set(records.map((r) => `.git/${r.split(" ")[0].split("/").slice(0, 2).join("/")}`))].join(", ");
+    throw new GuardStop(
+      `STOPPED ${when}: ${names} in the shared .git while sandboxes ran. A worktree you made yourself has its record there, and a sandbox may have changed it so that your next git command in that worktree reads config no check has seen. ` +
+        `Inspect ${inspect} and that worktree's .git file before running any git command there.`,
+      { what: "a worktree record of your own changed while sandboxes ran", detail: `(${names})` },
+    );
+  }
+  // Nothing is named: the records as they stand are the run's expectation from here on (a worktree removed or added since
+  // the start), so a later change to an added one is caught too, and a removed name added again is judged as added.
+  before.records = now.records;
   const rewritten = rewrittenWorktrees(project);
   if (rewritten.length) {
     throw new GuardStop(
@@ -955,6 +1268,56 @@ export const checkBeforeClose = async (project: Project, worktree: string, when:
   }
 };
 
+/** The kit's worktrees (under the project's `.sandcastle/worktrees/`) that have `branch` checked out, by the path git lists. */
+const worktreesOf = (project: Project, branch: string): string[] => {
+  const under = [...new Set([join(project.root, ".sandcastle/worktrees/"), join(realpathSync(project.root), ".sandcastle/worktrees/")])];
+  const found: string[] = [];
+  for (const entry of sh("git", ["worktree", "list", "--porcelain"], project.root).split("\n\n")) {
+    const lines = entry.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && under.some((u) => path.startsWith(u)) && lines.includes(`branch refs/heads/${branch}`)) found.push(path);
+  }
+  return found;
+};
+
+/**
+ * Opens a sandbox (Sandcastle's `createSandbox`, passed as `open`) and, when the open fails, removes what it left. A
+ * start that runs out of time (a loaded machine) throws with no handle to close: the container keeps running, the
+ * worktree stays locked by the worktree hook (so Sandcastle's own clean-up of it fails) and the branch stays. Nothing
+ * has worked in it yet, so the container goes first, then the worktree's lock and the worktree - unless the guard
+ * refuses git there (`worktreeRefusal`), when it is left for `sandcastle clean` to report - and a scratch
+ * `sandcastle/*` branch with it. An `agent/*` branch stays: a ticket's run owns it, it may hold work from an earlier
+ * run, and the run's fingerprint restores a vanished one. A worktree that existed before the open (one reused for a
+ * ticket) is not the open's to remove, and stays as it stands once its container is gone: `git worktree remove`
+ * without `--force` runs `git status` on the host in it, past the `.git` check a close makes first, so a filter
+ * another sandbox planted since would run there. Never throws from the clean-up: the open's own error is the one the caller sees, a container-start timeout as an `OperatorError` that names the cause and the fix.
+ */
+export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>): Promise<T> => {
+  let before: string[] = [];
+  try {
+    before = worktreesOf(project, branch);
+  } catch {
+    /* the open will say what is wrong with the repository */
+  }
+  try {
+    return await open();
+  } catch (error) {
+    try {
+      for (const path of worktreesOf(project, branch)) {
+        removeSandboxContainer(path);
+        if (before.includes(path) || worktreeRefusal(project)(path)) continue;
+        unlockWorktree(path, project.root);
+        sh("git", ["worktree", "remove", "--force", path], project.root);
+        if (branch.startsWith("sandcastle/")) sh("git", ["branch", "-D", branch], project.root);
+      }
+    } catch {
+      /* what is left, `sandcastle clean` removes */
+    }
+    // A start that ran out of time is the machine's, not a fault to trace: said in words, with no stack trace.
+    throw containerStartTimeout(error) ?? error;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // 3. What lands. A green branch that changes how the repo executes - hooks,
 // CI, agent settings, install scripts - is never merged automatically: the
@@ -969,11 +1332,42 @@ const DEFAULT_PROTECTED = [
   ".npmrc", "pnpm-workspace.yaml", ".yarnrc.yml",
   ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml", "lefthook.yml",
 ];
+// The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
+// defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
+const hooksDirProtected = (project: Project): string[] => {
+  let value = "";
+  try {
+    value = sh("git", ["config", "--local", "--get", "core.hooksPath"], project.root).trim();
+  } catch {
+    return [];
+  }
+  if (!trackedHooksPath(project, value)) return [];
+  const dir = `${value.split("/").filter((p) => p && p !== ".").join("/")}/`;
+  return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
+};
+const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
+
+/**
+ * The prompts' `{{KIT_PROTECTED}}`: the protected paths (the defaults and the project's `protectedPaths`) and what a
+ * change to one costs. An agent that is not told adds a comment to one for no reason, and the branch it spent a pipeline
+ * on is held for a person. The review is told to revert such a change when the ticket did not need it.
+ */
+export const protectedPathsNote = (project: Project, role: "implement" | "review"): string => {
+  const list = protectedPrefixes(project).map((p) => `\`${p}\``).join(", ");
+  const ask =
+    role === "review"
+      ? "If the branch changes one and the ticket did not need that change, revert it in a commit of your own: the rest of the work then lands by itself."
+      : "Change one only when the ticket needs it, never for a comment, a tidy-up or a formatting fix on the side.";
+  return (
+    "# Protected paths\n\n" +
+    `A change to any of these paths, or to an install-time script in a \`package.json\` (${INSTALL_SCRIPTS.map((s) => `\`${s}\``).join(", ")}), holds the whole branch for a person to merge by hand, however good the rest of the work: ${list}. ${ask}\n`
+  );
+};
 
 /** The files among `files` that lie in a protected path: the default set and the project's `protectedPaths`. */
 export const protectedAmong = (project: Project, files: string[]): string[] => {
-  const prefixes = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])];
+  const prefixes = protectedPrefixes(project);
   return files.filter((f) => prefixes.some((p) => f === p || f.startsWith(p)));
 };
 
@@ -1076,4 +1470,16 @@ export const lockRun = (project: Project) => {
   }
   heldLocks.add(file);
   process.on("exit", () => releaseLock(file, mine));
+};
+
+/**
+ * The first thing a command that runs host git over the shared `.git` does (`run`, `land`, `gates`, `clean`): takes
+ * the run lock, then stops what a killed run's sandboxes left working. A container left alive can still write the
+ * shared `.git` until it is reaped, so a baseline check or a pin made before the reap could be followed by a timed
+ * write that is neither refused nor pinned, and would become the fingerprint the first open is compared with. The
+ * reap is only safe under the lock (no live run owns a container then), so a refused lock reaps nothing.
+ */
+export const holdAndReap = (project: Project) => {
+  lockRun(project);
+  reapOrphans(project);
 };

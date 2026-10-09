@@ -153,7 +153,7 @@ test("the full review's prompt quotes the implementer's changelog lines, in orde
 
 test("the full review's prompt quotes nothing when the implementer gave no changelog line", async () => {
   const h = harness();
-  h.agents.impl = implementing("Done. <changelog>...</changelog>");
+  h.agents.impl = implementing("<changelog>...</changelog>");
   h.gates.push(GREEN);
   await h.attempt();
   const review = h.passes.find((p) => p.name === `review-${ID}`);

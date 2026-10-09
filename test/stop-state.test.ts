@@ -16,11 +16,12 @@ const ONE: Record<Kind, StopCause> = {
   "host failed": { kind: "host failed", error: new Error("STOPPED before writing to the base branch: HEAD changed") },
   "plan limit": { kind: "plan limit", ticket: "3" },
   "usage limit": { kind: "usage limit", line: "usage 97% of the 5-hour window" },
+  "setup problem": { kind: "setup problem", line: "Command `gh issue view 3` exited with code 4: HTTP 404" },
 };
 
 // The spec, written out rather than read from STOP_KINDS: the safety stops, and the headline order.
-const SAFETY: Record<Kind, boolean> = { tampered: true, "host failed": true, "plan limit": false, "usage limit": false };
-const SEVERITY: Kind[] = ["tampered", "host failed", "plan limit", "usage limit"];
+const SAFETY: Record<Kind, boolean> = { tampered: true, "host failed": true, "plan limit": false, "usage limit": false, "setup problem": false };
+const SEVERITY: Kind[] = ["tampered", "host failed", "plan limit", "usage limit", "setup problem"];
 
 const KINDS = Object.keys(ONE) as Kind[];
 const subsets = <T>(xs: T[]): T[][] => xs.reduce<T[][]>((all, x) => [...all, ...all.map((s) => [...s, x])], [[]]);
@@ -56,7 +57,7 @@ test("every mix of kinds, in every arrival order: starts nothing, lands nothing,
       cases++;
     }
   }
-  assert.equal(cases, 64);
+  assert.equal(cases, 325);
 });
 
 test("a safety stop after a limit still lands nothing, and heads the summary", () => {

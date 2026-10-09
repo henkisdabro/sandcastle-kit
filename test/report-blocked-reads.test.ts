@@ -127,6 +127,6 @@ test("a blocked ticket past a full open list is still read on its own and report
   assert.match(warned.join(""), /gh returned the limit of 500 open tickets/);
   assert.deepEqual(facts.blocked, [{ id: "21", on: ["#11"], why: { "#11": "held for a human" } }]);
   assert.deepEqual(facts.runnable, []);
-  assert.deepEqual(callsOf().filter((c) => c.startsWith("issue view")), ["issue view 21 --json number,title,state,body,comments,labels"]);
+  assert.deepEqual(callsOf().filter((c) => c.startsWith("issue view")), ["issue view 21 --json number,title,state,body,comments,labels,blockedBy"]);
   assert.deepEqual(callsOf().filter((c) => c.startsWith("api")), []);
 });

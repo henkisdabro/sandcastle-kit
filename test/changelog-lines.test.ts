@@ -162,7 +162,7 @@ test("without the key the implement prompt is the one with the ask taken out", (
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const render = (p: Project) => readFileSync(renderPrompts(p, makeTracker(p)).implement, "utf8");
   const on = render(project(root, true));
-  const ask = on.slice(on.indexOf("**Changelog lines.**"), on.indexOf("The same gates"));
+  const ask = on.slice(on.indexOf("**Changelog lines.**"), on.indexOf("The orchestrator runs every gate after you exit,"));
   assert.ok(ask.includes("<changelog>...</changelog>"));
   assert.equal(on.replace(ask, ""), render(project(root)));
 });

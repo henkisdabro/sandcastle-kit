@@ -74,16 +74,21 @@ leg_bash32() {
 }
 
 leg_linux() {
+  # The container is removed with `--rm`, and its shard logs with it: they are copied into a
+  # bind-mounted directory of the log directory, so a shard that failed or ran slowly can be read.
+  mkdir -p "$logs/linux-shards"
   # COPYFILE_DISABLE: macOS tar would add an AppleDouble `._` file beside each one.
   git ls-files -z -co --exclude-standard | COPYFILE_DISABLE=1 tar --null -T - -cf - 2>/dev/null \
-    | docker run --rm -i -e FULL_CHECK_SHARDS="$shards" node:24-trixie bash -c '
+    | docker run --rm -i -e FULL_CHECK_SHARDS="$shards" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+      -v "$logs/linux-shards:/out" node:24-trixie bash -c '
       set -e
       apt-get update -qq >/dev/null && apt-get install -y -qq jq bsdutils git >/dev/null
       corepack enable >/dev/null 2>&1
       mkdir /w && cd /w && tar -xf - && chown -R node:node /w
       # As the image'"'"'s own non-root user, as CI and every real run are: the kit refuses root
       # (src/runtime.ts), so a root suite fails each `sandcastle run` test and skips the Linux ones.
-      exec runuser -u node -- env HOME=/home/node FULL_CHECK_SHARDS="$FULL_CHECK_SHARDS" bash -ec "
+      rc=0
+      runuser -u node -- env HOME=/home/node FULL_CHECK_SHARDS="$FULL_CHECK_SHARDS" bash -ec "
         git init -q && git add -A
         git config --global user.email t@example.com && git config --global user.name t
         CI=1 pnpm install --frozen-lockfile >/dev/null 2>&1
@@ -93,9 +98,15 @@ leg_linux() {
         # The host worked out the count against its own cores; the VM may have fewer.
         [ \"\$FULL_CHECK_SHARDS\" -le \"\$(nproc)\" ] || export FULL_CHECK_SHARDS=\$(nproc)
         bash test/run-shards.sh /tmp/shards >/tmp/t.log 2>&1 || { tail -40 /tmp/t.log; exit 1; }
-        cat /tmp/t.log"' >"$logs/linux.log" 2>&1 \
+        cat /tmp/t.log" || rc=$?
+      # The shard logs stay on the host, whether the suite passed or not, owned by the host user
+      # (the bind mount is written as root here) so the next run can overwrite them.
+      if [ -d /tmp/shards ]; then cp -R /tmp/shards/. /out/ || true; fi
+      cp /tmp/t.log /out/ 2>/dev/null || true
+      chown -R "$HOST_UID:$HOST_GID" /out 2>/dev/null || true
+      exit "$rc"' >"$logs/linux.log" 2>&1 \
     && { printf 'pnpm test: '; tail -1 "$logs/linux.log"; } \
-    || { echo "FAIL"; tail -60 "$logs/linux.log"; return 1; }
+    || { echo "FAIL (shard logs: $logs/linux-shards)"; tail -60 "$logs/linux.log"; return 1; }
 }
 
 # The lines of a file that name a real home directory. `home` must start a path, or a repo path

@@ -1,5 +1,5 @@
 // Every test file starts from the same environment (test/hermetic-env.ts, preloaded beside
-// test/no-stray.ts): a canonical TMPDIR, the running node's directory first on PATH, and none of the
+// test/no-stray.ts): a canonical TMPDIR, the running node's directory first on PATH and a no-op `docker` after it, and none of the
 // host's HERDR_*, TMUX*, SANDCASTLE_* or kit settings, and no git identity of the host's. Also the guard against a new setting leaking in:
 // a name `src/` reads from the environment must be scrubbed or on the keep list below.
 //
@@ -41,6 +41,24 @@ test("a test sees tmpdir() equal to its realpath, and the running node's directo
   assert.equal(process.env.PATH!.split(delimiter)[0], dirname(process.execPath));
 });
 
+test("a test that runs `docker` gets one that lists nothing, never the machine's own", () => {
+  // `docker ps` is what a sandbox's close asks; a real daemon is slow (macOS), stopped (Docker installed, no daemon) or absent.
+  const ps = spawnSync("docker", ["ps", "-aq", "--filter", "name=sandcastle"], { encoding: "utf8" });
+  assert.deepEqual([ps.error, ps.status, ps.stdout, ps.stderr], [undefined, 0, "", ""]);
+  const dockerDirs = process.env.PATH!.split(delimiter).filter((d) => existsSync(join(d, "docker")));
+  assert.equal(dockerDirs[0], process.env.SANDCASTLE_TEST_NO_DOCKER_DIR, "the no-op docker is the first docker on PATH");
+  assert.equal(readFileSync(join(dockerDirs[0]!, "docker"), "utf8"), "#!/bin/sh\nexit 0\n");
+  // After the node directory, so the order the test above holds stays.
+  assert.equal(process.env.PATH!.split(delimiter)[1], dockerDirs[0]);
+});
+
+test("a docker a test puts ahead of the no-op one is the one that runs", () => {
+  const own = mkdtempSync(join(dir, "own-docker-"));
+  writeFileSync(join(own, "docker"), "#!/bin/sh\necho own\n", { mode: 0o755 });
+  const r = spawnSync("docker", ["ps"], { encoding: "utf8", env: { ...process.env, PATH: `${own}${delimiter}${process.env.PATH}` } });
+  assert.equal(r.stdout, "own\n");
+});
+
 test("a test sees none of the host's Herdr, tmux or kit settings", () => {
   for (const name of Object.keys(process.env)) assert.equal(scrubs(name), false, `${name} leaked into the test's environment`);
 });
@@ -54,13 +72,18 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   const file = join(dir, "probe.test.ts");
   writeFileSync(
     file,
-    `import { writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
-      `test("probe", () => writeFileSync(${JSON.stringify(out)}, JSON.stringify({ tmp: tmpdir(), path: process.env.PATH, env: process.env })));\n`,
+    `import { spawnSync } from "node:child_process";\nimport { writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
+      `test("probe", () => writeFileSync(${JSON.stringify(out)}, JSON.stringify({ tmp: tmpdir(), path: process.env.PATH, env: process.env, ` +
+      `docker: spawnSync("docker", ["ps"], { encoding: "utf8" }).stdout })));\n`,
   );
+  // The shell's own docker, ahead of everything: the machine's real Docker on a developer's PATH.
+  const hostBin = join(dir, "host-bin");
+  mkdirSync(hostBin);
+  writeFileSync(join(hostBin, "docker"), "#!/bin/sh\necho host docker\n", { mode: 0o755 });
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     TMPDIR: link,
-    PATH: `/shim${delimiter}${process.env.PATH}`,
+    PATH: [hostBin, "/shim", process.env.PATH].join(delimiter),
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
     SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", GH_TOKEN: "t", NO_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
     GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
@@ -68,12 +91,16 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "commit.gpgsign", GIT_CONFIG_VALUE_0: "false",
   };
   delete env.NODE_TEST_CONTEXT;
+  delete env.SANDCASTLE_TEST_NO_DOCKER_DIR;
   const r = runNode(["--import", join(KIT, "test/hermetic-env.ts"), "--test", "--test-reporter=spec", file], { cwd: dir, env, encoding: "utf8", timeoutMs: 120_000 });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const seen = JSON.parse(readFileSync(out, "utf8")) as { tmp: string; path: string; env: Record<string, string> };
+  const seen = JSON.parse(readFileSync(out, "utf8")) as { tmp: string; path: string; docker: string; env: Record<string, string> };
   assert.equal(seen.tmp, realpathSync(real));
   assert.equal(seen.path.split(delimiter)[0], dirname(process.execPath));
   assert.ok(seen.path.split(delimiter).includes("/shim"), "the host's own PATH entries stay");
+  // The shell's own docker never answers: the no-op one, in the test's own TMPDIR, comes first.
+  assert.equal(seen.docker, "", "the host's docker answered the test");
+  assert.ok(seen.path.split(delimiter)[1]!.startsWith(realpathSync(real)), "the no-op docker is in the test's own TMPDIR");
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");

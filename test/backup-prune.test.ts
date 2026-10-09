@@ -159,7 +159,7 @@ test("a run's start and `sandcastle clean` both prune the backup", () => {
   const src = (file: string) => readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
   const run = src("burndown.ts");
   const body = run.indexOf("export const burndown = ");
-  const lock = run.indexOf("lockRun(project);", body);
+  const lock = run.indexOf("holdAndReap(project);", body);
   const prune = run.indexOf("pruneBackup(project)", body);
   assert.ok(lock > 0 && prune > lock, "burndown prunes the backup once it holds the run lock");
   assert.ok(prune < run.indexOf("tracker.queued()", body), "and before any ticket starts");

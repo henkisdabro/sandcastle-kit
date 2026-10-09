@@ -15,6 +15,11 @@ test("a failed command gives its last stderr line", () => {
   assert.equal(errorLine(Object.assign(new Error("Command failed"), { stderr: "warning\nHTTP 502: Bad Gateway\n" })), "HTTP 502: Bad Gateway");
 });
 
+test("a message holding a command's stderr gives its fatal: line, not git's progress line before it", () => {
+  const e = new Error("Preparing worktree (new branch 'sandcastle/land-agent-issue-7-1')\nfatal: cannot lock ref 'refs/heads/sandcastle/land-agent-issue-7-1': Unable to create '.git/refs/heads/sandcastle/land-agent-issue-7-1.lock': File exists.");
+  assert.match(errorLine(e), /^fatal: cannot lock ref/);
+});
+
 test("agentFailure: the library's two-line agent error reads as one line with its cause", async () => {
   const { agentFailure } = await import("../src/agents.ts");
   const e = new Error('(FiberFailure) AgentError: claude-code exited with code 1:\n[claude-code:unrecognized_model] {"model":"claude-nonexistent-9"}');

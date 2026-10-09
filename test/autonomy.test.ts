@@ -73,12 +73,12 @@ const facts: Facts = {
 };
 
 test("rerunnable: conflicted and newly unblocked tickets, never after a dry, stopped, red or skipped run", () => {
-  assert.deepEqual(rerunnable(facts), { conflicted: ["1"], unblocked: ["3"], partial: [] });
+  assert.deepEqual(rerunnable(facts), { conflicted: ["1"], unblocked: ["3"], partial: [], unlanded: [] });
   assert.equal(rerunnable({ ...facts, dryRun: true }), undefined);
   assert.equal(rerunnable({ ...facts, stopped: "usage limit" }), undefined);
   assert.equal(rerunnable({ ...facts, verify: { green: false, line: "" } }), undefined);
   assert.equal(rerunnable({ ...facts, tickets: { ...facts.tickets, 5: { state: "skipped" } } }), undefined);
-  assert.deepEqual(rerunnable({ ...facts, verify: null }), { conflicted: ["1"], unblocked: ["3"], partial: [] });
+  assert.deepEqual(rerunnable({ ...facts, verify: null }), { conflicted: ["1"], unblocked: ["3"], partial: [], unlanded: [] });
 });
 
 test("nextTurn: the level caps the turns, level 1 always asks", () => {

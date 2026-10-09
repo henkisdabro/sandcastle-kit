@@ -156,7 +156,7 @@ test("--accept-git-config is a run argument that is not a ticket", () => {
   assert.deepEqual(parseRunArgs([]), { dry: false });
 });
 
-test("run, land and gates check before the pins and record after the run lock", () => {
+test("run, land and gates take the run lock, check before the pins and record once they are pinned", () => {
   const read = (f: string) => readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
   const burndown = read("burndown.ts");
   const at = (text: string, needle: string) => {
@@ -165,12 +165,14 @@ test("run, land and gates check before the pins and record after the run lock", 
     return i;
   };
   assert.ok(at(burndown, "assertGitConfigBaseline(project,") < at(burndown, "pinHostGitConfig(project.root)"));
-  assert.ok(at(burndown, "lockRun(project);\n  recordGitConfigStart") > 0);
+  assert.ok(at(burndown, "holdAndReap(project);") < at(burndown, "assertGitConfigBaseline(project,"));
+  assert.ok(at(burndown, "pinHostGitConfig(project.root)") < at(burndown, "recordGitConfigStart(project, gitConfig)"));
   const cli = read("cli.ts");
   for (const verb of ['case "gates"', 'case "land"']) {
     const body = cli.slice(at(cli, verb), at(cli, verb) + 1800);
     assert.ok(at(body, "assertGitConfigBaseline(") < at(body, "pinHostGitConfig("), verb);
-    assert.ok(at(body, "lockRun(project)") < at(body, "recordGitConfigStart("), verb);
+    assert.ok(at(body, "holdAndReap(project)") < at(body, "assertGitConfigBaseline("), verb);
+    assert.ok(at(body, "pinHostGitConfig(") < at(body, "recordGitConfigStart("), verb);
     assert.ok(body.includes("recordGitConfigEnd(project)"), verb);
   }
   assert.match(cli, /recordGitConfigEnd\(project\);\n\s+const redExit/);

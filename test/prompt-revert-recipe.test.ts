@@ -25,11 +25,23 @@ test("the recipe is carried by the implement, review and repair prompts and the 
   }
 });
 
-test("every file that names the recipe saves and reverts the same files, both from HEAD", () => {
-  for (const f of carriers) {
+// A reviewer's change is already committed, so a diff against HEAD is empty and the HEAD recipe
+// reverts nothing; its recipe diffs against the target branch and reverses the patch instead.
+const reviewer = join("prompts", "review.md");
+
+test("every file that names the recipe, bar the review prompt, saves and reverts the same files, both from HEAD", () => {
+  for (const f of carriers.filter((c) => c !== reviewer)) {
     const t = read(f);
     assert.match(t, /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>/, f);
     assert.doesNotMatch(t, /git diff > \/tmp\/p/, f);
     assert.doesNotMatch(t, /git checkout -- <files>/, f);
   }
+});
+
+test("the review prompt reverts the branch's committed change against the target branch", () => {
+  const t = read(reviewer);
+  assert.match(t, /git diff \{\{TARGET_BRANCH\}\}\.\.\.HEAD -- <files> > \/tmp\/p && git apply -R \/tmp\/p/);
+  assert.match(t, /then `git apply \/tmp\/p`/);
+  assert.doesNotMatch(t, /git diff HEAD -- <files>/);
+  assert.doesNotMatch(t, /git checkout HEAD -- <files>/);
 });

@@ -10,8 +10,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MAX_OUTPUT, sh } from "./sandbox.ts";
-import { covers, type Generated } from "./generated.ts";
+import { MAX_OUTPUT, ownCommitList, sh, staleBaseParents } from "./sandbox.ts";
+import { covers, type Exec, type Generated, shq } from "./generated.ts";
 
 // `merge-tree --write-tree` arrived in git 2.38.
 const MIN_GIT: [number, number] = [2, 38];
@@ -190,6 +190,81 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
   }
 };
 
+/** How a `strayNote` begins: the closing summary tells a held conflict resolution from any other hold by the outcome text `needs a human: <note>` containing it. */
+export const STRAY_NOTE_START = "conflict resolution changed";
+
 /** The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it. */
 export const strayNote = (stray: string[]): string =>
-  `conflict resolution changed ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;
+  `${STRAY_NOTE_START} ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;
+
+/** How the note on a branch held for a rewritten base begins: the closing summary tells it from any other hold by the outcome text `needs a human: <note>` containing it. */
+export const REWRITTEN_NOTE_START = "base rewritten under the branch";
+
+/** What `rebuildOnBase` did with a carried branch whose base was rewritten under it (`undefined`: it was not). */
+export type Rebuilt =
+  /** `was`: the branch's tip before; `onto`: the base tip it now sits on; `picked`: its own commits re-applied; `dropped`: those the base already had the work of. */
+  | { kind: "rebuilt"; was: string; onto: string; picked: number; dropped: number }
+  /** `merged`: the old base tips the branch holds that the base no longer does; `why`: the cause, for the note. The branch is as it was. */
+  | { kind: "held"; was: string; merged: string[]; why: string };
+
+const lastLine = (r: { stdout: string; stderr: string }) => (r.stderr + "\n" + r.stdout).trim().split("\n").at(-1)?.slice(0, 160) ?? "";
+
+/**
+ * A carried branch that merged a base which has since been rewritten (`staleBaseParents`) is re-created on the base's
+ * tip from its own non-merge commits, cherry-picked in order in the sandbox `box` (never on the host: the sandbox's
+ * worktree is the branch's, and its own git does the work, as for the base merge). It is picked on a detached head
+ * and the branch moved only when every commit applied, so a branch that cannot be rebuilt is as it was: a commit that
+ * conflicts with the new base holds it for a person (`held`, the conflicting commit and files named). A commit the
+ * base already has the work of is left out (`dropped`). The old tip stays in the branch's reflog; `was` names it.
+ */
+export const rebuildOnBase = async (box: Exec, o: { root: string; base: string; branch: string; identity: string }): Promise<Rebuilt | undefined> => {
+  const { root, base, branch, identity } = o;
+  // One tip for the whole rebuild: a landing moving the base meanwhile is merged in by the pipeline's own base merge after.
+  const onto = sh("git", ["rev-parse", `refs/heads/${base}`], root);
+  const merged = staleBaseParents(onto, branch, root);
+  if (!merged.length) return undefined;
+  const was = sh("git", ["rev-parse", `refs/heads/${branch}`], root);
+  const own = ownCommitList(onto, branch, root);
+  // Named by the old base's tips alone: the parents of the landing merges inside it are in its history already.
+  const tips = merged.length > 1 ? sh("git", ["merge-base", "--independent", ...merged], root).split("\n").filter(Boolean) : merged;
+  const held = (why: string): Rebuilt => ({ kind: "held", was, merged: tips.map((m) => m.slice(0, 7)), why });
+  // The kit's own mechanical commits and checkouts: hooks stay off and signing is not asked, as the gates run on the result.
+  const git = `git ${identity} -c core.hooksPath=/dev/null -c commit.gpgsign=false`;
+  // Back to the branch as it was. No `-f`: uncommitted files the worktree already held are not ours to discard.
+  const restore = async () => {
+    await box.exec(`${git} cherry-pick --abort`);
+    await box.exec(`${git} checkout -q ${shq(branch)}`);
+  };
+
+  const detach = await box.exec(`${git} checkout -q --detach ${onto}`);
+  if (detach.exitCode !== 0) return held(`could not check out ${base} to rebuild on it (${lastLine(detach)})`);
+  let picked = 0;
+  let dropped = 0;
+  for (const sha of own) {
+    const r = await box.exec(`${git} cherry-pick ${sha}`);
+    if (r.exitCode === 0) {
+      picked++;
+      continue;
+    }
+    const files = (await box.exec("git diff --name-only --diff-filter=U")).stdout.trim().split("\n").filter(Boolean);
+    const stopped = (await box.exec("git rev-parse -q --verify CHERRY_PICK_HEAD")).exitCode === 0;
+    // A stopped pick with nothing unmerged and nothing changed is a commit that became empty: the base has its work already.
+    if (stopped && !files.length && (await box.exec("git diff --quiet HEAD")).exitCode === 0 && (await box.exec(`${git} cherry-pick --skip`)).exitCode === 0) {
+      dropped++;
+      continue;
+    }
+    const why = files.length ? `its commit ${sha.slice(0, 7)} conflicts with ${base} in ${files.slice(0, 3).join(", ")}${files.length > 3 ? ` and ${files.length - 3} more` : ""}` : `its commit ${sha.slice(0, 7)} did not apply to ${base} (${lastLine(r)})`;
+    await restore();
+    return held(why);
+  }
+  const moved = await box.exec(`${git} checkout -q -B ${shq(branch)}`);
+  if (moved.exitCode !== 0) {
+    await restore();
+    return held(`could not move the branch onto the rebuilt commits (${lastLine(moved)})`);
+  }
+  return { kind: "rebuilt", was, onto, picked, dropped };
+};
+
+/** The note on a ticket held because its branch could not be rebuilt on a rewritten base: the run record and the tracker comment share it. */
+export const rewrittenNote = (base: string, held: Extract<Rebuilt, { kind: "held" }>): string =>
+  `${REWRITTEN_NOTE_START} - it merged ${held.merged.join(", ")}, which ${base} no longer holds, and ${held.why}; the branch is left as it was (${held.was.slice(0, 7)})`;

@@ -98,5 +98,5 @@ test("the closing summary: Needs-you line, and the Next step names it first", ()
 });
 
 test("a further turn does not take an uncommitted ticket", () => {
-  assert.deepEqual(rerunnable(facts()), { conflicted: [], unblocked: [], partial: [] });
+  assert.deepEqual(rerunnable(facts()), { conflicted: [], unblocked: [], partial: [], unlanded: [] });
 });

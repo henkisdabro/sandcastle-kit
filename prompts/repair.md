@@ -21,7 +21,7 @@ or a move to the background cannot leave the worktree without your change. Never
 
 {{KIT_TICKET_VIEW}}
 
-# What the branch changed
+{{FOLLOWUPS_NAMED}}# What the branch changed
 
 !`git log {{TARGET_BRANCH}}..HEAD --format='%h %s'`
 
@@ -59,8 +59,9 @@ see the whole set, and fix all of them.
   line). The orchestrator files each as a new ticket for triage, naming this ticket, so do not file it
   yourself.
 - Dependencies are already installed. Commit your fix in the style of the repo's history.
+  Never write an issue-closing keyword (`Closes #N`, `Fixes #N`, `Resolves #N`) in a commit: the kit decides whether the ticket closes, and one left partly done must stay open when the branch reaches the default branch; write `(#N)` to refer to it.
   Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
-  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  then `git commit -F <file>`: never `git commit -m "..."`. Free text on the
   command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 {{KIT_PROJECT_RULES}}

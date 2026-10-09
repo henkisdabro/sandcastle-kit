@@ -9,15 +9,18 @@ their records mid-run. `git worktree add` in the project is refused: to compare
 against `{{TARGET_BRANCH}}`, read it with `git show {{TARGET_BRANCH}}:<path>` or
 `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`. A scratch repository to test a
 change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
-plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
+plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). Create it
+in an earlier command, then use `git -C /literal/absolute/path`: the guard reads the command before it runs,
+so a repository made in the same command, or a path in a variable, is refused. To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
-another agent's change. To run a test without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD --
-<files>`, run it, then `git apply /tmp/p`. Give that test run a time limit (the test runner's
+another agent's change. To run a test without the branch's change (it is committed, so a diff against `HEAD` is empty),
+`git diff {{TARGET_BRANCH}}...HEAD -- <files> > /tmp/p && git apply -R /tmp/p`, run it, then
+`git apply /tmp/p`. Never use `HEAD~1`: a branch can have more than one commit. Give that test run a time limit (the test runner's
 timeout option, or `timeout`): without the change it may hang. Run `git apply /tmp/p` as a command
 of its own, never chained after the test, so a hang or a move to the background cannot leave the
 worktree without your change. Never `pgrep -f` or `pkill -f` a pattern that also appears in your
-own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. If git ever tells you this
+own command line: it matches your own shell and kills it. Every other test you run by hand (one file, one case) gets a limit too, `timeout 300 <command>`: a new test that fails can leave something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses (`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it refuses the quoting like the command. If git ever tells you this
 worktree is not a git repository, stop: {{KIT_LOST}}
 and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
@@ -25,7 +28,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 {{KIT_TICKET_VIEW}}
 
-{{KIT_COMMENTS_VIEW}}{{IMPL_UNMET}}# What was changed
+{{KIT_COMMENTS_VIEW}}{{IMPL_UNMET}}{{IMPL_SAID}}{{FOLLOWUPS_NAMED}}# What was changed
 
 !`git diff {{TARGET_BRANCH}}...HEAD --stat`
 
@@ -67,14 +70,15 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    introduced when it makes the changed behaviour harder to follow. Do not reorganise sound code
    to your taste.
 
+{{KIT_PROTECTED}}
 {{KIT_PROJECT_RULES}}
 
 # What to do about what you find
 
-**Fix it yourself and commit**, in the same style as the existing commits. You are not writing a
+**Fix it yourself and commit**, in the same style as the existing commits. Never write an issue-closing keyword (`Closes #N`, `Fixes #N`, `Resolves #N`) in a commit: the kit decides whether the ticket closes, and one left partly done must stay open when the branch reaches the default branch; write `(#N)` to refer to it. You are not writing a
 report for a human - your commits are the deliverable, and they will be gated alongside the
 implementer's. Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
-then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+then `git commit -F <file>`: never `git commit -m "..."`. Free text on the
 command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 
 Constraints:

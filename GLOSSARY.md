@@ -127,7 +127,8 @@ One item in a release's Upgrading section: something an existing project may hav
 _Avoid_: migration, upgrade step
 
 **Update record**:
-What a project keeps, on one machine, of the Upgrading notes it has acted on.
+What a project keeps, on one machine, of the Upgrading notes it has acted on, and of the update
+steps its user declined (`declined`, each at the release it was declined at).
 _Avoid_: marker, kit-updated (the file's name, not the concept)
 
 ### Between runs

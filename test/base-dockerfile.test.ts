@@ -1,6 +1,7 @@
-// docker/base.Dockerfile read as text (no Docker): the npm cache is dropped in the
-// layer that fills it, the build checks the git `sandcastle preview` needs, and the
-// full trixie base stays, with the reasons written down.
+// docker/base.Dockerfile and docker/agents.Dockerfile read as text (no Docker): the base installs
+// neither agent (a release would move its tag), the agents image drops the npm cache in the layer
+// that fills it, the build checks the git `sandcastle preview` needs, and the full trixie base
+// stays, with the reasons written down.
 //
 //   pnpm test:file test/base-dockerfile.test.ts
 
@@ -11,19 +12,43 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "docker", "base.Dockerfile"), "utf8");
+const docker = join(dirname(fileURLToPath(import.meta.url)), "..", "docker");
+const text = readFileSync(join(docker, "base.Dockerfile"), "utf8");
+const agentsText = readFileSync(join(docker, "agents.Dockerfile"), "utf8");
 
 // One entry per instruction: backslash continuations joined, comment lines dropped.
-const instructions = text
-  .replace(/\\\r?\n/g, " ")
-  .split("\n")
-  .filter((l) => !l.trim().startsWith("#") && l.trim() !== "");
+const instructionsOf = (file: string) =>
+  file
+    .replace(/\\\r?\n/g, " ")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#") && l.trim() !== "");
+const instructions = instructionsOf(text);
 const runs = instructions.filter((l) => /^RUN\s/.test(l));
+const agentRuns = instructionsOf(agentsText).filter((l) => /^RUN\s/.test(l));
 
 test("every npm install -g clears the npm cache in the same RUN", () => {
-  const installs = runs.filter((l) => /npm install -g/.test(l));
+  const installs = agentRuns.filter((l) => /npm install -g/.test(l));
   assert.ok(installs.length > 0, "expected at least the Codex install");
   for (const run of installs) assert.match(run, /npm install -g .*&& npm cache clean --force/, run);
+});
+
+test("the base installs neither agent, so a release leaves its tag and every project layer's alone", () => {
+  assert.ok(!runs.some((l) => /@openai\/codex|claude\.ai\/install|npm install -g/.test(l)), "the base installs an agent");
+  assert.ok(!instructions.some((l) => /^ARG (CODEX|CLAUDE_CODE)_VERSION/.test(l)), "the base takes an agent version");
+  assert.ok(!instructions.some((l) => l.startsWith("ENV PATH=")), "the base sets a PATH for the agents' ~/.local/bin");
+});
+
+test("the agents image is built FROM the base, Codex as root and Claude Code as the agent user", () => {
+  const steps = instructionsOf(agentsText);
+  assert.ok(steps.includes("FROM ${BASE}"), "the agents image does not build FROM ${BASE}");
+  const at = (pattern: RegExp) => steps.findIndex((l) => pattern.test(l));
+  const codex = at(/^RUN npm install -g .*@openai\/codex@\$CODEX_VERSION/);
+  const claude = at(/^RUN curl .*claude\.ai\/install\.sh .*"\$CLAUDE_CODE_VERSION"/);
+  assert.ok(codex > 0 && claude > codex, "expected the Codex install, then the Claude Code install");
+  // The last USER before each install: root for the global npm install, the agent user for the home install.
+  const userBefore = (i: number) => steps.slice(0, i).reverse().find((l) => /^USER\s/.test(l));
+  assert.equal(userBefore(codex), "USER root");
+  assert.equal(userBefore(claude), "USER ${AGENT_UID}:${AGENT_GID}");
 });
 
 test("a RUN checks the git version at build, naming sandcastle preview", () => {

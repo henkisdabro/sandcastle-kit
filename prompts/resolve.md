@@ -14,7 +14,10 @@ their records mid-run. If git ever tells you this worktree is not a git reposito
 Every test file you run by hand gets a limit, `timeout 300 <command>`: a test that fails can leave
 something pending, and the run then never exits. A script fed to an interpreter through a heredoc takes
 a delimiter the file it edits cannot contain (`<<'PYEOF'`, not `<<'EOF'`): an `EOF` line in that file
-ends the heredoc early and runs the rest as shell.
+ends the heredoc early and runs the rest as shell. Text that names a git command the guard refuses
+(`git push`, deleting an agent branch) - in a heredoc, a script or a commit message - goes through the Edit
+or Write tool or a file, never on a shell command line: the guard matches the whole command string, so it
+refuses the quoting like the command.
 
 # The conflicted files
 

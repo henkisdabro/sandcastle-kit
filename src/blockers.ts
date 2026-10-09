@@ -13,9 +13,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
-import { mergedByHand } from "./run.ts";
+import { mergedByHand, mergedPartly } from "./run.ts";
 import { USER_CONFIG } from "./sandbox.ts";
-import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
+import { DEFAULT_DONE, refOf, slug, statusOf, type Tracker } from "./tracker.ts";
 
 export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
 // `closed-unmerged`: closed as not planned, so the work it stood for will never land.
@@ -160,19 +160,20 @@ export const blockerResolver = (project: Project, tracker: Tracker, known = new 
 
 type Blocked = { id: string; body?: string };
 
-export type Why = "not-planned" | "held" | "merged-by-hand" | "unqueued";
+export type Why = "not-planned" | "held" | "merged-by-hand" | "merged-partly" | "unqueued";
 
 /** The words after "waits for #B" in the closing summary. */
 export const whyShort: Record<Why, string> = {
   "not-planned": "closed as not planned",
   held: "held for a human",
   "merged-by-hand": "merged by hand, closes on push",
+  "merged-partly": "merged by hand, partly done: stays open",
   unqueued: "open but not queued",
 };
 
 /**
  * Why an open blocker will not close by itself: closed as not planned, held for a person (or merged
- * by one, and closing on the push), or not in the queue. GitHub and ticket-file blockers only: Linear issues and task files have no queue.
+ * by one, and closing on the push, or "part of" its ticket and staying open), or not in the queue. GitHub and ticket-file blockers only: Linear issues and task files have no queue.
  * `queued`: ids the caller knows are in the queue; without it a ticket's own queue label decides.
  * One `tracker.get` per distinct blocker; a ticket that cannot be read says nothing.
  */
@@ -185,7 +186,7 @@ export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<stri
     if (!seen.has(key)) {
       try {
         const t = tracker.get(b.id);
-        seen.set(key, t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? "merged-by-hand" : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined);
+        seen.set(key, t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined);
       } catch {
         seen.set(key, undefined);
       }
@@ -194,10 +195,13 @@ export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<stri
   };
 };
 
-/** Every blocker a ticket names: in its body, and any its tracker declares. */
+/** Every blocker a ticket names: in its body, and any its tracker declares (a ticket file's `Blocked by:` line, GitHub's native edge). */
 export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] => {
   const refs = parseRefs(project, t.body ?? "");
-  for (const id of tracker.declaredBlockers(t.id)) refs.push({ kind: "ticket", id });
+  // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
+  // as not planned included. One the body names too is one blocker.
+  const kind = tracker.kind === "github" ? "github" : "ticket";
+  for (const id of tracker.declaredBlockers(t.id)) if (!refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind, id });
   return refs;
 };
 
@@ -251,30 +255,57 @@ export const commentBlockLine = (f: Awaited<ReturnType<typeof commentOnlyBlocks>
 // before its blocker lands, and nothing else says so.
 const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[-*+][ \t]/im;
 
+// The to-tickets template names a child's spec under a `## Parent` heading. A queued spec that
+// has queued children is run as one ticket beside them, so the parents a body names are read here:
+// `#12`, the issue's URL, or (files tracker) the parent's ticket-file path. Plain text, no tracker call.
+const parentsOf = (project: Project, body: string): string[] => {
+  const dir = project.tracker.kind === "files" ? project.tracker.dir.replace(/^\.?\/+|\/+$/g, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : undefined;
+  const found = new Set<string>();
+  let inside = false;
+  for (const line of stripCode(body).split("\n")) {
+    if (/^#{1,6}[ \t]/.test(line)) {
+      inside = /^#{1,6}[ \t]+parent:?[ \t]*#*[ \t]*\r?$/i.test(line);
+      continue;
+    }
+    if (!inside) continue;
+    for (const m of line.matchAll(/(?:^|[^\w/&])#(\d+)\b|\/issues\/(\d+)(?![\d-])/g)) found.add(m[1] ?? m[2]);
+    if (dir) for (const m of line.matchAll(new RegExp(`${dir}/([^/\\s]+)/issues/(\\d+)-[^\\s,;)]*\\.md`, "gi"))) found.add(`${slug(m[1])}-${String(Number(m[2])).padStart(2, "0")}`);
+  }
+  return [...found];
+};
+
 /**
  * Queued tickets that will never start, or start too soon, because of how their blockers are
  * written: a blocker that does not exist or cannot be read (it counts as open, so the ticket
  * waits for good), tickets that wait for each other, a Linear-style id the config does not
  * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
- * (not read, so the ticket starts at once). Each line says what to change.
+ * (not read, so the ticket starts at once). Also a queued spec that queued children name under
+ * `## Parent`: a run would implement it whole beside them. Each line says what to change.
+ * `inQueue`: the ids of the whole queue, when `queued` is only some of it (the tickets a run
+ * names), so a blocker queued outside them is not called "not queued".
  */
-export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
-  const queuedIds = new Set(queued.map((t) => t.id));
-  const resolve = blockerResolver(project, tracker, queuedIds);
-  const whyOf = blockerWhy(project, tracker, queuedIds);
+export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[], inQueue = new Set(queued.map((t) => t.id))): Promise<string[]> => {
+  const resolve = blockerResolver(project, tracker, inQueue);
+  const whyOf = blockerWhy(project, tracker, inQueue);
   const lines: string[] = [];
   const waits = new Map<string, string[]>();
   for (const t of queued) {
     const who = refOf(t.id);
     const refs = refsOf(project, tracker, t);
     waits.set(t.id, refs.filter((r) => r.kind === "ticket" || r.kind === "github").map((r) => r.id).filter((id) => queued.some((q) => q.id === id)));
-    for (const b of await Promise.all(refs.map(resolve))) {
+    // A GitHub native edge the body does not name has no line to remove: it is removed on GitHub.
+    const fromBody = parseRefs(project, t.body ?? "");
+    const resolved = await Promise.all(refs.map(resolve));
+    for (const [i, b] of resolved.entries()) {
       const name = refLabel(b);
       const why = whyOf(b);
-      if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. Remove the line, or reopen ${name}.`);
+      const native = tracker.kind === "github" && !fromBody.some((r) => r.kind === refs[i].kind && r.id === refs[i].id);
+      const removeIt = native ? `remove ${who}'s "blocked by" relationship on GitHub` : "remove the line";
+      if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. ${native ? "Remove the relationship on GitHub" : "Remove the line"}, or reopen ${name}.`);
       else if (why === "merged-by-hand") lines.push(`${who} waits for ${name}, which is merged locally and closes on push - it starts once ${name} is closed.`);
+      else if (why === "merged-partly") lines.push(`${who} waits for ${name}, which is merged by hand but only partly done, so it stays open - it starts once ${name} is closed.`);
       else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human - it starts once ${name} is closed.`);
-      else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or remove the line.`);
+      else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or ${removeIt}.`);
       if (b.state !== "unreadable") continue;
       lines.push(
         b.kind === "ticket"
@@ -286,15 +317,28 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     }
     // Stripped on purpose, so a run starts the ticket without waiting: say so, as the author thinks it waits.
     const read = new Set(refsIn(project, stripCode(t.body ?? "")).map((r) => `${r.kind}:${r.id}`));
+    const inCode = new Map<string, string>();
     for (const r of refsIn(project, t.body ?? "")) {
-      if (!read.has(`${r.kind}:${r.id}`)) lines.push(`${who} mentions "Blocked by ${refLabel(r)}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
+      if (!read.has(`${r.kind}:${r.id}`)) inCode.set(`${r.kind}:${r.id}`, refLabel(r));
     }
+    if (inCode.size) lines.push(`${who} mentions "Blocked by ${[...inCode.values()].join(", ")}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
     if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) lines.push(`${who} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
     const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
     for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
       if (linear.has(m[1].toUpperCase())) continue;
       lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (README: Blockers), or remove the line.`);
     }
+  }
+  // Only a parent the run would take itself: one queued outside the named tickets is not implemented by it.
+  const taken = new Set(queued.map((t) => t.id));
+  const children = new Map<string, string[]>();
+  for (const t of queued) {
+    for (const parent of parentsOf(project, t.body ?? "")) {
+      if (parent !== t.id && taken.has(parent)) children.set(parent, [...(children.get(parent) ?? []), t.id]);
+    }
+  }
+  for (const [parent, kids] of children) {
+    lines.push(`${refOf(parent)} is the parent of ${kids.map(refOf).join(", ")} - a run would implement the whole spec as one ticket: unqueue ${refOf(parent)}`);
   }
   // Tickets that wait, through each other, for themselves: none of them can ever start.
   const seen = new Set<string>();
@@ -317,7 +361,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     const cycle = walk(start);
     if (cycle) {
       cycle.forEach((id) => seen.add(id));
-      lines.push(`${cycle.map(refOf).join(", ")} wait for each other - none of them can ever start. Remove one "Blocked by" line.`);
+      lines.push(`${cycle.map(refOf).join(", ")} wait for each other - none of them can ever start. Remove one "Blocked by" line${tracker.kind === "github" ? ' (or "blocked by" relationship on GitHub)' : ""}.`);
     }
   }
   return lines;

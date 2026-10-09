@@ -658,5 +658,5 @@ test("a run's mid-run base check and its verify close their gate sandboxes behin
   assert.match(burndown, /baseGate: \(\) => gateBase\(gateProject, image, planFile, "base-red", false, runId, false, true, \(when\) => host\.check\(when\)\)/);
   assert.match(burndown, /verifyBase\(gateProject, image, planFile, runId, \(when\) => host\.check\(when\)\)/);
   const cli = readFileSync(join(import.meta.dirname, "../src/cli.ts"), "utf8");
-  assert.match(cli, /requireGreenBase\(gateOnly\(project\), .*, \(when\) => assertGitUnchanged\(project, fingerprint, when\)\)/);
+  assert.match(cli, /requireGreenBase\(gateOnly\(project\), .*, \(when\) => assertGitUnchanged\(project, fingerprint, when, true\)\)/);
 });

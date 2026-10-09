@@ -14,9 +14,9 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
-import { assertGitUnchanged, checkBeforeClose, gitFingerprint, protectedAmong } from "./guard.ts";
-import type { Hook } from "./lean.ts";
-import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
+import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
+import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
+import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -30,9 +30,10 @@ type Failure = { name: string; command: string; exitCode: number; output: string
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
+// `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; head?: string; rewrote?: string[] };
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; pressureSome?: number; pressureFull?: number; head?: string; rewrote?: string[] };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -113,8 +114,12 @@ const restoreGateChanges = async (sandbox: Parameters<typeof execGate>[0], befor
 // gate, for a report that says which of them are red, not just the first.
 // `priority` is for the gates the run's end waits on - a landing's, the base check's, the verify's: when a
 // machine-wide gates slot frees, they take it before the same run's ticket gates (`withSlot` in src/pool.ts).
-export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false) => {
+// `from` names the gate to start at, the first by default: a red gate's re-run (`PipelineContext.regate`) goes on
+// from the red one, in config order, since the gates before it already passed on this tree. The log and the
+// progress keep the configured numbering (`gate 2/3`), and a name that is no gate starts at the first.
+export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[0], label: string, all = false, progress: GateProgress = {}, priority = false, from?: string) => {
   const asked = Date.now();
+  const start = Math.max(0, project.gates.findIndex((g) => g.name === from));
   return withSlot("gates", label, async (): Promise<GateRun> => {
     const waitMs = Date.now() - asked;
     const gates: Gate[] = [];
@@ -125,8 +130,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
     const before = await dirtyPaths(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
+    const pressure: Pressure = {};
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
+        if (i < start) continue;
         progress.gate?.(i, g.name);
         if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
@@ -153,10 +160,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // its own timeout too.
         if (!all || r.exitCode === 124) break;
       }
-    });
+    }, pressure);
     const peakMib = await samplePeak(sandbox);
     const rewrote = await restoreGateChanges(sandbox, before);
-    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...(rewrote.length ? { rewrote } : {}) };
+    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   }, progress.wait, undefined, priority);
 };
 
@@ -309,6 +316,12 @@ export const runGitHookProbe = async (sandbox: Parameters<typeof execGate>[0]): 
   return parseGitHookProbe(r.stdout);
 };
 
+/** The base check's lines for a `core.hooksPath` that does not exist inside a sandbox (`hooksPathOutside`); none when it does. */
+export const hooksPathWarning = (root: string): string[] => {
+  const value = hooksPathOutside(root);
+  return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
+};
+
 export const gitHooksLine = (g: GitHooks) =>
   g.unchecked !== undefined ? `git hooks: not checked (${g.unchecked})` : `git hooks: ${g.hooks.map((h) => `${h.name}=${h.status}`).join(" ")}`;
 
@@ -335,11 +348,22 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }));
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
     const own = check ? undefined : gitFingerprint(project);
+    // The close never runs after a failed check, so the throwaway worktree and its branch (no work in either) stay on
+    // disk; the stop says so, with the step that removes them, instead of leaving them unnamed.
+    const leftBehind = (error: unknown): never => {
+      if (!(error instanceof GuardStop)) throw error;
+      const left = relative(project.root, sandbox.worktreePath) || sandbox.worktreePath;
+      throw new GuardStop(
+        `${error.message} The ${label} sandbox's worktree (${left}) and branch (${branch}) are left behind and hold no work: \`sandcastle clean\` removes them once the stop is dealt with.`,
+        { what: error.what, detail: error.detail },
+        { cause: error },
+      );
+    };
     const checkGit = (when: string) => (own ? assertGitUnchanged(project, own, when) : check?.(when));
     try {
       // Before the gates, which may leave the worktree anywhere: the sandbox was cut from the base's name, so a
@@ -371,7 +395,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
       // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
-      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when));
+      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when)).catch(leftBehind);
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {
@@ -428,10 +452,11 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // default with its absolute "location:" paths) the ids name no file, and the
 // red stays the branch's own.
 const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
-// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it. The label
-// is skipped, a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a
-// package, and its "0.004s" would pass for a file.
-const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))[^\s/.]+\s+)?(\S+)/;
+// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it; a project
+// named after a scoped package is "@acme/web". The label is skipped,
+// a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a package, and
+// its "0.004s" would pass for a file.
+const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=(?:@[^\s/]+\/)?[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))(?:@[^\s/]+\/)?[^\s/.]+\s+)?(\S+)/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
   FAIL_LINE,
@@ -567,11 +592,13 @@ export const timedLandingGate = async <T>(
     const red = done ? gateRed(result) : undefined;
     const gateTimes = done ? gateMs(result) : undefined;
     const peakMib = done ? peakOf(result) : undefined;
+    const pressure = done ? pressureFields(pressureOf(result)) : {};
     const line = {
       ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING_GATES, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
+      ...pressure,
       ...(red?.length ? { red } : {}),
     };
     appendFileSync(timings, JSON.stringify(line) + "\n");
@@ -812,13 +839,13 @@ export class BaseRedError extends OperatorError {
 export const VERIFY_LOG = ".sandcastle/logs/verify-gates.log";
 
 /**
- * The Dockerfiles a run's merges changed between `from` and `to` (commits on the base): the kit's base image
- * (`docker/base.Dockerfile`) and the project's own layer (the config's `dockerfile`). The run's image is
- * built before the first landing, so the verify gates the merged tree on an image without them; the closing
- * summary says so. A path git cannot place is no change: nothing here may fail a run that has landed.
+ * The Dockerfiles a run's merges changed between `from` and `to` (commits on the base): the kit's base and
+ * agents images (`docker/base.Dockerfile`, `docker/agents.Dockerfile`) and the project's own layer (the
+ * config's `dockerfile`). The run's image is built before the first landing, so the verify gates the merged
+ * tree on an image without them; the closing summary says so. A path git cannot place is no change: nothing here may fail a run that has landed.
  */
 export const changedDockerfiles = (project: Pick<Project, "root" | "dockerfile">, from: string, to: string): string[] => {
-  const watched = ["docker/base.Dockerfile", ...(project.dockerfile ? [project.dockerfile] : [])].map((d) => posix.normalize(d));
+  const watched = ["docker/base.Dockerfile", "docker/agents.Dockerfile", ...(project.dockerfile ? [project.dockerfile] : [])].map((d) => posix.normalize(d));
   try {
     const changed = new Set(sh("git", ["diff", "--no-renames", "--name-only", from, to], project.root).split("\n").filter(Boolean).map((l) => posix.normalize(l)));
     return [...new Set(watched.filter((d) => changed.has(d)))];
@@ -847,6 +874,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
+  // Before the probe's line, and before the cached return: a path no sandbox has reads there as `none`, which is also
+  // what a project with no hooks reads, so the base check says why.
+  for (const line of hooksPathWarning(project.root)) console.log(line);
   // A landing's or verify's green record covers the gates, and the hook tests and the git-hook probe only when
   // `noteGreenCommit` carried them over from the record before it.
   const gatesGreen = cached && baseCacheHit(project.root, key);
@@ -883,8 +913,8 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
   // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
-  // (out of `ms`) and the sandbox's peak.
-  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}) };
+  // (out of `ms`) and the sandbox's peak and memory pressure.
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }
