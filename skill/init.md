@@ -29,6 +29,14 @@ This continues SKILL.md: run its "Before every action" first.
    written from the template needs `dockerfile: ".sandcastle/Dockerfile"` in `.sandcastle/config.ts`
    too, or it is never built (`sandcastle build` says "Not built"); init adds the key itself only
    for a Dockerfile it wrote.
+   If a Node project has no linter (no `lint` script, no ESLint, Biome or oxlint config), tell the
+   user once that oxlint is a cheap gate to add: `pnpm add -D oxlint` (their package manager) and
+   `"lint": "oxlint --deny-warnings"` in `package.json`. Offer it as a ticket or a separate change,
+   never as part of init: init reads a project and adds no dependency. Init has written its config
+   by then and refuses to run over it, so that change also adds the gate itself:
+   `{ name: "lint", command: "pnpm run lint" }` in `gates` in `.sandcastle/config.ts`. A `lint` script that runs oxlint needs `--deny-warnings`: plain
+   `oxlint` exits 0 when it finds only warnings, so the gate is always green. When the project already
+   has such a script without the flag, say so and propose adding it.
    If the project tests in Chromium (Playwright, Puppeteer), tell the user its tests must launch
    it with `--disable-dev-shm-usage`: a sandbox has the runtime's default `/dev/shm`, 64 MB on
    Docker (`df -h /dev/shm` in one shows it), and a heavy page crashes there. Add a line to
