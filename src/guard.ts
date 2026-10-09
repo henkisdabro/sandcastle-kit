@@ -696,7 +696,7 @@ const rewrittenWorktrees = (project: Project): string[] => {
 // what moved, instead of calling every commit tampering. An agent branch that vanished is
 // restored (the work is the kit's and the copy is exact); one that moved while its ticket was not
 // running is a stop.
-export const assertGitUnchanged = (project: Project, before: Fingerprint, when: string) => {
+export const assertGitUnchanged = (project: Project, before: Fingerprint, when: string, gatesOnly = false) => {
   const now = gitFingerprint(project);
   const base = project.baseBranch;
   const root = project.root;
@@ -715,7 +715,7 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       before.config = now.config;
     }
     if (benign.length) {
-      console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
+      console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config ${gatesOnly ? "while the gates ran" : "while sandboxes ran"}: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - ${gatesOnly ? "the gates go on" : "the run goes on"}.`);
     }
   }
   // No benign key here: nothing a person's own work adds to a worktree's config is let through. An empty

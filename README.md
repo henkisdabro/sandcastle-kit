@@ -1463,9 +1463,9 @@ and the kit narrows what can cross it:
 - 📋 **Start baseline.** The pins and the fingerprint take the shared `.git` as they find it when a
   run starts, so a filter or a hook a sandbox planted in a run that was killed before any check
   (Ctrl-C at the wrong moment, a crash, a machine asleep) would become the next run's baseline and
-  never be reported. So `sandcastle run`, `land` and `gates` record what makes git run a program or
+  never be reported. So `sandcastle run`, `land`, `gates` and `clean` record what makes git run a program or
   reach the network in `.sandcastle/.run/git-config-baseline.json`, when they start and again when
-  they end cleanly:
+  they end cleanly (a `gates` or `land` that ends red after its `.git` check passed ends cleanly too):
   - in `.git/config` and in the main worktree's `.git/config.worktree` (present or absent), every
     `filter.*`, `merge.*.driver`, `diff.*.textconv` and `.command`, `diff.external`,
     `core.fsmonitor`, `core.hooksPath`, `core.sshCommand`, `core.pager`, `core.editor`,
@@ -1488,7 +1488,7 @@ and the kit narrows what can cross it:
   Remove what is not yours; if it is your own (a filter, a remote or a hook you added since the last
   run), start again with `sandcastle run --accept-git-config` (or `land`, `gates` or `clean` with it), which
   records the present state as the new baseline. With no record - the first run under this kit -
-  the run records and starts. A run killed with all of it unchanged starts again with no question.
+  the first of those four commands to start records and goes on, `sandcastle gates` included. A run killed with all of it unchanged starts again with no question.
   With `worktree.useRelativePaths` on, git writes `extensions.relativeWorktrees` the first time it
   adds a worktree, after the record was taken, so the next start names that key once.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and
