@@ -29,7 +29,8 @@ export const autonomyLevel = (env: string | undefined, config: unknown): Level =
 };
 
 /** `partial`: merged tickets with a criterion left undone, still queued, whose remainder an agent can do. */
-export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[] };
+/** `unlanded`: green branches whose landing did not happen (a sandbox that would not open, a branch that moved); the next turn lands the recorded head. */
+export type Rerun = { conflicted: string[]; unblocked: string[]; partial?: string[]; unlanded?: string[] };
 
 /**
  * What `unmetOf` (src/burndown.ts) puts in front of an `<unmet who="person">` line: the agent's explicit
@@ -95,6 +96,7 @@ export const rerunnable = (facts: Facts): Rerun | undefined => {
     conflicted: tickets.filter(([, t]) => t.state === "conflict").map(([id]) => id),
     unblocked: facts.runnable,
     partial: partialRerunnable(facts),
+    unlanded: tickets.filter(([, t]) => t.state === "not landed").map(([id]) => id),
   };
 };
 
@@ -103,7 +105,7 @@ export const turnCap = (level: Level): number | undefined => (level === 0 ? 1 : 
 
 /** `turn` is the number of the turn that just ended (1-based). */
 export const nextTurn = (level: Level, turn: number, again: Rerun | undefined): "stop" | "ask" | "run" | "cap" => {
-  if (!again || level === 0 || again.conflicted.length + again.unblocked.length + (again.partial?.length ?? 0) === 0) return "stop";
+  if (!again || level === 0 || again.conflicted.length + again.unblocked.length + (again.partial?.length ?? 0) + (again.unlanded?.length ?? 0) === 0) return "stop";
   if (level === 1) return "ask";
   return turn < turnCap(level)! ? "run" : "cap";
 };
@@ -127,6 +129,8 @@ export type DrainTurn = {
   conflicted: string[];
   /** Tickets this turn merged partly done and left queued. */
   partial?: string[];
+  /** Green branches this turn did not land. */
+  unlanded?: string[];
 };
 
 /**
@@ -140,6 +144,8 @@ export const drainStop = (turn: DrainTurn, earlier: DrainTurn | undefined, ref: 
   // A third try would leave the same remainder: the agents do not see it as theirs to finish.
   const partly = earlier?.partial ? (turn.partial ?? []).filter((id) => earlier.partial!.includes(id)) : [];
   if (partly.length) return `${partly.map(ref).join(", ")} left partly done in two turns running`;
+  const unlanded = earlier?.unlanded ? (turn.unlanded ?? []).filter((id) => earlier.unlanded!.includes(id)) : [];
+  if (unlanded.length) return `${unlanded.map(ref).join(", ")} failed to land in two turns running`;
   if (turn.landed === 0 && turn.released.length === 0) return "no progress: the turn landed nothing and released nothing";
   return undefined;
 };
@@ -178,11 +184,12 @@ export const lateQueueLines = async (
 };
 
 export const rerunList = (again: Rerun, ref: (id: string) => string): string => {
-  const all = [...again.conflicted, ...again.unblocked, ...(again.partial ?? [])].map(ref).join(", ");
+  const all = [...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? [])].map(ref).join(", ");
   const parts = [
     again.conflicted.length ? `conflicted: ${again.conflicted.map(ref).join(", ")}` : "",
     again.unblocked.length ? `unblocked: ${again.unblocked.map(ref).join(", ")}` : "",
     again.partial?.length ? `partly done: ${again.partial.map(ref).join(", ")}` : "",
+    again.unlanded?.length ? `not landed: ${again.unlanded.map(ref).join(", ")}` : "",
   ].filter(Boolean);
   return `${all} (${parts.join("; ")})`;
 };
@@ -205,8 +212,8 @@ export const stillOpen = (tracker: Tracker) => (id: string): boolean => {
 export const afterTurn = (facts: Facts, level: Level, turn: number, open: (id: string) => boolean) => {
   const again = rerunnable(facts);
   if (!again) return undefined;
-  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open), partial: (again.partial ?? []).filter(open) };
-  return { left, ids: [...left.conflicted, ...left.unblocked, ...left.partial!], verdict: nextTurn(level, turn, left) };
+  const left: Rerun = { conflicted: again.conflicted.filter(open), unblocked: again.unblocked.filter(open), partial: (again.partial ?? []).filter(open), unlanded: (again.unlanded ?? []).filter(open) };
+  return { left, ids: [...left.conflicted, ...left.unblocked, ...left.partial!, ...left.unlanded!], verdict: nextTurn(level, turn, left) };
 };
 
 /** undefined without reading when the input is not a terminal: a pipe, CI or `nohup` never blocks. Default No. */

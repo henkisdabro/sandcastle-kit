@@ -383,6 +383,7 @@ try {
             released: left.unblocked.filter((id) => !drain.unblocked.includes(id)),
             conflicted: conflictedIn(readOutcomes(root), facts.started),
             partial: left.partial,
+            unlanded: left.unlanded,
           };
           const why = drainStop(now, drain.last, tracker.ref);
           drain.last = now;

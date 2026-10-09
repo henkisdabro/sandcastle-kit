@@ -688,7 +688,7 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
 
   const lines = [`Settings: ${items.join(" · ")}`, ...usage];
   const again = level === 0 && !f.next ? rerunnable(f) : undefined;
-  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? [])])] : [];
+  const left = again ? [...new Set([...again.conflicted, ...again.unblocked, ...(again.partial ?? []), ...(again.unlanded ?? [])])] : [];
   if (left.length) {
     lines.push(
       `Autonomy 0 makes one turn, and ${left.map(refOf).join(" ")} could run again: \`AUTONOMY_LEVEL=2\` (or \`drain\`) lets one \`sandcastle run\` take ` +
