@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
@@ -110,8 +110,9 @@ export const squashBody = (root: string, base: string, head: string) =>
  * the base tip and `head` plus `generated` changes (`checkLandingMerge`) is a `conflict` with
  * a `note`, and nothing is fast-forwarded. With `squash`, the checked merge's tree is committed
  * on the base tip with that one parent instead, as a run's squash landing would. With `gate`, the merge is gated in the
- * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`
- * throws `OperatorError`, as after any sandbox. With `expected` (a run's fingerprint), its base
+ * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`, or a
+ * changed record of the box's worktree, throws `OperatorError`: checked before the box closes,
+ * whose close is then never called (`checkBeforeClose`), and again after. With `expected` (a run's fingerprint), its base
  * moves to the new tip in the same synchronous step as the fast-forward, so a check made by
  * another pipeline never sees the base moved and the expectation not. The sandbox's peak memory
  * is filed under `run` (a run's start time; `sandcastle land` has none, so its own) before it closes.
@@ -184,6 +185,11 @@ export const landInSandbox = async (
       }
       // A landing gate can be the run's largest sandbox: `sandcastle size` must see it.
       await recordPeak(box, project.root, t.run);
+      // Sandcastle's close runs `git status` on the host in the box's worktree: the `.git` check and the worktree's
+      // records come first, and a failure throws with the container removed and no close - a stop, whatever the
+      // landing's own result or error.
+      const when = `after landing ${t.branch} in a sandbox`;
+      await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when));
       await box.close();
     }
     // A container ran with the shared .git mounted: the next host git call must not run what it may have planted.

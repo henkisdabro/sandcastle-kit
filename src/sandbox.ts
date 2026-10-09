@@ -108,6 +108,40 @@ export const reapOrphans = (project: Project) => {
   }
 };
 
+/**
+ * Removes the container of the sandbox whose worktree is `worktree`, without Sandcastle's close: that close runs
+ * `git status` on the host in the worktree, which a failed `.git` check says must not run (guard.ts,
+ * `checkBeforeClose`). The container is found as `reapOrphans` finds one, by its mount of the worktree, under either
+ * spelling of the path. Never throws: with Docker down, or the container gone, there is nothing to remove, and the
+ * process's exit removes what Sandcastle started. Returns the ids removed.
+ */
+export const removeSandboxContainer = (worktree: string): string[] => {
+  const paths = new Set([worktree]);
+  try {
+    paths.add(realpathSync(worktree));
+  } catch {
+    /* gone: its recorded spelling is all there is */
+  }
+  let ids: string[];
+  try {
+    ids = sh("docker", ["ps", "-aq", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const id of ids) {
+    try {
+      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      if (!mounts.some((m) => paths.has(m))) continue;
+      sh("docker", ["rm", "-f", id]);
+      removed.push(id);
+    } catch {
+      /* gone meanwhile */
+    }
+  }
+  return removed;
+};
+
 const WORKTREE_MARK = ".sandcastle/worktrees/agent-issue-";
 
 /**

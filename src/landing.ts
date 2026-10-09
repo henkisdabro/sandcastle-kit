@@ -143,12 +143,12 @@ export type HostGit = {
    * when `made(previous, tip)` returns nothing; a returned reason stops the run.
    */
   write<T>(fn: () => T, made?: (prev: string, tip: string) => string | undefined): Promise<T>;
-  /** The check a pipeline makes once its sandbox is closed, and the worker before each landing. */
+  /** The check a pipeline makes before its sandbox closes for a pause, a gate sandbox's before it closes, and the worker's before each landing. */
   check(when: string): Promise<void>;
   /** A ticket's pipeline starts: its branch may now move (the agent commits), and has only to exist. */
   begin(branch: string): void;
   /**
-   * A ticket's pipeline ended and its sandbox is closed: the `.git` check, then the branch's tip is
+   * A ticket's pipeline ended, its sandbox not yet closed (`checkBeforeClose`) or closed by a pause: the `.git` check, then the branch's tip is
    * the one the run expects and, if it holds commits, is copied to the backup repo (guard.ts).
    */
   settle(branch: string, when: string): Promise<void>;

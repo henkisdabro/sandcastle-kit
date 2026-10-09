@@ -1473,6 +1473,21 @@ and the kit narrows what can cross it:
   prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
   values, except for keys that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook path, an `include`, `rebase` or
   `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
+- 🚪 **Checked before every sandbox closes.** Sandcastle's close stops the container, then runs
+  `git status` on your machine in the sandbox's worktree, which reads `.git/config` and that
+  worktree's record in `.git/worktrees/<name>/`. So before each close - a ticket's sandbox at the end
+  of its pipeline or for a pause, the gate sandboxes, the landing sandbox - the fingerprint is
+  checked, and the worktree's record is held to what git writes: the worktree's `.git` file names
+  that record, the record's `commondir` names the shared `.git`, and there is no `config.worktree`.
+  A record that differs would have that `git status` read config no check has seen, and a filter
+  there would run on your machine. The record check also comes before the host runs git in a
+  worktree an earlier run kept (cutting a stale branch there, or Sandcastle reusing it as a sandbox
+  opens): a fingerprint taken at this run's start would read an earlier sandbox's change as the way
+  things are. A failure stops the run; the sandbox's container is removed without that close, and
+  its worktree is left for you - inspect its record before running any git command in it. What
+  remains is the moment between that check and Sandcastle's own git call: milliseconds in which
+  another sandbox still running could write `.git`, the same moment a landing leaves between its
+  last check and the fast-forward of your base branch.
 - 🗄️ **Agent branches checked and backed up.** A container can delete a branch no live sandbox
   holds, and a `gc` there removes its commits for good. The same check also covers each ticket's
   `agent/issue-*` branch: when a pipeline ends with commits, the kit copies the branch into a bare

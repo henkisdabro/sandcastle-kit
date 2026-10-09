@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
-import { protectedAmong } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, gitFingerprint, protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -321,7 +321,8 @@ export const gitHooksLine = (g: GitHooks) =>
 // `ownSlot` false runs it in the sandbox slot the caller holds: a ticket's pipeline that waits on
 // the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true) => {
+// `check` is the `.git` check of the run around it (`HostGit.check`), made before the sandbox closes.
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown) => {
   // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
   // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
   const asked = Date.now();
@@ -329,6 +330,10 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     const slotWaitMs = Date.now() - asked;
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
+    // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
+    // taken once the sandbox is open: git may write the repo's config as it adds a worktree (`worktree.useRelativePaths`).
+    const own = check ? undefined : gitFingerprint(project);
+    const checkGit = (when: string) => (own ? assertGitUnchanged(project, own, when) : check?.(when));
     try {
       // Before the gates, which may leave the worktree anywhere: the sandbox was cut from the base's name, so a
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
@@ -347,7 +352,6 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
         gitHooks: hookTests ? await runGitHookProbe(sandbox) : undefined,
       };
     } finally {
-      unlockWorktree(sandbox.worktreePath);
       await recordPeak(sandbox, project.root, runId);
       // Sandcastle's close keeps a worktree with any uncommitted file, and a gate or a hook test leaves one: the
       // kept worktree and its branch would outlive the run, unnamed.
@@ -356,6 +360,11 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       } catch {
         /* closing still has to happen */
       }
+      // Sandcastle's close runs `git status` on the host in the worktree: the `.git` check and the worktree's records
+      // come first, and a failure throws with the container removed, the worktree and its branch left for a person.
+      const when = `before closing the ${label} sandbox`;
+      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when));
+      unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {
         sh("git", ["branch", "-D", branch]);
@@ -764,8 +773,8 @@ export const verifyPlan = (project: Project, image: string, planFile: string, me
  * commit they ran on is the base's record, as the base check's own result is: green is the next
  * turn's skip, red removes a record that would skip a base known to be red.
  */
-export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string) => {
-  const gated = await gateBase(project, image, planFile, "verify", false, runId);
+export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown) => {
+  const gated = await gateBase(project, image, planFile, "verify", false, runId, true, true, check);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
   if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify", "verify");
@@ -819,9 +828,9 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
 /**
  * Gates the base branch and throws if any gate is red, with each red gate's
  * output in the log. `cached` skips the check when the same base, image and
- * config were green before.
+ * config were green before. `check` is the `.git` check before its sandbox closes (`gateBase`).
  */
-export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string) => {
+export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string, check?: (when: string) => unknown) => {
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
@@ -837,7 +846,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     }
     console.log(`Gates on ${base}: ${seen} - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
   } else console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
-  const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen);
+  const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen, check);
   if (!gatesGreen) {
     console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
     for (const line of gateResultLines(project.gates, run.gates)) console.log(line);

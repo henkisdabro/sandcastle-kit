@@ -609,7 +609,7 @@ try {
       lockRun(project);
       const fingerprint = gitFingerprint(project);
       try {
-        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false);
+        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when));
       } finally {
         assertGitUnchanged(project, fingerprint, "after the gates");
       }
