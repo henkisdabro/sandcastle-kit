@@ -281,11 +281,12 @@ const parentsOf = (project: Project, body: string): string[] => {
  * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
  * (not read, so the ticket starts at once). Also a queued spec that queued children name under
  * `## Parent`: a run would implement it whole beside them. Each line says what to change.
+ * `inQueue`: the ids of the whole queue, when `queued` is only some of it (the tickets a run
+ * names), so a blocker queued outside them is not called "not queued".
  */
-export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
-  const queuedIds = new Set(queued.map((t) => t.id));
-  const resolve = blockerResolver(project, tracker, queuedIds);
-  const whyOf = blockerWhy(project, tracker, queuedIds);
+export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[], inQueue = new Set(queued.map((t) => t.id))): Promise<string[]> => {
+  const resolve = blockerResolver(project, tracker, inQueue);
+  const whyOf = blockerWhy(project, tracker, inQueue);
   const lines: string[] = [];
   const waits = new Map<string, string[]>();
   for (const t of queued) {
@@ -323,10 +324,12 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
       lines.push(`${who} says "${m[0].trim()}", but ${m[1].toUpperCase()} is not in \`blockers.linear\` in .sandcastle/config.ts - the line is ignored and a run starts the ticket. Add the key there (README: Blockers), or remove the line.`);
     }
   }
+  // Only a parent the run would take itself: one queued outside the named tickets is not implemented by it.
+  const taken = new Set(queued.map((t) => t.id));
   const children = new Map<string, string[]>();
   for (const t of queued) {
     for (const parent of parentsOf(project, t.body ?? "")) {
-      if (parent !== t.id && queuedIds.has(parent)) children.set(parent, [...(children.get(parent) ?? []), t.id]);
+      if (parent !== t.id && taken.has(parent)) children.set(parent, [...(children.get(parent) ?? []), t.id]);
     }
   }
   for (const [parent, kids] of children) {
