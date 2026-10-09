@@ -8,7 +8,7 @@ import { dirname, join, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { doctorApiKeyLine, red } from "./api-key.ts";
 import { linearKey } from "./blockers.ts";
-import { CONFIG_PATH, loadProject, type Project } from "./config.ts";
+import { CONFIG_PATH, loadProject, MountRefused, type Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines } from "./lean.ts";
@@ -322,9 +322,15 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
 
   console.log(`sandcastle-kit ${kitVersion()} at ${KIT}\n`);
   // Whether this project's tickets are GitHub Issues decides what GitHub access is required.
+  // A refused mount is the one load error doctor reports (below): it is a safety refusal, not a
+  // config that merely does not run.
+  let mountRefusal: MountRefused | undefined;
   const project =
     repoRoot && existsSync(join(repoRoot, CONFIG_PATH))
-      ? await loadProject(repoRoot).catch(() => undefined)
+      ? await loadProject(repoRoot).catch((error) => {
+          if (error instanceof MountRefused) mountRefusal = error;
+          return undefined;
+        })
       : undefined;
   const needsGh = project?.tracker.kind !== "files";
   // The commands that install things differ: Homebrew and `open -a` on macOS, the distribution's tools elsewhere.
@@ -586,6 +592,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
     check(hasConfig, CONFIG_PATH, "`sandcastle init` (then fill in gates, setup and lean - see the kit README)");
     // A warning, never a FIX: a pulled kit still runs, but a note may ask this project to act.
     if (hasConfig) for (const line of upgradeLines(repoRoot)) console.log(line);
+    if (mountRefusal) check(false, `${CONFIG_PATH} mounts stay out of the run's own state`, `${(mountRefusal as MountRefused).message} Remove the entry or mount a directory elsewhere (a cache under the project is fine, the project root, .sandcastle/ and .git are not).`);
     if (project) {
       const t = project.tracker;
       check(!t.note, `tracker: ${t.kind} (${t.source === "config" ? "config.ts" : t.source === "docs/agents" ? "docs/agents/issue-tracker.md" : "default"}), queue "${project.label}"`, t.note ?? "", true);
