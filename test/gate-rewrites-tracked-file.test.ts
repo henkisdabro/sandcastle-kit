@@ -117,7 +117,11 @@ test("the summary names a rewritten file once, with how to stop it", () => {
 // burndown() needs Docker; its wiring is held here instead.
 test("gate-only sandboxes reset before they close, and a run records what its gates rewrote", () => {
   const gates = readFileSync(join(import.meta.dirname, "../src/gates.ts"), "utf8");
-  assert.match(gates, /await sandbox\.exec\("git reset -q --hard && git clean -fdq"\);\n\s*\} catch \{\n.*\n\s*\}\n\s*await sandbox\.close\(\);/);
+  // Between the reset and the close only the `.git` check before the close (test/guard-worktree-records.test.ts) and the unlock.
+  assert.match(
+    gates,
+    /await sandbox\.exec\("git reset -q --hard && git clean -fdq"\);\n\s*\} catch \{\n.*\n\s*\}\n(?:\s*\/\/.*\n)*\s*const when = .*\n\s*await checkBeforeClose\(project, sandbox\.worktreePath, when, .*\);\n\s*unlockWorktree\(sandbox\.worktreePath\);\n\s*await sandbox\.close\(\);/,
+  );
   const burndown = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   assert.match(burndown, /for \(const path of gated\.rewrote \?\? \[\]\)/);
   assert.match(burndown, /gateRewrites: \[\.\.\.gateRewrites\]/);
