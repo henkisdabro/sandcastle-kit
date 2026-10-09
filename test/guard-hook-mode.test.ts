@@ -161,13 +161,33 @@ test("a record with no version is taken again once, with a line and no refusal, 
   assert.match(refusal(project), /alias\.co added/);
 });
 
-test("an older version's record is taken again without a refusal even when the config differs from it", async () => {
+test("an older version's record after a clean end is taken again without a refusal even when the config differs from it", async () => {
   const { project, git } = repo();
   git("config", "core.fsmonitor", "touch owned");
   mkdirSync(join(project.root, ".sandcastle", ".run"), { recursive: true });
-  writeFileSync(baselinePath(project.root), `${JSON.stringify({ version: 1, entries: [], worktreeEntries: [], attributes: "", files: {}, modes: {}, clean: false })}\n`);
+  writeFileSync(baselinePath(project.root), `${JSON.stringify({ version: 1, entries: [], worktreeEntries: [], attributes: "", files: {}, modes: {}, clean: true })}\n`);
   const { lines } = await quietly(() => assert.doesNotThrow(() => start(project)));
   assert.equal(lines.length, 1);
+});
+
+// A run under the earlier kit that was killed may have had a sandbox write a key: taking the state again with no
+// comparison would make that key the person's own.
+test("an older version's record after a run that did not end cleanly is compared, and a planted key refused", async () => {
+  const { project, git } = repo();
+  // What the earlier kit wrote at the start of that run: today's fields less the version and the executable bits.
+  const { took: _t, retaken: _r, modes: _m, ...state } = assertGitConfigBaseline(project, "sandcastle run");
+  const older = `${JSON.stringify({ ...state, clean: false })}\n`;
+  mkdirSync(join(project.root, ".sandcastle", ".run"), { recursive: true });
+  writeFileSync(baselinePath(project.root), older);
+  // An alias the earlier kit never listed is no difference; nothing else differs: no refusal, and no
+  // "taken again" line, since it was compared.
+  git("config", "alias.st", "status");
+  assert.deepEqual((await quietly(() => assert.doesNotThrow(() => start(project)))).lines, []);
+  writeFileSync(baselinePath(project.root), older);
+  git("config", "core.fsmonitor", "touch owned");
+  const said = refusal(project);
+  assert.match(said, /core\.fsmonitor added/);
+  assert.match(said, /written by an earlier kit version/);
 });
 
 test("a detached start shows the line of an older record taken again on its own terminal, as the child's log does", async () => {

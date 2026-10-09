@@ -1530,7 +1530,7 @@ and the kit narrows what can cross it:
   and any other hook. After an unclean end (killed, stopped) every change is refused, as before. Each refusal
   says whether the last run ended cleanly, and marks a change that looks like your own tooling
   (`looks like your own tooling: ...`) apart from the rest. With no record - the first run under this kit -
-  the first of those four commands to start records and goes on, `sandcastle gates` included. The same for a record an earlier kit version left (the record is versioned): the first start after an update takes the present state again, once, and prints a line saying so, rather than naming every alias or pager key as added. A run killed with all of it unchanged starts again with no question.
+  the first of those four commands to start records and goes on, `sandcastle gates` included. The same for a record an earlier kit version left (the record is versioned): the first start after an update takes the present state again, once, and prints a line saying so, rather than naming every alias or pager key as added - unless that earlier run did not end cleanly: then what the older record holds is compared as usual (the keys it never listed left out), since a sandbox may have written the difference. A run killed with all of it unchanged starts again with no question.
   With `worktree.useRelativePaths` on, git writes `extensions.relativeWorktrees` the first time it
   adds a worktree, after the record was taken, so the next start names that key once.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and

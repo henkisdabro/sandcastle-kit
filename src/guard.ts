@@ -485,6 +485,7 @@ type BaselineRecord = ProgramState & { clean: boolean };
 // every key the version added to the list as added, so the start takes the state again once instead (`readBaseline`).
 // 2: the executable bits (`modes`), and the keys `MORE_PROGRAM_KEYS` and `alias.*` added to the list.
 const BASELINE_VERSION = 2;
+const LISTED_SINCE_V1 = new RegExp(`^(alias\\..+|${MORE_PROGRAM_KEYS})$`, "i");
 
 const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
 
@@ -518,8 +519,12 @@ const programState = (project: Project): ProgramState => {
 
 const strings = (value: unknown) => Array.isArray(value) && value.every((e) => typeof e === "string");
 
-/** The previous run's record: `record` when it is of today's version, `older` when one an earlier kit wrote is there (it is taken again, not compared), neither when there is none. */
-const readBaseline = (project: Project): { record?: BaselineRecord; older: boolean } => {
+/**
+ * The previous run's record: `record` when it is of today's version, `older` when one an earlier kit wrote is there,
+ * neither when there is none. `olderRecord`: that earlier record's own fields, when it has them, with no `modes` (it
+ * held no executable bits).
+ */
+const readBaseline = (project: Project): { record?: BaselineRecord; older: boolean; olderRecord?: Omit<BaselineRecord, "modes"> } => {
   try {
     const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
     const files = record.files;
@@ -529,7 +534,11 @@ const readBaseline = (project: Project): { record?: BaselineRecord; older: boole
     if (record.version === BASELINE_VERSION && strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files)) && modes && typeof modes === "object" && strings(Object.values(modes))) {
       return { record: { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, modes, clean: record.clean === true }, older: false };
     }
-    return { older: record !== null && typeof record === "object" && !Array.isArray(record) };
+    const older = record !== null && typeof record === "object" && !Array.isArray(record);
+    if (older && strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
+      return { older, olderRecord: { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true } };
+    }
+    return { older };
   } catch {
     // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
   }
@@ -684,10 +693,17 @@ export type GitConfigStart = ProgramState & { took: string[]; retaken: boolean }
  */
 export const assertGitConfigBaseline = (project: Project, command: string, accept = false): GitConfigStart => {
   const now = programState(project);
-  const { record: was, older } = readBaseline(project);
-  // An earlier version's record is not compared (it lacks what this version records): the state is taken again, once.
+  const { record: recorded, older, olderRecord } = readBaseline(project);
+  // An earlier version's record after a clean end is not compared (it lacks what this version records, so every key
+  // the list gained would read as added): the state is taken again, once. After a run that did not end cleanly a
+  // sandbox may have written the difference, so the fields that record does hold are compared (executable bits it
+  // never held are taken as they are now), and any difference refuses, as with today's record.
+  const was = recorded ?? (olderRecord && !olderRecord.clean ? { ...olderRecord, modes: now.modes } : undefined);
   if (!was || accept) return { ...now, took: [], retaken: older && !accept };
-  const { config, worktree, files, parts, took, ownOnly } = differences(project, was, now);
+  // The keys this version added to the list were never watched by the earlier kit: they are left out of that comparison.
+  const listedSince = (entries: string[], had: string[]) => entries.filter((e) => !LISTED_SINCE_V1.test(e.split("\n")[0]) || had.includes(e));
+  const held = recorded ? now : { ...now, entries: listedSince(now.entries, was.entries), worktreeEntries: listedSince(now.worktreeEntries, was.worktreeEntries) };
+  const { config, worktree, files, parts, took, ownOnly } = differences(project, was, held);
   if (!parts.length) return { ...now, took: [], retaken: false };
   if (was.clean && ownOnly) return { ...now, took, retaken: false };
   const root = project.root;
@@ -704,7 +720,7 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
   const listed = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0]);
   const ended = was.clean
     ? `The last run ended cleanly. Something wrote them between the runs. That is most likely you or a tool of yours.${ownOnly || !took.length ? "" : " Changes marked as looking like your own tooling are taken without a question when nothing else differs; this start has others."}`
-    : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them.";
+    : `The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them.${recorded ? "" : " Its record was written by an earlier kit version, which listed fewer keys: a key named here may only be new to the list."}`;
   throw new OperatorError(
     `NOT STARTED: the shared .git differs from what the last run left, in what makes git run a program or reach the network. ${parts.join(" ")} ` +
       `${ended} ` +
