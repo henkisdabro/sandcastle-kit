@@ -1460,10 +1460,11 @@ and the kit narrows what can cross it:
   sandbox writes into `.git/config` mid-run is never the one the host's git runs.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and
   `info/exclude`: ignore patterns and a transport index run nothing, and your own tools, Claude Code
-  among them, rewrite them while a run is live), `.git/hooks/` and the base
-  branch are fingerprinted; if a sandbox changes them, the run stops before the host runs another
-  git command there, naming the file. A hook planted there would otherwise run on your next
-  checkout or commit. While tickets land during the run, the base may move only by the kit's own
+  among them, rewrite them while a run is live), `.git/hooks/`, the main worktree's
+  `.git/config.worktree` (which git reads once `extensions.worktreeConfig` is on: created, changed
+  or removed, it stops the run, naming its keys) and the base branch are fingerprinted; if a
+  sandbox changes them, the run stops before the host runs another git command there, naming the
+  file. A hook planted there would otherwise run on your next checkout or commit. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
