@@ -65,7 +65,7 @@ test("a mixed run: every section, the right tickets, a file in common and a next
     assert.ok(at > last, `${s} missing or out of order`);
     last = at;
   }
-  assert.match(out, /1h 48m\) - 6 attempted - 2 merged - 1 need you - 2 need fixing - 0 not started - 2 blocked - tokens 97.5M in/);
+  assert.match(out, /1h 48m\) - 6 attempted - 2 merged - 1 need you - 2 need fixing - 0 not started - 1 blocked - tokens 97.5M in/);
   assert.match(out, /all 2 gates green/);
   assert.match(body(out, "## ✅ Done"), /2 merged and closed on GitHub: #207 #208/);
   assert.match(body(out, "## ✅ Done"), /only on your local main until you push it/);

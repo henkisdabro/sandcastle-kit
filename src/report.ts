@@ -876,8 +876,9 @@ export const render = (f: Facts, plain = false): string => {
   const unstarted = early ? ids(["queued"]).filter((id) => !requeued.includes(id)) : [];
   // Blocked tickets are counted apart: the run would not have started them, and the sections below name only
   // the skipped and unstarted ones as "Not started", so a headline folding them in disagreed with its own lines.
+  // The count is the "Still blocked" lines', not the record's state: one whose blockers this run closed is named runnable.
   const notStarted = ids(baseRed ? ["queued", "skipped"] : ["skipped"]).concat(unstarted);
-  const blockedCount = ids(["blocked"]).length;
+  const blockedCount = f.blocked.length;
   const nochange = ids(["nochange"]);
   const withdrawn = ids(["withdrawn"]);
   const stoppedIds = ids(["stopped"]);
