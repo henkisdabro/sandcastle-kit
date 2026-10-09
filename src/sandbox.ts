@@ -448,8 +448,11 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
 export const errorLine = (error: unknown) => {
   const stderr = (error as { stderr?: unknown })?.stderr;
   const said = typeof stderr === "string" ? stderr.trim().split("\n").filter(Boolean).at(-1) : undefined;
-  // The message, not String(error): its "Error: " prefix reached the summary's lines.
-  const line = (said ?? (error instanceof Error ? error.message : String(error)).split("\n")[0]).slice(0, 160);
+  // The message, not String(error): its "Error: " prefix reached the summary's lines. A message that is a
+  // command's whole stderr (Sandcastle's WorktreeError) leads with git's progress ("Preparing worktree ..."),
+  // so its fatal: or error: line, when it has one, is the cause.
+  const lines = (error instanceof Error ? error.message : String(error)).split("\n");
+  const line = (said ?? lines.find((l) => /^(?:fatal|error):/.test(l.trim()))?.trim() ?? lines[0]).slice(0, 160);
   // With commit signing on and its agent locked, git says only "failed to write commit object".
   const all = `${typeof stderr === "string" ? stderr : ""}\n${error instanceof Error ? error.message : String(error)}`;
   return /failed to write commit object|gpg failed to sign|signing failed|error: (?:1Password|ssh-keygen|couldn't sign)/i.test(all)
