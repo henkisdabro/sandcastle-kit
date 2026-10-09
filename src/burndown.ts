@@ -36,7 +36,7 @@ import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, che
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
-import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
+import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
@@ -2688,6 +2688,7 @@ export const burndown = async (
     let tokens: Tokens | undefined;
     let gateTimes: Record<string, number> | undefined;
     let peakMib: number | undefined;
+    let pressure: ReturnType<typeof pressureOf>;
     let red: string[] | undefined;
     let times: ReturnType<typeof stepTimes> | undefined;
     try {
@@ -2699,6 +2700,7 @@ export const burndown = async (
       tokens = runTokens(result);
       gateTimes = gateMs(result);
       peakMib = peakOf(result);
+      pressure = pressureOf(result);
       red = gateRed(result);
       // `ok` is pass/fail: a gate run with a red gate is not ok, though it ran.
       ok = !red?.length;
@@ -2722,6 +2724,7 @@ export const burndown = async (
         ...(tokens ? { tokens } : {}),
         ...(gateTimes ? { gates: gateTimes } : {}),
         ...(peakMib ? { peakMib } : {}),
+        ...pressureFields(pressure),
         ...(red?.length ? { red } : {}),
       };
       appendFileSync(timings, JSON.stringify(line) + "\n");
