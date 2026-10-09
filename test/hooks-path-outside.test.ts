@@ -45,6 +45,22 @@ test("an absolute or climbing core.hooksPath is outside the sandbox; a relative 
   assert.equal(hooksPathOutside(repo()), undefined);
 });
 
+test("the host's own hooks switched off by environment are not the project's value", async () => {
+  // `sandcastle gates` and every run turn the host's hooks off (`core.hooksPath=/dev/null` through `GIT_CONFIG_*`)
+  // before the base check reads the value: a plain read would answer `/dev/null` and flag every project.
+  const { disableHostGitHooks } = await import("../src/guard.ts");
+  const saved = { ...process.env };
+  try {
+    disableHostGitHooks();
+    assert.equal(hooksPathOutside(repo(".githooks")), undefined);
+    assert.deepEqual(hooksPathWarning(repo()), []);
+    assert.equal(hooksPathOutside(repo(ABSOLUTE)), ABSOLUTE);
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+});
+
 test("the base check names the value, the fix and the --accept-git-config case", () => {
   const said = hooksPathWarning(repo(ABSOLUTE)).join("\n");
   assert.ok(said.includes(`"${ABSOLUTE}"`), said);
