@@ -661,6 +661,21 @@ export const settingsLines = (f: Facts, bare = false): string[] => {
   return lines;
 };
 
+/**
+ * The line for a run the plan's session or weekly limit stopped: the skipped tickets whose note names it say when it
+ * resets, and a run with `USAGE_PAUSE` off is told the switch that waits the window out. Nothing for any other stop.
+ */
+const planLimitLines = (f: Facts, skipped: string[]): string[] => {
+  const notes = skipped.map((id) => f.tickets[id]?.note ?? "").filter((n) => /usage limit/i.test(n));
+  if (!notes.length) return [];
+  const resets = notes.map((n) => /\(resets (.+)\)$/.exec(n)?.[1]).find((r) => r !== undefined);
+  const off = typeof f.settings?.usagePause !== "number";
+  return [
+    `Paused for usage: the plan's limit stopped the run${resets ? `, resets ${resets}` : ""}; the tickets above are runnable again once the window resets.` +
+      (off ? " `USAGE_PAUSE=95` (a percentage, 1 to 100) makes a run wait out the window and carry on." : ""),
+  ];
+};
+
 const hhmm = (iso: string) => new Date(iso).toTimeString().slice(0, 5);
 const span = (ms: number) => {
   const m = Math.round(ms / 60_000);
@@ -1134,6 +1149,7 @@ export const render = (f: Facts, plain = false): string => {
     ...(runnable.length || !cut.length ? [`▶️ Runnable now: ${runnable.length ? runnable.map((id) => `${refOf(id)} (${runnableWhy(id)})`).join(", ") : "none"}`] : []),
     ...f.blocked.map((b) => `⏳ ${refOf(b.id)} waits for ${b.on.map((l) => `${l}${ticketState(l)}${b.why?.[l] ? ` - ${b.why[l]}` : ""}`).join(", ") || "blockers that could not be read"}`),
     ...(skipped.length ? [`Not started (the run stopped early): ${list(skipped)}`] : []),
+    ...planLimitLines(f, skipped),
     ...requeued.map((id) => `Requeued: ${name(id)}${f.tickets[id].requeued ? ` - ${f.tickets[id].requeued}` : ""} - still queued for the next run`),
     ...(cut.length ? [`Cut short when the run ended: ${cut.map((id) => `${refOf(id)} (${f.tickets[id].state})`).join(", ")} - still queued`] : []),
     ...(unstarted.length ? [`Not started (the run ended early): ${list(unstarted)}`] : []),

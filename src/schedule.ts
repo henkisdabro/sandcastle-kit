@@ -341,7 +341,7 @@ const createDependants = <T extends { id: string }, B>(
  * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`).
  */
 export type StopCause =
-  | { kind: "plan limit"; ticket: string }
+  | { kind: "plan limit"; ticket: string; resets?: string }
   | { kind: "usage limit"; line: string }
   | { kind: "tampered"; error: unknown }
   | { kind: "host failed"; error: unknown };
@@ -562,7 +562,8 @@ export type Ending<G, O> =
   | { kind: "crashed"; error: unknown; attempts: number; green?: G }
   /** `finished` (and `green`): it was green and waited to land; it lands on a later run. */
   | { kind: "stopped"; cause: StopCause | undefined; finished: boolean; green?: G }
-  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string } }
+  /** `cutShort`: its agent began and died of the plan's limit (`why` is that limit) - nothing failed, and it is runnable again. */
+  | { kind: "not begun"; why: StopCause | Withdrawn | { kind: "refused label"; reason: string }; cutShort?: true }
   /** Parked at a juncture of a paused run when the run stopped: it never resumed, its branch holds every commit and the next run picks it up. */
   | { kind: "parked"; cause: StopCause | undefined }
   /** Still parked behind a file git cannot merge, or held for a blocker, when the run ended. */
@@ -1364,9 +1365,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
               return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }) });
             }
-            case "crashed":
+            case "crashed": {
               for (const c of r.causes ?? []) stop.add(c);
+              // Its agent died of the plan's limit: nothing failed, the ticket was cut short - not begun, and runnable again.
+              const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
+              if (limit) return await end(t.id, { kind: "not begun", why: limit, cutShort: true });
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
+            }
             case "stopped":
               stop.add(r.cause);
               return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });
