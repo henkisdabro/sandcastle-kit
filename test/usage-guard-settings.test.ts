@@ -108,7 +108,7 @@ const row = (cols: number): string | undefined => {
   const r = spawnSync(process.env.STATUS_BASH || "bash", [join(KIT, "status.sh"), "0", "all"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const lines = r.stdout.replace(/\u001b\[[0-9;]*m/g, "").split("\n");
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
-  const at = lines.findIndex((l) => /^│ settings /.test(l));
+  const at = lines.findIndex((l) => l.startsWith("│ settings "));
   if (at < 0) return undefined;
   const text = (l: string) => l.replace(/^│ /, "").replace(/ *│$/, "");
   // Continuation lines are indented under the value.

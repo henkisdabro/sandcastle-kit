@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { KIT } from "../src/sandbox.ts";
 
 const GUARD = join(KIT, "container/git-guard.sh");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
 const bash = (command: string) =>
   spawnSync("bash", [GUARD], { input: JSON.stringify({ cwd: KIT, tool_input: { command } }), encoding: "utf8", env });
 

@@ -132,7 +132,7 @@ export type Override = { model?: string; effort?: Effort };
 
 // The model id ends up in the agent command that runs in the container, so
 // only characters a shell reads as plain text get through.
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$/;
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/;
 
 // Refuses on the host, before any sandbox starts: a bad label costs nothing then.
 export const ticketOverride = (ref: string, labels: string[]): Override => {

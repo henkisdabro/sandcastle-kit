@@ -36,7 +36,7 @@ test("a resolve wait is said once its list has held, worded by who is still runn
   const land20 = later();
   const schedule = createSchedule<T, G, string>({
     tickets: [{ id: "10" }, { id: "20" }, { id: "30" }],
-    files: { of: (t: T): TicketFiles => ({ all: ["src/a.ts"], unmergeable: [] }) },
+    files: { of: (): TicketFiles => ({ all: ["src/a.ts"], unmergeable: [] }) },
   });
   const waitsOf = () => told.flatMap((c) => (c.kind === "resolve waits" ? [c] : []));
   const running = schedule.run({

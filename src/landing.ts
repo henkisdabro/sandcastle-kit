@@ -284,6 +284,7 @@ export const createHostGit = (project: Project, expected: Fingerprint): HostGit 
                 { what: `${base} moved while the kit wrote to it`, detail: `(not by that write: ${why})` },
               );
               // Thrown from `finally` on purpose: the stop wins over the write's own result or error.
+              // oxlint-disable-next-line no-unsafe-finally -- on purpose, as the line above says
               throw failed;
             }
             expected.base = tip;

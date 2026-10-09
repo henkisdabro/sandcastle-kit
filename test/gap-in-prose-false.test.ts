@@ -22,7 +22,6 @@ const { createPipeline } = await import("../src/burndown.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type FollowUp = import("../src/burndown.ts").FollowUp;
-type Project = import("../src/config.ts").Project;
 
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-followup-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));

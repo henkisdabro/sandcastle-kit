@@ -413,7 +413,11 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // once read as three separate mysteries; named, they group. Matched line by
 // line so a bare "FAIL" line (Go prints one) cannot borrow the next line's word.
 // ESLint ends a red lint gate with "✖ N problems (...)": not a test, and two
-// lint-red branches would otherwise read as one failing test.
+// lint-red branches would otherwise read as one failing test. oxlint's report
+// ("x rule(...): msg", "! rule(...): msg", "Found N warnings and M errors.")
+// and its agent report ("path:line:col: error rule(...): msg") match none of
+// the patterns as they are (test/failing-tests.test.ts holds both), so a red
+// gate of either linter names no test and stays the branch's own.
 // node:test's spec reporter ends a red run with a "✖ failing tests:" summary
 // that puts "test at <path>:<line>:<col>" above each failing leaf test, so its
 // ids there are "path::name", like pytest's, and the base-red check can tell

@@ -419,6 +419,7 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   const live: Run[] = [];
   const own = adopted ? await look($, root) : undefined;
   if (own) live.push(own);
+  // oxlint-disable-next-line no-useless-spread -- a snapshot: `look` deletes from `followed`, and other rounds change it across the awaits
   for (const other of [...followed]) {
     const run = await look($, other, true);
     if (run) live.push(run);

@@ -22,7 +22,6 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const { createPipeline } = await import("../src/burndown.ts");
 const { readHeads } = await import("../src/run.ts");
-const { ownCommits } = await import("../src/sandbox.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type Outcome = Awaited<ReturnType<ReturnType<typeof createPipeline>>>;

@@ -13,7 +13,7 @@ import { after, test } from "node:test";
 import { KIT } from "../src/sandbox.ts";
 
 const GUARD = join(KIT, "container/git-guard.sh");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k) && k !== "CLAUDE_PROJECT_DIR"));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "CLAUDE_PROJECT_DIR"));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-git-guard-common-")));
 after(() => rmSync(root, { recursive: true, force: true }));

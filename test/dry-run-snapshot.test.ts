@@ -37,7 +37,10 @@ const project = { root: dir, label: "ready-for-agent", tracker: fakeTracker() } 
 const tracker = makeTracker(project);
 
 const set = (env: Record<string, string | undefined>) => {
-  for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
 };
 
 test("the same issue twice: equal snapshots", () => {

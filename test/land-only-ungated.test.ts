@@ -21,7 +21,6 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
 const { createPipeline } = await import("../src/burndown.ts");
 const { readHeads } = await import("../src/run.ts");
-const { ownCommits } = await import("../src/sandbox.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type Outcome = Awaited<ReturnType<ReturnType<typeof createPipeline>>>;
@@ -48,10 +47,6 @@ const BRANCH = `agent/issue-${ID}`;
 const ISSUE = { id: ID, title: "seven", body: "" } as Parameters<ReturnType<typeof createPipeline>>[0];
 
 const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
-const red = (output: string): GateRun => {
-  const failure = { name: "test", command: "run-tests", exitCode: 1, output };
-  return { gates: [{ name: "test", pass: false }], failure, failures: [failure] };
-};
 
 /** What an agent does in the sandbox's worktree, by its pass: `impl`, `review`, `repair` or `resolve`. Returns its final message. */
 type Agent = (worktree: string) => string | void;

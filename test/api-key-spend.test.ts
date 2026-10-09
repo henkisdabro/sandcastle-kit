@@ -111,7 +111,7 @@ test("the confirmation: asked on a terminal, refused without one, skipped with t
   await confirmApiKey(spend, "This run", { env: {}, ask: answer(true) });
   assert.deepEqual(asked, [`This run bills API credits (ANTHROPIC_API_KEY from ${c.userFile}). Go ahead? [y/N] `]);
 
-  await assert.rejects(confirmApiKey(spend, "This run", { env: {}, ask: answer(false) }), (e) => e instanceof OperatorError && /^Not started: this run bills API credits/.test(e.message));
+  await assert.rejects(confirmApiKey(spend, "This run", { env: {}, ask: answer(false) }), (e) => e instanceof OperatorError && e.message.startsWith("Not started: this run bills API credits"));
 
   // No terminal: `confirm` answers undefined, and the refusal names the flag and the key's removal.
   for (const options of [{ env: {}, ask: answer(undefined) }, { env: {}, terminal: false }]) {

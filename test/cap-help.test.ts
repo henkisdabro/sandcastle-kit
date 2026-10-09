@@ -8,10 +8,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { runKit } from "./cli-spawn.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
 const cli = (...args: string[]) => {
   const config = mkdtempSync(join(tmpdir(), "sandcastle-cap-help-cfg-"));
   const r = runKit(args, {

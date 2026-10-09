@@ -97,7 +97,7 @@ const frame = (cols: number, next?: string): string[] => {
   for (const l of lines) assert.ok([...l].length <= cols, `wider than ${cols} columns: ${l}`);
   return lines;
 };
-const row = (lines: string[]) => lines.find((l) => /^│ settings /.test(l))?.replace(/^│ /, "").replace(/ *│$/, "");
+const row = (lines: string[]) => lines.find((l) => l.startsWith("│ settings "))?.replace(/^│ /, "").replace(/ *│$/, "");
 
 test("the row shows repair attempts and an unclamped concurrency with no (asked)", () => {
   record({ settings: { autonomy: 0, turn: 1, cap: 1, repair: 1, concurrency: 4, asked: 4 } });

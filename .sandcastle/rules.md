@@ -35,8 +35,8 @@ This repository is sandcastle-kit itself. `AGENTS.md` is the rule book: read it 
   `shellcheck -S error` it; both are installed here. Users' Macs run `#!/usr/bin/env bash` scripts
   under 3.2, which has no associative arrays, `mapfile`, `${x,,}` or `source <(...)`.
 - **Never run** `sandcastle run`, `preflight`, `build`, `lean --measure`, `setup` or `clean` here:
-  they need Docker or spend model allowance. `pnpm exec tsc --noEmit`, `bash -n` and `pnpm test`
-  are the checks.
+  they need Docker or spend model allowance. `pnpm lint`, `pnpm exec tsc --noEmit`, `bash -n` and
+  `pnpm test` are the checks.
 - **Do not edit `CHANGELOG.md`**, even where AGENTS.md or the ticket asks for a line: tickets in one
   run all add at the same spot and would conflict at landing. The maintainer writes the entries
   from the run's closing summary: give each line in a `<changelog>...</changelog>` tag in your final

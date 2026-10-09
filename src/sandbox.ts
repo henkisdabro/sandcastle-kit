@@ -145,7 +145,8 @@ const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) =>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      error ? reject(Object.assign(error, { stderr })) : resolve(stdout.trim());
+      if (error) reject(Object.assign(error, { stderr }));
+      else resolve(stdout.trim());
     });
     const timer = setTimeout(() => {
       if (settled) return;

@@ -115,6 +115,7 @@ A change is ready to commit when `README.md`, `skill/` and `docs/` no longer des
 behaviour (grep them for its words, not only for the function's name), and all of these pass:
 
 ```bash
+pnpm lint            # oxlint (.oxlintrc.json); a false positive is disabled at its line, with the reason
 pnpm exec tsc --noEmit
 pnpm test            # every test/ file against fixtures and temp repos (no Docker, no model calls),
                      # with `bash -n` on every tracked shell script

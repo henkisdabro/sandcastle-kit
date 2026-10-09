@@ -14,7 +14,7 @@ import type { Project } from "../src/config.ts";
 import { KIT, MANAGED_SETTINGS, sandboxMounts } from "../src/sandbox.ts";
 
 const GUARD = join(KIT, "container/git-guard.sh");
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-git-guard-")));
 const main = join(root, "main");

@@ -570,7 +570,7 @@ const span = (ms: number) => {
  */
 const changelogLines = (all: { id: string; line: string }[]): string[] => {
   const out: string[] = [];
-  const isUpgrading = ({ line }: { line: string }) => /^Upgrading:/.test(line);
+  const isUpgrading = ({ line }: { line: string }) => line.startsWith("Upgrading:");
   const lines = all.filter((l) => !isUpgrading(l));
   const upgrading = all.filter(isUpgrading);
   if (lines.length) {
@@ -750,7 +750,7 @@ const fromTurn = (turn: number, lines: string[]) => lines.map((l) => (l.startsWi
 /** The closing summary as Markdown-ish text, every section present. */
 export const render = (f: Facts, plain = false): string => {
   const o = owed(f);
-  const { ids, merged, notClosed, partly, closed, partlyRerun, partlyDecide, partlyAway, ungated, gapped, byHand, held, gone, handedBack, heldWork, uncommitted, followUps, filingFailed, toTriage } = o;
+  const { ids, merged, notClosed, partly, closed, partlyRerun, ungated, gapped, byHand, held, uncommitted, followUps, filingFailed, toTriage } = o;
   const name = (id: string) => nameOf(f, id);
   const list = listOf;
   // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
@@ -854,7 +854,7 @@ export const render = (f: Facts, plain = false): string => {
   const sentBack = new Map<string, string[]>();
   for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
     const line = f.tickets[id].requeued!;
-    const why = /^requeued after conflict/.test(line) ? "sent back after a conflict at landing" : /^requeued after red/.test(line) ? "sent back after a red gate at landing" : "sent back at landing";
+    const why = line.startsWith("requeued after conflict") ? "sent back after a conflict at landing" : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : "sent back at landing";
     sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
   }
   if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);

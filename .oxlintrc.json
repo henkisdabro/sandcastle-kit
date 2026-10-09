@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "overrides": [
+    {
+      // The tests strip or match the status view's ANSI escapes, so a control character in a
+      // regex there is the point, not a typo.
+      "files": ["test/**"],
+      "rules": { "no-control-regex": "off" }
+    }
+  ]
+}

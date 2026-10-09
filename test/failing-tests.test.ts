@@ -67,6 +67,39 @@ test("eslint: its '✖ N problems' summary is not a test", () => {
   assert.deepEqual(failingTests(out), []);
 });
 
+// Real `oxlint --deny-warnings` output (1.87): its default report, and the one-line-per-finding report it
+// prints when it detects a coding agent. Neither names a test, so a red lint gate stays the branch's own.
+test("oxlint: neither its report nor its agent report is a test", () => {
+  const report = [
+    "",
+    "  ! eslint(no-unused-vars): Identifier 'readFileSync' is imported but never used.",
+    "   ,-[src/util.ts:1:10]",
+    ' 1 | import { readFileSync } from "node:fs";',
+    "   :          ^^^^^^|^^^^^",
+    "   :                `-- 'readFileSync' is imported here",
+    " 2 | export const sum = (a: number, b: number) => a + b;",
+    "   `----",
+    "  help: Consider removing this import.",
+    "",
+    "  x eslint(no-debugger): `debugger` statement is not allowed",
+    "   ,-[src/util.ts:3:1]",
+    " 2 | export const sum = (a: number, b: number) => a + b;",
+    " 3 | debugger;",
+    "   : ^^^^^^^^^",
+    "   `----",
+    "  help: Remove the debugger statement",
+    "",
+    "Found 1 warning and 1 error.",
+    "Finished in 17ms on 1 file with 96 rules using 15 threads.",
+  ].join("\n");
+  const agent = [
+    "src/util.ts:1:10: warning eslint(no-unused-vars): Identifier 'readFileSync' is imported but never used. help: Consider removing this import.",
+    "src/util.ts:3:1: error eslint(no-debugger): `debugger` statement is not allowed help: Remove the debugger statement",
+  ].join("\n");
+  assert.deepEqual(failingTests(report), []);
+  assert.deepEqual(failingTests(agent), []);
+});
+
 test("go test: --- FAIL lines name the test, subtests included, and a bare FAIL line adds nothing", () => {
   const out = [
     "=== RUN   TestSum",

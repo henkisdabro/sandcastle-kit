@@ -165,14 +165,14 @@ test("a choice is read back from the store after a reload, and hiding makes no q
 });
 
 test("a dismissal is read back from the store after a reload", async ($, on) => {
-  const w = world(on, ["1", "2"], { [MARK_KEY]: { hidden: false, dismissed: ["1", "2", "3"] } });
+  world(on, ["1", "2"], { [MARK_KEY]: { hidden: false, dismissed: ["1", "2", "3"] } });
   await $.session.start(START);
   expect(await markNow($)).toBe("sandcastle");
   expect((await $.command.run(MARK(""))).text).toMatch(/^Idle mark: shown without a count: dismissed/);
 });
 
 test("a store entry that is not a choice is ignored", async ($, on) => {
-  const w = world(on, ["1", "2"], { [MARK_KEY]: { hidden: "yes" } });
+  world(on, ["1", "2"], { [MARK_KEY]: { hidden: "yes" } });
   await $.session.start(START);
   expect(await markNow($)).toBe(READY(2));
 });

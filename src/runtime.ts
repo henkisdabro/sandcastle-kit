@@ -107,7 +107,7 @@ export const runtimeProblem = ({ platform, uid, reads }: { platform: NodeJS.Plat
   if (platform !== "linux") return undefined;
   // Asked first: a daemon that hangs is met by the read every start makes anyway, before the others.
   const info = json(reads.info());
-  const podman = /^podman version/.test(reads.version() ?? "") || components(json(reads.server())).includes("Podman Engine");
+  const podman = (reads.version() ?? "").startsWith("podman version") || components(json(reads.server())).includes("Podman Engine");
   if (podman) {
     return {
       label: "Docker Engine behind `docker` (found Podman)",

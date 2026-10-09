@@ -50,9 +50,9 @@ export const isTestPath = (path: string): boolean => {
   return (
     parts.some((d) => d === "test" || d === "tests" || d === "__tests__") ||
     /^.+\.(?:test|spec)\..+$/.test(name) ||
-    /_test\.go$/.test(name) ||
+    name.endsWith("_test.go") ||
     /^test_.+\.py$/.test(name) ||
-    /_test\.py$/.test(name)
+    name.endsWith("_test.py")
   );
 };
 

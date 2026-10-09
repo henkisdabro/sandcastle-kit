@@ -114,7 +114,6 @@ const WHERE: Record<Exclude<Runtime, "native">, string> = {
 };
 
 const gib = (bytes: number) => `${(Math.round((bytes / GIB) * 10) / 10).toString()} GiB`;
-const num = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
 
 /**
  * One figure the peaks give: `mib`, what is priced, the `samples` it was taken from (one per sandbox's line) and the

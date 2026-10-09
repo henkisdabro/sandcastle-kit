@@ -24,7 +24,7 @@ const repo = () => {
 
 const stopMessage = (project: Project, before: ReturnType<typeof gitFingerprint>) => {
   let said = "";
-  assert.throws(() => assertGitUnchanged(project, before, "after #1"), (e: Error) => ((said = e.message), /^STOPPED after #1: /.test(said)));
+  assert.throws(() => assertGitUnchanged(project, before, "after #1"), (e: Error) => ((said = e.message), said.startsWith("STOPPED after #1: ")));
   return said;
 };
 

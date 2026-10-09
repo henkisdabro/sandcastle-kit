@@ -63,7 +63,6 @@ export const blockerChain = (project: Project, tracker: Tracker, queued: Queued[
 /** The report, one line each; the caller prints it. */
 export const lintQueue = async (project: Project, tracker: Tracker, queued: Queued[]): Promise<string[]> => {
   if (!queued.length) return [`queue "${project.label}" is empty - nothing to lint.`];
-  const ids = new Set(queued.map((t) => t.id));
 
   const waits = blockerWaits(project, tracker, queued);
   const chain = longestChain(queued, waits);

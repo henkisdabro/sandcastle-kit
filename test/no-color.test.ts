@@ -46,7 +46,7 @@ test("render(facts, true) drops the emoji from the seven headings and nothing el
   ];
   assert.equal(headings.length, want.length);
   want.forEach((w, i) => assert.ok(headings[i].startsWith(w), `${headings[i]} should start with ${w}`));
-  assert.doesNotMatch(plain, /^## .*[\u{1F300}-\u{1FAFF}☀-➿⏩-⏺️]/mu);
+  assert.doesNotMatch(plain, /^## .*[\u{1F300}-\u{1FAFF}☀-➿⏩-⏺]/mu);
   // The body is untouched: the runnable line keeps its emoji.
   assert.match(plain, /▶️ Runnable now/);
 });
