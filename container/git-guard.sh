@@ -56,6 +56,9 @@ GIT='(^|[;&|(`])[[:space:]]*(sudo[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*=[^[:space
 # The shared dir here is the one of the dir Claude Code started in (CLAUDE_PROJECT_DIR), not COMMON: the
 # shell's cwd moves with a `cd`, and from inside the scratch repo COMMON is the scratch's own dir, so a
 # `-C` back into the project would pass. Without it the shared dir is unknown and these stay refused.
+# What every refusal that scratch_only made says about how to pass it: the rule reads the command string
+# before it runs, so a repository the same command creates, or a path in a variable, cannot resolve yet.
+SCRATCH_HOW="Create the scratch repository in an earlier command, then use git -C /literal/absolute/path <command> (no variable, no path created in the same command)."
 scratch_only() {
   local words w args=() pending= sub
   grep -qE 'GIT_(DIR|COMMON_DIR|WORK_TREE)=' <<<"$CMD" && return 1
@@ -87,13 +90,13 @@ scratch_only() {
   [ -n "$target" ] && [ "$target" != "$PROJECT_COMMON" ]
 }
 while IFS= read -r m; do
-  scratch_only "$m" || deny "git update-ref, gc or prune" "" "It is allowed in a scratch repository elsewhere, run as git -C <absolute path> <command> with the path outside this project (build one under the temp dir)."
+  scratch_only "$m" || deny "git update-ref, gc or prune" "" "It is allowed in a scratch repository elsewhere, run as git -C <absolute path> <command> with the path outside this project (build one under the temp dir). $SCRATCH_HOW"
 done < <(grep -oE "${GIT}(update-ref|gc|prune)([[:space:]]|\$)" <<<"$CMD")
 # refs/stash lives in the shared .git, so every worktree of a run sees one stash list: a pop can apply
 # another agent's change. list and show only read it.
 while IFS= read -r m; do
   grep -qE 'stash[[:space:]]+(list|show)[[:space:]]*$' <<<"$m" && continue
-  scratch_only "$(sed -E 's/stash[[:space:]]+[^[:space:]]+[[:space:]]*$/stash /' <<<"$m")" || deny "git stash" "" "The stash list is shared by every agent's worktree. To run a test without your change: git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- <files>, run it, then git apply /tmp/p."
+  scratch_only "$(sed -E 's/stash[[:space:]]+[^[:space:]]+[[:space:]]*$/stash /' <<<"$m")" || deny "git stash" "" "The stash list is shared by every agent's worktree. To run a test without your change: git diff HEAD -- <files> > /tmp/p && git checkout HEAD -- <files>, run it, then git apply /tmp/p. $SCRATCH_HOW"
 done < <(grep -oE "${GIT}stash([[:space:]]+[^[:space:];&|]+)?([[:space:]]|\$)" <<<"$CMD")
 grep -qE "${GIT}push([[:space:]]|\$)" <<<"$CMD" && deny "git push" "" "To test remote handling, build a bare origin under the temp dir and use git fetch, and use git -C <absolute path> for a scratch repository's own plumbing."
 grep -qE "${GIT}reflog[[:space:]]+expire" <<<"$CMD" && deny "git reflog expire"
@@ -101,7 +104,7 @@ grep -qE "${GIT}worktree[[:space:]]+(prune|repair)" <<<"$CMD" && deny "git workt
 # worktree add writes a record, with the container's path, into the shared .git; a pass killed before its
 # cleanup leaves it there. In a scratch repository's own .git it harms nothing.
 while IFS= read -r m; do
-  scratch_only "$m" || deny "git worktree add in the shared repository" "" "To compare against the base, read it: git show <base>:<path>, or git archive <base> | tar -x -C <temp dir>. A scratch repository under the temp dir takes git -C <absolute path> worktree add."
+  scratch_only "$m" || deny "git worktree add in the shared repository" "" "To compare against the base, read it: git show <base>:<path>, or git archive <base> | tar -x -C <temp dir>. A scratch repository under the temp dir takes git -C <absolute path> worktree add. $SCRATCH_HOW"
 done < <(grep -oE "${GIT}worktree[[:space:]]+add([[:space:]]|\$)" <<<"$CMD")
 grep -qE "${GIT}branch[[:space:]]([^;&|\`]*[[:space:]])?(-[a-zA-Z]*[dDf]|--delete|--force)[[:space:]][^;&|\`]*agent/" <<<"$CMD" && deny "deleting or moving an agent branch"
 if grep -qE '(^|[;&|(`])[[:space:]]*(rm|mv)[[:space:]]' <<<"$CMD"; then

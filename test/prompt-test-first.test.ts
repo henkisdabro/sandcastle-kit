@@ -19,7 +19,7 @@ test("the implementer tests at the seam, reproduces a bug first, and runs its co
   assert.match(p, /A value recomputed the way the code computes it passes by construction/);
   assert.match(p, /Mock only real boundaries/);
   assert.match(p, /While working, run single test files and the typecheck\./);
-  assert.match(p, /Before you finish, run the typecheck gate and the tests your change touches or that cover it, each once, in its own command/);
+  assert.match(p, /Before you finish, run the typecheck gate and the tests your change touches or that cover it, each once\./);
 });
 
 test("the implementer files what it leaves outside the ticket", () => {
@@ -32,7 +32,13 @@ test("neither agent stashes in the shared .git, and both are told how to run a t
   for (const name of ["implement.md", "review.md"]) {
     const p = read("prompts", name);
     assert.match(p, /Never `git stash` in this worktree/, name);
-    assert.match(p, /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>`, run it, then `git apply \/tmp\/p`/, name);
+    assert.match(
+      p,
+      name === "review.md"
+        ? /git diff \{\{TARGET_BRANCH\}\}\.\.\.HEAD -- <files> > \/tmp\/p && git apply -R \/tmp\/p`, run it, then `git apply \/tmp\/p`/
+        : /git diff HEAD -- <files> > \/tmp\/p && git checkout HEAD -- <files>`, run it, then `git apply \/tmp\/p`/,
+      name,
+    );
   }
 });
 
