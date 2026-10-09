@@ -298,8 +298,12 @@ export const cutAtWord = (text: string, max: number): string => {
 // asked for with `withAttrs` takes any, so `<changelog x>` stays prose as before.
 const ownLineMatches = (text: string, tag: string, withAttrs = false): { attrs: string; text: string }[] => {
   const unfenced = text.replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "");
+  // A tag quoted in inline code inside the line (``Fixed: `<changelog>none</changelog>` is no line``) is the line's
+  // words, not a tag: its brackets are masked while matching, so the line is neither cut there nor refused.
+  const masked = unfenced.replace(/`[^`\n]+`/g, (code) => code.replace(/</g, "\uE000").replace(/>/g, "\uE001"));
+  const unmask = (t: string) => t.replace(/\uE000/g, "<").replace(/\uE001/g, ">");
   const open = withAttrs ? `<${tag}(?:[ \\t]+([^<>\\n]*?))?[ \\t]*>` : `<${tag}()>`;
-  return [...unfenced.matchAll(new RegExp(`^[ \\t]*${open}((?:(?!<${tag}[ \\t>])[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => ({ attrs: m[1] ?? "", text: m[2] }));
+  return [...masked.matchAll(new RegExp(`^[ \\t]*${open}((?:(?!<${tag}[ \\t>])[\\s\\S])*?)</${tag}>[ \\t]*$`, "gm"))].map((m) => ({ attrs: unmask(m[1] ?? ""), text: unmask(m[2]) }));
 };
 const ownLineTags = (text: string, tag: string): string[] => ownLineMatches(text, tag).map((m) => m.text);
 const lineOf = (tag: string) => (text: string): string | undefined => {
