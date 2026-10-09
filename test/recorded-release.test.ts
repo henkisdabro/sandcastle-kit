@@ -78,7 +78,7 @@ test("the update line names the project's earlier release against the kit now, o
 
 test("the CLI reads the recorded release before it marks the project updated", () => {
   const cli = readFileSync(join(import.meta.dirname, "../src/cli.ts"), "utf8");
-  assert.match(cli, /const before = recordedRelease\(root\);\n\s+console\.log\(updatedLine\(before, markUpdated\(root, KIT, keys\)\)\);/);
+  assert.match(cli, /const before = recordedRelease\(root\);\n\s+console\.log\(updatedLine\(before, markUpdated\(root, KIT, declined, accepted\)\)\);/);
 });
 
 test("the update skill reports the project's recorded release, not the kit's version before the pull", () => {
