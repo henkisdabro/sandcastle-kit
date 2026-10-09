@@ -3,7 +3,7 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
@@ -111,6 +111,33 @@ const AGENT_BRANCH = /^agent\/issue-/;
 const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
 const moduleFiles = (modules: string, hashOf: (f: string) => string) => treeFiles(modules, hashOf, MODULE_DATA);
 
+/**
+ * What a path in the shared `.git` holds, for a fingerprint, without ever reading what is not a regular file: a FIFO a
+ * sandbox planted would block the read, and with it the whole run (the read is synchronous), and a directory throws.
+ * A regular file is its content's hash (as before); a missing one the hash of nothing; a link its target; anything else
+ * its kind. Opened without following a link and without blocking, and checked again once open, so an entry swapped
+ * between the lstat and the open is never read either.
+ */
+export const entryHash = (f: string): string => {
+  const at = lstatSync(f, { throwIfNoEntry: false });
+  if (!at) return createHash("sha256").update("").digest("hex");
+  if (at.isSymbolicLink()) return `link ${readlinkSync(f)}`;
+  if (at.isDirectory()) return "directory";
+  if (!at.isFile()) return `special ${at.isFIFO() ? "fifo" : at.isSocket() ? "socket" : "device"}`;
+  let fd: number;
+  try {
+    fd = openSync(f, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    return `unreadable ${(error as NodeJS.ErrnoException).code ?? "error"}`;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return "special";
+    return createHash("sha256").update(readFileSync(fd)).digest("hex");
+  } finally {
+    closeSync(fd);
+  }
+};
+
 /** Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything). */
 const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set()): Record<string, string> => {
   const found: Record<string, string> = {};
@@ -178,10 +205,13 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // already there waits for it). Listed only while it exists, so creating one, even an empty one, differs
   // from its absence, which an empty file's hash would not.
   const worktreeConfigPath = join(dir, "config.worktree");
-  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks"), ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
   const files: Record<string, string> = {};
-  const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
+  // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
+  // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
+  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf));
   Object.assign(files, moduleFiles(join(dir, "modules"), hashOf));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
@@ -330,7 +360,7 @@ const programState = (project: Project): ProgramState => {
       throw new OperatorError(`NOT STARTED: git cannot read ${relative(realpathSync(project.root), path)} as config, so the program-running keys a sandbox may have planted there cannot be checked. Inspect it before running any other git command there.`, { cause: error });
     }
   };
-  const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  const hashOf = entryHash;
   const files: Record<string, string> = {};
   for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf), ...moduleFiles(join(dir, "modules"), hashOf) })) files[relative(dir, path)] = hash;
   const attributes = join(dir, "info", "attributes");
@@ -627,7 +657,22 @@ const restoreBranch = (project: Project, name: string, want: string, when: strin
 // A sandbox's worktree record names the worktree by its host path. `git worktree repair` run in a
 // container rewrites it to the container path, and the host then cannot find that sandbox.
 // Kit-made worktrees only (`agent-issue-*`, and `sandcastle-*` for a landing's scratch): a person's
-// own worktrees live where they like.
+// own worktrees live where they like. The name alone cannot tell: Sandcastle names a worktree after its branch, and a
+// person's worktree in a folder named `sandcastle-*` (a clone of the kit, say) has the same form. One whose `.git` file
+// names this very record was written by git at both ends, so it is a worktree elsewhere, not a record a sandbox
+// rewrote: a rewrite points at a container path, where the host finds no such file.
+/** True when `pointer` is a worktree's `.git` file naming `record`. */
+const namesRecord = (pointer: string, record: string): boolean => {
+  try {
+    if (!lstatSync(pointer, { throwIfNoEntry: false })?.isFile()) return false;
+    const text = readFileSync(pointer, "utf8").replace(/[\r\n]+$/, "");
+    if (!text.startsWith("gitdir: ")) return false;
+    return realpathSync(resolve(dirname(pointer), text.slice("gitdir: ".length))) === realpathSync(record);
+  } catch {
+    return false;
+  }
+};
+
 const rewrittenWorktrees = (project: Project): string[] => {
   const records = join(commonDir(project.root), "worktrees");
   if (!existsSync(records)) return [];
@@ -638,7 +683,7 @@ const rewrittenWorktrees = (project: Project): string[] => {
       // `worktree.useRelativePaths` (git 2.48+) writes the path relative to the record's own
       // directory: read as it stands, every kit worktree would look rewritten.
       const at = resolve(join(records, name), readFileSync(join(records, name, "gitdir"), "utf8").trim());
-      return !under.some((u) => at.startsWith(u));
+      return !under.some((u) => at.startsWith(u)) && !namesRecord(at, join(records, name));
     })
     .sort();
 };
