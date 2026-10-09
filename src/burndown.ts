@@ -2203,7 +2203,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }), !DRY_RUN, project.name)) console.log(line);
+  }), !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. A dry run keeps no slot for landing.
