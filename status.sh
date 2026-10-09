@@ -703,8 +703,10 @@ style_of() {
     queued|requeued|paused) glyph='○'; colour="$blu"; prio=3; grp=queued;;
     blocked) glyph='~'; colour="$blu"; prio=4; grp=blocked;;
     merged) glyph='+'; colour="$grn"; prio=5; grp=merged;;
-    "left over"|withdrawn) glyph='-'; colour="$gry"; prio=6; grp="left over";;
-    *) glyph='·'; colour="$gry"; prio=6; grp=idle;;
+    # Labelled, not in the live run: it waits for a later run, not for a sandbox of this one.
+    later) glyph='…'; colour="$gry"; prio=6; grp=later;;
+    "left over"|withdrawn) glyph='-'; colour="$gry"; prio=7; grp="left over";;
+    *) glyph='·'; colour="$gry"; prio=7; grp=idle;;
   esac
 }
 
@@ -1053,7 +1055,9 @@ landed_commits() {
 }
 
 # One row into the frame, counted in its group - or, while a live run keeps a
-# record, as outside that run ($1 = 1), so the counts add up to the run.
+# record, as outside that run ($1 = 1), so the counts add up to the run. A `later`
+# row (a labelled ticket outside the live run) is counted apart, for the legend and
+# the collapsed view's foot line, which names it instead of drawing it.
 emit() {
   local age_c="$age_col" cmt_c="$head"
   if [ "$state" = merged ] && { [ "$commits" = 0 ] || [ "$commits" = "-" ]; }; then commits=$(landed_commits "$n"); fi
@@ -1077,7 +1081,14 @@ emit() {
   OW=("${TW[@]}"); AL=("${TAL[@]}")
   cells_line; rendered="$REPLY"
   out[n_out]="$prio	$key	$n	$grp	$rendered"; n_out=$((n_out+1))
-  if [ "$1" = 1 ]; then c_out=$((c_out+1)); return 0; fi
+  if [ "$state" = later ]; then
+    c_later=$((c_later+1)); disp "$n"; later_list="${later_list}${DISP}|"
+    case "$activity" in "waits for "*) c_later_block=$((c_later_block+1)); later_list="${later_list}1";; *) later_list="${later_list}0";; esac
+    later_list="${later_list}
+"
+    return 0
+  fi
+  if [ "$1" = 1 ]; then return 0; fi
   case "${activity_note:-}" in "partly done"*) c_partly=$((c_partly+1));; esac
   case "$grp" in
     working) c_work=$((c_work+1));;
@@ -1094,7 +1105,7 @@ emit() {
 render() {
   local now now_s issues n phase log age commits state glyph colour activity activity_note landed_subj rendered
   local merged_list cols rows prio cpu mem cpu_col tok tok_col tokens budget hidden key wide WIN BUF BUF_N
-  local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_out=0 c_partly=0
+  local c_work=0 c_attn=0 c_ready=0 c_queue=0 c_block=0 c_merged=0 c_idle=0 c_left=0 c_later=0 c_later_block=0 c_partly=0 later_list= later_line= shown
   local mtime q quiet act_col age_col on live_wt kept_wt models gate_wait
   local grp oc oc_run oc_text oc_kind oc_state hidden_list group summary act since
   local tstate started order note typ pos upstream ahead unpushed=
@@ -1220,6 +1231,8 @@ render() {
       activity="USAGE LIMIT REACHED - $state model"; glyph='!'; colour="$hot"
     fi
     log=""
+    # This run's landings above earlier runs' merged rows (their keys are epoch seconds).
+    [ "$grp" = merged ] && key=$(( key + 10000000000 ))
     emit 0
   done
 
@@ -1230,7 +1243,11 @@ render() {
     n="$q"; age="-"; commits="-"; cpu="-"; mem="-"; cpu_col="$gry"; tok="-"; tok_col="$gry"; age_col="$gry"; act_col="$mute"; key=0
     # Held back by an open dependency, not waiting for a sandbox.
     on=$(blocked_on "$q")
-    if [ -n "$on" ]; then
+    if [ "$RUN_LIVE" = 1 ] && { [ "$RECORD" = 1 ] || { ! has_line "$q" "$RUN_ISSUES" && [ -z "$(active_of "$q")" ]; }; }; then
+      # Outside the live run (named by it, or queued after it started): it waits for a later run.
+      state="later"; activity="next run"
+      [ -n "$on" ] && activity="waits for $on to close"
+    elif [ -n "$on" ]; then
       state="blocked"; activity="waits for $on to close"
     elif [ "$RUN_LIVE" = 1 ] && [ "$RECORD" = 0 ] && [ -n "$(active_of "$q")" ]; then
       # Claimed, before its first agent log: the sandbox is being set up.
@@ -1240,8 +1257,7 @@ render() {
       # label reads as in flight otherwise, long after the run has ended.
       state="queued"
       if [ "$RUN_LIVE" = 0 ]; then activity="for the next run"
-      elif [ "$RECORD" = 0 ] && has_line "$q" "$RUN_ISSUES"; then activity="in this run - waiting for a sandbox"; key=1
-      else activity="not in this run"; fi
+      else activity="in this run - waiting for a sandbox"; key=1; fi
     fi
     style_of "$state"
     emit "$RECORD"
@@ -1356,10 +1372,13 @@ render() {
       && ! { [ "$RUN_LIVE" = 1 ] && has_line "$n" "$RUN_ISSUES"; }; then
       state="queued"
       # Its old log's last line is history; say what happens next instead.
-      if [ "$RUN_LIVE" = 1 ]; then activity_note="not in this run"; else activity_note="for the next run"; fi
+      if [ "$RUN_LIVE" = 1 ]; then state="later"; activity_note="next run"; else activity_note="for the next run"; fi
       [ "$commits" -gt 0 ] && activity_note="$activity_note - on its earlier branch ($commits commit(s))"
       on=$(blocked_on "$n")
-      if [ -n "$on" ]; then state="blocked"; activity_note="waits for $on to close"; fi
+      if [ -n "$on" ]; then
+        if [ "$RUN_LIVE" = 1 ]; then state="later"; else state="blocked"; fi
+        activity_note="waits for $on to close"
+      fi
       style_of "$state"
     fi
 
@@ -1438,10 +1457,11 @@ render() {
   build_header 3
   # The legend with each group's count (the counts band is gone), then the note.
   LEG=("${ylw}● working ${bold}${c_work}${off}" "${hot}! needs you ${bold}${c_attn}${off}" "${cyn}> ready to land ${bold}${c_ready}${off}" \
-    "${blu}○ queued ${bold}${c_queue}${off}" "${blu}~ blocked ${bold}${c_block}${off}" "${grn}+ merged ${bold}${c_merged}${off}" \
-    "${gry}- left over ${bold}${c_left}${off}" "${gry}· idle ${bold}${c_idle}${off}")
+    "${blu}○ queued ${bold}${c_queue}${off}" "${blu}~ blocked ${bold}${c_block}${off}" "${grn}+ merged ${bold}${c_merged}${off}")
+  # Tickets outside the live run, a group of their own: queued and blocked count the run's alone.
+  [ "$c_later" -gt 0 ] && LEG[${#LEG[@]}]="${gry}… later ${bold}${c_later}${off}"
+  LEG[${#LEG[@]}]="${gry}- left over ${bold}${c_left}${off}"; LEG[${#LEG[@]}]="${gry}· idle ${bold}${c_idle}${off}"
   NOTE=()
-  [ "$c_out" -gt 0 ] && NOTE[0]="${blu}${c_out} not in this run${off}"
   # The view reads git, not the agents' notes: the closing summary counts a merged ticket left open under "needs you".
   # Two notes for the same reason as the time note below: one line of 98 characters was cut at 80 columns.
   [ "$c_partly" -gt 0 ] && NOTE[${#NOTE[@]}]="${gry}${c_partly} merged, partly done (ticket open)${off}" \
@@ -1459,23 +1479,23 @@ render() {
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
   # columns: eight on one row from 130 columns, else rows of four, or of two
   # where four do not fit. A column is as wide as its widest item.
-  local per=8 r c sumw
+  local per=${#LEG[@]} r c sumw nleg=${#LEG[@]}
   [ "$cols" -lt 130 ] && per=4
   while :; do
     local -a LWT=(); sumw=0
     for (( c=0; c<per; c++ )); do
       LWT[c]=0
-      for (( r=c; r<8; r+=per )); do vlen "${LEG[r]}"; [ "$VN" -gt "${LWT[c]}" ] && LWT[c]=$VN; done
+      for (( r=c; r<nleg; r+=per )); do vlen "${LEG[r]}"; [ "$VN" -gt "${LWT[c]}" ] && LWT[c]=$VN; done
       LWT[c]=$(( LWT[c] + 4 )); sumw=$(( sumw + LWT[c] ))
     done
     { [ "$per" -le 2 ] || [ $(( sumw + per + 1 )) -le "$WIN" ]; } && break
-    per=$(( per / 2 ))
+    per=$(( (per + 1) / 2 ))
   done
   # The legend's bars snap onto the table's, so the seam between them has no near-miss joints.
   OW=("${TW[@]}"); bars_of; tbars="$BARS"
   split_cols "${LWT[@]}"; snap_w "$tbars" "${LWT[@]}"; bars_of; lbars="$BARS"
-  AL=(c c c c c c c c)
-  for (( r=0; r<8; r+=per )); do CELL=("${LEG[@]:r:per}"); cells_line; put "$REPLY"; done
+  AL=(c c c c c c c c c)
+  for (( r=0; r<nleg; r+=per )); do CELL=("${LEG[@]:r:per}"); cells_line; put "$REPLY"; done
   junction '├' '┤' '─' "$lbars" ""; put "$REPLY"
   split_cols 1; AL=(c)
   wrap_items $(( WIN - 4 )) "${NOTE[@]}"
@@ -1506,13 +1526,29 @@ render() {
   OW=("${TW[@]}"); bars_of; tbars="$BARS"
   junction '├' '┤' '─' "$tbars" "$tbars"; sep_line="$REPLY"
   up="$tbars"
-  if [ "$n_out" -eq 0 ]; then
+  # The collapsing view draws no row for a ticket outside the live run: one line at the foot counts them
+  # ("43 for a later run (#382-#609), 2 blocked"), so a long queue never pushes the run's rows off the pane.
+  local foot_hidden=""
+  shown="$n_out"
+  if [ "$SHOW_ALL" != all ] && [ "$c_later" -gt 0 ]; then
+    shown=$(( n_out - c_later ))
+    later_line=$(printf '%s' "$later_list" | awk -F'|' -v blocked="$c_later_block" 'NF==2 {
+        id=$1; c++
+        if (c <= 3) names=names (c > 1 ? ", " : "") id
+        if (id ~ /^#[0-9]+$/) { v=substr(id, 2)+0
+          if (!lo || v < lo) lo=v; if (v > hi) hi=v }
+        else numeric=0 }
+      BEGIN { numeric=1 }
+      END { ids = numeric ? "#" lo (hi != lo ? "-#" hi : "") : names (c > 3 ? ", …" : "")
+        printf "%d for a later run (%s)%s", c, ids, (blocked > 0 ? ", " blocked " blocked" : "") }')
+  fi
+  if [ "$shown" -eq 0 ]; then
     # A project whose merged tickets' logs were archived has had runs; the run
     # cell above says how the last one ended.
     local empty="(no runs yet)"; [ -f logs/run.json ] && empty="(nothing to show)"
     CELL=(); CELL[${#TW[@]}-1]="${mute}${empty}${off}"; AL=("${TAL[@]}"); cells_line; put "$REPLY"
   else
-    # Working, needing you, ready, queued, blocked, then merged and idle -
+    # Working, needing you, ready, queued, blocked, merged, later, then idle -
     # everything unfinished first - and within a group the most recent change
     # first (the queue: next to start first). The merged and idle tail is what
     # makes the list outgrow the screen, so it gets cut, oldest first.
@@ -1521,13 +1557,19 @@ render() {
     # a row too, and the "+N not shown" cell two, only when something is hidden.
     budget=$(( rows - hdr_n - ftr_n - 1 )); hidden=0; hidden_list=""
     [ "$SHOW_ALL" = "all" ] && budget=1000000
+    # The rule above the foot lines and the later line take two rows more, and the "+N not shown" cell a third.
+    local reserve=0; [ -n "$later_line" ] && reserve=2
+    budget=$(( budget - reserve ))
     [ "$budget" -lt 3 ] && budget=3
     sorted=$(printf '%s\n' "${out[@]}" | sort -t$'\t' -k1,1n -k2,2nr -k3,3n)
+    [ -n "$later_line" ] && sorted=$(printf '%s\n' "$sorted" | awk -F'\t' '$4 != "later"')
     need=0; pp=""
     while IFS=$'\t' read -r prio key n group rendered; do
       need=$((need+1)); [ -n "$pp" ] && [ "$prio" != "$pp" ] && need=$((need+1)); pp="$prio"
     done <<<"$sorted"
-    [ "$need" -gt "$budget" ] && budget=$(( budget - 2 ))
+    if [ "$need" -gt "$budget" ]; then
+      if [ "$reserve" -gt 0 ]; then budget=$(( budget - 1 )); else budget=$(( budget - 2 )); fi
+    fi
     used=0; pp=""
     while IFS=$'\t' read -r prio key n group rendered; do
       sep=0; [ -n "$pp" ] && [ "$prio" != "$pp" ] && sep=1
@@ -1556,10 +1598,17 @@ render() {
         END { for (i=1; i<=k; i++) { g=order[i]
           ids = num[g] ? "#" lo[g] (hi[g] != lo[g] ? "-#" hi[g] : "") : names[g] (c[g] > 3 ? ", …" : "")
           printf "%s%d %s (%s)", (i>1 ? " · " : ""), c[g], g, ids } }')
-      junction '├' '┤' '─' "$tbars" ""; put "$REPLY"
-      split_cols 1; AL=(l); CELL=("${gry}+${summary} not shown${off}"); cells_line; put "$REPLY"
-      up=""
+      foot_hidden="${gry}+${summary} not shown${off}"
     fi
+  fi
+  if [ -n "$foot_hidden$later_line" ]; then
+    junction '├' '┤' '─' "$tbars" ""; put "$REPLY"
+    split_cols 1; AL=(l)
+    for l in "$foot_hidden" "${later_line:+${gry}${later_line}${off}}"; do
+      [ -n "$l" ] || continue
+      CELL=("$l"); cells_line; put "$REPLY"
+    done
+    up=""
   fi
   junction '├' '┤' '─' "$up" "$lbars"
   printf '%s%s%s\n%s' "$HDR" "$BUF" "$REPLY" "$FTR"

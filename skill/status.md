@@ -19,7 +19,8 @@ never a loop of `sleep` and `grep`; the table is for the user's eyes.
 
 While a run is live, every ticket it holds is shown from the run's own record
 (`.sandcastle/logs/run.json`, `tickets`), and the header counts add up to the run: working, ready
-to land, need you, queued, blocked, merged. The states:
+to land, need you, queued, blocked, merged (and `later`, the tickets outside the run, counted
+apart). The states:
 
 - **Working** - `setup`, `impl`, `resolve`, `review`, `codex`, `gates` (with the gate running,
   `2/7 pytest`, or `waiting for a gates slot`), `repair`, `landing`. TIME in red and `usually 5m`
@@ -41,6 +42,11 @@ to land, need you, queued, blocked, merged. The states:
   `(lands this run)` when the blocker is in this run - then this run starts it once the blocker
   lands - `(stopped)`, `(gate red)` or another state when the blocker ended in this run without landing - or `(not in this run)` when it was never this run's), **`merged`**, **`no change`**, **`skipped`** (not started
   because the run stopped early).
+- **`later`** (grey, `…`) - a labelled ticket the live run does not hold, queued or blocked
+  (`next run`, or `waits for #N to close`): `queued` and `blocked` mean this run's tickets only. The
+  collapsing view (`sandcastle status`) draws no row for them and counts them in one line at the
+  table's foot (`43 for a later run (#382-#609), 2 blocked`); `sandcastle status 0` and `status all`
+  list them as rows, after `merged`. With no run live every labelled ticket reads `queued`.
 - **`paused`** - parked between two phases while a person has the run paused (`sandcastle
   pause`): its sandbox is closed, its branch kept, and the note names the phase it resumes at.
   `sandcastle resume` continues it in the same run.
