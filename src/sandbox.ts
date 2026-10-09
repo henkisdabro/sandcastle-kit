@@ -77,18 +77,20 @@ export const AGENT_COMMITTER = {
 export const ownCommits = (base: string, branch: string, cwd?: string) =>
   Number(sh("git", ["rev-list", "--count", "--no-merges", `${base}..${branch}`], cwd));
 
+const WORKTREES = ".sandcastle/worktrees/";
+
 /**
  * Stops the sandboxes a killed run of this project left working. A run killed
  * outright (SIGKILL, a closed terminal) cannot close its containers, and their
  * agents went on spending the plan's allowance on work nobody would gate or
  * land. Call only while holding the project's run lock: then no live run owns
- * a container that mounts one of its agent worktrees. `sandcastle gates` uses
- * other worktrees and is never touched.
+ * a container that mounts a worktree under the project's `.sandcastle/worktrees/` - a ticket's, or the base
+ * gates' and a landing's, which a failed open leaves running too. Another project's is never touched.
  */
 export const reapOrphans = (project: Project) => {
   // Docker records a bind mount's source as it was given: either spelling.
   const root = realpathSync(project.root);
-  const prefixes = [...new Set([root, project.root])].map((r) => join(r, ".sandcastle/worktrees/agent-issue-"));
+  const prefixes = [...new Set([root, project.root])].map((r) => join(r, WORKTREES));
   let ids: string[];
   try {
     ids = sh("docker", ["ps", "-q", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);

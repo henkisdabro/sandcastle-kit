@@ -9,6 +9,7 @@ import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
+import { lockWorktree, unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
 // ---------------------------------------------------------------------------
@@ -951,6 +952,60 @@ export const checkBeforeClose = async (project: Project, worktree: string, when:
     assertWorktreeRecords(project, worktree, when);
   } catch (error) {
     removeSandboxContainer(worktree);
+    throw error;
+  }
+};
+
+/** The kit's worktrees (under the project's `.sandcastle/worktrees/`) that have `branch` checked out, by the path git lists. */
+const worktreesOf = (project: Project, branch: string): string[] => {
+  const under = [...new Set([join(project.root, ".sandcastle/worktrees/"), join(realpathSync(project.root), ".sandcastle/worktrees/")])];
+  const found: string[] = [];
+  for (const entry of sh("git", ["worktree", "list", "--porcelain"], project.root).split("\n\n")) {
+    const lines = entry.split("\n");
+    const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && under.some((u) => path.startsWith(u)) && lines.includes(`branch refs/heads/${branch}`)) found.push(path);
+  }
+  return found;
+};
+
+/**
+ * Opens a sandbox (Sandcastle's `createSandbox`, passed as `open`) and, when the open fails, removes what it left. A
+ * start that runs out of time (a loaded machine) throws with no handle to close: the container keeps running, the
+ * worktree stays locked by the worktree hook (so Sandcastle's own clean-up of it fails) and the branch stays. Nothing
+ * has worked in it yet, so the container goes first, then the worktree's lock and the worktree - unless the guard
+ * refuses git there (`worktreeRefusal`), when it is left for `sandcastle clean` to report - and a scratch
+ * `sandcastle/*` branch with it. An `agent/*` branch stays: a ticket's run owns it, it may hold work from an earlier
+ * run, and the run's fingerprint restores a vanished one. A worktree that existed before the open (one reused for a
+ * ticket) is removed only when it holds no uncommitted file, and is locked again when git refuses. Never throws: the
+ * open's own error is the one the caller sees.
+ */
+export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>): Promise<T> => {
+  let before: string[] = [];
+  try {
+    before = worktreesOf(project, branch);
+  } catch {
+    /* the open will say what is wrong with the repository */
+  }
+  try {
+    return await open();
+  } catch (error) {
+    try {
+      for (const path of worktreesOf(project, branch)) {
+        removeSandboxContainer(path);
+        if (worktreeRefusal(project)(path)) continue;
+        const reused = before.includes(path);
+        unlockWorktree(path, project.root);
+        try {
+          sh("git", ["worktree", "remove", ...(reused ? [] : ["--force"]), path], project.root);
+        } catch {
+          if (reused) lockWorktree(path, project.root);
+          continue;
+        }
+        if (branch.startsWith("sandcastle/")) sh("git", ["branch", "-D", branch], project.root);
+      }
+    } catch {
+      /* what is left, `sandcastle clean` removes */
+    }
     throw error;
   }
 };

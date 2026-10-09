@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
-import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, protectedAmong } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -335,7 +335,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }));
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
