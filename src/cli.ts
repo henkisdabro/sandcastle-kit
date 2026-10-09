@@ -95,8 +95,11 @@
 //                    the CHANGELOG entries of every release after the one this project last
 //                    updated at (or after RELEASE), up to the kit's own: per release grouped
 //                    Added, Changed, Security, Fixed, Upgrading, each cut to its bold lead;
-//                    with no record and no --since, the current release's; read-only, no
-//                    model calls
+//                    with no record and no --since, the current release's; then, from
+//                    the kit's git tags of the two releases, the config keys, personal
+//                    settings, environment variables, commands and flags added, removed
+//                    or changed (a missing tag is said, the changelog stands alone);
+//                    read-only, no model calls
 //   clean [--all] [--accept-git-config]
 //                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
@@ -137,7 +140,7 @@ import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRu
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { changesLines, kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
+import { changesDiffLines, changesLines, kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -718,7 +721,8 @@ try {
       if (args.length !== (at === -1 ? 0 : 2) || (at !== -1 && !/^v?\d+\.\d+\.\d+$/.test(since ?? ""))) {
         throw new OperatorError("Usage: sandcastle changes [--since RELEASE] - RELEASE is a kit version such as 0.10.0.");
       }
-      for (const line of changesLines(root, KIT, since)) console.log(line);
+      const diff = changesDiffLines(root, KIT, since);
+      for (const line of [...changesLines(root, KIT, since), ...(diff.length ? [""] : []), ...diff]) console.log(line);
       break;
     }
     case "clean": {

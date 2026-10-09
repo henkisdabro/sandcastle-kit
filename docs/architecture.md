@@ -155,7 +155,7 @@ state.
 
 ## `src/upgrading.ts`
 
-Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release and the notes acted on; an older record's kit commit is read through git) against the kit's own notes, and the lines doctor and a run print. Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's, or `--since`, each cut to its bold lead; read-only) and `kitVersion`, the version doctor and `--version` print: `package.json`'s release, and in a clone past its tag, the distance and commit
+Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release and the notes acted on; an older record's kit commit is read through git) against the kit's own notes, and the lines doctor and a run print. Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's, or `--since`, each cut to its bold lead; read-only), `changesDiffLines` (its second part, between the git tags of the two releases: the README Configuration tables' keys and defaults and the help text's commands and flags, added, removed or changed; a missing tag is said and the first part stands alone) and `kitVersion`, the version doctor and `--version` print: `package.json`'s release, and in a clone past its tag, the distance and commit
 
 ## `src/herdr.ts`
 
