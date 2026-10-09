@@ -77,6 +77,13 @@ test("lint with named tickets keeps the chain among them", () => {
   assert.match(r.stdout, /hot files \(declared by 4\+ tickets\): none/);
 });
 
+test("lint with named tickets does not call a blocker queued outside them unqueued", () => {
+  const r = lint(project(), "shop-05");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /shop-05 waits for shop-01\n/);
+  assert.ok(!r.stdout.includes("not queued"), r.stdout);
+});
+
 test("lint refuses a named ticket that is closed, as a run does", () => {
   const r = lint(project(), "shop-04", "shop-06");
   assert.equal(r.status, 1);

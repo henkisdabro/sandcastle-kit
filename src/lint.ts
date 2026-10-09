@@ -86,7 +86,9 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   const twice = [...declaredBy].filter(([, by]) => by.length >= 2);
   const hard = new Set(unmergeableFiles(project.root, project.baseBranch, twice.map(([f]) => f), project.generated ?? []));
   const shared = twice.filter(([f]) => hard.has(f));
-  const problems = await blockerProblems(project, tracker, queued);
+  // Named tickets are some of the queue: a blocker queued outside them is a wait, not "not queued".
+  const inQueue = new Set([...queued.map((t) => t.id), ...(named ? tracker.queued(false).map((t) => t.id) : [])]);
+  const problems = await blockerProblems(project, tracker, queued, inQueue);
 
   // A plain path no file matches is kept by expandTouches (it may be a new file) and an empty glob is dropped: neither shows above.
   for (const t of queued) {
@@ -107,7 +109,7 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
   // A run of named tickets holds one back for any open blocker, in the set or not: the ones outside the set are not in the chain above.
   const outside: string[] = [];
   if (named) {
-    const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
+    const resolve = blockerResolver(project, tracker, inQueue);
     for (const t of queued) {
       const set = new Set(waits.get(t.id));
       const open = (await openBlockers(project, tracker, resolve, t)).filter((b) => !((b.kind === "ticket" || b.kind === "github") && (set.has(b.id) || b.id === t.id)));

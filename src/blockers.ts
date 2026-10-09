@@ -258,11 +258,12 @@ const LIST_BLOCKERS = /^(?:#+[ \t]*)?(?:blocked by|depends on):?[ \t]*\r?\n(?:[ 
  * waits for good), tickets that wait for each other, a Linear-style id the config does not
  * name (the line is ignored, so the ticket starts at once), and blockers listed under a heading
  * (not read, so the ticket starts at once). Each line says what to change.
+ * `inQueue`: the ids of the whole queue, when `queued` is only some of it (the tickets a run
+ * names), so a blocker queued outside them is not called "not queued".
  */
-export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[]): Promise<string[]> => {
-  const queuedIds = new Set(queued.map((t) => t.id));
-  const resolve = blockerResolver(project, tracker, queuedIds);
-  const whyOf = blockerWhy(project, tracker, queuedIds);
+export const blockerProblems = async (project: Project, tracker: Tracker, queued: Blocked[], inQueue = new Set(queued.map((t) => t.id))): Promise<string[]> => {
+  const resolve = blockerResolver(project, tracker, inQueue);
+  const whyOf = blockerWhy(project, tracker, inQueue);
   const lines: string[] = [];
   const waits = new Map<string, string[]>();
   for (const t of queued) {
