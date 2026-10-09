@@ -87,24 +87,26 @@ const WORKTREES = ".sandcastle/worktrees/";
  * a container that mounts a worktree under the project's `.sandcastle/worktrees/` - a ticket's, or the base
  * gates' and a landing's, which a failed open leaves running too. Another project's is never touched.
  */
-export const reapOrphans = (project: Project) => {
+export const reapOrphans = (project: Project, limitMs = DOCKER_ANSWER_MS) => {
   // Docker records a bind mount's source as it was given: either spelling.
   const root = realpathSync(project.root);
   const prefixes = [...new Set([root, project.root])].map((r) => join(r, WORKTREES));
   let ids: string[];
   try {
-    ids = sh("docker", ["ps", "-q", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
-  } catch {
+    ids = dockerOrStop(["ps", "-q", "--filter", "name=^sandcastle-"], limitMs).split("\n").filter(Boolean);
+  } catch (e) {
+    if (e instanceof OperatorError) throw e;
     return; // Docker not up: nothing of ours can be running
   }
   for (const id of ids) {
     try {
-      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      const mounts = dockerOrStop(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"], limitMs).split("\n");
       const worktree = mounts.find((m) => prefixes.some((p) => m.startsWith(p)));
       if (!worktree) continue;
-      sh("docker", ["rm", "-f", id]);
+      dockerOrStop(["rm", "-f", id], limitMs);
       console.log(`Stopped a sandbox a killed run left working: ${relative(worktree.startsWith(root) ? root : project.root, worktree)}`);
-    } catch {
+    } catch (e) {
+      if (e instanceof OperatorError) throw e; // a daemon that stopped answering: the container may still be running
       /* gone meanwhile */
     }
   }
@@ -225,8 +227,21 @@ export const stopSandboxContainer = async (worktree: string): Promise<{ id: stri
 };
 
 // The removal after a failed check runs on the failure path, where a hung daemon must not hold the run's stop.
-const dockerSync = (args: string[]) =>
-  execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT, timeout: DOCKER_ANSWER_MS, killSignal: "SIGKILL" }).trim();
+const dockerSync = (args: string[], limitMs = DOCKER_ANSWER_MS) =>
+  execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT, timeout: limitMs, killSignal: "SIGKILL" }).trim();
+
+// The reap and the removal of exited containers run at a run's start and in `clean`, with the project's run lock held:
+// a daemon that never answers would hang them there with nothing said. It is named instead, and the caller stops
+// (a container it could not ask about may still be running), where a failed answer means Docker is down or the
+// container gone.
+const dockerOrStop = (args: string[], limitMs: number) => {
+  try {
+    return dockerSync(args, limitMs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException | undefined)?.code !== "ETIMEDOUT") throw e;
+    throw new OperatorError(`docker did not answer \`docker ${args[0]}\` within ${limitMs / 1000} s - is the runtime running?`, { cause: e });
+  }
+};
 
 /**
  * Removes the container of the sandbox whose worktree is `worktree`, without Sandcastle's close: that close runs
@@ -266,28 +281,30 @@ const WORKTREE_MARK = ".sandcastle/worktrees/agent-issue-";
  * ever clean up). One that mounts another project's worktree still on disk is left alone. Returns the
  * ids removed. Call only while holding the project's run lock, like reapOrphans.
  */
-export const removeExitedSandboxes = (project: Project): string[] => {
+export const removeExitedSandboxes = (project: Project, limitMs = DOCKER_ANSWER_MS): string[] => {
   const root = realpathSync(project.root);
   const prefixes = [...new Set([root, project.root])].map((r) => join(r, WORKTREE_MARK));
   let ids: string[];
   try {
-    ids = sh("docker", ["ps", "-aq", "--filter", "status=exited", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
-  } catch {
+    ids = dockerOrStop(["ps", "-aq", "--filter", "status=exited", "--filter", "name=^sandcastle-"], limitMs).split("\n").filter(Boolean);
+  } catch (e) {
+    if (e instanceof OperatorError) throw e;
     return []; // Docker not up: nothing to remove
   }
   const removed: string[] = [];
   for (const id of ids) {
     try {
-      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      const mounts = dockerOrStop(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"], limitMs).split("\n");
       // The worktree is the mount's path up to its `agent-issue-<n>` directory, which is what may be gone.
       const worktrees = mounts.filter((m) => m.includes(WORKTREE_MARK)).map((m) => {
         const end = m.indexOf("/", m.indexOf(WORKTREE_MARK) + WORKTREE_MARK.length);
         return end === -1 ? m : m.slice(0, end);
       });
       if (!worktrees.some((w) => prefixes.some((p) => w.startsWith(p)) || !existsSync(w))) continue;
-      sh("docker", ["rm", id]);
+      dockerOrStop(["rm", id], limitMs);
       removed.push(id);
-    } catch {
+    } catch (e) {
+      if (e instanceof OperatorError) throw e;
       /* gone meanwhile */
     }
   }
