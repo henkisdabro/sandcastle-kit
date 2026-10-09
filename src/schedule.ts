@@ -494,10 +494,16 @@ export const createLanding = <G extends Green>(
 };
 
 /** What a ticket's first attempt collided with, at landing or in its pipeline: its second attempt carries it. */
-export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[] };
+export type Again = { kind: "conflict" | "red"; with: string[]; gates?: string[]; failing?: string[]; found?: ConflictFound };
 
-/** A branch that no longer merges onto the base: the files git could not merge, and the landed tickets that changed them. */
-export type Conflict = { files: string[]; with: string[] };
+/** Where a conflict was found: by the merge check before the ticket's review or before its gates, or when landing it. */
+export type ConflictFound = "review" | "gates" | "landing";
+
+/**
+ * A branch that no longer merges onto the base: the files git could not merge, and the landed tickets that changed them.
+ * `found`: the pipeline's check that saw it (a landing's conflict is `landing`, which the scheduler says itself).
+ */
+export type Conflict = { files: string[]; with: string[]; found?: "review" | "gates" };
 
 /** The tracker took the ticket back (closed, unqueued, marked for a human) before an attempt began. */
 export type Withdrawn = { kind: "withdrawn"; reason: string };
@@ -1173,7 +1179,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         // A second conflict is final, unless a landing that finished after the resolve began caused it: the
         // resolve could not have merged that one, so it is no fault of the resolve and the ticket is sent back again.
         if (first.has(t.id) && !(met.kind === "conflict" && met.with.some((id) => (landedAt.get(id) ?? 0) > (resolveFrom.get(t.id) ?? Infinity)))) return false;
-        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with };
+        // Where it was found: a pipeline's conflict says which check (`Conflict.found`), a landing's is the landing.
+        const found = "conflict" in back ? back.conflict.found : "landing";
+        const again: Again = met.kind === "red" ? { kind: "red", with: met.with, gates: met.gates, ...(met.failing && { failing: met.failing }) } : { kind: "conflict", with: met.with, ...(found && { found }) };
         first.set(t.id, again);
         if (met.kind === "conflict") conflicted.set(t.id, met.files);
         sentBack.set(t.id, back);

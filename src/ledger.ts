@@ -474,7 +474,7 @@ export const createLedger = (d: {
   // The run's last words, once the schedule is over: until then a ticket it left unstarted has none.
   let last: { stopLine?: string } | undefined;
   const requeued = (id: string, again: Again) => {
-    const line = requeuedLine(again.kind, again.with, again);
+    const line = requeuedLine(again.kind, again.with, again, again.found);
     sentBack.set(id, line);
     requeuedAs.set(id, line);
     d.bookkeep(id, () => d.run.ticket(id, { state: "queued", note: line, requeued: line }));
