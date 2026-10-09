@@ -721,7 +721,7 @@ export type FollowUpBook = {
   file(unsafe?: string): Promise<FiledFollowUp[]>;
   /** What is named already from one ticket, for its agents' prompts: earlier runs' filings, then this run's lines (`alreadyNamedView`). */
   namedFrom(from: string): NamedFollowUp[];
-  /** What this run's passes named from every ticket but one, for that ticket's agents' prompts (`alreadyNamedView`). Earlier runs' filings are left out: they are another run's. */
+  /** What this run's passes named from every ticket but one, for that ticket's agents' prompts (`runTicketsView`). Earlier runs' filings are left out: they are another run's. */
   namedByOthers(from: string): NamedFollowUp[];
 };
 /** A follow-up named from a ticket already: `id` is the issue it was filed as, absent while this run has yet to file it; `phase` the pass of this run that named it; `from` the ticket whose agent named it, in `namedByOthers`. */
@@ -1185,7 +1185,7 @@ export type PipelineContext = {
   notes: Note[];
   /** Where the `<followup>` lines of every agent pass go as the pass ends: the run's book (`createFollowUpBook`), which records and later files them. A pipeline given none keeps none. */
   followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
-  /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`alreadyNamedView`). None, and it is shown none. */
+  /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`runTicketsView`). None, and it is shown none. */
   tickets?: readonly { id: string; title: string }[];
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
