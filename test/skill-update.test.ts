@@ -45,6 +45,9 @@ test("What's new has the three tiers, in order, each by its name", () => {
 test("must act is the Upgrading notes, read in full", () => {
   const text = flat(step(2));
   assert.match(text, /\*\*Must act\.\*\* The \*\*Upgrading\*\* notes, in full/);
+  // Both commands print a note cut to its bold lead, which drops what the project has to do.
+  const mustAct = text.slice(text.indexOf("**Must act.**"), text.indexOf("**Decisions.**"));
+  assert.match(mustAct, /the kit's `CHANGELOG\.md`/, "must act says where a note's full text is");
 });
 
 test("decisions are asked one by one with a recommendation and never applied unasked", () => {

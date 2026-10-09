@@ -37,8 +37,9 @@ apply it once the user agrees.
    <release>`. `sandcastle doctor` also lists the **Upgrading** notes the project has not had.
    Sort the entries into three tiers and tell the user in this order, leaving out a tier with
    nothing in it:
-   1. **Must act.** The **Upgrading** notes, in full: they name what an existing project has to do.
-      The steps below carry them out, each as a proposal.
+   1. **Must act.** The **Upgrading** notes, in full from the kit's `CHANGELOG.md` (`sandcastle
+      changes` and doctor print only each note's bold lead): they name what an existing project
+      has to do. The steps below carry them out, each as a proposal.
    2. **Decisions.** A new setting, or a new default that changes what a run does or spends, that
       the user may want to change (an `Added` or `Changed` entry; the Upgrading notes name some).
       Ask about them one by one, each with a recommendation and why, through the harness's question
