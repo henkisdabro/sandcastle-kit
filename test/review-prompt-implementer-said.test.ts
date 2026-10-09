@@ -1,10 +1,10 @@
-// With `changelog: true` the full review's prompt shows the implementer's changelog lines, as it shows the
-// implementer's unmet line, so the reviewer keeps the ones that hold and corrects or adds the rest: full
-// reviewers wrote that they could not see the lines and restated the whole set from the diff. A narrow
-// review never sees them. The pipeline (`createPipeline`, src/burndown.ts) runs over a temp repo with a
-// scripted agent, on the prompts `renderPrompts` really writes. No Docker, model, gh or network.
+// The full review's prompt quotes the last paragraph of the implementer's final message, so a caveat there
+// ("I did not check that the new test fails without the change") reaches the reviewer, who would otherwise
+// take the tests' word for it. A narrow review is not shown it. The pipeline (`createPipeline`,
+// src/burndown.ts) runs over a temp repo with a scripted agent, on the prompts `renderPrompts` really
+// writes. No Docker, model, gh or network.
 //
-//   pnpm test:file test/review-prompt-changelog.test.ts
+//   pnpm test:file test/review-prompt-implementer-said.test.ts
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -19,15 +19,15 @@ process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 // The merges pass process.env through to git, so an exported identity would win over config.
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
-const { createPipeline } = await import("../src/burndown.ts");
-const { implChangelogView, renderPrompts } = await import("../src/run.ts");
+const { createPipeline, closingParagraphOf, implSaidView } = await import("../src/burndown.ts");
+const { readHeads, renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
 const { fakeTracker } = await import("./fixtures.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
 type Box = import("../src/burndown.ts").PipelineBox;
 type GateRun = import("../src/gates.ts").GateRun;
 
-const TMP = mkdtempSync(join(tmpdir(), "sandcastle-review-changelog-"));
+const TMP = mkdtempSync(join(tmpdir(), "sandcastle-review-said-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 let n = 0;
 
@@ -47,14 +47,15 @@ const RED: GateRun = (() => {
   return { gates: [{ name: "test", pass: false }], failure, failures: [failure] };
 })();
 
-const tag = (...lines: string[]) => lines.map((l) => `<changelog>${l}</changelog>`).join("\n");
+const CAVEAT = "I did not check that the wait tests fail without their changes.";
+const MESSAGE = `Added the wait report.\n\nChanged src/wait.ts and test/wait.test.ts.\n\n${CAVEAT}\n\n<unmet>Nothing is left.</unmet>\n<changelog>Added: the wait is reported.</changelog>\n<promise>COMPLETE</promise>`;
 
 /** What Sandcastle makes of a prompt file and the arguments a pass gave it: each `{{NAME}}` replaced in one pass. */
 const filled = (promptFile: string, args: Record<string, string>) =>
   readFileSync(promptFile, "utf8").replace(/\{\{(\w+)\}\}/g, (whole, key: string) => args[key] ?? whole);
 
 /** A project in a temp repo whose prompts are the kit's own, and a pipeline over it with every port faked. */
-const harness = (opts: { changelog: boolean } = { changelog: true }) => {
+const harness = () => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -65,7 +66,7 @@ const harness = (opts: { changelog: boolean } = { changelog: true }) => {
 
   const project = {
     root, name: "fixture", label: "ready-for-agent", baseBranch: "main", gates: [{ name: "test", command: "run-tests" }],
-    generated: [], setup: [], implement: {}, review: {}, repair: {}, tracker: fakeTracker(), changelog: opts.changelog,
+    generated: [], setup: [], implement: {}, review: {}, repair: {}, tracker: fakeTracker(), changelog: true,
   };
   const prompts = renderPrompts(project as unknown as Parameters<typeof renderPrompts>[0], makeTracker(project as unknown as Parameters<typeof makeTracker>[0]));
 
@@ -99,7 +100,7 @@ const harness = (opts: { changelog: boolean } = { changelog: true }) => {
   const pipeline = createPipeline({
     project: project as unknown as Ctx["project"],
     tracker: { ref: (id: string) => `#${id}`, agentsWrite: true, promptArgs: () => ({}), reopenedSince: () => false } as unknown as Ctx["tracker"],
-    runId: "2026-10-05T00:00:00.000Z",
+    runId: "2026-10-09T00:00:00.000Z",
     dryRun: false,
     repair: 1,
     testRedGate: false,
@@ -127,7 +128,7 @@ const harness = (opts: { changelog: boolean } = { changelog: true }) => {
     tampered: new Map(),
   });
   const attempt = () => quietly(() => pipeline(ISSUE));
-  return { prompts, passes, agents, gates, attempt };
+  return { root, prompts, passes, agents, gates, attempt };
 };
 
 /** An implementer that commits a file, saying `say`. */
@@ -136,38 +137,34 @@ const implementing = (say: string) => (wt: string) => {
   return say;
 };
 
-test("the full review's prompt quotes the implementer's changelog lines, in order", async () => {
+test("the full review's rendered prompt quotes the implementer's closing paragraph, without its tags", async () => {
   const h = harness();
-  const lines = ["Added: `sandcastle size` recommends the pool's limits.", "Fixed: a report no longer drops its last section."];
-  h.agents.impl = implementing(tag(...lines));
+  h.agents.impl = implementing(MESSAGE);
   h.gates.push(GREEN);
   await h.attempt();
   const review = h.passes.find((p) => p.name === `review-${ID}`);
   assert.ok(review, "the full review ran");
   const prompt = filled(review.promptFile, review.args);
-  const first = prompt.indexOf(`> ${lines[0]}`);
-  const second = prompt.indexOf(`> ${lines[1]}`);
-  assert.ok(first > 0 && second > first, `both lines are quoted in order:\n${prompt.slice(prompt.indexOf("Changelog lines"))}`);
-  assert.doesNotMatch(prompt, /\{\{IMPL_CHANGELOG\}\}/);
+  assert.ok(prompt.includes(`> ${CAVEAT}`), `the caveat is quoted:\n${prompt.slice(prompt.indexOf("What the implementer said"))}`);
+  assert.doesNotMatch(prompt, /\{\{IMPL_SAID\}\}/);
+  assert.ok(!prompt.includes("> Changed src/wait.ts"), "only the last paragraph is passed on");
+  assert.doesNotMatch(prompt, /^> .*<(promise|unmet|changelog)>/m, "the kit's own tags are not part of the quote");
 });
 
-test("the full review's prompt quotes nothing when the implementer gave no changelog line", async () => {
+test("a review of an implementer that said nothing in prose gets an empty IMPL_SAID", async () => {
   const h = harness();
-  h.agents.impl = implementing("<changelog>...</changelog>");
+  h.agents.impl = implementing("<promise>COMPLETE</promise>");
   h.gates.push(GREEN);
   await h.attempt();
   const review = h.passes.find((p) => p.name === `review-${ID}`);
   assert.ok(review, "the full review ran");
-  assert.equal(review.args.IMPL_CHANGELOG, "");
-  const prompt = filled(review.promptFile, review.args);
-  assert.doesNotMatch(prompt, /^> /m, "no quote");
-  assert.doesNotMatch(prompt, /\{\{IMPL_CHANGELOG\}\}/);
-  assert.match(prompt, /none quoted means it gave none/, "the reviewer is told that an empty quote is no line given");
+  assert.equal(review.args.IMPL_SAID, "");
+  assert.doesNotMatch(filled(review.promptFile, review.args), /What the implementer said last/);
 });
 
-test("the review after a repair is narrow and is not shown the implementer's lines", async () => {
+test("the review after a repair is narrow and is not shown the closing paragraph, and the head record keeps it", async () => {
   const h = harness();
-  h.agents.impl = implementing(tag("Fixed: the implementer's own line."));
+  h.agents.impl = implementing(MESSAGE);
   h.agents.repair = (wt) => {
     commit(wt, "fix.txt", "fix\n");
     return "";
@@ -176,20 +173,22 @@ test("the review after a repair is narrow and is not shown the implementer's lin
   await h.attempt();
   const reviews = h.passes.filter((p) => p.name === `review-${ID}`);
   assert.equal(reviews.length, 2, "a full review and the review after the repair");
-  assert.match(reviews[0].args.IMPL_CHANGELOG, /the implementer's own line/);
-  assert.ok(!("IMPL_CHANGELOG" in reviews[1].args), "the narrow prompt has no place for it");
-  assert.doesNotMatch(filled(reviews[1].promptFile, reviews[1].args), /the implementer's own line/);
+  assert.match(reviews[0].args.IMPL_SAID, /did not check/);
+  assert.ok(!("IMPL_SAID" in reviews[1].args) || reviews[1].args.IMPL_SAID === "", "the narrow review is shown nothing of it");
+  assert.doesNotMatch(filled(reviews[1].promptFile, reviews[1].args), /did not check/);
+  assert.equal(readHeads(h.root)[ID]?.implSaid, CAVEAT, "land-only and requeued attempts still have it");
 });
 
-test("a project that did not ask for changelog lines has no placeholder in any prompt", () => {
-  const h = harness({ changelog: false });
-  for (const kind of ["implement", "review", "repair", "rereview", "remerge", "resolve"] as const) {
-    assert.doesNotMatch(readFileSync(h.prompts[kind], "utf8"), /IMPL_CHANGELOG|Changelog lines/, kind);
-  }
+test("closingParagraphOf takes the last prose paragraph, past tags and fenced blocks", () => {
+  assert.equal(closingParagraphOf(MESSAGE), CAVEAT);
+  assert.equal(closingParagraphOf("First.\n\nSecond line one\nsecond line two.\n\n```\ncode\n```\n<promise>COMPLETE</promise>"), "Second line one\nsecond line two.");
+  assert.equal(closingParagraphOf("<unmet>Left.</unmet>\n<promise>COMPLETE</promise>"), undefined);
+  assert.equal(closingParagraphOf(""), undefined);
 });
 
-test("implChangelogView is empty with no lines, and quotes each line with some", () => {
-  assert.equal(implChangelogView([]), "");
-  const view = implChangelogView(["Added: one.", "Fixed: two."]);
-  assert.match(view, /^> Added: one\.\n> Fixed: two\.\n\n$/);
+test("implSaidView is empty with no paragraph, and quotes every line of one", () => {
+  assert.equal(implSaidView(undefined), "");
+  const view = implSaidView("Line one.\nLine two.");
+  assert.match(view, /> Line one\.\n> Line two\.\n\n$/);
+  assert.match(view, /make that check yourself/);
 });

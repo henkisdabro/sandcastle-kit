@@ -151,7 +151,7 @@ not edit, a decision), open the line as `<unmet who="person">...</unmet>` instea
 picked up again by the next run, which would spend an agent on work only a person can do.
 
 **A problem, limitation, risk or trade-off you judge outside the ticket** does not stay in the prose of
-your final message, which no reviewer and no tracker reads. Put each one on a line of its own:
+your final message: the tracker does not read it, and the reviewer is shown only its last paragraph. Put each one on a line of its own:
 
 <followup>title - one line of evidence</followup>
 
