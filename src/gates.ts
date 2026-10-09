@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
-import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
+import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
 import { execGate, GATE_TIMEOUT_SECONDS, unlockWorktree } from "./worktree-lock.ts";
@@ -30,9 +30,10 @@ type Failure = { name: string; command: string; exitCode: number; output: string
 // `waitMs`: how long the run waited for a machine-wide gates slot before its first gate started; a base run
 // (`gateBase`) adds its wait for a machine-wide sandbox slot.
 // `peakMib`: the sandbox's peak memory so far, read after the pass (src/peaks.ts); absent where the kernel gives none.
+// `pressureSome`, `pressureFull`: the highest memory pressure (`avg10`, percent) read in the sandbox while this pass ran; absent at 0 or where the kernel gives none.
 // `head`: the commit a base run (`gateBase`) gated, read in its sandbox: the base's name can move between asking and gating.
 // `rewrote`: the tracked files the gates changed in the worktree, which were put back.
-export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; head?: string; rewrote?: string[] };
+export type GateRun = { gates: Gate[]; failure?: Failure; failures: Failure[]; waitMs?: number; peakMib?: number; pressureSome?: number; pressureFull?: number; head?: string; rewrote?: string[] };
 
 // Start and end of a gate's output: the first compiler error is at the top,
 // the test summary at the bottom, and a whole log would swamp the prompt.
@@ -129,6 +130,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
     if (log && waitMs >= 1000) appendFileSync(log, `# waited ${Math.round(waitMs / 1000)}s for a gates slot\n`);
     const before = await dirtyPaths(sandbox);
     // The sandbox's anonymous memory while the gates run (src/peaks.ts): after them, the test workers are gone.
+    const pressure: Pressure = {};
     await sampling(sandbox, "gate", async () => {
       for (const [i, g] of project.gates.entries()) {
         if (i < start) continue;
@@ -158,10 +160,10 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // its own timeout too.
         if (!all || r.exitCode === 124) break;
       }
-    });
+    }, pressure);
     const peakMib = await samplePeak(sandbox);
     const rewrote = await restoreGateChanges(sandbox, before);
-    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...(rewrote.length ? { rewrote } : {}) };
+    return { gates, failure: failures[0], failures, waitMs, ...(peakMib !== undefined ? { peakMib } : {}), ...pressureFields(pressure), ...(rewrote.length ? { rewrote } : {}) };
   }, progress.wait, undefined, priority);
 };
 
@@ -590,11 +592,13 @@ export const timedLandingGate = async <T>(
     const red = done ? gateRed(result) : undefined;
     const gateTimes = done ? gateMs(result) : undefined;
     const peakMib = done ? peakOf(result) : undefined;
+    const pressure = done ? pressureFields(pressureOf(result)) : {};
     const line = {
       ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING_GATES, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
+      ...pressure,
       ...(red?.length ? { red } : {}),
     };
     appendFileSync(timings, JSON.stringify(line) + "\n");
@@ -909,8 +913,8 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     redHooks.map((t) => `===== hook test ${t.name}\n${t.detail}\n`).join("\n") + (gitHook ? `===== git hook ${gitHook.name}\n${gitHook.output}\n` : ""),
   );
   // For the run's "base gates" timings line, as verify's carries them: per-gate times, the slot wait
-  // (out of `ms`) and the sandbox's peak.
-  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}) };
+  // (out of `ms`) and the sandbox's peak and memory pressure.
+  if (green) return { gates: run.gates, waitMs: run.waitMs, ...(run.peakMib !== undefined ? { peakMib: run.peakMib } : {}), ...pressureFields(pressureOf(run)) };
   for (const f of run.failures) {
     console.log(`\n--- ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
   }

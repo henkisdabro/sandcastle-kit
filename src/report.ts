@@ -19,6 +19,7 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
+import { PRESSURE_WARN_FULL } from "./peaks.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
@@ -49,6 +50,8 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
+  /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
+  pressure?: { some: number; full: number; where: string };
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
@@ -283,6 +286,30 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
   return total ? { total, byModel } : undefined;
 };
 
+/**
+ * One run's highest memory pressure from timings.jsonl text: the largest `full` and `some` of any line of the run (a
+ * gate pass's, src/peaks.ts), and where the largest `full` was read (`ticket 12's gates`, or the step's name).
+ */
+export const pressureFromTimings = (text: string, runId: string): { some: number; full: number; where: string } | undefined => {
+  let found: { some: number; full: number; where: string } | undefined;
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; pressureSome?: unknown; pressureFull?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId) continue;
+    const some = typeof line.pressureSome === "number" && line.pressureSome > 0 ? line.pressureSome : 0;
+    const full = typeof line.pressureFull === "number" && line.pressureFull > 0 ? line.pressureFull : 0;
+    if (!some && !full) continue;
+    const phase = typeof line.phase === "string" ? line.phase : "a pass";
+    const where = typeof line.issue === "string" || typeof line.issue === "number" ? (line.issue === "" ? phase : `ticket ${line.issue}'s ${phase}`) : phase;
+    found = { some: Math.max(found?.some ?? 0, some), full: Math.max(found?.full ?? 0, full), where: !found || full > found.full ? where : found.where };
+  }
+  return found;
+};
+
 /** The phases of a ticket's timings lines that are a pass of it: its sandbox's setup is not one. */
 export const PASS_PHASES = ["implement", "resolve", "review", "cross-review", "gates", "repair", LANDING_GATES] as const;
 
@@ -447,7 +474,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
-  const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
+  const timingsText = !earlier && existsSync(timingsFile) ? readFileSync(timingsFile, "utf8") : undefined;
+  const timed = timingsText ? tokensFromTimings(timingsText, run.startedAt) : undefined;
+  const pressure = timingsText ? pressureFromTimings(timingsText, run.startedAt) : undefined;
 
   return {
     base,
@@ -461,6 +490,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     tokens: run.tokens,
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
+    ...(pressure ? { pressure } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -994,6 +1024,9 @@ export const render = (f: Facts, plain = false): string => {
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
         : `Merged ${f.base} re-gated: ${sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
+  if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
+    out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
+  }
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;

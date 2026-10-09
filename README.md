@@ -1725,6 +1725,13 @@ and a hash of the project root: no path and no project name. A ticket's sandbox 
 records `agentMib`, its peak read just before its first gate pass (the peak cannot be reset, so after
 a gate it is the gate's), and `agentAnonMib`, the anonymous memory read while its agents worked; a
 line without them is a gate peak only.
+Memory pressure is read in the same 10-second loop: the sandbox's own cgroup `memory.pressure` (PSI),
+`some` and `full` `avg10` (the percent of the last 10 seconds its tasks stalled on memory, `full` being all
+of them at once). The highest goes onto each gate pass's `timings.jsonl` line (`pressureSome`,
+`pressureFull`) and onto the sandbox's `peaks.jsonl` line, where it was above 0; a kernel with no PSI
+records nothing. `size` shows the highest of the runs it rests on and, at 5% `full` or more, says the VM
+was short of memory at that pool size; a run's closing summary has a `Memory pressure` line under the same
+condition. It is a warning only: `size` does not yet lower its recommendation for it.
 `size` takes the project whose peak figure (priced as below) is highest over its last 5 measured runs,
 of the projects measured in the last 30 days, and prices each figure at the 90th percentile of that project's samples
 over those runs (every sandbox's line is one sample; with fewer than 5 samples the highest is used),
