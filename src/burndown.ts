@@ -49,7 +49,7 @@ import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownComm
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
-import { closingReport, summary, verifySkippedLine } from "./report.ts";
+import { closingReport, summary } from "./report.ts";
 import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
@@ -3238,8 +3238,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // failed note: then it runs).
     verifySkipped = verifyDue.skipped;
     let gated: { gates: Gate[]; failures: GateRun["failures"] } = { gates: [], failures: [] };
-    if (verifySkipped) console.log(`${verifySkippedLine(base, verifySkipped)}.`);
-    else {
+    // The skip is said once, in the closing summary.
+    if (!verifySkipped) {
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
       gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when))).finally(() => setDemand(0));
