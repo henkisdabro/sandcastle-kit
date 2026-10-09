@@ -387,7 +387,7 @@ const gitHooksDir = (root: string) => localHooksPath(root) ?? (existsSync(join(r
 
 /**
  * The project's `core.hooksPath` when it cannot name a directory of the sandbox's worktree: an absolute host path
- * (`/Users/...`, `C:\...`, `~/...`) does not exist in the container, and a relative one that climbs out of the
+ * (a macOS or Windows home, `~/...`) does not exist in the container, and a relative one that climbs out of the
  * worktree leaves it. Git then finds no hooks and every agent commit runs none, with no error to say so.
  */
 export const hooksPathOutside = (root: string): string | undefined => {
