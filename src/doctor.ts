@@ -12,7 +12,9 @@ import { CONFIG_PATH, loadProject, MountRefused, type Project } from "./config.t
 import { OperatorError } from "./errors.ts";
 import { clickHintLine, herdrSettingProblem, resolveClickHint } from "./click-hint.ts";
 import { askRuleLines, hooksPathLines, hooksPathOutside } from "./lean.ts";
-import { pluginState } from "./herdr-plugin.ts";
+import { liveRuns, pluginState } from "./herdr-plugin.ts";
+import type { Probe } from "../mod/hooks/run-live.ts";
+import { RUNS_DIR, tabAwaitsReport } from "./live-runs.ts";
 import { SANDCASTLE_IGNORES } from "./init.ts";
 import { detectFromDocs } from "./tracker.ts";
 import { limit } from "./pool.ts";
@@ -307,6 +309,22 @@ export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot
  * `pointToSize` is false for `sandcastle setup`, which runs doctor and prints the pointer itself
  * after it, so the line is not said twice.
  */
+/**
+ * The warn block for the runs live on this machine, or none: a run keeps its code loaded but reads
+ * `prompts/` as each ticket starts, `container/` as each sandbox opens and `status.sh` as the view
+ * redraws, so a pull of the kit under it changes what its later tickets get. A run that ended with
+ * its Herdr tab still to be told is parked for the plugin, as the tab bar does, never dropped.
+ */
+export const liveRunLines = (dir = RUNS_DIR, probe?: Probe): string[] => {
+  const runs = liveRuns(dir, probe, tabAwaitsReport);
+  if (!runs.length) return [];
+  return [
+    `warn ${runs.length} sandcastle run${runs.length === 1 ? " is" : "s are"} live on this machine, and a live run reads the kit's \`prompts/\`, \`container/\` and \`status.sh\` from disk`,
+    "       -> Wait for them to finish before pulling the kit (`sandcastle wait` in each project): a pull changes what their later tickets are built from.",
+    ...runs.map((r) => `       - ${r.root}${r.pid ? ` (pid ${r.pid})` : ""}`),
+  ];
+};
+
 export const doctor = async (repoRoot?: string, verify = false, pointToSize = true) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {
@@ -569,6 +587,7 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   for (const line of poolWarns) console.log(`warn ${line}`);
   const pointer = pointToSize && !poolWarns.length ? sizePointerNow() : undefined;
   if (pointer) console.log(`info ${pointer}`);
+  for (const line of liveRunLines()) console.log(line);
   check(process.env.HERDR_ENV === "1", "Herdr (optional: opens the status pane automatically)", "Without it, run `sandcastle status` in a second terminal.", true);
   if (process.env.HERDR_ENV === "1") {
     const plugin = pluginState();

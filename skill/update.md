@@ -5,7 +5,12 @@ was set up with. Every change to the project or the user's machine is a **propos
 apply it once the user agrees.
 
 1. **The kit.** Its location is doctor's first line. If `git -C <kit> status --porcelain` shows
-   local changes, stop and tell the user - never discard them. Otherwise
+   local changes, stop and tell the user - never discard them. Then run `sandcastle doctor` and
+   look for its `warn  N sandcastle run(s) live on this machine` block before pulling: a live run
+   keeps its code loaded but reads the kit's `prompts/`, `container/` and `status.sh` from disk, so
+   a pull changes what its later tickets are built from. If it lists runs, ask the user to wait for
+   them (`sandcastle wait` in each project) or to confirm the pull anyway, and go no further until
+   they answer. Otherwise
    `git -C <kit> pull --ff-only && pnpm -C <kit> install`, then `sandcastle doctor`. This skill is
    a link into the kit, so the pull may have changed it: re-read SKILL.md and this file before going on.
    - If `sandcastle` stops with `cannot run the kit's TypeScript`, the user's Node is older than
