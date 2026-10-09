@@ -39,6 +39,8 @@ test("a wait behind its own run's earlier wait prints nothing while a slot is fr
   setHeld("beta", 5);
   const second = ticket("second");
   assert.ok(!first.taken);
+  // A wait's first look runs in the tick it begins: with the slot still free, it said nothing.
+  assert.ok(!lines().some((l) => l.includes("second:")), lines().join("\n"));
   await until(() => first.taken, "the first wait to take the free slot");
   assert.ok(lines().every((l) => !l.includes("second:") || !l.includes("earlier wait")), "the queue order is never the reason");
   await until(() => lines().some((l) => l.includes("second:")), "the second wait's line");
