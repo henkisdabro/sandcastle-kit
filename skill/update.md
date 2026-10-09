@@ -158,8 +158,10 @@ apply it once the user agrees.
        joined, that runs `claude` or `codex` (a plugin install, a login, a version check). It
        finds neither, and `sandcastle build` fails at that step with `not found`. For each, propose
        moving the command to an entry of `setup` in `.sandcastle/config.ts`, which runs in the
-       finished image before the agents, or dropping it when it only checked a version. Then
-       `sandcastle build` and `sandcastle gates`.
+       finished image before the agents, or dropping it when it only checked a version. The base
+       no longer puts `~/.local/bin` on `PATH` either: a `RUN` step that calls a tool an earlier
+       step installed there (`uv`, `pipx`) by its bare name fails the same way; propose its full
+       path, `/home/agent/.local/bin/<tool>`. Then `sandcastle build` and `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: kit version before and after, what changed

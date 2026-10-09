@@ -819,11 +819,13 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       }
 
       // A release moves the agents' tag and leaves the parent's: this is the one image it rebuilds per project,
-      // and a copy layer takes seconds.
+      // and a copy layer takes seconds. The tag hashes the whole text, which names both tags: hashing only
+      // those, a kit that changed what this step copies or sets kept every project on the image without it.
       const repo = `${projectRepo(project)}-run`;
-      const tag = `${repo}:${hash(parent, agents.tag)}`;
+      const finalFile = finalDockerfile(parent, agents.tag, ids);
+      const tag = `${repo}:${hash(finalFile)}`;
       if (force || !imageExists(tag)) {
-        await build(tag, finalDockerfile(parent, agents.tag, ids), {}, false, "This step copies Claude Code and Codex onto the project's image; `sandcastle build --force` builds every image again.");
+        await build(tag, finalFile, {}, false, "This step copies Claude Code and Codex onto the project's image; `sandcastle build --force` builds every image again.");
         prune(repo, tag);
       }
       noteUse(tag);

@@ -1403,7 +1403,8 @@ start lines and `sandcastle build` print `Claude Code <version> (<channel>) · C
   days old.
 - **In a project's layer**: Claude Code and Codex are copied in after the layer, so a `RUN` step of
   the layer that calls `claude` or `codex` finds neither. Move that work to a `setup` command, which
-  runs in the finished image.
+  runs in the finished image. `~/.local/bin` is on `PATH` only in that finished image too: a layer
+  step that runs a tool an earlier step installed there names its full path.
 
 ## 🪶 Lean sandboxes and hooks
 

@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -165,6 +166,14 @@ test("the final image copies both CLIs from where the agents Dockerfile puts the
   assert.ok(copies.some((c) => c.includes(` --chown=${ids} /home/agent/.local /home/agent/.local`)), copies.join("\n"));
   assert.ok(lines.includes(`USER ${ids}`));
   assert.ok(lines.includes('ENV PATH="/home/agent/.local/bin:$PATH"'));
+});
+
+test("the final image's tag follows the whole Dockerfile it is built from, so a kit that changes what it copies or sets builds it again", () => {
+  const m = machine();
+  const tag = build(m, project(true), "1.0.0");
+  // Hashing only the two tags it names, a changed copy step kept every project on the image without it.
+  const text = dockerfileOf(m, tag);
+  assert.equal(tag, `sandcastle-one-run:${createHash("sha256").update(text).digest("hex").slice(0, 12)}`);
 });
 
 test("--force builds all four images again", () => {
