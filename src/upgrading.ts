@@ -175,3 +175,108 @@ export const changesLines = (root: string, kit = KIT, since?: string): string[] 
   }
   return lines;
 };
+
+const showAt = (kit: string, tag: string, file: string): string | undefined => {
+  const r = spawnSync("git", ["-C", kit, "show", `${tag}:${file}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 25 });
+  return r.status === 0 ? r.stdout : undefined;
+};
+
+const tagExists = (kit: string, tag: string) => git(kit, ["rev-parse", "-q", "--verify", `refs/tags/${tag}^{commit}`]) !== undefined;
+
+/** A table row's cells; a `\|` inside a cell stays in it. */
+const cells = (row: string) =>
+  row.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").replace(/\s+/g, " ").trim());
+
+type Surface = { config: Map<string, string>; personal: Map<string, string>; env: Map<string, string>; commands: Map<string, Set<string>> };
+
+/**
+ * The README Configuration section's tables, by their first header cell: `Field` (project config
+ * keys), `Key` (personal settings) and `Variable` (environment variables), each name -> its default.
+ * A row naming several (`` `a` / `b` ``, `` `A`, `B` ``) gives each its own entry, with the same default.
+ */
+const readmeTables = (readme: string): Pick<Surface, "config" | "personal" | "env"> => {
+  const out = { config: new Map<string, string>(), personal: new Map<string, string>(), env: new Map<string, string>() };
+  let inside = false;
+  let into: Map<string, string> | undefined;
+  for (const line of readme.split("\n")) {
+    if (line.startsWith("## ")) inside = /^## .*Configuration\s*$/.test(line);
+    if (!inside || !line.trimStart().startsWith("|")) {
+      into = undefined;
+      continue;
+    }
+    const row = cells(line);
+    if (/^-+$/.test(row[0]!.replace(/[:\s]/g, "")) || !row[0]) continue;
+    if (row[0] === "Field") into = out.config;
+    else if (row[0] === "Key") into = out.personal;
+    else if (row[0] === "Variable") into = out.env;
+    else if (into) {
+      // `NAME=value` and `a`, `b` or `c` name one variable with its values: only a name in capitals is one.
+      for (const m of row[0].matchAll(/`([^`]+)`/g)) {
+        const name = into === out.env ? m[1]!.replace(/=.*$/, "") : m[1]!;
+        if (into !== out.env || /^[A-Z][A-Z0-9_]*$/.test(name)) into.set(name, row[1] ?? "");
+      }
+    }
+  }
+  return out;
+};
+
+/** The help text's commands (the header comment of `src/cli.ts`), each with the `--flags` its entry names. */
+const helpCommands = (cli: string): Map<string, Set<string>> => {
+  const commands = new Map<string, Set<string>>();
+  let current: Set<string> | undefined;
+  for (const line of cli.split("\n")) {
+    if (!line.startsWith("//")) break;
+    const entry = line.match(/^\/\/ {3}([a-z][a-z-]*)(?:\s|$)/);
+    if (entry) commands.set(entry[1]!, (current = new Set()));
+    else if (!/^\/\/ {4,}\S/.test(line)) current = undefined;
+    if (current) for (const f of line.matchAll(/(?<![\w-])--[a-z][a-z-]*/g)) current.add(f[0]);
+  }
+  return commands;
+};
+
+const surfaceAt = (kit: string, tag: string): Surface => ({
+  ...readmeTables(showAt(kit, tag, "README.md") ?? ""),
+  commands: helpCommands(showAt(kit, tag, "src/cli.ts") ?? ""),
+});
+
+const compareMaps = (was: Map<string, string>, now: Map<string, string>): string[] => [
+  ...[...now].filter(([k]) => !was.has(k)).map(([k, v]) => `- added \`${k}\` (default: ${v || "none"})`),
+  ...[...now].filter(([k, v]) => was.has(k) && was.get(k) !== v).map(([k, v]) => `- changed \`${k}\` default: ${was.get(k) || "none"} -> ${v || "none"}`),
+  ...[...was.keys()].filter((k) => !now.has(k)).map((k) => `- removed \`${k}\``),
+];
+
+/**
+ * `sandcastle changes`, second part: what the changelog's prose can bury. Between the git tags of the
+ * release counted from and the kit's own, the README Configuration section's config keys, personal
+ * settings and environment variables (added, removed, default changed) and the help text's commands
+ * and flags. Nothing when there is no release to count from or nothing new. A missing tag (a shallow
+ * clone, a kit outside git) is said, and the changelog part stands alone.
+ */
+export const changesDiffLines = (root: string, kit = KIT, since?: string): string[] => {
+  const now = kitRelease(kit);
+  const from = (since ?? readRecord(root, kit)?.version)?.replace(/^v/, "");
+  if (from === undefined || compareReleases(from, now) >= 0) return [];
+  const missing = [`v${from}`, `v${now}`].filter((t) => !tagExists(kit, t));
+  const head = `## Settings and flags, ${from} -> ${now}`;
+  if (missing.length) {
+    return [head, "", `Not compared: this kit checkout has no git tag ${missing.join(" or ")} (a shallow clone has none; \`git fetch --tags\` in the kit fetches them). Only the changelog above is shown.`];
+  }
+  const [was, is] = [surfaceAt(kit, `v${from}`), surfaceAt(kit, `v${now}`)];
+  const groups: [string, string[]][] = [
+    ["Config keys", compareMaps(was.config, is.config)],
+    ["Personal settings", compareMaps(was.personal, is.personal)],
+    ["Environment variables", compareMaps(was.env, is.env)],
+    ["Commands and flags", [
+      ...[...is.commands].filter(([c]) => !was.commands.has(c)).map(([c, f]) => `- added command \`${c}\`${f.size ? ` (${[...f].join(", ")})` : ""}`),
+      ...[...is.commands].filter(([c]) => was.commands.has(c)).flatMap(([c, f]) => {
+        const old = was.commands.get(c)!;
+        const [add, del] = [[...f].filter((x) => !old.has(x)), [...old].filter((x) => !f.has(x))];
+        return add.length || del.length ? [`- \`${c}\`:${add.length ? ` added ${add.join(", ")}` : ""}${add.length && del.length ? ";" : ""}${del.length ? ` removed ${del.join(", ")}` : ""}`] : [];
+      }),
+      ...[...was.commands.keys()].filter((c) => !is.commands.has(c)).map((c) => `- removed command \`${c}\``),
+    ]],
+  ];
+  const shown = groups.filter(([, l]) => l.length);
+  if (!shown.length) return [head, "", "No config key, environment variable, command or flag was added, removed or changed."];
+  return [head, ...shown.flatMap(([name, l]) => ["", `### ${name}`, ...l])];
+};

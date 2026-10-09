@@ -34,7 +34,9 @@ apply it once the user agrees.
    CHANGELOG entries of every release since this project's last recorded update, up to the kit's
    own, each cut to its bold lead. With no record it prints only the current release's entries and
    says so: ask which release the project was set up with and run `sandcastle changes --since
-   <release>`. `sandcastle doctor` also lists the **Upgrading** notes the project has not had.
+   <release>`. After the entries it lists the config keys, environment variables, commands and
+   flags added, removed or changed between the two releases' git tags (or says a tag is missing).
+   `sandcastle doctor` also lists the **Upgrading** notes the project has not had.
    Sort the entries into three tiers and tell the user in this order, leaving out a tier with
    nothing in it:
    1. **Must act.** The **Upgrading** notes, in full from the kit's `CHANGELOG.md` (`sandcastle
