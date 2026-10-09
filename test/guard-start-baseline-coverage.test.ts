@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
+import { quietly } from "./quiet.ts";
 import { assertGitConfigBaseline, recordGitConfigEnd, recordGitConfigStart } from "../src/guard.ts";
 
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)));
@@ -184,12 +185,13 @@ test("a submodule's git directory created between two runs is refused, naming it
   assert.match(refusal(project), /modules\/lib\/config added/);
 });
 
-test("a record an earlier kit wrote, holding fewer keys and no files, is read as a first run", () => {
+test("a record an earlier kit wrote, holding fewer keys and no files, is read as a first run, with a line saying so", async () => {
   const { project, git } = repo();
   git("remote", "add", "origin", "https://example.invalid/project.git");
   mkdirSync(join(project.root, ".sandcastle", ".run"), { recursive: true });
   writeFileSync(baselinePath(project.root), `${JSON.stringify({ entries: [], attributes: "", clean: true })}\n`);
-  assert.doesNotThrow(() => start(project));
+  const { lines } = await quietly(() => assert.doesNotThrow(() => start(project)));
+  assert.match(lines.join("\n"), /taken again from the present state, once/);
   recordGitConfigEnd(project);
   const record = JSON.parse(readFileSync(baselinePath(project.root), "utf8"));
   assert.deepEqual(record.entries, ["remote.origin.url\nhttps://example.invalid/project.git"]);

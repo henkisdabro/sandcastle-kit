@@ -1474,6 +1474,9 @@ and the kit narrows what can cross it:
     `core.fsmonitor`, `core.hooksPath`, `core.sshCommand`, `core.pager`, `core.editor`,
     `core.askPass`, `core.gitProxy`, `sequence.editor`, `gpg.program` and `gpg.*.program`, and
     `include*` key;
+  - what your own later git command runs: every `alias.*` (a repo-local alias overrides yours),
+    `pager.*`, `difftool.*.cmd`, `mergetool.*.cmd`, `submodule.*.update`, `interactive.diffFilter`,
+    `gpg.ssh.defaultKeyCommand`, `core.alternateRefsCommand` and `lfs.*`;
   - what a `git fetch` reads there (Sandcastle runs one on your machine when it reuses a kept
     worktree): `remote.*.url`, `.pushurl`, `.uploadpack`, `.receivepack` and `.proxy`,
     `url.*.insteadOf` and `.pushInsteadOf`, every `credential.*` and `protocol.*` key, and
@@ -1482,7 +1485,9 @@ and the kit narrows what can cross it:
     `extensions.*` key;
   - the hash of `.git/info/attributes`, and of every file under `.git/hooks/` (the kit's git
     ignores hooks, but your next commit runs them) and `.git/modules/` (but for the objects, refs
-    and logs a submodule's own use rewrites), by name and content.
+    and logs a submodule's own use rewrites), by name, content and, for a regular file, executable
+    bit (git runs a hook only while it is executable, so `chmod +x` on a disabled hook with the same
+    content is a difference, in the fingerprint during a run and in this record at the next start).
 
   `branch.*` and `remote.*.fetch` stay free: your own work in another worktree changes them, and
   they run nothing. Before anything is pinned, the next start compares the present state with that
@@ -1505,7 +1510,7 @@ and the kit narrows what can cross it:
   and any other hook. After an unclean end (killed, stopped) every change is refused, as before. Each refusal
   says whether the last run ended cleanly, and marks a change that looks like your own tooling
   (`looks like your own tooling: ...`) apart from the rest. With no record - the first run under this kit -
-  the first of those four commands to start records and goes on, `sandcastle gates` included. A run killed with all of it unchanged starts again with no question.
+  the first of those four commands to start records and goes on, `sandcastle gates` included. The same for a record an earlier kit version left (the record is versioned): the first start after an update takes the present state again, once, and prints a line saying so, rather than naming every alias or pager key as added. A run killed with all of it unchanged starts again with no question.
   With `worktree.useRelativePaths` on, git writes `extensions.relativeWorktrees` the first time it
   adds a worktree, after the record was taken, so the next start names that key once.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and
@@ -1514,7 +1519,7 @@ and the kit narrows what can cross it:
   `.git/config.worktree` (which git reads once `extensions.worktreeConfig` is on: created, changed
   or removed, it stops the run, naming its keys) and the base branch are fingerprinted; if a
   sandbox changes them, the run stops before the host runs another git command there, naming the
-  file. A hook planted there would otherwise run on your next checkout or commit. `.git/modules/`
+  file. A hook planted there would otherwise run on your next checkout or commit, and so would a disabled one made executable (`chmod +x`), so the executable bit of a hook is fingerprinted beside its content. `.git/modules/`
   (the git directories of submodules) is fingerprinted too, since a config a sandbox adds there would
   run on a `git status` that looks into a submodule. The records of worktrees you made by hand beside
   a run (`.git/worktrees/<name>/`: `commondir`, `gitdir` and `config.worktree`, present or absent, and
