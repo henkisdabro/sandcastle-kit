@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
-import { assertGitUnchanged, checkBeforeClose, gitFingerprint, protectedAmong } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, protectedAmong } from "./guard.ts";
 import type { Hook } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -340,6 +340,17 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
     const own = check ? undefined : gitFingerprint(project);
+    // The close never runs after a failed check, so the throwaway worktree and its branch (no work in either) stay on
+    // disk; the stop says so, with the step that removes them, instead of leaving them unnamed.
+    const leftBehind = (error: unknown): never => {
+      if (!(error instanceof GuardStop)) throw error;
+      const left = relative(project.root, sandbox.worktreePath) || sandbox.worktreePath;
+      throw new GuardStop(
+        `${error.message} The ${label} sandbox's worktree (${left}) and branch (${branch}) are left behind and hold no work: \`sandcastle clean\` removes them once the stop is dealt with.`,
+        { what: error.what, detail: error.detail },
+        { cause: error },
+      );
+    };
     const checkGit = (when: string) => (own ? assertGitUnchanged(project, own, when) : check?.(when));
     try {
       // Before the gates, which may leave the worktree anywhere: the sandbox was cut from the base's name, so a
@@ -371,7 +382,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
       // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
-      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when));
+      await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when)).catch(leftBehind);
       unlockWorktree(sandbox.worktreePath);
       await sandbox.close();
       try {
