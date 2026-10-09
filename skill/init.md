@@ -64,7 +64,8 @@ This continues SKILL.md: run its "Before every action" first.
      sandbox. If one is a guard the project relies on, propose moving it into
      `.claude/settings.json`.
    - Git hooks (`core.hooksPath`, `.husky`) run on every agent commit inside the sandbox. Check
-     that what they call is in the image and that none pushes or deploys.
+     that what they call is in the image and that none pushes or deploys. A `core.hooksPath` that
+     is absolute (or outside the project) does not exist in the sandbox: set a relative one.
    - **Prove the guards.** The hook check only proves a hook can run. For each kept `PreToolUse`
      guard that matters, add a `hookTests` entry to the config (README: Hook tests): a tool call
      it must refuse, with `expect: "block"` - read the guard's script for what it refuses - and

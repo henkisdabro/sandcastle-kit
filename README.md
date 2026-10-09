@@ -1412,7 +1412,10 @@ untracked `.claude/settings.local.json` never reach a sandbox, and the check war
 hooks run on agent commits inside the sandbox as usual, so `sandcastle gates` and every run's base
 check also run the repo's `pre-commit` and `commit-msg` hooks there (`git hook run`, nothing committed,
 git 2.36 or newer): a hook the image cannot satisfy stops the run before any agent starts, and the
-fix is in the project's Dockerfile. The Codex review does not run Claude Code
+fix is in the project's Dockerfile. A `core.hooksPath` that is an absolute host path (or climbs out
+of the project) names a directory no sandbox has, so git finds no hooks and agent commits run none:
+`sandcastle doctor`, `sandcastle lean` and the base check flag it, naming the value, and the fix is
+`git config core.hooksPath <relative path>`. The Codex review does not run Claude Code
 hooks.
 
 ### Hook tests

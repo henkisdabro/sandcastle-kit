@@ -15,7 +15,7 @@ import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
 import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, protectedAmong } from "./guard.ts";
-import type { Hook } from "./lean.ts";
+import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { peakOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
 import { sandboxConfig, sh } from "./sandbox.ts";
@@ -307,6 +307,12 @@ export const runGitHookProbe = async (sandbox: Parameters<typeof execGate>[0]): 
   // A probe that could not run at all (the sandbox died) is not a refused hook.
   if (r.exitCode !== 0) return { hooks: [], unchecked: `the probe exited ${r.exitCode}` };
   return parseGitHookProbe(r.stdout);
+};
+
+/** The base check's lines for a `core.hooksPath` that does not exist inside a sandbox (`hooksPathOutside`); none when it does. */
+export const hooksPathWarning = (root: string): string[] => {
+  const value = hooksPathOutside(root);
+  return value ? hooksPathLines(value).map((l, i) => (i ? `    ${l}` : `  WARNING: ${l}`)) : [];
 };
 
 export const gitHooksLine = (g: GitHooks) =>
@@ -858,6 +864,9 @@ export const requireGreenBase = async (project: Project, image: string, planFile
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
+  // Before the probe's line, and before the cached return: a path no sandbox has reads there as `none`, which is also
+  // what a project with no hooks reads, so the base check says why.
+  for (const line of hooksPathWarning(project.root)) console.log(line);
   // A landing's or verify's green record covers the gates, and the hook tests and the git-hook probe only when
   // `noteGreenCommit` carried them over from the record before it.
   const gatesGreen = cached && baseCacheHit(project.root, key);
