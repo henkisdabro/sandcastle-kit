@@ -52,8 +52,11 @@ This continues SKILL.md: run its "Before every action" first.
    - **A refused start naming `.git` keys or files.** `NOT STARTED: the shared .git differs from
      what the last run left` means a filter, driver, `include`, remote, proxy, credential or
      signing setting, a hook or a module changed since the previous run - possibly a killed run's
-     sandbox. Show the user the keys and files it names; never pass `--accept-git-config` on your
-     own. Only the user's yes that they are theirs allows it.
+     sandbox. Show the user the keys and files it names, and whether it says the last run ended
+     cleanly; never pass `--accept-git-config` on your own. Only the user's yes that they are theirs
+     allows it. After a clean end the start itself takes a new plain https or ssh remote, a hooks
+     path in a tracked directory of the repo and a hook manager's hook files, printing a `Took as
+     your own` line for each; quote those lines, there is nothing to answer.
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait

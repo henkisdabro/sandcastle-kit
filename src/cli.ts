@@ -21,6 +21,9 @@
 //                    and refuses a difference, naming each key and file (a sandbox of a killed
 //                    run may have planted it): remove it, or if it is yours
 //                    --accept-git-config records the present state as the new baseline
+//                    After a clean end the start takes a new plain https or ssh remote, a
+//                    hooks path in a tracked directory and a hook manager's hooks itself,
+//                    printing a line for each
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
