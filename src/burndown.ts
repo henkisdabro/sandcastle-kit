@@ -320,11 +320,13 @@ export const implUnmetView = (unmet: string | undefined): string =>
 // The last paragraph of an implementer's final message, with the kit's own tags (`<promise>`, `<unmet>`,
 // `<changelog>`, `<followup>`, `<ungated>`) and fenced blocks taken out first: a caveat ("I did not check that
 // the new test fails without the change") sits in the closing prose, and no other pass reads that prose. Cut at
-// a word to UNGATED_MAX; undefined when the message has no prose.
+// a word to UNGATED_MAX; undefined when the message has no prose. A `<report>` keeps its words and loses only its
+// tags: with a tracker agents do not write to, the implementer's prose for the ticket, caveat and all, is in it.
 export const closingParagraphOf = (text: string): string | undefined => {
   const prose = text
     .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, "")
-    .replace(/^[ \t]*<(promise|unmet|changelog|followup|ungated)\b[^>\n]*>[\s\S]*?<\/\1>[ \t]*$/gm, "");
+    .replace(/^[ \t]*<(promise|unmet|changelog|followup|ungated)\b[^>\n]*>[\s\S]*?<\/\1>[ \t]*$/gm, "")
+    .replace(/<\/?report>/g, "");
   const last = prose.split(/\n[ \t]*\n/).map((p) => p.trim()).filter(Boolean).at(-1);
   return last ? cutAtWord(last, UNGATED_MAX) : undefined;
 };
