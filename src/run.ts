@@ -554,7 +554,7 @@ const CHANGELOG_ASK =
   "starting `Upgrading:` that says what to do, in its own tag. The closing summary lists it apart from the ordinary lines, " +
   "so do not fold the instruction into a `Changed:` line. If this project's own rules define an upgrading or migration note, " +
   "write it in their words. ";
-const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}Give none for a change nobody outside the code would notice.\n\n`;
+const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}For a change nobody outside the code would notice, answer exactly \`<changelog>none</changelog>\`: it is no line, and the ticket is listed as needing no entry.\n\n`;
 // A full review that could not see the implementer's lines wrote the whole set again from the diff; it is
 // shown them (per ticket, as `IMPL_UNMET` is), so it keeps the ones that hold and corrects or adds the rest.
 const CHANGELOG_REVIEW =
@@ -562,7 +562,7 @@ const CHANGELOG_REVIEW =
   "none. If the diff shows a user-facing change you made yourself " +
   "in this review, or a line of the implementer's that would now be wrong, give the full set of lines for the whole branch - " +
   "its changes as well as yours, one line each, the implementer's lines that still hold copied as they are: your set replaces " +
-  "the implementer's, so a line left out is lost, and a reworded one is not shown twice. Otherwise give none, and the " +
+  "the implementer's, so a line left out is lost, and a reworded one is not shown twice. Otherwise answer exactly `<changelog>none</changelog>`, and the " +
   "implementer's lines stand. If the change needs an `Upgrading:` line and none of the implementer's lines is one, give the " +
   "full set with one in it (do not leave that to a remark in your message).\n\n{{IMPL_CHANGELOG}}";
 
@@ -576,7 +576,7 @@ export const implChangelogView = (lines: string[]): string => (lines.length ? `$
 const CHANGELOG_NARROW =
   `${CHANGELOG_ASK}The implementer has given its own, which you cannot see, and you see only the commits above, not the ` +
   "branch. Give lines only for a user-facing change you made yourself in this review, one line each; they are added to the " +
-  "implementer's, so do not restate the branch's changes. If you made none, give none. If a change you made needs an " +
+  "implementer's, so do not restate the branch's changes. If you made none, answer exactly `<changelog>none</changelog>`. If a change you made needs an " +
   "`Upgrading:` line, give it (do not leave that to a remark in your message).\n\n";
 
 export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false) => {
@@ -1315,6 +1315,8 @@ export type BranchHead = {
   changelog?: string[];
   /** How many `<changelog>` tags by `green` were no changelog line and were left out, carried like `changelog`. */
   changelogDropped?: number;
+  /** An agent answered `<changelog>none</changelog>` and no pass gave a line, carried like `changelog`. */
+  changelogNone?: boolean;
   /** Why each of those was dropped, in order (an older record has none). */
   changelogDroppedWhy?: string[];
   /** What a reviewer said no gate exercises, by `green` (its `<ungated>` line): a later land-only run reads no reviewer, so without it the "check by hand" note would not reach the closing summary. */
@@ -1339,7 +1341,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; changelogNone?: boolean; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);

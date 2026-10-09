@@ -167,6 +167,8 @@ export type TicketRecord = {
   changelog?: string[];
   /** How many `<changelog>` tags were no changelog line (too long, a list, a commit sha) and were left out of `changelog`. */
   changelogDropped?: number;
+  /** An agent answered `<changelog>none</changelog>` and no pass gave a line: the ticket needs no entry, so `report --changelog` does not list it as lacking a suggested line. */
+  changelogNone?: boolean;
   /** Why each of those was dropped, in order ("too long (527 characters)", "spans list items", "holds a commit sha"); an older record has none. */
   changelogDroppedWhy?: string[];
   /** The acceptance criterion an agent knowingly left undone: merged, the ticket still open; a merged ticket with one needs a person. */

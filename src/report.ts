@@ -1448,7 +1448,7 @@ export const changelogSince = (project: Project, since?: string): string => {
     const run = parseRecord(text);
     if (run && typeof run.startedAt === "string" && !Number.isNaN(Date.parse(run.startedAt))) runs.set(run.startedAt, run);
   }
-  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; why?: unknown }>();
+  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; why?: unknown; none: boolean }>();
   for (const run of [...runs.values()].sort((a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!))) {
     if (run.dryRun || (after && Date.parse(run.startedAt!) <= Date.parse(after))) continue;
     for (const [id, t] of Object.entries(readTickets(run))) {
@@ -1456,8 +1456,8 @@ export const changelogSince = (project: Project, since?: string): string => {
       const before = landed.get(id);
       const lines = Array.isArray(t.changelog) ? t.changelog.filter((l): l is string => typeof l === "string") : [];
       // The latest run's lines; an earlier run's stand only while no later one gave any.
-      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, why: t.changelogDroppedWhy } : before;
-      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, why: kept.why });
+      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, why: t.changelogDroppedWhy, none: t.changelogNone === true } : before;
+      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, why: kept.why, none: kept.none });
     }
   }
   // Tickets landed with `sandcastle land` after a run stopped: no run record says `merged`, but the kit's merge subject is on
@@ -1471,14 +1471,20 @@ export const changelogSince = (project: Project, since?: string): string => {
     const records = [heads[id], ...[...runs.values()].filter((run) => !run.dryRun).sort((x, y) => Date.parse(y.startedAt!) - Date.parse(x.startedAt!)).map((run) => readTickets(run)[id])].filter((r) => !!r);
     const linesOf = (r: { changelog?: unknown }) => (Array.isArray(r.changelog) ? r.changelog.filter((l): l is string => typeof l === "string") : []);
     const source = records.find((r) => linesOf(r).length) ?? records.find((r) => r.changelogDropped);
-    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0, why: source?.changelogDroppedWhy });
+    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0, why: source?.changelogDroppedWhy, none: !source && records.some((r) => r.changelogNone === true) });
   }
   const ids = [...landed.keys()];
   const out = [`${ids.length} ticket(s) landed in runs started after ${ref ? `${ref} (${after})` : "the start of the history"}.`];
   const all = ids.flatMap((id) => landed.get(id)!.lines.map((line) => ({ id, line })));
   out.push(...changelogLines(all));
   for (const id of ids.filter((id) => landed.get(id)!.dropped)) out.push(...droppedLines(refOf(id), landed.get(id)!.dropped, landed.get(id)!.why));
-  const bare = ids.filter((id) => !landed.get(id)!.lines.length);
+  // A ticket the agents said needs no entry is not one to write from the ticket.
+  const needNone = ids.filter((id) => !landed.get(id)!.lines.length && landed.get(id)!.none);
+  if (needNone.length) {
+    out.push("No entry needed (the agents said none):");
+    for (const id of needNone) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
+  }
+  const bare = ids.filter((id) => !landed.get(id)!.lines.length && !landed.get(id)!.none);
   if (bare.length) {
     out.push("No suggested line - write from the ticket:");
     for (const id of bare) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
