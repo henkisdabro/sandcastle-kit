@@ -244,6 +244,25 @@ test("a title an earlier run filed from ticket 7 is a comment on that issue from
   assert.deepEqual(other.comments, []);
 });
 
+test("the same title is met however the evidence of the repeat places it: history kept no evidence of the filing", async () => {
+  const made: string[] = [];
+  const comments: string[] = [];
+  const book = createFollowUpBook(
+    { update: () => {} },
+    {
+      tracker: { ref: (id: string) => `#${id}`, create: (title: string) => String(made.push(title) + 100), comment: (id: string) => void comments.push(id) },
+      dryRun: false,
+      write: async (fn) => fn(),
+      exists: (path) => path === "src/net/client.ts",
+      earlier: [{ title: "Flaky test", from: "7", phase: "review", id: "41" }],
+    },
+  );
+  book.push({ title: "Flaky test", evidence: "src/net/client.ts:12 times out", from: "7", phase: "implement" });
+  assert.deepEqual(await book.file(), []);
+  assert.deepEqual(made, []);
+  assert.deepEqual(comments, ["41"]);
+});
+
 test("filedBefore reads the filed follow-ups of the tickets asked for, and none from a project with no history", () => {
   const root = join(TMP, `history${n++}`);
   mkdirSync(root);

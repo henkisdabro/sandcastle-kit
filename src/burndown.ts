@@ -616,8 +616,9 @@ const sameFinding = (a: Seat, b: Seat): boolean => {
 };
 /** The issue (or, for a line only listed, `""`) of each file's findings, by `from` and path: what `sameFinding` is asked of. */
 export type Places = Map<string, { id: string; seat: Seat }[]>;
-// A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files.
-const placesKeys = (s: Seat) => (s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]);
+// A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files;
+// and under its title, so an earlier run's filing, placed by its title alone, meets the same title whatever its evidence names.
+const placesKeys = (s: Seat) => [...(s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]), `${s.from}\0\0${s.key}`];
 const placeOf = (places: Places, seat: Seat) => {
   for (const key of placesKeys(seat)) {
     const found = places.get(key)?.find((p) => sameFinding(p.seat, seat));
