@@ -251,7 +251,7 @@ render "120 121 122 123"
 has "PAUSED since $when"
 sed -i.bak "s/\"since\": $((since_at * 1000)),/\"since\": \"$started\",/" "$L/run.json"
 render "120 121 122 123"
-has 'PAUSED since [0-9]{2}:[0-9]{2}'
+has 'PAUSED since ([0-9]{2} [A-Za-z]{3} )?[0-9]{2}:[0-9]{2}'
 # A record that is not an object pauses nothing, and does not blank the run cell.
 sed -i.bak 's/"paused": {[^}]*},/"paused": "yes",/' "$L/run.json"
 render "120 121 122 123"
@@ -346,9 +346,41 @@ has "resumes +$back"
 # A record whose cause is not stated with numbers is read as a person's pause, never as a blank or broken cell.
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
 render "120 121 123"
-has 'PAUSED since [0-9]{2}:[0-9]{2}'
+has "PAUSED since $when"
 hasnt 'usage'
 COLS="$COLS_WAS"
+
+# ---------------------------------------------------------------------------
+SCENARIO="pause ten minutes old, the clock at 00:05"
+# The pause the scenarios above draw is made at now - 600: within ten minutes after midnight that is
+# yesterday, and the cell then gives its date (`PAUSED since 08 Oct 23:55`). The same two records, a
+# person's pause and a usage pause whose percent is no number, are drawn under a `date` that says it is
+# 00:05, so the date prefix is held at any hour of the day and not only by a run that starts after midnight.
+mkdir -p "$TMP/clock"
+cat >"$TMP/clock/date" <<'EOF'
+#!/bin/sh
+# Only a bare "+format" asks for the time now: the clock is FAKE_NOW then, and the real date is run otherwise.
+if [ "$#" = 1 ] && [ "${1#+}" != "$1" ]; then
+  if [ "$1" = "+%s" ]; then echo "$FAKE_NOW"; else "$REAL_DATE" -d "@$FAKE_NOW" "$1" 2>/dev/null || "$REAL_DATE" -r "$FAKE_NOW" "$1"; fi
+else exec "$REAL_DATE" "$@"; fi
+EOF
+chmod +x "$TMP/clock/date"
+REAL_DATE="$(command -v date)"
+midnight_now=$(date -d "$(date +%F) 00:05:00" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%F) 00:05:00" +%s)
+since_was="$since_at"; since_at=$((midnight_now - 600))
+usage_paused week 100 codex '[]'
+sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
+PATH="$TMP/clock:$PATH" REAL_DATE="$REAL_DATE" FAKE_NOW="$midnight_now" render "120 121 123"
+has 'PAUSED since [0-9]{2} [A-Za-z]{3} 23:55'
+hasnt 'usage'
+# The clock itself is held: a pause made after midnight, four minutes ago, gives the time alone.
+since_at=$((midnight_now - 240))
+usage_paused week 100 codex '[]'
+sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
+PATH="$TMP/clock:$PATH" REAL_DATE="$REAL_DATE" FAKE_NOW="$midnight_now" render "120 121 123"
+has 'PAUSED since 00:01'
+hasnt 'PAUSED since [0-9]{2} [A-Za-z]{3}'
+since_at="$since_was"
 
 # ---------------------------------------------------------------------------
 SCENARIO="live run, finished work left uncommitted"
