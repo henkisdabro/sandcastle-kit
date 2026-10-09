@@ -213,7 +213,9 @@ export const landInSandbox = async (
     // writes the files out, and the config pin only holds the filters that existed at the run's start. The calls
     // above are synchronous, so nothing of this run interleaves; this check is the last thing before the write.
     assertGitUnchanged(project, before, `before fast-forwarding ${t.branch}`);
-    sh("git", ["merge", "--ff-only", landed], project.root);
+    // `--no-overwrite-ignore`: the check above no longer watches `.git/info/exclude` (the host's own tools rewrite it),
+    // so a sandbox that lists an operator's untracked file there would otherwise have this fast-forward replace it.
+    sh("git", ["merge", "--ff-only", "--no-overwrite-ignore", landed], project.root);
     if (expected) {
       // Only what this fast-forward made: a base that names anything else is not ours to adopt.
       const now = sh("git", ["rev-parse", `refs/heads/${project.baseBranch}`], project.root);

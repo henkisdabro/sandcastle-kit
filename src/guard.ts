@@ -570,10 +570,11 @@ const recordProblem = (project: Project, path: string): string | undefined => {
   }
   const names = clean(text.slice("gitdir: ".length));
   if (named !== record) return `the worktree's .git names ${JSON.stringify(names.length > 200 ? `${names.slice(0, 200)}...` : names)}, not ${shown}`;
-  // Git trims the end of the file and reads what is left as a path relative to the record; with no file at all it
-  // takes the record itself for the common directory, and would read a `config` the sandbox put there.
+  // Git strips only the line end and reads what is left as a path relative to the record, so `../.. ` (a trailing
+  // space) names a directory `.. ` the sandbox made there: compare as git reads it, never trimmed further. With no
+  // file at all git takes the record itself for the common directory, and would read a `config` the sandbox put there.
   const commondir = join(record, "commondir");
-  if (!entry(commondir)?.isFile() || readFileSync(commondir, "utf8").trimEnd() !== "../..") return `${shown}/commondir no longer names the shared .git (git writes ../..)`;
+  if (!entry(commondir)?.isFile() || readFileSync(commondir, "utf8").replace(/[\r\n]+$/, "") !== "../..") return `${shown}/commondir no longer names the shared .git (git writes ../..)`;
   if (entry(join(record, "config.worktree"))) return `${shown}/config.worktree exists, which git reads as that worktree's config`;
   return undefined;
 };

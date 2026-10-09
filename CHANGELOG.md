@@ -47,6 +47,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 - **The models guidance warns that Claude Haiku 5.5, on an API key, bills prompts over 100K tokens
   at five times its price**, as most requests at `high` or `max` effort are, and advises `medium`
   or below with the effort set beside the model.
+- **A commit made on the base branch while a run's opening base gates are running stops the run**,
+  as a commit on the base already did at any later point in the run.
 
 ### Security
 
@@ -56,7 +58,16 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `sandcastle land`.
 - **The run's host guard also turns off git's background maintenance (`maintenance.auto=false`)**
   beside `gc.auto`, so a landing merge can no longer start a detached repack, worktree prune, ref
-  pack or reflog expiry in the shared `.git` on git 2.54 and newer.
+  pack or reflog expiry in the shared `.git` on git 2.54 and newer. The sandboxes' git has it off
+  too (`gc.auto=0`, `maintenance.auto=false` in their environment), so an agent's commit or merge
+  no longer starts a detached repack and prune in the `.git` every sandbox shares.
+- **A sandbox's changes to the shared `.git`, or to its own worktree's records, are checked before
+  it closes.** Sandcastle runs a host `git status` in each sandbox's worktree as the sandbox closes,
+  so the `.git` check, and a check of each worktree's records (its `.git` pointer, `commondir` read
+  as git reads it, and no `config.worktree`), now run before every sandbox closes and before the
+  host runs git in a kept worktree, whose status never looks into a nested repository. On a failure
+  the container is removed without that host `git status`, and the run stops, leaving the worktree
+  for a person.
 
 ### Fixed
 
@@ -80,7 +91,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   merged), so the agent no longer works on a stale tree and conflicts at landing. That holds too
   when a clean kept worktree under `.sandcastle/worktrees/` still has the branch checked out, as a
   run killed before its sandboxes closed leaves: the worktree moves with its branch. A worktree
-  with uncommitted or untracked files, or one of your own, is left as it is.
+  with uncommitted or untracked files, one holding an ignored file the base has since started
+  tracking, or one of your own, is left as it is.
 - **A gate that rewrites a tracked file no longer leaves every worktree dirty**, so merged tickets'
   branches are deleted and no worktree or branch leaks. The closing summary names the rewritten
   file once, with the hint to `.gitignore` it or list it under `generated`, and lists each kept
@@ -110,7 +122,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   codes.
 - **`sandcastle gates` takes the run lock, as `land` and `clean` do**, so it refuses while a run of
   the project is live, instead of rewriting that run's lean plan and green-base record or reporting
-  the run's own commits as tampering.
+  the run's own commits as tampering. The init and update actions say to check
+  `sandcastle status 0` (or `sandcastle wait`) before they run it.
 - **The end-of-run verify's and the base check's wait for a machine-wide sandbox slot is recorded
   as `waitMs` in `timings.jsonl`**, not as run time, so the start estimate no longer inflates those
   steps after a run that waited behind another.
@@ -118,7 +131,7 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `load.concurrency`, and the start line's share clause count the slot kept for landing**, so a run
   with a share of 2 is shown and recorded as one ticket at a time, not two.
 - **The start line tells two live runs of one project apart** (a second checkout, say) by their
-  folders, or their pids where the folders are unknown or alike.
+  folders, or their pids where the folders are unknown, alike, or the same as this run's own.
 - **The closing summary reads blocked tickets and their blockers from one list of open tickets**,
   not one tracker call each, so a run with dozens of blocked tickets no longer spends a minute or
   more building it.
@@ -164,9 +177,15 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   opening with "That" or "This" is quoted with the sentences before it.
 - **With the Markdown ticket-files tracker, a red end-of-run verify on the tree a landing's own
   gates passed says the difference is the sandbox, not the merge**, instead of "RED TOGETHER".
+- **A run no longer stops as `.git` tampering when your own tools, Claude Code among them, rewrite
+  `.git/info/exclude` while it runs.** The exclude file holds ignore patterns and runs nothing;
+  `info/attributes` and every other file under `.git/info/` are still watched, and the landing's
+  fast-forward refuses to replace an untracked file of yours that the exclude file lists, rather
+  than overwrite it.
 - **The kit's own test suite no longer flakes on a busy machine**: its environment turns off git's
   background maintenance, the merge-driver test has a temp directory of its own, and the status
-  view's paused-for-usage scenario passes at any terminal width.
+  view's paused-for-usage scenario passes at any terminal width and in the ten minutes after
+  midnight.
 
 ## [0.11.0] - 2026-10-08
 

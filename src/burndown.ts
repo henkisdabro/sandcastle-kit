@@ -1123,11 +1123,13 @@ const reusedWorktrees = (project: Project, branch: string): string[] =>
 /**
  * True when nothing in the worktree is uncommitted or untracked (what Sandcastle's close keeps a worktree for), so
  * a move of its checkout loses nothing. Asked of git with the options a config could turn off; a worktree git
- * cannot read (gone, its record rewritten) is not clean.
+ * cannot read (gone, its record rewritten) is not clean. Submodules are never looked into: recursing runs the status
+ * in a repository the sandbox nested in its worktree, with that repository's own config and filters, on the host -
+ * and only the command-line flag holds, as a `.gitmodules` the sandbox wrote can set `ignore = none`.
  */
 const worktreeIsClean = (project: Project, path: string) => {
   try {
-    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], project.root) === "";
+    return sh("git", ["-C", path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=all"], project.root) === "";
   } catch {
     return false;
   }
