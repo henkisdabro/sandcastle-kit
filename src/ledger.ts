@@ -17,8 +17,10 @@
 // complete - the agent's hand-back is on its pipeline's result - so nothing is patched in later.
 
 import type { Outcome, TicketRecord } from "../mod/hooks/run-record.ts";
+import { agentFailure } from "./agents.ts";
 import { remainderNote } from "./autonomy.ts";
 import { type Gate, gateLine } from "./gates.ts";
+import { promptExpansionLine } from "./errors.ts";
 import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
@@ -393,8 +395,9 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       return describeConflict(e, c);
     case "crashed":
       return {
-        // The land port threw (`green`), or the pipeline did: each says its error as it always has.
-        record: { state: "crashed", note: e.green ? errorLine(e.error) : String(e.error).split("\n")[0].slice(0, 160) },
+        // The land port threw (`green`), or the pipeline did: the pipeline's error is read as an agent's failure is
+        // (no `(FiberFailure) PromptError:` prefix, cut at a word), and a failed prompt expansion keeps its stderr.
+        record: { state: "crashed", note: e.green ? errorLine(e.error) : (promptExpansionLine(e.error) ?? agentFailure(e.error)) },
         outcome: { kind: "crashed", text: "crashed" },
         tracker: comment(notLandedComment(c.report, undefined)),
       };
@@ -603,6 +606,14 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 };
 
 /**
+ * The words of a run that stopped starting tickets because every one crashed expanding its prompt the same way: a
+ * setup problem (a token that cannot see the repo, `gh` not signed in), not the tickets', so the error is quoted once
+ * and `doctor --verify` is the next step - never the per-ticket "add a comment for the implementer".
+ */
+export const setupProblemWords = (line: string): string =>
+  `a setup problem, not the tickets': their prompts could not be expanded - ${line}. Run \`sandcastle doctor --verify\``;
+
+/**
  * How a stop's cause reads in the notes of the tickets it left unstarted and in the closing
  * summary. A `.git` stop says what moved (`main moved while sandboxes ran`), so a ticket never
  * started because the base moved does not read as tampering with the shared `.git`.
@@ -613,6 +624,8 @@ export const causeWords = (c: StopCause, ref: (id: string) => string): string =>
       return `${ref(c.ticket)} hit the plan's usage limit${c.resets ? ` (resets ${c.resets})` : ""}`;
     case "usage limit":
       return c.line;
+    case "setup problem":
+      return setupProblemWords(c.line);
     case "tampered":
     case "host failed":
       return guardWords(c.error).what;

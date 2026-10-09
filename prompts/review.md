@@ -70,6 +70,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
    introduced when it makes the changed behaviour harder to follow. Do not reorganise sound code
    to your taste.
 
+{{KIT_PROTECTED}}
 {{KIT_PROJECT_RULES}}
 
 # What to do about what you find

@@ -19,13 +19,14 @@ import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
 import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
+import { PRESSURE_WARN_FULL } from "./peaks.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
-import { LANDING_HOLD } from "./ledger.ts";
+import { LANDING_HOLD, setupProblemWords } from "./ledger.ts";
 import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, sameExpansionFailure } from "./errors.ts";
 import { liveness, type Probe } from "../mod/hooks/run-live.ts";
 import type { FiledFollowUp } from "./burndown.ts";
 import { isTicketState, type OutcomeKind, type PlanUsage, readTickets, type RunSettings, type TicketRecord, type TicketState, TICKET_STATES } from "../mod/hooks/run-record.ts";
@@ -49,6 +50,8 @@ export type Facts = {
   tokenTotal?: Tokens;
   /** The same, per model; "model not recorded" for lines written before the model was. */
   byModel?: Record<string, Tokens>;
+  /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
+  pressure?: { some: number; full: number; where: string };
   verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
@@ -89,6 +92,8 @@ export type Facts = {
   stopped?: string;
   /** The stop's cause in a few words, when it was the `.git` guard's: tells a moved base from any other change. */
   stoppedWhat?: string;
+  /** The prompt-expansion error that crashed tickets alike, so the run started no more: a setup problem, not the tickets'. */
+  setupProblem?: string;
   /** The reason the follow-ups were withheld from the tracker, said once for the set. */
   followUpsWithheld?: string;
   /** How a person ended the run (`sandcastle stop`, Ctrl-C, a signal): not a crash, though its exit code is not 0. */
@@ -283,6 +288,30 @@ export const tokensFromTimings = (text: string, runId: string): { total: Tokens;
   return total ? { total, byModel } : undefined;
 };
 
+/**
+ * One run's highest memory pressure from timings.jsonl text: the largest `full` and `some` of any line of the run (a
+ * gate pass's, src/peaks.ts), and where the largest `full` was read (`ticket 12's gates`, or the step's name).
+ */
+export const pressureFromTimings = (text: string, runId: string): { some: number; full: number; where: string } | undefined => {
+  let found: { some: number; full: number; where: string } | undefined;
+  for (const raw of text.split("\n")) {
+    let line: { run?: unknown; issue?: unknown; phase?: unknown; pressureSome?: unknown; pressureFull?: unknown };
+    try {
+      line = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!line || line.run !== runId) continue;
+    const some = typeof line.pressureSome === "number" && line.pressureSome > 0 ? line.pressureSome : 0;
+    const full = typeof line.pressureFull === "number" && line.pressureFull > 0 ? line.pressureFull : 0;
+    if (!some && !full) continue;
+    const phase = typeof line.phase === "string" ? line.phase : "a pass";
+    const where = typeof line.issue === "string" || typeof line.issue === "number" ? (line.issue === "" ? phase : `ticket ${line.issue}'s ${phase}`) : phase;
+    found = { some: Math.max(found?.some ?? 0, some), full: Math.max(found?.full ?? 0, full), where: !found || full > found.full ? where : found.where };
+  }
+  return found;
+};
+
 /** The phases of a ticket's timings lines that are a pass of it: its sandbox's setup is not one. */
 export const PASS_PHASES = ["implement", "resolve", "review", "cross-review", "gates", "repair", LANDING_GATES] as const;
 
@@ -449,7 +478,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   const heldRewritten = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(REWRITTEN_NOTE_START)).map(([id]) => id);
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
-  const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
+  const timingsText = !earlier && existsSync(timingsFile) ? readFileSync(timingsFile, "utf8") : undefined;
+  const timed = timingsText ? tokensFromTimings(timingsText, run.startedAt) : undefined;
+  const pressure = timingsText ? pressureFromTimings(timingsText, run.startedAt) : undefined;
 
   return {
     base,
@@ -463,6 +494,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     tokens: run.tokens,
     tokenTotal: timed?.total,
     byModel: timed?.byModel,
+    ...(pressure ? { pressure } : {}),
     verify: run.verify,
     gateCount: project.gates.length,
     tickets,
@@ -484,6 +516,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
     stoppedWhat: run.stoppedWhat,
+    setupProblem: run.setupProblem,
     followUpsWithheld: run.followUpsWithheld,
     stoppedBy: run.stoppedBy,
     changed,
@@ -1000,6 +1033,9 @@ export const render = (f: Facts, plain = false): string => {
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
         : `Merged ${f.base} re-gated: ${sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
+  if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
+    out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
+  }
   const models = Object.entries(f.byModel ?? {});
   if (models.some(([model]) => model !== NO_MODEL)) {
     const size = (t: Tokens) => t.input + t.cacheWrite + t.cacheRead + t.output;
@@ -1010,6 +1046,7 @@ export const render = (f: Facts, plain = false): string => {
   if (f.mergeUnchecked) out.push(`Merge checks: ${f.mergeUnchecked}.`);
   out.push(...gapLines(f, o, carried));
   if (f.stopped) out.push(f.stopped);
+  if (f.setupProblem) out.push(`Stopped starting tickets: ${setupProblemWords(f.setupProblem)}.`);
   if (f.dryRunCheck) out.push(f.dryRunCheck);
 
   // Done
@@ -1242,7 +1279,12 @@ export const render = (f: Facts, plain = false): string => {
   next.push(...ticketSteps(f, o, false));
   // The earlier turns' steps follow, each marked: only the last turn's summary says them, and its own were no help for those tickets.
   for (const c of carried) next.push(...ticketSteps(c.facts, c.o, true).map((n) => n.replace(/\.$/, ` (turn ${c.turn}).`)));
-  const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)));
+  // Crashed alike expanding their prompt: the setup's fault, so no step asks for a comment on a ticket.
+  const setupCrashed = f.setupProblem ? fixing.filter((id) => f.tickets[id].state === "crashed" && sameExpansionFailure(f.tickets[id].note ?? "", f.setupProblem!)) : [];
+  if (f.setupProblem) {
+    next.push(`Fix the setup problem (above): run \`sandcastle doctor --verify\`, put right what it names, then \`sandcastle run\` again for ${list([...setupCrashed, ...skipped])} - the tickets themselves are fine.`);
+  }
+  const lone = fixing.filter((id) => ![...sameTest, ...sameFile].some(([, w]) => w.includes(id)) && !setupCrashed.includes(id));
   // These tickets keep their queue label (the kit only comments on them), so "requeue" sent operators
   // looking for a step that does not exist; the next run resumes the kept branch instead.
   // `sandcastle land` merges and gates the way a run does; a hand-written merge skips both.
@@ -1250,7 +1292,7 @@ export const render = (f: Facts, plain = false): string => {
   // Never closed by the kit (the agent may be wrong), and still queued: every later run would pay for it again.
   if (nochange.length) next.push(`Read the agent's comment on ${list(nochange)} (nothing to change): close it if the evidence holds, or add what is missing - while it stays queued, every \`sandcastle run\` tries it again.`);
   if (f.runnable.length) next.push(`Run again for the ${f.runnable.length} ticket(s) this run unblocked: \`sandcastle run\`.`);
-  if (skipped.length) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
+  if (skipped.length && !f.setupProblem) next.push(`Run again for the ${skipped.length} ticket(s) that never started.`);
   if (requeued.length) next.push(`\`sandcastle run\` again for ${list(requeued)}: requeued during this run.`);
   // They keep their queue label, and the next run resumes a kept branch rather than starting over.
   if (parked.length + cut.length + unstarted.length) {
