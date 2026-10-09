@@ -1332,6 +1332,20 @@ const DEFAULT_PROTECTED = [
   ".npmrc", "pnpm-workspace.yaml", ".yarnrc.yml",
   ".lintstagedrc", "lint-staged.config.", ".pre-commit-config.yaml", "lefthook.yml",
 ];
+// The tracked directory the local `core.hooksPath` names: its scripts run on the person's own next commit as the
+// defaults' `.husky/` and `.githooks/` do, and the start takes such a path without a question after a clean end.
+const hooksDirProtected = (project: Project): string[] => {
+  let value = "";
+  try {
+    value = sh("git", ["config", "--local", "--get", "core.hooksPath"], project.root).trim();
+  } catch {
+    return [];
+  }
+  if (!trackedHooksPath(project, value)) return [];
+  const dir = `${value.split("/").filter((p) => p && p !== ".").join("/")}/`;
+  return DEFAULT_PROTECTED.includes(dir) ? [] : [dir];
+};
+const protectedPrefixes = (project: Project) => [...DEFAULT_PROTECTED, ...hooksDirProtected(project), ...(project.protectedPaths ?? [])];
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepublish", "prepack", "postpack"];
 
 /**
@@ -1340,7 +1354,7 @@ const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "pre
  * on is held for a person. The review is told to revert such a change when the ticket did not need it.
  */
 export const protectedPathsNote = (project: Project, role: "implement" | "review"): string => {
-  const list = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])].map((p) => `\`${p}\``).join(", ");
+  const list = protectedPrefixes(project).map((p) => `\`${p}\``).join(", ");
   const ask =
     role === "review"
       ? "If the branch changes one and the ticket did not need that change, revert it in a commit of your own: the rest of the work then lands by itself."
@@ -1353,7 +1367,7 @@ export const protectedPathsNote = (project: Project, role: "implement" | "review
 
 /** The files among `files` that lie in a protected path: the default set and the project's `protectedPaths`. */
 export const protectedAmong = (project: Project, files: string[]): string[] => {
-  const prefixes = [...DEFAULT_PROTECTED, ...(project.protectedPaths ?? [])];
+  const prefixes = protectedPrefixes(project);
   return files.filter((f) => prefixes.some((p) => f === p || f.startsWith(p)));
 };
 

@@ -1610,7 +1610,7 @@ and the kit narrows what can cross it:
 - 🏷️ **Who committed.** Sandbox commits and the kit's merges carry the committer
   `Sandcastle agent <agent@sandcastle.invalid>`; you stay the author. `git log --format='%h %an / %cn %s'`
   tells them from your own commits. GitHub issues and comments the agents write still show your GitHub account.
-- 🛡️ **Protected paths.** A green branch that changes hooks (git, Claude Code, pre-commit tools), CI,
+- 🛡️ **Protected paths.** A green branch that changes hooks (git - the tracked directory `core.hooksPath` names among them -, Claude Code, pre-commit tools), CI,
   agent settings (`.claude/` settings, `.mcp.json`, `.codex/`, `.agents/`), `.sandcastle/`,
   package-manager config or install scripts - plus anything in `protectedPaths` - is labelled
   `ready-for-human` and left for you to merge; `sandcastle land` refuses it too. A branch that adds
