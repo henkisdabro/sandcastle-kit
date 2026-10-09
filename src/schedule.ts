@@ -341,7 +341,7 @@ const createDependants = <T extends { id: string }, B>(
  * worker's); `host failed` is a host git write the writer refused (`HostGit.failed`).
  */
 export type StopCause =
-  | { kind: "plan limit"; ticket: string }
+  | { kind: "plan limit"; ticket: string; resets?: string }
   | { kind: "usage limit"; line: string }
   | { kind: "tampered"; error: unknown }
   | { kind: "host failed"; error: unknown };
@@ -1364,9 +1364,13 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               const conflict = again ? { ...r.conflict, with: [...new Set([...again.with, ...r.conflict.with])] } : r.conflict;
               return await end(t.id, { kind: "conflict", outcome: r.outcome, conflict, attempts: n, ...(again && { again }) });
             }
-            case "crashed":
+            case "crashed": {
               for (const c of r.causes ?? []) stop.add(c);
+              // Its agent died of the plan's limit: nothing failed, the ticket was cut short - not begun, and runnable again.
+              const limit = r.causes?.find((c) => c.kind === "plan limit" && c.ticket === t.id);
+              if (limit) return await notBegun(t, limit);
               return await end(t.id, { kind: "crashed", error: r.error, attempts: n });
+            }
             case "stopped":
               stop.add(r.cause);
               return await end(t.id, { kind: "stopped", cause: r.cause, finished: false });

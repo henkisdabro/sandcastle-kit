@@ -1662,7 +1662,9 @@ Herdr tab bar shows each live run's share, and while the run waits for a slot it
 tickets next to start say `waits for the run's share` (or `waits: slot kept to land`, when the last slot of
 its share is kept for a landing). A run started by an older kit knows no shares and
 ignores them until it ends; it counts as wanting its concurrency. All runs share one plan allowance; the
-first ticket that hits the usage limit stops that run's queue. With `USAGE_CHECK=1` a run stops
+first ticket that hits the usage limit (a session or weekly limit message in its log) stops that run's queue; the
+tickets it cut short end as not started and runnable again, not as crashes, and the closing summary gives the
+reset time. With `USAGE_CHECK=1` a run stops
 starting tickets before that, once a usage window passes `USAGE_STOP` percent; with `USAGE_PAUSE` it
 pauses instead of stopping, and resumes after the window's reset ([Pausing a run](#-pausing-a-run)).
 
@@ -1761,7 +1763,7 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `Another sandcastle run of this project is live` | One run per project; `sandcastle gates`, `land` and `clean` refuse with it too. `sandcastle wait` blocks until it ends; `sandcastle stop` stops it. If that process is gone, or its pid now belongs to some other program, the lock clears itself on the next run, which also stops any sandbox the killed run left working. |
 | `STOPPED ... <path under .git> changed while sandboxes ran` | Inspect `git config --local --list` and `.git/info/` before any other git command in that repo. |
 | `STOPPED ... <base> moved while sandboxes ran` | A commit landed on the base branch mid-run - often your own (a ticket-file edit). The closing summary names the commits. The run prints `STOPPED landing: ...` as soon as it finds the move, and the status view's run cell reads `STOPPED landing`: tickets in flight finish, nothing more lands. If the commits are yours, run again: finished branches land then. |
-| A ticket `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`; usually a usage limit. |
+| A ticket `CRASHED` with "trust dialog" or exit code 1 | Read the last lines of `.sandcastle/logs/agent-issue-<n>-*.log`. A plan limit is not a crash: those tickets read `not started` and the summary says when the window resets. |
 | Status view shows nothing | Run it from inside the project; `sandcastle status 0` prints once. |
 | `waits for #N to close` | The ticket body says `Blocked by #N` (or `Depends on #N`) and #N is open. Close #N, or remove the line. This also applies to tickets named in `TICKETS=`. The same holds for a Linear issue or task file named there (see [Blockers](#-blockers-github-linear-ticket-files)); one that cannot be read - no `LINEAR_API_KEY`, a missing file - counts as open. |
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |

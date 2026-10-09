@@ -243,9 +243,8 @@ test("a crash names its causes, and a throwing attempt or land port costs that t
       throw new Error("not a result at all");
     },
   });
-  assert.equal(endings.get("1")?.kind, "crashed");
-  // The plan limit stops the run: 2 and 3 never begin.
-  assert.deepEqual(kinds(endings), { 1: "crashed", 2: "not begun", 3: "not begun" });
+  // The plan limit stops the run: 2 and 3 never begin, and 1, which the limit cut short, is not a crash either.
+  assert.deepEqual(kinds(endings), { 1: "not begun", 2: "not begun", 3: "not begun" });
   assert.deepEqual(stop.causes, [{ kind: "plan limit", ticket: "1" }]);
 
   const thrown = await play(["1", "2"], { workers: 1, attempt: async (t) => (t.id === "1" ? Promise.reject(new Error("boom")) : green(t.id)) });

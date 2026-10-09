@@ -40,7 +40,7 @@ import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
@@ -165,12 +165,12 @@ export const settleAfter = async (settle: () => Promise<void>, kept: (error: unk
  * it lands on a later run; any other result keeps its own ending, and a crash its own error.
  * `limited`: the crashed pipeline's agent hit the plan's usage limit.
  */
-export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, check?: { error: unknown }, limited = false): Attempted<Outcome, Outcome> => {
+export const attempted = (issue: string, result: PromiseSettledResult<Outcome>, check?: { error: unknown }, limited: { resets?: string } | boolean = false): Attempted<Outcome, Outcome> => {
   const tampered: StopCause[] = check ? [{ kind: "tampered", error: check.error }] : [];
   // Parked by a pause when the run stopped: thrown on to the scheduler, which ends it as parked, with the check -
   // dropped, a `.git` change found after a non-safety stop went unreported, as no check closes the run.
   if (result.status === "rejected" && result.reason instanceof StoppedWhileParked) throw new StoppedWhileParked(tampered);
-  if (result.status === "rejected") return { kind: "crashed", error: result.reason, causes: [...tampered, ...(limited ? [{ kind: "plan limit" as const, ticket: issue }] : [])] };
+  if (result.status === "rejected") return { kind: "crashed", error: result.reason, causes: [...tampered, ...(limited ? [{ kind: "plan limit" as const, ticket: issue, ...(typeof limited === "object" && limited.resets !== undefined && { resets: limited.resets }) }] : [])] };
   const value = result.value;
   if (value.status === "green" || value.status === "merged-earlier") return check ? { kind: "stopped", cause: tampered[0] } : { kind: "green", green: value };
   // Never pushed on as green: the gates vouched for no commit of it. The requeue-once rule decides what comes next.
@@ -223,17 +223,24 @@ const tags = (text: string) => {
 // after paying for a sandbox and an install. The first one stops the queue.
 // Only what each log's latest pass wrote counts (`passStarts`), as in `passHitLimit`: a re-run that fails early would
 // otherwise read the limit message of the pass before it and stop the queue for the wrong reason.
-export const hitLimit = (root: string, issue: string) => {
+export const hitLimit = (root: string, issue: string) => planLimit(root, issue) !== undefined;
+
+/** The limit a ticket's agent hit, with the reset time its line gives when it gives one; undefined when none. Same reading as `hitLimit`. */
+export const planLimit = (root: string, issue: string): { resets?: string } | undefined => {
   const logs = join(root, ".sandcastle/logs");
-  if (!existsSync(logs)) return false;
-  return readdirSync(logs)
+  if (!existsSync(logs)) return undefined;
+  let found: { resets?: string } | undefined;
+  for (const f of readdirSync(logs)) {
     // Not the .jsonl sidecar: its last lines are raw tool results, and a file the agent merely read could say "usage limit".
-    .filter((f) => f.endsWith(".log") && logOwner(f) === issue)
-    .some((f) => {
-      const log = readFileSync(join(logs, f));
-      const from = passStarts.get(f) ?? 0;
-      return logSaysLimit(log.subarray(log.length < from ? 0 : from).toString("utf8"));
-    });
+    if (!f.endsWith(".log") || logOwner(f) !== issue) continue;
+    const log = readFileSync(join(logs, f));
+    const from = passStarts.get(f) ?? 0;
+    const text = log.subarray(log.length < from ? 0 : from).toString("utf8");
+    if (!logSaysLimit(text)) continue;
+    const resets = limitResets(text);
+    found = { ...found, ...(resets !== undefined && { resets }) };
+  }
+  return found;
 };
 
 // Where each agent log's latest pass began, by the log's file name (they all live in .sandcastle/logs): Sandcastle appends a re-run to the same log.
@@ -3092,11 +3099,11 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
       // To the landing worker as it ends, not when the slowest pipeline does.
       return report;
     }
-    let limited = false;
+    let limited: { resets?: string } | undefined;
     bookkeep(issue.id, () => {
       // Kept open even at the end of the queue: a crash is for a human to read.
       view.finish(issue.id, "crashed");
-      limited = hitLimit(project.root, issue.id);
+      limited = planLimit(project.root, issue.id);
     });
     // A pipeline that crashed on its own keeps its own error; a failed check after it stops the run all the same.
     return attempted(issue.id, ended, check, limited);

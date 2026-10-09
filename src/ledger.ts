@@ -408,7 +408,7 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       };
     case "not begun": {
       const { why } = e;
-      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
+      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
       return { record, tracker: comment(notLandedComment(c.report, undefined)) };
     }
     case "waiting":
@@ -605,7 +605,7 @@ export const accountLanding = (entries: Iterable<Entry>): Landings => {
 export const causeWords = (c: StopCause, ref: (id: string) => string): string => {
   switch (c.kind) {
     case "plan limit":
-      return `${ref(c.ticket)} hit the plan's usage limit`;
+      return `${ref(c.ticket)} hit the plan's usage limit${c.resets ? ` (resets ${c.resets})` : ""}`;
     case "usage limit":
       return c.line;
     case "tampered":

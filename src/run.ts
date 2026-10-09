@@ -415,11 +415,26 @@ export const toolFailureLine = (line: string): string | undefined => {
 export const isToolFailureLine = (line: string) => /^! (error|exit -?\d+)(: |$)/.test(line);
 
 // What a spent plan allowance leaves at the end of an agent's log.
-const LIMIT = /out of usage credits|usage limit|limit reached/i;
+// Claude Code's own line reads "You've hit your session limit · resets 2:10pm (UTC)" (or "weekly limit", "Opus limit").
+const LIMIT = /out of usage credits|usage limit|limit reached|hit your [\w' ]{0,30}limit/i;
 
 /** Whether a readable log ends saying the plan allowance is spent. Not a failed tool's line: a test or a file can say "usage limit". */
 export const logSaysLimit = (text: string) =>
   LIMIT.test(text.split("\n").filter((l) => !isToolFailureLine(l)).slice(-8).join("\n"));
+
+/**
+ * When the plan's window resets, as the log's limit line says it ("resets 2:10pm (UTC)" -> "2:10pm (UTC)"), or undefined
+ * when the log ends with no such line. Read from the same tail as `logSaysLimit`, the last one winning.
+ */
+export const limitResets = (text: string): string | undefined => {
+  const tail = text.split("\n").filter((l) => !isToolFailureLine(l)).slice(-8);
+  for (const line of tail.reverse()) {
+    if (!LIMIT.test(line)) continue;
+    const when = /\bresets?\s+(?:at\s+)?(.+?)\s*$/i.exec(line)?.[1];
+    if (when) return when.slice(0, 60);
+  }
+  return undefined;
+};
 
 /**
  * The library ends each pass with "Context window: Nk", which is the sum of input, cache-write and cache-read
