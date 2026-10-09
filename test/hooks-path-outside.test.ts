@@ -19,7 +19,7 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const { hooksPathOutside, plan, report } = await import("../src/lean.ts");
 const { hooksPathWarning } = await import("../src/gates.ts");
 
-const ABSOLUTE = "/Users/someone/project/.githooks";
+const ABSOLUTE = "/home/user/project/.githooks";
 
 const repo = (hooksPath?: string) => {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-hookspath-"));
@@ -75,7 +75,7 @@ test("lean warns about it and no longer says the hooks run", (t) => {
   const project = { name: "fixture", root: repo(ABSOLUTE), lean: { keep: [], dropHooks: [] }, hookTests: [] } as unknown as Project;
   report(project, plan(project));
   const said = log.mock.calls.map((c) => c.arguments.join(" ")).join("\n");
-  assert.match(said, /WARNING: core\.hooksPath is "\/Users\/someone\/project\/\.githooks"/);
+  assert.match(said, /WARNING: core\.hooksPath is "\/home\/user\/project\/\.githooks"/);
   assert.doesNotMatch(said, /run on every agent commit/);
 });
 
@@ -91,7 +91,7 @@ test("lean still says the hooks run for a relative core.hooksPath", (t) => {
 test("doctor reports it as a FIX in a project", () => {
   const doctor = (root: string) =>
     runKit(["doctor"], { cwd: root, encoding: "utf8", env: { ...process.env, XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "sandcastle-test-")), GIT_CEILING_DIRECTORIES: tmpdir() } }).stdout;
-  assert.match(doctor(repo(ABSOLUTE)), /FIX  core\.hooksPath is "\/Users\/someone\/project\/\.githooks".*\n.*-> .*git config core\.hooksPath <relative path>/);
+  assert.match(doctor(repo(ABSOLUTE)), /FIX  core\.hooksPath is "\/home\/user\/project\/\.githooks".*\n.*-> .*git config core\.hooksPath <relative path>/);
   assert.doesNotMatch(doctor(repo(".githooks")), /core\.hooksPath is/);
 });
 
