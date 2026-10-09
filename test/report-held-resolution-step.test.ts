@@ -78,7 +78,7 @@ test("gather lists a held resolution's ticket, and neither a landing hold's nor 
   const out = render(gathered);
   const state = section(out, "## 📤 Local state");
   assert.match(state, new RegExp(`agent/issue-7 \\(its conflict resolution was held in an earlier run: ${NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
-  assert.match(state, /agent\/issue-8 \(held for a human merge in an earlier run: needs a human merge\)/);
+  assert.match(state, /agent\/issue-8 \(held for a human merge in an earlier run\)/);
 });
 
 test("an earlier held resolution is checked and landed with sandcastle land, not merged by hand", () => {
@@ -99,7 +99,7 @@ test("several earlier held resolutions name <branch> and <n>", () => {
 
 test("an earlier landing hold prints as before, beside a held resolution", () => {
   const out = render(facts({ standing: ["agent/issue-7", "agent/issue-8"], earlierHeld: { "agent/issue-7": RESOLUTION, "agent/issue-8": "needs a human merge" }, heldResolutions: ["7"] }));
-  assert.match(section(out, "## 📤 Local state"), /agent\/issue-8 \(held for a human merge in an earlier run: needs a human merge\)/);
+  assert.match(section(out, "## 📤 Local state"), /agent\/issue-8 \(held for a human merge in an earlier run\)/);
   const next = section(out, "## 👉 Next step");
   assert.match(next, /Resolve agent\/issue-8, held for a human merge in an earlier run: review it with `git log -p main\.\.agent\/issue-8` and merge by hand with `git merge --no-ff agent\/issue-8`, or drop it with `git branch -D agent\/issue-8`\./);
   assert.match(next, /`sandcastle land 7`/);
