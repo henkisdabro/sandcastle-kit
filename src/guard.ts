@@ -96,7 +96,8 @@ export const pinHostGitConfig = (root: string) => {
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
 // `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
 // `files` also holds the shared `.git/modules/` (see `moduleFiles`), whose repositories a host git reaches through a gitlink.
-export type Fingerprint = { files: Record<string, string>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
+// `records` holds the person's own linked worktrees' records (`personRecords`) by name: `.` is the record itself, then each of the three files git reads there that exists.
+export type Fingerprint = { files: Record<string, string>; records: Record<string, Record<string, string>>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
 
 type ConfigReading = { path: string; entries: string[] | null };
 
@@ -235,12 +236,104 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const worktreeConfig = readEntries(worktreeConfigPath);
   return {
     files,
+    records: personRecords(project, dir),
     config,
     worktreeConfig,
     base: tipOf(project.root, `refs/heads/${project.baseBranch}`),
     branches: share?.branches ?? agentBranches(project.root),
     flying: share?.flying ?? new Set(),
   };
+};
+
+// The files of a linked worktree's record that decide which config git reads there.
+const RECORD_FILES = ["commondir", "config.worktree", "gitdir"];
+
+/**
+ * Whether the record `name` is one the kit made for a sandbox: a kit name whose `gitdir` sits under the project's
+ * `.sandcastle/worktrees/`. Those keep their own checks (`rewrittenWorktrees`, `assertWorktreeRecords`).
+ */
+const kitRecord = (project: Project, records: string, name: string): boolean => {
+  if (!/^(agent-issue-|sandcastle-)/.test(name)) return false;
+  try {
+    const at = resolve(join(records, name), readFileSync(join(records, name, "gitdir"), "utf8").trim());
+    return [...new Set([project.root, realpathSync(project.root)])].some((r) => at.startsWith(join(r, ".sandcastle", "worktrees") + sep));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The records of worktrees a person made by hand beside a run (`git worktree add` for a pull request's branch, say), by
+ * name: `.` is the record itself (a directory, else its kind), then the content of each of `commondir`,
+ * `config.worktree` and `gitdir` that exists. A file that is absent has no key, so creating one differs from its absence.
+ * A sandbox that changes one makes the person's next git command in that worktree read config no check has seen.
+ */
+const personRecords = (project: Project, common: string): Fingerprint["records"] => {
+  const records = join(common, "worktrees");
+  const found: Fingerprint["records"] = {};
+  if (!lstatSync(records, { throwIfNoEntry: false })?.isDirectory()) return found;
+  for (const name of readdirSync(records).sort()) {
+    const files = personRecord(project, records, name);
+    if (files) found[name] = files;
+  }
+  return found;
+};
+
+/** One record of `personRecords`, or none when it is a kit sandbox's. */
+const personRecord = (project: Project, records: string, name: string): Record<string, string> | undefined => {
+  if (kitRecord(project, records, name)) return undefined;
+  const record = join(records, name);
+  const files: Record<string, string> = { ".": entryHash(record) };
+  for (const file of RECORD_FILES) if (lstatSync(join(record, file), { throwIfNoEntry: false })) files[file] = entryHash(join(record, file));
+  return files;
+};
+
+/**
+ * What a person's worktree records differ by since `before`, as the stop names them. A record present at the start whose
+ * `commondir`, `gitdir` or `config.worktree` differs (present or absent, or content) is named; one that is gone passes
+ * (`git worktree remove`); one added since passes only as `git worktree add` writes it: `commondir` is `../..` and
+ * there is no `config.worktree`, and `now` then holds it as it passed.
+ */
+const recordChanges = (project: Project, before: Fingerprint["records"], now: Fingerprint["records"]): string[] => {
+  const records = join(realpathSync(commonDir(project.root)), "worktrees");
+  const named: string[] = [];
+  for (const [name, files] of Object.entries(now)) {
+    const shown = (file: string) => `worktrees/${clean(name)}${file === "." ? "" : `/${file}`}`;
+    const was = before[name];
+    if (was) {
+      for (const file of [".", ...RECORD_FILES]) {
+        if (was[file] !== files[file]) named.push(`${shown(file)} ${!(file in was) ? "added" : !(file in files) ? "removed" : "changed"}`);
+      }
+      continue;
+    }
+    // git writes the record's files a moment after its directory exists: one added just now is read again before it is blamed.
+    let problem: string | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const record = join(records, name);
+      const commondir = join(record, "commondir");
+      problem = undefined;
+      try {
+        const text = lstatSync(commondir, { throwIfNoEntry: false })?.isFile() ? readFileSync(commondir, "utf8").replace(/[\r\n]+$/, "") : undefined;
+        if (!lstatSync(record).isDirectory()) problem = `${shown(".")} is not a directory`;
+        else if (text !== "../..") problem = `${shown("commondir")} is ${text === undefined ? "missing" : "not ../.."}, which git writes`;
+        else if (lstatSync(join(record, "config.worktree"), { throwIfNoEntry: false })) problem = `${shown("config.worktree")} added`;
+      } catch {
+        problem = `${shown(".")} cannot be read`;
+      }
+      if (!problem) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    if (problem) {
+      named.push(problem);
+      continue;
+    }
+    // What passed is what is expected from here on: the reading `now` took may predate the files git wrote since, and
+    // would name them as added at the next check. A kit sandbox's record whose `gitdir` was not written yet then was one.
+    const passed = personRecord(project, records, name);
+    if (passed) now[name] = passed;
+    else delete now[name];
+  }
+  return named;
 };
 
 const changedFiles = (before: Fingerprint["files"], now: Fingerprint["files"]) =>
@@ -876,6 +969,19 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }
+  const records = recordChanges(project, before.records, now.records);
+  if (records.length) {
+    const names = records.join(", ");
+    const inspect = [...new Set(records.map((r) => `.git/${r.split(" ")[0].split("/").slice(0, 2).join("/")}`))].join(", ");
+    throw new GuardStop(
+      `STOPPED ${when}: ${names} in the shared .git while sandboxes ran. A worktree you made yourself has its record there, and a sandbox may have changed it so that your next git command in that worktree reads config no check has seen. ` +
+        `Inspect ${inspect} and that worktree's .git file before running any git command there.`,
+      { what: "a worktree record of your own changed while sandboxes ran", detail: `(${names})` },
+    );
+  }
+  // Nothing is named: the records as they stand are the run's expectation from here on (a worktree removed or added since
+  // the start), so a later change to an added one is caught too, and a removed name added again is judged as added.
+  before.records = now.records;
   const rewritten = rewrittenWorktrees(project);
   if (rewritten.length) {
     throw new GuardStop(
