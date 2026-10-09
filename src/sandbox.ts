@@ -165,7 +165,7 @@ const saidOf = (e: unknown) => {
  * The running sandbox containers that mount `worktree`, found as `removeSandboxContainer` finds one. Throws a
  * `DockerAnswerError` when Docker does not answer `ps` (it failed, took too long, or listed something that is not an id)
  * or `inspect` of a listed container: a busy, restarting or hung daemon is not "nothing is running". Only a container
- * Docker says is gone meanwhile is skipped.
+ * Docker says is gone meanwhile is skipped, and a missing `docker` program lists none.
  */
 const runningContainersOf = async (worktree: string): Promise<string[]> => {
   const paths = spellings(worktree);
@@ -173,6 +173,8 @@ const runningContainersOf = async (worktree: string): Promise<string[]> => {
   try {
     ids = (await dockerAsync(["ps", "-q", "--filter", "name=^sandcastle-"])).split("\n").filter(Boolean);
   } catch (e) {
+    // No docker program at all (not installed, or not on this PATH): the kit started no container through it.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw new DockerAnswerError(`docker ps: ${saidOf(e)}`, { cause: e });
   }
   const unreadable = ids.find((id) => /\s/.test(id));
