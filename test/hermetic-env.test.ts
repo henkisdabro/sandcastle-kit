@@ -1,5 +1,5 @@
 // Every test file starts from the same environment (test/hermetic-env.ts, preloaded beside
-// test/no-stray.ts): a canonical TMPDIR, the running node's directory first on PATH, and none of the
+// test/no-stray.ts): a canonical TMPDIR, the running node's directory first on PATH and a no-op `docker` after it, and none of the
 // host's HERDR_*, TMUX*, SANDCASTLE_* or kit settings, and no git identity of the host's. Also the guard against a new setting leaking in:
 // a name `src/` reads from the environment must be scrubbed or on the keep list below.
 //
@@ -72,14 +72,18 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   const file = join(dir, "probe.test.ts");
   writeFileSync(
     file,
-    `import { readFileSync, writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
+    `import { spawnSync } from "node:child_process";\nimport { writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { test } from "node:test";\n` +
       `test("probe", () => writeFileSync(${JSON.stringify(out)}, JSON.stringify({ tmp: tmpdir(), path: process.env.PATH, env: process.env, ` +
-      `docker: readFileSync(process.env.PATH.split(${JSON.stringify(delimiter)})[1] + "/docker", "utf8") })));\n`,
+      `docker: spawnSync("docker", ["ps"], { encoding: "utf8" }).stdout })));\n`,
   );
+  // The shell's own docker, ahead of everything: the machine's real Docker on a developer's PATH.
+  const hostBin = join(dir, "host-bin");
+  mkdirSync(hostBin);
+  writeFileSync(join(hostBin, "docker"), "#!/bin/sh\necho host docker\n", { mode: 0o755 });
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     TMPDIR: link,
-    PATH: `/shim${delimiter}${process.env.PATH}`,
+    PATH: [hostBin, "/shim", process.env.PATH].join(delimiter),
     HERDR_ENV: "1", HERDR_PANE_ID: "p", TMUX: "x", TMUX_PANE: "%1", AUTONOMY_LEVEL: "3", CONCURRENCY: "9", USAGE_CHECK: "1",
     SANDCASTLE_DETACHED: "1", SANDCASTLE_TEST_TEMP: "kept", GH_TOKEN: "t", NO_COLOR: "1", XDG_CONFIG_HOME: "/xdg",
     GIT_COMMITTER_NAME: "n", GIT_COMMITTER_EMAIL: "n@example.com", GIT_AUTHOR_NAME: "n", GIT_AUTHOR_EMAIL: "n@example.com", EMAIL: "n@example.com",
@@ -94,10 +98,9 @@ test("a polluted shell reaches a test file as the canonical environment", () => 
   assert.equal(seen.tmp, realpathSync(real));
   assert.equal(seen.path.split(delimiter)[0], dirname(process.execPath));
   assert.ok(seen.path.split(delimiter).includes("/shim"), "the host's own PATH entries stay");
-  // The polluted shell's own docker (a shim here) never comes first, and a docker answering on it is the no-op one.
-  const seenDocker = seen.path.split(delimiter)[1]!;
-  assert.equal(seen.docker, "#!/bin/sh\nexit 0\n");
-  assert.ok(seenDocker.startsWith(realpathSync(real)), "in the test's own TMPDIR");
+  // The shell's own docker never answers: the no-op one, in the test's own TMPDIR, comes first.
+  assert.equal(seen.docker, "", "the host's docker answered the test");
+  assert.ok(seen.path.split(delimiter)[1]!.startsWith(realpathSync(real)), "the no-op docker is in the test's own TMPDIR");
   for (const gone of ["HERDR_ENV", "HERDR_PANE_ID", "TMUX", "TMUX_PANE", "AUTONOMY_LEVEL", "CONCURRENCY", "USAGE_CHECK", "SANDCASTLE_DETACHED", "GH_TOKEN", "NO_COLOR"]) assert.equal(seen.env[gone], undefined, gone);
   assert.equal(seen.env.SANDCASTLE_TEST_TEMP, "kept");
   assert.equal(seen.env.XDG_CONFIG_HOME, "/xdg");
