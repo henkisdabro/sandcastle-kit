@@ -32,7 +32,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -2112,7 +2112,7 @@ let unlockOnExit = false;
  * `turn.docker` is the start's one `docker info` reading, which the first turn takes over from the
  * runtime check (cli.ts); a turn handed none reads its own.
  */
-export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined }): Promise<boolean> => {
+export const burndown = async (project: Project, turn?: { settings: ResolvedSettings; turn: number; docker?: () => string | undefined; acceptGitConfig?: boolean }): Promise<boolean> => {
   const DRY_RUN = process.env.DRY_RUN === "1";
   // This turn's record and summary name a merge-check gap only when this turn's own checks hit it: the note is module state, and a drain runs every turn in one process.
   resetMergeCheckGap();
@@ -2134,9 +2134,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notify = notifyCommand();
   disableHostGitHooks();
   disableHostGitGc();
+  // Before the pins take the config as it is: a key an earlier, killed run's sandbox planted is refused, not pinned.
+  const gitConfig = assertGitConfigBaseline(project, "sandcastle run", turn?.acceptGitConfig);
   pinHostGitConfig(project.root);
   assertCleanBase(project);
   lockRun(project);
+  recordGitConfigStart(project, gitConfig);
   reapOrphans(project);
   // A held branch merged or deleted by hand leaves its backup entry behind: only a landing drops one.
   const swept = pruneBackup(project);

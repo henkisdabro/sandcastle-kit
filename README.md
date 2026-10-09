@@ -1258,7 +1258,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle requeue <ticket> [--note "..."]` | Puts a ticket back in the queue and takes the hold label off, commenting the note first; on a ticket still queued it only adds the note. Drops the ticket's recorded green head, so the next run re-implements it instead of landing the old branch. On GitHub it also reminds you to give the label search a few seconds before `sandcastle run`. GitHub or ticket files (a ticket-file requeue is a commit to the base branch, so it refuses while a run of the project is live) | ➖ no |
 | `sandcastle blockers` | Lists open tickets, queued or not, whose comments say "blocked by" while the body does not (a run would start them), comments whose blockers are all closed, and queued tickets whose blockers can never close (missing, a cycle, unreadable) or are ignored (an unconfigured Linear key, a list under a `Blocked by` heading). Reads GitHub, and Linear if configured | ➖ no |
 | `sandcastle preflight [--api-key]` | One "Reply OK" from every model, in the project image. Asks first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 yes, briefly |
-| `sandcastle run [--detach] [--api-key]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)) | 💸 yes |
+| `sandcastle run [--detach] [--api-key] [--accept-git-config]` | The burndown (above). `--detach` starts it as a process of its own and returns ([Detached runs](#-detached-runs)); `--api-key` is the yes to billing API credits where there is no terminal to ask on ([Run](#-run)); `--accept-git-config` takes the shared `.git/config`'s program-running keys, as they are now, as your own after a run's start refused them ([Safety model](#-safety-model)) | 💸 yes |
 | `sandcastle wait [secs]` | Blocks while the project's run is live, then prints its closing summary and exits with the run's exit code (1 when the merged base ended red); with a timeout, exits 124 and leaves the run alone. With no run live: the last summary and its recorded code | ➖ no |
 | `sandcastle stop` | Stops the live run with a SIGINT, as Ctrl-C does in its terminal; `No run is live.` when none is | ➖ no |
 | `sandcastle pause` | Holds the live run at the next safe juncture ([Pausing a run](#-pausing-a-run)): no new ticket or agent pass starts, passes in flight finish and their sandboxes close (branches kept), green branches still land, and the run gives its sandbox slots to other runs and lets the machine sleep. `No run is live.` when none is; `already paused` when it is. A pause the run took for the plan's usage (`USAGE_PAUSE`) becomes yours: it stays until `resume` | ➖ no |
@@ -1458,6 +1458,20 @@ and the kit narrows what can cross it:
   signing are off, and every filter, merge or diff driver, pager, editor and signing program
   configured when the run starts keeps that value, through git's command-scope config. A value a
   sandbox writes into `.git/config` mid-run is never the one the host's git runs.
+- 📋 **Start baseline.** The pins and the fingerprint take `.git/config` as they find it when a run
+  starts, so a filter a sandbox planted in a run that was killed before any check (Ctrl-C at the
+  wrong moment, a crash, a machine asleep) would become the next run's baseline and never be
+  reported. So `sandcastle run`, `land` and `gates` record the program-running part of the shared
+  `.git/config` - every `filter.*`, `merge.*.driver`, `diff.*.textconv` and `.command`,
+  `core.fsmonitor`, `core.hooksPath`, `core.sshCommand` and `include*` key - and the hash of
+  `.git/info/attributes` in `.sandcastle/.run/git-config-baseline.json`, when they start and again
+  when they end cleanly. Before anything is pinned, the next start compares the present state with
+  that record and refuses a difference, naming each added, changed or removed key (no value for a
+  key that runs a program or carries credentials) and whether the last run ended cleanly. Remove what
+  is not yours; if it is your own (a filter you added since the last run), start again with
+  `sandcastle run --accept-git-config` (or `land` / `gates` with it), which records the present state
+  as the new baseline. With no record - the first run under this kit - the run records and starts.
+  A run killed with those keys unchanged starts again with no question.
 - 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and
   `info/exclude`: ignore patterns and a transport index run nothing, and your own tools, Claude Code
   among them, rewrite them while a run is live), `.git/hooks/`, the main worktree's

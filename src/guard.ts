@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { removeSandboxContainer, sh } from "./sandbox.ts";
@@ -246,6 +246,99 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
   }
   return { benign: allBenign ? benign : [], words };
+};
+
+// ---------------------------------------------------------------------------
+// The start baseline. The pins and the fingerprint both take the shared `.git/config` as they find it
+// when a run starts, so whatever a sandbox wrote there in a run that was killed before any check (Ctrl-C
+// at the wrong moment, a crash, a machine asleep) would be that run's baseline and never reported.
+// The program-running part of the config - the keys that make git run something, and `info/attributes`,
+// which maps paths to them - is therefore recorded when a run starts and again when it ends cleanly, in
+// the project's gitignored `.sandcastle/.run/`, and compared before anything is pinned: a difference
+// from the previous run's record is a refusal, until a person says it is theirs.
+// ---------------------------------------------------------------------------
+
+// Every key that runs a program or loads more config. All of `filter.*` (its `required` decides whether
+// a failing filter stops git), the other drivers and commands, and every `include` key.
+const PROGRAM_KEYS = /^(filter\..+|merge\..+\.driver|diff\..+\.(textconv|command)|core\.(fsmonitor|hookspath|sshcommand)|include.*)$/i;
+
+type ProgramConfig = { entries: string[]; attributes: string };
+type BaselineRecord = ProgramConfig & { clean: boolean };
+
+const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
+
+/** The shared `.git/config`'s program-running entries (`key\nvalue`, sorted) and the hash of `info/attributes` ("" when absent). */
+const programConfig = (project: Project): ProgramConfig => {
+  const dir = commonDir(project.root);
+  let listed: string[];
+  try {
+    // `--file`: only this file, not the user's or the system's, which a sandbox cannot write.
+    listed = existsSync(join(dir, "config")) ? sh("git", ["config", "--file", join(dir, "config"), "-z", "--list"], project.root).split("\0").filter(Boolean) : [];
+  } catch (error) {
+    throw new OperatorError(`NOT STARTED: git cannot read ${relative(realpathSync(project.root), join(dir, "config"))} as config, so the program-running keys a sandbox may have planted there cannot be checked. Inspect it before running any other git command there.`, { cause: error });
+  }
+  const attributes = join(dir, "info", "attributes");
+  return {
+    entries: listed.filter((e) => PROGRAM_KEYS.test(e.split("\n")[0])).sort(),
+    attributes: existsSync(attributes) ? createHash("sha256").update(readFileSync(attributes)).digest("hex") : "",
+  };
+};
+
+const readBaseline = (project: Project): BaselineRecord | undefined => {
+  try {
+    const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
+    if (Array.isArray(record.entries) && record.entries.every((e: unknown) => typeof e === "string") && typeof record.attributes === "string") {
+      return { entries: record.entries, attributes: record.attributes, clean: record.clean === true };
+    }
+  } catch {
+    // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
+  }
+  return undefined;
+};
+
+const writeBaseline = (project: Project, record: BaselineRecord) => {
+  mkdirSync(dirname(baselineFile(project)), { recursive: true });
+  writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
+};
+
+/**
+ * Before a run, `land` or `gates` pins anything: holds the shared `.git/config`'s program-running keys
+ * and `info/attributes` to what the previous run recorded. A difference throws an `OperatorError` that
+ * names each added, changed or removed key (no value for a key that runs a program, as the `.git` stop
+ * says it) and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's
+ * own. No record (the first run under this kit) is no difference. A previous run that never ended
+ * cleanly says so in the refusal, since a sandbox may have written the difference. Writes nothing:
+ * `recordGitConfigStart` does, once the run holds its lock. Returns the state it read.
+ */
+export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramConfig => {
+  const now = programConfig(project);
+  const was = readBaseline(project);
+  if (!was || accept) return now;
+  const { words } = configChange(project, was.entries, now.entries);
+  if (was.attributes !== now.attributes) words.push(`info/attributes ${!was.attributes ? "added" : !now.attributes ? "removed" : "changed"}`);
+  if (!words.length) return now;
+  const root = project.root;
+  throw new OperatorError(
+    `NOT STARTED: the shared .git/config holds program-running keys that differ from the ones the last run left: ${words.join("; ")}. ` +
+      `${was.clean ? "Something wrote them between the runs." : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them."} ` +
+      `Inspect \`git -C ${root} config --local --list\` and .git/info/attributes. Remove what is not yours (\`git -C ${root} config --local --unset-all <key>\`), ` +
+      `or, if it is your own, start again with \`${command} --accept-git-config\`, which records the present state as the new baseline.`,
+  );
+};
+
+/** Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended. */
+export const recordGitConfigStart = (project: Project, state: ProgramConfig) => writeBaseline(project, { ...state, clean: false });
+
+/**
+ * At a run's clean end: marks the record clean when the config still holds what the run started
+ * with. A key a sandbox wrote after the last check stays different from the record, so the next start
+ * refuses it: the end never records a state it did not check.
+ */
+export const recordGitConfigEnd = (project: Project) => {
+  const was = readBaseline(project);
+  if (!was) return;
+  const now = programConfig(project);
+  if (now.attributes === was.attributes && now.entries.length === was.entries.length && now.entries.every((e, i) => e === was.entries[i])) writeBaseline(project, { ...was, clean: true });
 };
 
 // Names, subjects and paths are the sandbox's to choose: shown without

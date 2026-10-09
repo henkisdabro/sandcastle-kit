@@ -49,6 +49,11 @@ This continues SKILL.md: run its "Before every action" first.
      `--api-key` (or `SANDCASTLE_API_KEY=1`) only when the user has said yes to billing API credits
      in so many words - a yes to the run is not that yes. `sandcastle preflight` and
      `sandcastle lean --measure` ask the same.
+   - **A refused start naming `.git/config` keys.** `NOT STARTED: the shared .git/config holds
+     program-running keys that differ from the ones the last run left` means a filter, driver or
+     `include` appeared since the previous run - possibly a killed run's sandbox. Show the user the
+     keys it names; never pass `--accept-git-config` on your own. Only the user's yes that the keys
+     are theirs allows it.
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
