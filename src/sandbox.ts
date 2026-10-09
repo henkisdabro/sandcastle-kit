@@ -70,12 +70,35 @@ export const AGENT_COMMITTER = {
   GIT_COMMITTER_EMAIL: "agent@sandcastle.invalid",
 } as const;
 
+/**
+ * The base-side parents of the merge commits in `base..branch` that the base no longer holds: the kit
+ * merges the base into a carried branch on each re-run, and when the base is rewritten between runs (a
+ * `git pull --rebase` that flattens the landing merges into copies, a reset that drops a landing) the
+ * old base stays reachable through those merges. Everything of it the base lacks then reads as the
+ * branch's own work, and landing the branch brings it back: duplicates of what landed, or a commit
+ * someone removed on purpose. A parent is an ancestor of the base exactly when it is not in
+ * `base..branch`, so one `rev-list` answers for every merge. `git cherry` cannot: a commit a reset
+ * dropped has no copy on the base and reads as the branch's own. Empty for a base that only moved forward.
+ */
+export const staleBaseParents = (base: string, branch: string, cwd?: string): string[] => {
+  const commits = sh("git", ["rev-list", "--parents", `${base}..${branch}`], cwd).split("\n").filter(Boolean).map((l) => l.split(" "));
+  const unmerged = new Set(commits.map(([sha]) => sha));
+  return [...new Set(commits.flatMap(([, , ...joined]) => joined).filter((parent) => unmerged.has(parent)))];
+};
+
+/** The revisions of a branch's own commits: since the base, and not the old base a rewrite left reachable (`staleBaseParents`). */
+export const ownRange = (base: string, branch: string, cwd?: string) => [`${base}..${branch}`, ...staleBaseParents(base, branch, cwd).map((parent) => `^${parent}`)];
+
 // A branch's own commits since the base: merges are left out, because the kit
 // merges the base into a carried branch on each re-run and those merge-ins are
-// not the ticket's work. Only for reporting - "carried" and "nochange" count
-// every commit, merge or not.
+// not the ticket's work; nor is the old base a rewrite left behind them. Only
+// for reporting - "carried" and "nochange" count every commit, merge or not.
 export const ownCommits = (base: string, branch: string, cwd?: string) =>
-  Number(sh("git", ["rev-list", "--count", "--no-merges", `${base}..${branch}`], cwd));
+  Number(sh("git", ["rev-list", "--count", "--no-merges", ...ownRange(base, branch, cwd)], cwd));
+
+/** The same commits, oldest first (parents before children): what a branch is rebuilt from. */
+export const ownCommitList = (base: string, branch: string, cwd?: string): string[] =>
+  sh("git", ["rev-list", "--reverse", "--topo-order", "--no-merges", ...ownRange(base, branch, cwd)], cwd).split("\n").filter(Boolean);
 
 const WORKTREES = ".sandcastle/worktrees/";
 

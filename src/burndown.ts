@@ -40,13 +40,13 @@ import { agentBaseline, peakOf, pressureFields, pressureOf, recordPeak, sampling
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, strayChanges, strayNote } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -59,7 +59,7 @@ import { OperatorError, reportedError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -977,11 +977,18 @@ export const openOnQueue = async (project: Project, tracker: Tracker, whole: Iss
  * The files the ticket's existing branch changes. Three dots: its own changes since it forked or
  * last merged the base, so work that landed on the base meanwhile is not counted against it. No
  * branch (a new ticket) or an empty diff means no files. `--no-renames` lists both ends of a rename.
+ * A branch that merged a base since rewritten (`staleBaseParents`) has no merge base to count from:
+ * the three dots would list everything the rewrite moved, so it is the files its own commits changed
+ * (the pipeline re-creates it from those commits).
  */
 export const branchFiles = (root: string, base: string, id: string): string[] => {
   try {
-    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`], root);
-    return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...agent/issue-${id}`], root).split("\0").filter(Boolean);
+    const branch = `agent/issue-${id}`;
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    if (staleBaseParents(base, branch, root).length) {
+      return [...new Set(sh("git", ["log", "--no-merges", "--no-renames", "--name-only", "--format=", "-z", ...ownRange(base, branch, root)], root).split("\0").filter(Boolean))];
+    }
+    return sh("git", ["diff", "--no-renames", "--name-only", "-z", `${base}...${branch}`], root).split("\0").filter(Boolean);
   } catch {
     return [];
   }
@@ -1696,6 +1703,29 @@ export const createPipeline = (ctx: PipelineContext) => {
         console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
         return { issue: issue.id, branch, status: "conflict", conflict: { ...conflict, found: before }, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
       };
+      // A branch that merged a base since rewritten (a `pull --rebase` that flattened the landing merges into copies,
+      // a reset that dropped a landing) holds commits the base no longer has under their old hashes: landed as it
+      // stands it brings them back, duplicated or removed on purpose, with no review, and its recorded heads vouch
+      // for them. It is re-created on the base's tip from its own commits, in the sandbox as the merge below is, and
+      // its head record dropped, so the full implement, review and gates follow. A commit that does not apply holds
+      // it for a person, the branch as it was. Before `carried` and the head records below read the branch.
+      const rebuilt = await rebuildOnBase(sandbox, { root: project.root, base, branch, identity: hostIdentity(project.root) }).catch((error) => {
+        if (error instanceof GuardStop) throw error;
+        console.log(`${ref(issue.id)}: could not tell whether ${base} was rewritten under ${branch} (${errorLine(error)}); it runs as a carried branch does.`);
+        return undefined;
+      });
+      if (rebuilt?.kind === "held") {
+        const why = rewrittenNote(base, rebuilt);
+        console.log(`${ref(issue.id)}: ${why} - held for a human.`);
+        notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
+        return heldResolution(issue.id, branch, why, { commits: ownCommits(base, branch, project.root), reviewCommits: 0, gates: [] });
+      }
+      if (rebuilt) {
+        console.log(rebuiltLine(ref(issue.id), base, rebuilt));
+        run.ticket(issue.id, { note: `re-created on the rewritten ${base}` });
+        // A dry run's work must not change what a real run skips; the old record stands for the old tip, which the rebuilt branch no longer holds.
+        if (!dryRun) forgetHead(project.root, issue.id);
+      }
       // A branch kept from an earlier run (red, conflicted, crashed) forks from
       // an older base. Asked to "merge it in", an agent that found the work
       // already done said so and stopped, and the branch hit the same conflict
