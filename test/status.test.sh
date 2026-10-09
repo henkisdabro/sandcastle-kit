@@ -356,6 +356,8 @@ SCENARIO="pause ten minutes old, the clock at 00:05"
 # yesterday, and the cell then gives its date (`PAUSED since 08 Oct 23:55`). The same two records, a
 # person's pause and a usage pause whose percent is no number, are drawn under a `date` that says it is
 # 00:05, so the date prefix is held at any hour of the day and not only by a run that starts after midnight.
+# The clock is tomorrow's 00:05, not today's: then the real `date +%F` names another day than the shim's,
+# and both checks below fail if status.sh ever reads the real clock.
 mkdir -p "$TMP/clock"
 cat >"$TMP/clock/date" <<'EOF'
 #!/bin/sh
@@ -366,14 +368,17 @@ else exec "$REAL_DATE" "$@"; fi
 EOF
 chmod +x "$TMP/clock/date"
 REAL_DATE="$(command -v date)"
-midnight_now=$(date -d "$(date +%F) 00:05:00" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%F) 00:05:00" +%s)
+# Tomorrow is found from today's noon, so a daylight-saving change tonight cannot keep it today.
+noon=$(date -d "$(date +%F) 12:00:00" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$(date +%F) 12:00:00" +%s)
+tomorrow=$(date -d "@$((noon + 86400))" +%F 2>/dev/null || date -r "$((noon + 86400))" +%F)
+midnight_now=$(date -d "$tomorrow 00:05:00" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$tomorrow 00:05:00" +%s)
 since_was="$since_at"; since_at=$((midnight_now - 600))
 usage_paused week 100 codex '[]'
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
 PATH="$TMP/clock:$PATH" REAL_DATE="$REAL_DATE" FAKE_NOW="$midnight_now" render "120 121 123"
 has 'PAUSED since [0-9]{2} [A-Za-z]{3} 23:55'
 hasnt 'usage'
-# The clock itself is held: a pause made after midnight, four minutes ago, gives the time alone.
+# A pause made after midnight, four minutes ago, gives the time alone.
 since_at=$((midnight_now - 240))
 usage_paused week 100 codex '[]'
 sed -i.bak 's/"percent": 100,/"percent": "high",/' "$L/run.json"
