@@ -382,7 +382,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   }
   // A branch with no ref has no diff: `clean` deletes one once its patches are on the base, so the merge's subject says whether it was merged.
   const gone = Object.entries(tickets).filter(([id, t]) => t.state === "held" && changed[id] === undefined).map(([id]) => id);
-  const byHand = [...Object.keys(changed).filter((id) => changed[id] === 0), ...gone].filter((id) => mergedByHand(root, base, id));
+  // A finished ticket the run stopped before landing, which `sandcastle land` then merged: the run record still says `stopped`.
+  const landedAfterStop = Object.entries(tickets).filter(([, t]) => t.state === "stopped").map(([id]) => id);
+  const byHand = [...Object.keys(changed).filter((id) => changed[id] === 0), ...gone, ...landedAfterStop].filter((id) => mergedByHand(root, base, id));
   // An agent that handed a ticket back left no commits, so `clean` deletes its branch too: the question is still the person's to answer.
   const recorded = readOutcomes(root);
   for (const id of gone) {
@@ -727,7 +729,7 @@ const owed = (f: Facts) => {
   // Likewise merged, with a gap a reviewer named in prose and filed nowhere (no `<followup>`, no `<unmet>`).
   const gapped = merged.filter((id) => f.tickets[id].gap);
   // Held work a person has merged by hand: on the base already, so not theirs to merge or redo; the push closes it.
-  const byHand = ids(["held"]).filter((id) => f.mergedByHand?.includes(id));
+  const byHand = ids(["held", "stopped"]).filter((id) => f.mergedByHand?.includes(id));
   const held = ids(["held"]).filter((id) => !byHand.includes(id));
   // Held, its branch cleaned away and never merged: only the ticket is left to act on.
   const gone = held.filter((id) => f.branchGone?.includes(id));
@@ -902,7 +904,7 @@ export const render = (f: Facts, plain = false): string => {
   const blockedCount = f.blocked.length;
   const nochange = ids(["nochange"]);
   const withdrawn = ids(["withdrawn"]);
-  const stoppedIds = ids(["stopped"]);
+  const stoppedIds = ids(["stopped"]).filter((id) => !byHand.includes(id));
   // A dry run's green branches end as "ready": they would have merged.
   const wouldMerge = f.dryRun ? ids(["ready"]) : [];
   // Withdrawn before its sandbox started: someone's decision, not an attempt.
@@ -991,13 +993,19 @@ export const render = (f: Facts, plain = false): string => {
   const byHandShut = byHand.filter((id) => f.mergedByHandClosed?.includes(id));
   const byHandPart = byHand.filter((id) => !byHandShut.includes(id) && f.mergedByHandPartly?.includes(id));
   const byHandOpen = byHand.filter((id) => !byHandShut.includes(id) && !byHandPart.includes(id));
-  if (byHandOpen.length) done.push(`${byHandOpen.length} held, merged by hand; closes on push: ${list(byHandOpen)}`);
+  // A ticket the run stopped before landing is "stopped", not "held": it was merged by hand all the same.
+  const byHandLine = (group: string[], tail: string) => {
+    for (const [what, who] of [["held", group.filter((id) => f.tickets[id].state === "held")], ["stopped", group.filter((id) => f.tickets[id].state === "stopped")]] as const) {
+      if (who.length) done.push(`${who.length} ${what}, merged by hand${tail}: ${list(who)}`);
+    }
+  };
+  byHandLine(byHandOpen, "; closes on push");
   // A "part of" merge never closes its ticket: the criterion it left undone is for the next run, or a person.
   if (byHandPart.length) {
-    done.push(`${byHandPart.length} held, merged by hand, partly done: stays open: ${list(byHandPart)}`);
+    byHandLine(byHandPart, ", partly done: stays open");
     for (const id of byHandPart) if (f.tickets[id].unmet) done.push(`${name(id)} - criterion unmet: ${f.tickets[id].unmet}`);
   }
-  if (byHandShut.length) done.push(`${byHandShut.length} held, merged by hand, and closed: ${list(byHandShut)}`);
+  byHandLine(byHandShut, ", and closed");
   if (nochange.length) done.push(`Nothing to change: ${list(nochange)} - left open, with the agent's evidence in a comment`);
   // Someone's decision during the run; its branch stands in case they want it.
   for (const id of withdrawn) {
@@ -1305,6 +1313,8 @@ const commitTime = (root: string, ref: string) => git(["log", "-1", "--format=%c
  * else all history): the tickets merged in runs that started after the ref's commit time, read
  * from `logs/history.jsonl` and the current `logs/run.json`. A ticket merged in several runs is
  * shown once, with the lines of its latest run that has any. A line that does not parse is skipped.
+ * A ticket landed with `sandcastle land` is in no run's `merged`: its kit-worded merge subject on the base after the ref
+ * finds it, with the heads record's lines, else a run record's, else under "No suggested line".
  */
 export const changelogSince = (project: Project, since?: string): string => {
   const root = project.root;
@@ -1330,6 +1340,19 @@ export const changelogSince = (project: Project, since?: string): string => {
       const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0 } : before;
       landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped });
     }
+  }
+  // Tickets landed with `sandcastle land` after a run stopped: no run record says `merged`, but the kit's merge subject is on
+  // the base after the ref. Their lines are the heads record's, else the latest run record's that has any.
+  const heads = readHeads(root);
+  const subjects = git(["log", ref ? `${ref}..${project.baseBranch}` : project.baseBranch, "--format=%s"], root) ?? "";
+  for (const subject of subjects.split("\n").reverse()) {
+    const id = /^Merge agent\/issue-(.+) \((?:closes|part of) /.exec(subject)?.[1];
+    if (!id || landed.has(id)) continue;
+    // Newest first: the heads record, then each run's record of the ticket.
+    const records = [heads[id], ...[...runs.values()].filter((run) => !run.dryRun).sort((x, y) => Date.parse(y.startedAt!) - Date.parse(x.startedAt!)).map((run) => readTickets(run)[id])].filter((r) => !!r);
+    const linesOf = (r: { changelog?: unknown }) => (Array.isArray(r.changelog) ? r.changelog.filter((l): l is string => typeof l === "string") : []);
+    const source = records.find((r) => linesOf(r).length) ?? records.find((r) => r.changelogDropped);
+    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0 });
   }
   const ids = [...landed.keys()];
   const out = [`${ids.length} ticket(s) landed in runs started after ${ref ? `${ref} (${after})` : "the start of the history"}.`];

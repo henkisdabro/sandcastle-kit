@@ -23,7 +23,7 @@ import { guardWords, largeFilesNote } from "./guard.ts";
 import type { Project } from "./config.ts";
 import { againNoteOf, conflictLine, type Landable, type Landed, redDetail, redNote, requeuedLine } from "./landing.ts";
 import { overrunLine, overrunNoted } from "./report.ts";
-import { HANDED_BACK, recordOutcomes } from "./run.ts";
+import { HANDED_BACK, readOutcomes, recordOutcomes } from "./run.ts";
 import { errorLine } from "./sandbox.ts";
 import type { Again, Change, Ending, StopCause } from "./schedule.ts";
 import { refOf } from "./tracker.ts";
@@ -428,6 +428,20 @@ const unstarted = (e: TicketEnding) =>
 
 /** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
 export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);
+
+/**
+ * A ticket `sandcastle land` merged, which no run is there to record: a run that stopped left it `stopped`, and the
+ * outcome is what `report --changelog` and the closing summary read. The run it belonged to is kept, so that run's
+ * summary still finds the entry; a ticket with none is filed under the landing's own time. A record that will not
+ * save is no reason to hide the merge, which is made.
+ */
+export const recordHandLanding = (project: Project, id: string, partly: boolean) => {
+  try {
+    recordOutcomes(project, readOutcomes(project.root)[id]?.run ?? new Date().toISOString(), { [id]: { kind: "merged", text: partly ? "merged (partly done)" : "merged by sandcastle land" } });
+  } catch {
+    /* the merge stands; the ticket's own comment is still to write */
+  }
+};
 
 /** One ticket's entry: its ending, the context it was described in, and what was said. */
 export type Entry = { id: string; ending: TicketEnding; context: Context; said: Said };

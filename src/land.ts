@@ -12,6 +12,7 @@ import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { assertGitUnchanged, checkBeforeClose, dropBackup, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
+import { recordHandLanding } from "./ledger.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
 import { recordPeak } from "./peaks.ts";
@@ -332,6 +333,7 @@ export const landTicket = async (
       const squash = project.land === "squash";
       const how = squash ? "squashed" : "merged";
       dropBackup(project, branch);
+      recordHandLanding(project, id, !!unmet);
       // Deleted as a run deletes it: a squashed branch would read as unmerged work, a merged one is clutter.
       let kept = "";
       try {
