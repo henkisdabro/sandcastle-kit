@@ -24,5 +24,5 @@ test("the implementer is not told to run gates one per command, and still sends 
   const p = read("prompts", "implement.md");
   assert.doesNotMatch(p, /never several in one command|in its own command/);
   assert.match(p, /Redirect each gate to a file outside the worktree/);
-  assert.match(p, /Before you finish, run each gate once\./);
+  assert.match(p, /Before you finish, run the typecheck gate and the tests your change touches or that cover it, each once\./);
 });
