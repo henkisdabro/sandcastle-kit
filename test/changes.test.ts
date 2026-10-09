@@ -24,6 +24,12 @@ const CHANGELOG = `# Changelog
 
 - **Not released yet.** Left out.
 
+## [0.4.0] - 2026-04-01
+
+### Added
+
+- **Beyond the kit.** A release newer than the kit's own is never shown.
+
 ## [0.3.0] - 2026-03-01
 
 ### Added
@@ -52,11 +58,6 @@ const CHANGELOG = `# Changelog
 
 - **The first change.**
 
-## [0.0.9] - 2025-12-01
-
-### Added
-
-- **Beyond the kit.** Newer than the kit's own release is never shown.
 `;
 
 const kit = (text = CHANGELOG, version = "0.3.0") => {
