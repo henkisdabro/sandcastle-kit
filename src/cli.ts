@@ -91,6 +91,12 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
+//   changes [--since RELEASE]
+//                    the CHANGELOG entries of every release after the one this project last
+//                    updated at (or after RELEASE), up to the kit's own: per release grouped
+//                    Added, Changed, Security, Fixed, Upgrading, each cut to its bold lead;
+//                    with no record and no --since, the current release's; read-only, no
+//                    model calls
 //   clean [--all] [--accept-git-config]
 //                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
@@ -131,7 +137,7 @@ import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, parseRu
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
+import { changesLines, kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -203,7 +209,8 @@ try {
     process.exit(0);
   }
   if (command === "help" || command === "--help" || command === "-h") {
-    console.log(HELP.join("\n"));
+    // `help changes` is the one entry; `helpFor` gives the whole text for a name the help does not list.
+    console.log(args[0] ? helpFor(args[0]) : HELP.join("\n"));
     process.exit(0);
   }
   if (command === "cap") {
@@ -703,6 +710,15 @@ try {
     }
     case "updated": {
       console.log(`Recorded: this project is up to date with sandcastle-kit ${markUpdated(root)}.`);
+      break;
+    }
+    case "changes": {
+      const at = args.indexOf("--since");
+      const since = at === -1 ? undefined : args[at + 1];
+      if (args.length !== (at === -1 ? 0 : 2) || (at !== -1 && !/^v?\d+\.\d+\.\d+$/.test(since ?? ""))) {
+        throw new OperatorError("Usage: sandcastle changes [--since RELEASE] - RELEASE is a kit version such as 0.10.0.");
+      }
+      for (const line of changesLines(root, KIT, since)) console.log(line);
       break;
     }
     case "clean": {
