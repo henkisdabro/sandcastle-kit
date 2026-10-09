@@ -3,7 +3,8 @@
 // that hangs. None of those is "nothing is running", so the check fails as a refused stop does - the container is
 // removed if it can be, the close is not called, the error names Docker's - and no `.git` check runs behind a
 // container that may still be alive. A fake `docker` on PATH, and the clock mocked for the time limits (30 s for `ps`
-// and `inspect`, the stop's 3 s grace plus 30 s): no Docker, model or network.
+// and `inspect`, the stop's 3 s grace plus 30 s): no Docker, model or network. A missing `docker` program is not
+// such a failure, and the check goes ahead.
 //
 //   pnpm test:file test/guard-docker-unanswered.test.ts
 
@@ -125,4 +126,16 @@ test("a docker stop that hangs stops the run after the grace plus 30 seconds, an
   assert.ok(!calls().includes("rm -f sandcastle-made-up"), "gave up before the grace plus 30 s");
   mock.timers.tick(1);
   stoppedNaming(await pending, /the container of agent-issue-7 could not be stopped \(docker stop gave no answer in 33 s\)/);
+});
+
+test("with no docker program on PATH the .git check still runs: the kit started no container through it", async () => {
+  const path = process.env.PATH;
+  process.env.PATH = join(TMP, "no-docker-here");
+  try {
+    const r = await attempt();
+    assert.equal(r.checked, true, `the .git check did not run: ${r.error}`);
+    assert.doesNotMatch(String(r.error ?? ""), /Docker/);
+  } finally {
+    process.env.PATH = path;
+  }
 });
