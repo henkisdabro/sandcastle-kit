@@ -72,7 +72,7 @@ test("ten implementers that die of the limit end as not started, and the run sto
 const BASE = { base: "main", gateNames: "lint, test" };
 
 test("the ledger records a ticket the limit cut short as skipped, with the reset time", () => {
-  const said = describe({ kind: "not begun", why: { kind: "plan limit", ticket: "5", resets: "2:10pm (UTC)" } }, { ...BASE, stopLine: "#1 hit the plan's usage limit" });
+  const said = describe({ kind: "not begun", why: { kind: "plan limit", ticket: "5", resets: "2:10pm (UTC)" }, cutShort: true }, { ...BASE, stopLine: "#1 hit the plan's usage limit" });
   assert.deepEqual(said.record, { state: "skipped", note: "not started: the plan's usage limit stopped it (resets 2:10pm (UTC))" });
 });
 

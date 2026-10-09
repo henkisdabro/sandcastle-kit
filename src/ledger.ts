@@ -408,7 +408,9 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
       };
     case "not begun": {
       const { why } = e;
-      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
+      // Only the ticket whose own agent the limit cut short says so: one the stop left unstarted takes the run's last
+      // words, the most severe cause, which may be a `.git` change found after the limit.
+      const record = why.kind === "withdrawn" ? withdrawnRecord(why.reason) : why.kind === "refused label" ? refusedRecord(why.reason) : e.cutShort && why.kind === "plan limit" ? { state: "skipped" as const, note: `not started: the plan's usage limit stopped it${why.resets ? ` (resets ${why.resets})` : ""}` } : { state: "skipped" as const, note: `not started: ${c.stopLine ?? "the run stopped"}` };
       return { record, tracker: comment(notLandedComment(c.report, undefined)) };
     }
     case "waiting":
@@ -422,9 +424,12 @@ const describeEnding = (e: TicketEnding, c: Context): Said => {
   }
 };
 
-/** Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. */
+/**
+ * Never begun because the run stopped: said in the run's last words, which only the end of the schedule knows. Not one
+ * the limit cut short: its note is its own, and recorded as it ends, or its row reads as still working until the run ends.
+ */
 const unstarted = (e: TicketEnding) =>
-  e.kind === "not begun" && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
+  e.kind === "not begun" && !e.cutShort && e.why.kind !== "withdrawn" && e.why.kind !== "refused label";
 
 /** The writer's `outcomes` port onto the project's `outcomes.json`: the ledger is its only writer, so burndown hands it this. */
 export const outcomesFile = (project: Project, run: string) => (outcomes: Record<string, Outcome>) => recordOutcomes(project, run, outcomes);
