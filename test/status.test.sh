@@ -148,7 +148,7 @@ row '#109' conflict 'with #103'
 row '#110' merged
 # A labelled ticket outside the run is `later` (greyed, a glyph of its own), not queued for this run.
 row '#120' later 'next run'
-# The legend's counts add up to the run (ten tickets), with the rest apart in the note.
+# The legend's counts add up to the run (ten tickets), with the ticket outside it apart as `later`.
 for c in 'working 2' 'ready to land 1' 'needs you 3' 'queued 2' 'blocked 1' 'merged 1'; do has "$c +│"; done
 has 'later 1 +│'
 hasnt 'not in this run'

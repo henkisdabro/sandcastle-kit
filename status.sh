@@ -1477,8 +1477,9 @@ render() {
   [ "$LINKS" = 1 ] && NOTE[${#NOTE[@]}]="${gry}${CLICK_HINT}${off}"
   BUF=""; BUF_N=0
   # Cells as wide as their text needs, so "ready to land 3" is not cut at 80
-  # columns: eight on one row from 130 columns, else rows of four, or of two
-  # where four do not fit. A column is as wide as its widest item.
+  # columns: every item on one row from 130 columns where they fit (halved until
+  # they do), else rows of four, or of two where four do not fit. A column is as
+  # wide as its widest item.
   local per=${#LEG[@]} r c sumw nleg=${#LEG[@]}
   [ "$cols" -lt 130 ] && per=4
   while :; do
