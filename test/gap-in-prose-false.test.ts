@@ -179,6 +179,15 @@ test("a sentence in double quotes is no gap, and the prose around it still is", 
   assert.equal(await gapOfReview('The README says "use the new flag". One gap remains: the old flag is still named.\n'), "One gap remains: the old flag is still named.");
 });
 
+test("a gap sentence that quotes words is shown with them, and a quoted sentence's full stop ends no sentence", async () => {
+  // Only the test for gap words skips a quote: the line a person reads keeps what the reviewer quoted.
+  assert.equal(await gapOfReview('One gap remains: the "Remaining" heading is still in the doc.\n'), 'One gap remains: the "Remaining" heading is still in the doc.');
+  assert.equal(await gapOfReview('It passes. "Foo" is still named in the README, a gap I did not fix.\n'), '"Foo" is still named in the README, a gap I did not fix.');
+  assert.equal(await gapOfReview('The doc says "Done. Nothing else." and a gap remains in the CLI.\n'), 'The doc says "Done. Nothing else." and a gap remains in the CLI.');
+  // A quote mark inside inline code pairs with nothing, so the quoted sentence after it is still skipped.
+  assert.equal(await gapOfReview('The flag is `--name="x` now, and the help quotes "the gap remains" as an example.\n'), undefined);
+});
+
 /** The closing summary of a run whose merged ticket 7 carries `gap`, a fake `gh` listing no issues. */
 const summaryWithGap = async (gap: string | undefined) => {
   const root = repo();

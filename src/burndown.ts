@@ -451,10 +451,13 @@ const boldLine = (line: string): { label: boolean; prose: string } | undefined =
 };
 // Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
 const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
-// Nor is a sentence in double quotes: a review of the detector itself quotes its example sentences ("The gap
-// remains; I have not yet fixed it."), and an approving one quotes what a document says. Taken out of a whole
-// unit, before it is split into sentences, as a quoted sentence ends its own sentence mid-quote.
-const withoutQuotes = (unit: string) => unit.replace(/"[^"]*"|\u201c[^\u201d]*\u201d/g, "");
+// Nor is text in double quotes: a review of the detector itself quotes its example sentences ("The gap
+// remains; I have not yet fixed it."), and an approving one quotes what a document says. Only the test skips it:
+// the sentence a person reads keeps its quoted words. A code span goes first, so a quote mark inside it pairs with nothing.
+const QUOTED = /`[^`\n]*`|"[^"]*"|\u201c[^\u201d]*\u201d/g;
+const withoutQuotes = (sentence: string) => sentence.replace(QUOTED, (m) => (m.startsWith("`") ? m : ""));
+// A quote is held whole while a unit is split into sentences: a quoted sentence's own full stop ends no sentence of the reviewer's.
+const QUOTE_HELD = /\uE000(\d+)\uE000/g;
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
 // fenced block are no prose, a heading is no sentence, a list item is a unit of its own, and a paragraph's
 // wrapped lines join. Each sentence keeps the unit it came from, for the context a gap sentence needs.
@@ -473,12 +476,14 @@ const sentencesOf = (text: string): { text: string; unit: number }[] => {
       open = true;
     }
   }
-  return units.flatMap((u, unit) =>
-    withoutQuotes(u)
-      .split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)
-      .map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
-      .map((s) => ({ text: s, unit })),
-  );
+  return units.flatMap((u, unit) => {
+    const quotes: string[] = [];
+    return u
+      .replace(QUOTED, (m) => (m.startsWith("`") ? m : `\uE000${quotes.push(m) - 1}\uE000`))
+      .split(/(?<=[.!?])\s+(?=[A-Z"`(*\uE000])/)
+      .map((s) => s.replace(QUOTE_HELD, (_, i: string) => quotes[Number(i)]).replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
+      .map((s) => ({ text: s, unit }));
+  });
 };
 // A sentence that points back at the one before it ("That is a coverage gap ..."): quoted alone, the person
 // has to open the review log to learn what "That" is.
@@ -492,7 +497,7 @@ const gapOf = (text: string): string | undefined => {
   const all = sentencesOf(text);
   const take = new Set<number>();
   all.forEach((s, i) => {
-    if (!isGap(withoutCode(s.text))) return;
+    if (!isGap(withoutCode(withoutQuotes(s.text)))) return;
     take.add(i);
     if (!ANAPHOR.test(s.text)) return;
     let size = s.text.length;
