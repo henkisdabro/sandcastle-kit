@@ -19,7 +19,7 @@ test("the implementer tests at the seam, reproduces a bug first, and runs each g
   assert.match(p, /A value recomputed the way the code computes it passes by construction/);
   assert.match(p, /Mock only real boundaries/);
   assert.match(p, /While working, run single test files and the typecheck\./);
-  assert.match(p, /Before you finish, run each gate once, in its own command/);
+  assert.match(p, /Before you finish, run each gate once\./);
 });
 
 test("the implementer files what it leaves outside the ticket", () => {

@@ -74,8 +74,7 @@ ticket names. The project rules below say what else to read.
   long suite is run once and not again to find the line you wanted. Give the command the tool's longest timeout
   (`timeout: 600000` in Claude Code, whose 2-minute default moves a longer suite to the background;
   other sandboxes run at the same moment and slow it). Never start it in the background and wait on
-  it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, never several in one command,
-  and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
+  it with `sleep`, which Claude Code blocks, or `pgrep -f`, which matches its own loop. Run each gate once per check, and never to time or compare it: other sandboxes share the machine, so a timing taken here is noise
   and slows them. When a ticket asks for a wall time or a before-and-after figure, leave it as an
   `<unmet>` line for a person. If a command is moved to the background anyway, do not wait on it
   with Monitor either: end your turn and say what is still running. Look in the project rules for how the test runner reports a
@@ -87,7 +86,7 @@ ticket names. The project rules below say what else to read.
   available here.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
   Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
-  then `git commit -F <file>`: never `git commit -m "..."` and never a shell heredoc. Free text on the
+  then `git commit -F <file>`: never `git commit -m "..."`. Free text on the
   command line can match a command rule of the project's permissions and be refused, where nobody can answer.
 - **After committing, check that the commit landed.** Run `git log -1 --oneline` and `git status
   --porcelain`: the first shows your commit, the second is empty when nothing is left over. A
@@ -108,8 +107,7 @@ For a change in behaviour:
    for real.
 5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck. Before you finish, run each gate once,
-in its own command.
+While working, run single test files and the typecheck. Before you finish, run each gate once.
 
 {{KIT_PROJECT_RULES}}
 
