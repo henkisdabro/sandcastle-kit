@@ -129,7 +129,12 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // while the base - and so the check - stays where it was.
   // Not info/refs: `git repack` rewrites it (an auto gc in a sandbox's commit does), it is only an
   // index for the dumb HTTP transport and runs nothing - fingerprinted, it read as tampering.
-  const info = inside("info").filter((f) => f !== join(dir, "info", "refs"));
+  // Not info/exclude either: ignore patterns only, nothing runs from it, and the kit never writes it,
+  // but the host's own tools do (Claude Code adds its runtime block to it while a session in the
+  // checkout schedules a wake-up) - fingerprinted, a person watching the run stopped it. Still watched:
+  // info/attributes (maps paths to filter, merge and diff drivers), grafts, sparse-checkout, any new file.
+  const unwatched = new Set([join(dir, "info", "refs"), join(dir, "info", "exclude")]);
+  const info = inside("info").filter((f) => !unwatched.has(f));
   const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
   const files: Record<string, string> = {};
   const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
