@@ -594,6 +594,30 @@ const keepKilledRecord = (root: string, file: string) => {
 let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
 
+/**
+ * The ticket slots a run could use, averaged over its time: the share moves as other runs begin and end, so the figure
+ * taken at the start prices later estimates as the wrong load. `sample` tells the slots from now on; `mean` is the
+ * time-weighted mean up to now, rounded to a whole number of at least 1 (a half rounds up), as `load.concurrency` is read.
+ */
+export const createLoadMeter = (slots: number, now: () => number = Date.now) => {
+  const began = now();
+  let at = began;
+  let current = slots;
+  let area = 0;
+  return {
+    sample(n: number) {
+      const t = now();
+      area += current * (t - at);
+      at = t;
+      current = n;
+    },
+    mean() {
+      const t = now();
+      return Math.max(1, Math.round(t > began ? (area + current * (t - at)) / (t - began) : current));
+    },
+  };
+};
+
 export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run: RunRecord) => void) => {
   // Before this record's first write: finishing the old one rewrites run.json.
   current?.(0);
@@ -615,10 +639,18 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
   // One process can hold several runs (autonomy turns): a new record finishes the one before it,
   // and the single exit handler finishes the last. Each finishes once.
   let finished = false;
+  let atFinish: (() => RunRecord) | undefined;
   const finish = (code: number | undefined) => {
     if (finished) return;
     finished = true;
-    run = { ...run, finishedAt: new Date().toISOString(), exitCode: code, ...(endedBy ? { stoppedBy: endedBy } : {}) };
+    // Values only known at the end (the load the run really ran at); a throw must not cost the record.
+    let last: RunRecord = {};
+    try {
+      last = atFinish?.() ?? {};
+    } catch {
+      /* the record keeps what it has */
+    }
+    run = { ...run, ...last, finishedAt: new Date().toISOString(), exitCode: code, ...(endedBy ? { stoppedBy: endedBy } : {}) };
     write();
     // run.json is overwritten by the next run, so each finished run also leaves one
     // line here. A failed append must never change the process's exit.
@@ -644,6 +676,10 @@ export const recordRun = (project: Project, extra: RunRecord = {}, onEnd?: (run:
     /** The record is finished: nothing writes to it any more, and a timer that did should stop. */
     get finished() {
       return finished;
+    },
+    /** Fields computed when the record finishes, written into run.json and its history line. */
+    finishWith(fields: () => RunRecord) {
+      atFinish = fields;
     },
     /** `stage` is what the status view's run line shows while the run is live. */
     update(fields: RunRecord) {
