@@ -26,8 +26,8 @@ cleanup() {
     # The command's whole process group (set -m below): a TERM to the command alone left the
     # shards and their test processes running against a removed TMPDIR. The directory goes
     # once they are gone, so a dying process cannot recreate it; KILL for one that ignores TERM.
-    # In a container whose PID 1 reaps nothing (`runuser` in full-check's Linux leg, or a project
-    # image whose ENTRYPOINT replaces the base image's tini), an orphan's zombie keeps the
+    # In a container whose PID 1 reaps nothing (a project image whose ENTRYPOINT replaces the
+    # base image's tini, or a process exec'd in place of the shell), an orphan's zombie keeps the
     # group alive, so the wait runs its full five seconds there: slow, but nothing is left running.
     kill -TERM -- -"$pid" 2>/dev/null
     i=0
