@@ -3,7 +3,7 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
@@ -94,11 +94,42 @@ export const pinHostGitConfig = (root: string) => {
 // `config` is `.git/config` as the list of its `key\nvalue` entries (null when git cannot read it as
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
 // `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
+// `files` also holds the shared `.git/modules/` (see `moduleFiles`), whose repositories a host git reaches through a gitlink.
 export type Fingerprint = { files: Record<string, string>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
 
 type ConfigReading = { path: string; entries: string[] | null };
 
 const AGENT_BRANCH = /^agent\/issue-/;
+
+/**
+ * The shared `.git/modules/`: each submodule's git directory, which a host `git status` that recurses into a gitlink reads
+ * the config and attributes of. Sandcastle never initialises a submodule, so the directory is absent in the ordinary run,
+ * and a sandbox that makes one is a difference from the run's start. Every file and directory under it, keyed by path,
+ * except what git reads as data and a host's own use of a submodule rewrites (`objects/`, `refs/`, `logs/`, `index`,
+ * `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`): a symlink is its target, a directory a marker, a file its hash.
+ */
+const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
+const moduleFiles = (modules: string, hashOf: (f: string) => string): Record<string, string> => {
+  const found: Record<string, string> = {};
+  const top = lstatSync(modules, { throwIfNoEntry: false });
+  if (!top) return found;
+  // `container`: a directory of modules, whose entries are module names (a module may be named `objects`), not a git
+  // directory's own, whose data names are left out.
+  const visit = (dir: string, container: boolean) => {
+    found[dir] = "directory";
+    for (const name of readdirSync(dir).sort()) {
+      if (!container && MODULE_DATA.has(name)) continue;
+      const path = join(dir, name);
+      const info = lstatSync(path);
+      if (info.isSymbolicLink()) found[path] = `link ${readlinkSync(path)}`;
+      else if (info.isDirectory()) visit(path, !container && name === "modules");
+      else found[path] = hashOf(path);
+    }
+  };
+  if (top.isDirectory()) visit(modules, true);
+  else found[modules] = top.isSymbolicLink() ? `link ${readlinkSync(modules)}` : hashOf(modules);
+  return found;
+};
 
 const commonDir = (root: string) => sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
 
@@ -148,6 +179,7 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   const files: Record<string, string> = {};
   const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
   for (const f of paths) files[f] = hashOf(f);
+  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
   const readEntries = (path: string): ConfigReading => {
@@ -698,19 +730,68 @@ const recordProblem = (project: Project, path: string): string | undefined => {
   return undefined;
 };
 
+/** Most entries a stop names: a tree full of them says no more. */
+const NESTED_SHOWN = 5;
+
+/**
+ * The paths below the worktree's root, relative to it, of every `.git` entry (file, directory or link) other than the
+ * root's own `.git`, in any case: a repository nested in the worktree. The tree is walked, never read through git, and no link is
+ * followed. A found `.git` directory is not walked into.
+ */
+const nestedGit = (path: string): string[] => {
+  const found: string[] = [];
+  const walk = (dir: string, rel: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return; // gone or unreadable: nothing git could read either
+    }
+    for (const name of names) {
+      const at = rel ? `${rel}/${name}` : name;
+      // Any case: on a case-insensitive disk (macOS's default) a host git opening `sub/.git` finds a `.GIT` a sandbox made.
+      if (name.toLowerCase() === ".git") {
+        if (rel) found.push(at);
+        continue;
+      }
+      if (found.length >= NESTED_SHOWN) return;
+      let info: ReturnType<typeof lstatSync>;
+      try {
+        info = lstatSync(join(dir, name));
+      } catch {
+        continue;
+      }
+      if (info.isDirectory()) walk(join(dir, name), at);
+    }
+  };
+  walk(path, "");
+  return found;
+};
+
 /**
  * Holds the records of the worktree at `path` to what git writes (above): its `.git` file names
  * `<common>/worktrees/<name>`, that record's `commondir` is `../..`, and it has no `config.worktree`. A difference
- * throws a `GuardStop` naming it. Before every host git command in a sandbox's worktree.
+ * throws a `GuardStop` naming it. So does a repository nested in the worktree (`nestedGit`): a host `git status` recurses
+ * into a gitlink and reads that repository's own config and attributes, past the pins and the fingerprint. Before every
+ * host git command in a sandbox's worktree.
  */
 export const assertWorktreeRecords = (project: Project, path: string, when: string) => {
   const problem = recordProblem(project, path);
-  if (!problem) return;
   const name = clean(basename(path));
+  if (problem) {
+    throw new GuardStop(
+      `STOPPED ${when}: the worktree record of ${name} is not the one git wrote: ${problem}. A sandbox may have tampered with it, and a git command run in that worktree would read config no check has seen, so the kit runs none there. ` +
+        `Inspect .git/worktrees/${name} and the worktree's .git file before running any git command in ${clean(path)}.`,
+      { what: "a sandbox's worktree record was changed", detail: `(${name}: ${problem})` },
+    );
+  }
+  const nested = nestedGit(path);
+  if (!nested.length) return;
+  const named = nested.map((p) => clean(p)).join(", ");
   throw new GuardStop(
-    `STOPPED ${when}: the worktree record of ${name} is not the one git wrote: ${problem}. A sandbox may have tampered with it, and a git command run in that worktree would read config no check has seen, so the kit runs none there. ` +
-      `Inspect .git/worktrees/${name} and the worktree's .git file before running any git command in ${clean(path)}.`,
-    { what: "a sandbox's worktree record was changed", detail: `(${name}: ${problem})` },
+    `STOPPED ${when}: ${named} in the worktree of ${name} ${nested.length === 1 ? "marks a git repository" : "mark git repositories"} nested in it. A host \`git status\` there looks into a nested repository and reads its own config and attributes, so a filter in it would run on the host; submodules are not supported in sandboxes. ` +
+      `Inspect ${nested.length === 1 ? "it" : "them"} and remove ${nested.length === 1 ? "it" : "them"} (or the gitlink that points there) before running any git command in ${clean(path)}.`,
+    { what: "a sandbox nested a git repository in its worktree", detail: `(${name}: ${named})` },
   );
 };
 
@@ -719,7 +800,7 @@ export const assertWorktreeRecords = (project: Project, path: string, when: stri
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
  * drivers configured at the start) or in config a changed record names would run there. The container is stopped
  * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop
- * fails it. `check` is the site's `.git` check; the worktree's records follow. On a failure the container is removed
+ * fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
  * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
  * error is thrown.
  */
