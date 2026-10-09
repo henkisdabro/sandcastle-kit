@@ -10,7 +10,7 @@ Shell entry; resolves symlinks, checks the temp directory can be written, runs `
 
 ## `src/cli.ts`
 
-Commands: help, `--version`, setup, doctor, init, updated, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, pause, resume, report, status, clean, herdr; also the autonomy loop around `burndown()`. The help text and each command's `--help` come from `src/help.ts`
+Commands: help, `--version`, setup, doctor, init, updated, changes, build, gates, land, preview, lean, lean-apply (internal hook), preflight, queue, requeue, blockers, run (`--detach`), wait, stop, pause, resume, report, status, clean, herdr; also the autonomy loop around `burndown()`. The help text and each command's `--help` come from `src/help.ts`
 
 ## `src/burndown.ts`
 
@@ -155,7 +155,7 @@ state.
 
 ## `src/upgrading.ts`
 
-Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release and the notes acted on; an older record's kit commit is read through git) against the kit's own notes, and the lines doctor and a run print. Also `kitVersion`, the version doctor and `--version` print: `package.json`'s release, and in a clone past its tag, the distance and commit
+Whether a pulled kit has **Upgrading** notes a project has not had: the project's update record (`.sandcastle/.run/kit-updated`, written by `sandcastle updated` and `init`: the release and the notes acted on; an older record's kit commit is read through git) against the kit's own notes, and the lines doctor and a run print. Also `changesLines` (`sandcastle changes`: the changelog entries of the releases after the record's, or `--since`, each cut to its bold lead; read-only) and `kitVersion`, the version doctor and `--version` print: `package.json`'s release, and in a clone past its tag, the distance and commit
 
 ## `src/herdr.ts`
 

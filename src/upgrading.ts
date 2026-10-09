@@ -104,3 +104,74 @@ export const upgradeLines = (root: string, kit = KIT, full = true): string[] => 
   if (!full) return [`${head}: \`sandcastle doctor\` lists them, ${fix}.`];
   return [`${head}:`, ...p.notes.map((n) => `       - ${n}`), `       -> ${fix}`];
 };
+
+const SECTIONS = ["Added", "Changed", "Security", "Fixed", "Upgrading"];
+
+const releaseParts = (v: string) => v.replace(/^v/, "").split(".").map(Number);
+/** Negative when release `a` is older than `b`; both `X.Y.Z`. */
+const compareReleases = (a: string, b: string) => {
+  const [x, y] = [releaseParts(a), releaseParts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0);
+  return 0;
+};
+
+/** A bullet shortened to its bold lead, else its whole first sentence (a bullet runs over several lines). */
+const shorten = (bullet: string): string => {
+  const text = bullet.replace(/\s+/g, " ").trim();
+  return text.match(/^\*\*(.+?)\*\*/)?.[1] ?? text.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? text;
+};
+
+/** Each release of a changelog, newest first as written: its section names and their shortened bullets. */
+export const releaseEntries = (changelog: string): { release: string; date?: string; sections: Map<string, string[]> }[] => {
+  const releases: { release: string; date?: string; sections: Map<string, string[]> }[] = [];
+  let sections: Map<string, string[]> | undefined;
+  let entries: string[] | undefined;
+  let bullet: string | undefined;
+  const flush = () => {
+    if (bullet !== undefined) entries?.push(shorten(bullet));
+    bullet = undefined;
+  };
+  for (const line of changelog.split("\n")) {
+    if (line.startsWith("## ") || line.startsWith("### ")) {
+      flush();
+      if (line.startsWith("## ")) {
+        const m = line.match(/^## \[(\d+\.\d+\.\d+)\](?: - (\S+))?/);
+        sections = m ? new Map() : undefined;
+        if (m && sections) releases.push({ release: m[1]!, date: m[2], sections });
+        entries = undefined;
+      } else if (sections) {
+        entries = [];
+        sections.set(line.slice(4).trim(), entries);
+      }
+    } else if (entries && line.startsWith("- ")) {
+      flush();
+      bullet = line.slice(2);
+    } else if (bullet !== undefined && /^\s+\S/.test(line)) bullet += ` ${line.trim()}`;
+    else if (!line.trim()) flush();
+  }
+  flush();
+  return releases;
+};
+
+/**
+ * `sandcastle changes`: the changelog entries of every release after `since` (default: the project's
+ * recorded release) up to the kit's current one, `[Unreleased]` left out, per release grouped by
+ * section. With no record and no `since`, the current release's entries and a line saying so.
+ */
+export const changesLines = (root: string, kit = KIT, since?: string): string[] => {
+  const now = kitRelease(kit);
+  const from = since ?? readRecord(root, kit)?.version;
+  const all = releaseEntries(readFileSync(join(kit, "CHANGELOG.md"), "utf8")).filter((r) => compareReleases(r.release, now) <= 0);
+  const shown = from === undefined ? all.filter((r) => r.release === now) : all.filter((r) => compareReleases(r.release, from) > 0);
+  const lines: string[] = [];
+  if (from === undefined) lines.push(`This project has no record of a kit update on this machine, so there is no release to count from. The entries of the current release (${now}) follow; \`sandcastle changes --since <release>\` shows the ones after an earlier release.`);
+  else if (!shown.length) return [`Nothing new: the kit is at ${now}, and ${since ? `${from} was asked for` : `this project's last update was at ${from}`}.`];
+  else lines.push(`Changes since ${from}${since ? "" : " (this project's last recorded update)"}, up to ${now}:`);
+  for (const r of shown) {
+    lines.push("", `## ${r.release}${r.date ? ` - ${r.date}` : ""}`);
+    const names = [...SECTIONS.filter((s) => r.sections.get(s)?.length), ...[...r.sections.keys()].filter((s) => !SECTIONS.includes(s) && r.sections.get(s)?.length)];
+    if (!names.length) lines.push("", "(no entries)");
+    for (const name of names) lines.push("", `### ${name}`, ...r.sections.get(name)!.map((e) => `- ${e}`));
+  }
+  return lines;
+};
