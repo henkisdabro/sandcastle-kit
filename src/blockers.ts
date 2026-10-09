@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import type { Project } from "./config.ts";
-import { mergedByHand } from "./run.ts";
+import { mergedByHand, mergedPartly } from "./run.ts";
 import { USER_CONFIG } from "./sandbox.ts";
 import { DEFAULT_DONE, refOf, statusOf, type Tracker } from "./tracker.ts";
 
@@ -160,19 +160,20 @@ export const blockerResolver = (project: Project, tracker: Tracker, known = new 
 
 type Blocked = { id: string; body?: string };
 
-export type Why = "not-planned" | "held" | "merged-by-hand" | "unqueued";
+export type Why = "not-planned" | "held" | "merged-by-hand" | "merged-partly" | "unqueued";
 
 /** The words after "waits for #B" in the closing summary. */
 export const whyShort: Record<Why, string> = {
   "not-planned": "closed as not planned",
   held: "held for a human",
   "merged-by-hand": "merged by hand, closes on push",
+  "merged-partly": "merged by hand, partly done: stays open",
   unqueued: "open but not queued",
 };
 
 /**
  * Why an open blocker will not close by itself: closed as not planned, held for a person (or merged
- * by one, and closing on the push), or not in the queue. GitHub and ticket-file blockers only: Linear issues and task files have no queue.
+ * by one, and closing on the push, or "part of" its ticket and staying open), or not in the queue. GitHub and ticket-file blockers only: Linear issues and task files have no queue.
  * `queued`: ids the caller knows are in the queue; without it a ticket's own queue label decides.
  * One `tracker.get` per distinct blocker; a ticket that cannot be read says nothing.
  */
@@ -185,7 +186,7 @@ export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<stri
     if (!seen.has(key)) {
       try {
         const t = tracker.get(b.id);
-        seen.set(key, t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? "merged-by-hand" : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined);
+        seen.set(key, t.held ? (mergedByHand(project.root, project.baseBranch, b.id) ? (mergedPartly(project.root, project.baseBranch, b.id) ? "merged-partly" : "merged-by-hand") : "held") : (queued ? true : t.status !== project.label) ? "unqueued" : undefined);
       } catch {
         seen.set(key, undefined);
       }
@@ -273,6 +274,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
       const why = whyOf(b);
       if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. Remove the line, or reopen ${name}.`);
       else if (why === "merged-by-hand") lines.push(`${who} waits for ${name}, which is merged locally and closes on push - it starts once ${name} is closed.`);
+      else if (why === "merged-partly") lines.push(`${who} waits for ${name}, which is merged by hand but only partly done, so it stays open - it starts once ${name} is closed.`);
       else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human - it starts once ${name} is closed.`);
       else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or remove the line.`);
       if (b.state !== "unreadable") continue;
