@@ -88,8 +88,8 @@ state.
   Both have waited already, and every landing before they start moves the base under them; behind the
   unstarted tickets they became the run's last landings while slots sat idle. A ticket freed from a
   file it shared keeps its place with the unstarted. The run prints `#N released: its last blocker has
-  landed; it starts at the next free slot` when a dependant is released (the start of one freed from a
-  file reads `starts:`), and the status view's queue position follows the same order (the hold
+  landed; it starts at the next free slot` when a dependant is released (one freed from a
+  file reads `#N released: #M is done with the file they both change; it starts at the next free slot`), and the status view's queue position follows the same order (the hold
   record gives a requeued or released ticket an `order` below every unstarted one's).
   `test/schedule-start-order.test.ts`.
 - **Slot first.** The rank decides when a slot is granted, not only which ticket a free worker takes:
