@@ -174,7 +174,8 @@ Declining is not skipping: every step still runs its check, and only the asking 
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated
    --declined claude-mod,autonomy-drain`): it records them at the kit's release and keeps the ones
-   declined before. Commit any project file that changed, by the repo's own rules, and report:
+   declined before. A step declined before that the user asked for this time and you applied goes in
+   `--accepted <key>[,<key>...]`, which takes it off that list. Commit any project file that changed, by the repo's own rules, and report:
    this project's release before and after (`sandcastle updated` prints it as
    `this project: <recorded release> -> <kit version now>`, or says there was no earlier record:
    say so, do not substitute the kit's version before the pull, which another session may already

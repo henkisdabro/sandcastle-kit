@@ -128,11 +128,14 @@ export const declinedSteps = (root: string): Record<string, string> => {
 
 /**
  * Records every Upgrading note in the kit as acted on by this project, keeps the steps declined
- * before and adds `declined` at this release (a step declined again moves to it). Returns the kit version.
+ * before and adds `declined` at this release (a step declined again moves to it); `accepted` takes
+ * steps off the declined list. Returns the kit version.
  */
-export const markUpdated = (root: string, kit = KIT, declined: string[] = []): string => {
+export const markUpdated = (root: string, kit = KIT, declined: string[] = [], accepted: string[] = []): string => {
   const release = kitRelease(kit);
   const steps = { ...declinedSteps(root), ...Object.fromEntries(declined.map((key) => [key, release])) };
+  // A step declined at an earlier release that the user has now asked for is no longer declined.
+  for (const key of accepted) delete steps[key];
   mkdirSync(dirname(updateRecord(root)), { recursive: true });
   const record = { version: release, notes: kitNotes(kit), ...(Object.keys(steps).length ? { declined: steps } : {}) };
   writeFileSync(updateRecord(root), `${JSON.stringify(record, null, 2)}\n`);
