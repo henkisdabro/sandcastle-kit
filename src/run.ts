@@ -12,6 +12,7 @@ import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
+import { protectedPathsNote } from "./guard.ts";
 import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
@@ -598,6 +599,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
       .replaceAll(/\{\{KIT_(LOST|TICKET_VIEW|COMMENTS_VIEW|RECORD|NOCHANGE|BLOCKED|SAY)\}\}/g, (_, k: keyof Tracker["words"]) => tracker.words[k])
       .replaceAll("{{KIT_GATES}}", () => project.gates.map((g) => g.command).join("\n"))
       .replaceAll("{{KIT_LABEL}}", () => project.label)
+      .replaceAll("{{KIT_PROTECTED}}", () => (kind === "implement" ? protectedPathsNote(project, "implement") : kind === "review" || kind === "rereview" || kind === "remerge" ? protectedPathsNote(project, "review") : ""))
       .replaceAll("{{KIT_PROJECT_RULES}}", () => rules)
       .replaceAll("{{KIT_CHANGELOG}}", () => (!project.changelog ? "" : kind === "implement" ? CHANGELOG_IMPLEMENT : kind === "rereview" || kind === "remerge" ? CHANGELOG_NARROW : CHANGELOG_REVIEW))
       .replaceAll("{{KIT_DRY_RUN}}", () => (dryRun ? tracker.dryRunNote : ""));
