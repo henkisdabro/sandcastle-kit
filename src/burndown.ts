@@ -2476,7 +2476,8 @@ export const burndown = async (
   // A comment is not read as a blocker; say so where the run would start the issue.
   for (const f of await commentOnlyBlocks(project, tracker, queued.map((t) => ({ ...t, queued: true })))) console.log(`  warning: ${commentBlockLine(f)}`);
   // A blocker that can never close (missing, a cycle) holds its ticket for good; an unnamed Linear key lets it start.
-  for (const line of await blockerProblems(project, tracker, queued)) console.log(`  warning: ${line}`);
+  // The whole queue's ids, so a blocker queued outside the named tickets is not called "not queued".
+  for (const line of await blockerProblems(project, tracker, queued, new Set(whole.map((t) => t.id)))) console.log(`  warning: ${line}`);
   // A ticket others wait for starts first; otherwise the tracker's order
   // holds. The two blockers of seven waiting tickets once ran last of thirty,
   // so a run stopped early would have left all seven stuck for another run.
