@@ -783,16 +783,16 @@ const byHandLines = (f: Facts, us: FiledFollowUp[], turn?: number): string[] => 
 };
 
 /**
- * The Needs you bullets of a turn's tickets: a held branch, a partly done remainder, a check by hand, a gap. A
- * carried turn (`carried`) leaves out two kinds a person is not asked about for an earlier turn: a commit that was
- * refused, and a close that failed (the next run closes it).
+ * The Needs you bullets of a turn's tickets: a held branch, a refused commit, a partly done remainder, a check by
+ * hand, a gap. A carried turn (`carried`) leaves out a close that failed (the next run closes it): no run re-runs
+ * an uncommitted ticket, so its refused commit is said for an earlier turn too.
  */
 const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
   const name = (id: string) => nameOf(f, id);
   const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
   const keptAt = (id: string) => f.keptWorktrees.find((k) => k.issue === id)?.path ?? f.tickets[id].note?.replace(/^work left uncommitted in /, "") ?? "its kept worktree";
   return [
-    ...(carried ? [] : o.uncommitted).map(
+    ...o.uncommitted.map(
       (id) =>
         `- ${name(id)} - finished but not committed - the work is in ${keptAt(id)}. Fix what refused the commit (the agent's comment says), then \`sandcastle requeue <ticket>\`: the next run reuses that worktree. Or commit it there yourself.`,
     ),
@@ -855,11 +855,19 @@ const gapLines = (f: Facts, o: Owed, carried: { turn: number; facts: Facts; o: O
   return finds.length ? [`Worth a glance - the reviewer's prose may name a gap: ${finds.join("; ")}`] : [];
 };
 
+/** The Next step for a refused commit: the work is done, and a further turn or a redo would only repeat the refusal. */
+const uncommittedSteps = (o: Owed): string[] =>
+  o.uncommitted.length
+    ? [`Commit the finished work of ${listOf(o.uncommitted)}: fix what refused the commit (a hook, a full disk, signing), then \`sandcastle requeue <ticket>\` - the next run reuses the kept worktree - or commit it there yourself (paths under Needs you).`]
+    : [];
+
 /** The Next steps for what `ticketLines` lists, in the order the summary gives them. */
 const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   const list = listOf;
   const holdLabel = f.holdLabel ? ` (\`${f.holdLabel}\`)` : "";
   const next: string[] = [];
+  // The last turn's own comes first in `render`; an earlier turn's has no such place, so it leads its own steps.
+  if (carried) next.push(...uncommittedSteps(o));
   const resolutions = o.heldWork.filter((id) => f.heldResolutions?.includes(id));
   const merges = o.heldWork.length - resolutions.length;
   if (merges) next.push(`Review and merge the ${merges} held branch(es) (commands above).`);
@@ -886,7 +894,7 @@ export const render = (f: Facts, plain = false): string => {
   const list = listOf;
   // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
   const carried = (f.carried ?? []).map(({ turn, facts }) => ({ turn, facts, o: owed(facts) }));
-  const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated]).size + c.o.filingFailed, 0);
+  const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + c.o.uncommitted.length + new Set([...c.o.partly, ...c.o.ungated]).size + c.o.filingFailed, 0);
   // The kept worktrees of the earlier turns' tickets, oldest first, one per path and none the last turn lists itself.
   const earlierTurnKept = carried
     .flatMap((c) => carriedKept(c.facts).map((k) => ({ ...k, turn: c.turn, state: c.facts.tickets[k.issue]?.state })))
@@ -1167,7 +1175,7 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   // First: the work is done, and a further turn or a redo would only repeat the refusal.
-  if (uncommitted.length) next.push(`Commit the finished work of ${list(uncommitted)}: fix what refused the commit (a hook, a full disk, signing), then \`sandcastle requeue <ticket>\` - the next run reuses the kept worktree - or commit it there yourself (paths under Needs you).`);
+  next.push(...uncommittedSteps(o));
   if (baseRed) {
     next.push(
       `Fix the base: read .sandcastle/logs/base-gates.log, then \`sandcastle gates\` to check; the queue is untouched, so \`sandcastle run\` afterwards starts the same tickets.`,
