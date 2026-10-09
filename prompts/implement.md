@@ -108,18 +108,25 @@ For a change in behaviour:
    for real.
 5. **Name each test after what a caller sees,** not after the function it calls.
 
-While working, run single test files and the typecheck. Before you finish, run each gate once,
-in its own command.
+While working, run single test files and the typecheck. Before you finish, run the typecheck gate and
+the tests your change touches or that cover it, each once, in its own command. Do not run the full suite
+yourself: the orchestrator runs every gate right after you exit.
 
 {{KIT_PROJECT_RULES}}
 
 # Gates
 
-Before you finish, run these in the repo root and make them pass:
+These are the project's gates. The orchestrator runs all of them after you exit, the full suite
+included, and merges your work only if they are green:
 
 ```
 {{KIT_GATES}}
 ```
+
+Before you finish, run in the repo root only the typecheck gate (the gate above that type-checks or
+builds, if there is one) and the tests your change touches or that cover it, and make them pass. A
+change to a README or another document that no test covers needs the typecheck gate alone. Do not run
+every gate: the orchestrator does, next, and a failure there sends the branch back for a repair pass.
 
 {{KIT_RECORD}}
 
@@ -132,7 +139,7 @@ observed.
 
 # Finishing
 
-**If you completed the ticket:** make sure the gates pass, make sure everything is committed, then
+**If you completed the ticket:** make sure the typecheck gate and the tests covering your change pass, make sure everything is committed, then
 output `<promise>COMPLETE</promise>`.
 
 **If you knowingly leave an acceptance criterion undone** (you could not do it, or it needs a decision
