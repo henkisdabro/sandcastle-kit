@@ -185,9 +185,9 @@ export const landInSandbox = async (
       }
       // A landing gate can be the run's largest sandbox: `sandcastle size` must see it.
       await recordPeak(box, project.root, t.run);
-      // Sandcastle's close runs `git status` on the host in the box's worktree: the `.git` check and the worktree's
-      // records come first, and a failure throws with the container removed and no close - a stop, whatever the
-      // landing's own result or error.
+      // Sandcastle's close runs `git status` on the host in the box's worktree: the container is stopped, and the
+      // `.git` check and the worktree's records made, before it. A failure throws with the container removed and no
+      // close - a stop, whatever the landing's own result or error.
       const when = `after landing ${t.branch} in a sandbox`;
       await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when));
       await box.close();

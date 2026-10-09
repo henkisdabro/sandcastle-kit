@@ -7,7 +7,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { basename, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { removeSandboxContainer, sh } from "./sandbox.ts";
+import { removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -598,12 +598,24 @@ export const assertWorktreeRecords = (project: Project, path: string, when: stri
 /**
  * The check before a sandbox closes. Sandcastle's close stops the container, then runs `git status` on the host in its
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
- * drivers configured at the start) or in config a changed record names would run there. `check` is the site's `.git`
- * check; the worktree's records follow. On a failure the container is removed here, without that close - the caller
- * must not call it - the worktree is left as it stands for a person, and the error is thrown.
+ * drivers configured at the start) or in config a changed record names would run there. The container is stopped
+ * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop
+ * fails it. `check` is the site's `.git` check; the worktree's records follow. On a failure the container is removed
+ * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
+ * error is thrown.
  */
 export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
   try {
+    const [running] = await stopSandboxContainer(worktree);
+    if (running) {
+      const name = clean(basename(worktree));
+      const said = clean(running.said).slice(0, 200);
+      throw new GuardStop(
+        `STOPPED ${when}: the container of ${name} could not be stopped (${said}), so a process left running there could still write the shared .git after the check. ` +
+          `Make sure it is gone (docker rm -f ${running.id}), then inspect .git/config, .git/info/ and .git/worktrees/${name} before running any git command in ${clean(worktree)}.`,
+        { what: "a sandbox's container could not be stopped", detail: `(${name}: ${said})` },
+      );
+    }
     await check();
     assertWorktreeRecords(project, worktree, when);
   } catch (error) {
