@@ -1159,7 +1159,7 @@ export const render = (f: Facts, plain = false): string => {
   const earlierMerged = earlierKept.filter((k) => k.merged);
   const earlierOpen = earlierKept.length - earlierMerged.length;
   const earlierKeptWords = earlierMerged.length
-    ? `${earlierMerged.length === 1 ? "the 1 merged worktree" : `the ${earlierMerged.length} merged worktrees`} kept by earlier runs${sizeWords(earlierMerged)}${earlierOpen ? `, and the ${earlierOpen} that hold work not on ${f.base} (their uncommitted files too: look at those first)` : ""}`
+    ? `${earlierMerged.length === 1 ? "the 1 merged worktree" : `the ${earlierMerged.length} merged worktrees`} kept by earlier runs${sizeWords(earlierMerged)}${earlierOpen ? `, and the ${earlierOpen} that ${earlierOpen === 1 ? "holds" : "hold"} work not on ${f.base} (their uncommitted files too: look at those first)` : ""}`
     : "";
   if (!baseRed) {
     if (f.standing.length) {

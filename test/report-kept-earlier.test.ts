@@ -75,7 +75,12 @@ test("an earlier worktree whose branch has work off the base is counted but not 
 
 test("merged and unmerged together: the clean step says the unmerged ones go too, after a look", () => {
   const f = facts({ earlierKept: [wt(1), wt(2, { merged: false })] });
-  assert.match(nextStep(f), /removes the 1 merged worktree kept by earlier runs, and the 1 that hold work not on main \(their uncommitted files too: look at those first\)/);
+  assert.match(nextStep(f), /removes the 1 merged worktree kept by earlier runs, and the 1 that holds work not on main \(their uncommitted files too: look at those first\)/);
+});
+
+test("two unmerged beside a merged one: the plural verb", () => {
+  const f = facts({ earlierKept: [wt(1), wt(2, { merged: false }), wt(3, { merged: false })] });
+  assert.match(nextStep(f), /removes the 1 merged worktree kept by earlier runs, and the 2 that hold work not on main/);
 });
 
 test("with a branch standing, the one clean line also names the earlier worktrees", () => {
