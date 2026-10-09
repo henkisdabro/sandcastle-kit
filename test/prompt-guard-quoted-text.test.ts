@@ -1,7 +1,7 @@
 // The git guard matches the whole command string (test/git-guard-quoted-text.test.ts), so an edit
 // whose text names a refused git command, made through a heredoc, is refused: one in 105 heredoc
-// edits of a dogfood run. The maintainer kept that rule and decided the cheap fix: the implement and
-// repair prompts tell the agent to carry such text through a file tool, never a command line. No
+// edits of a dogfood run. The maintainer kept that rule and decided the cheap fix: the implement, repair,
+// review and resolve prompts tell the agent to carry such text through a file tool, never a command line. No
 // model calls.
 //
 //   pnpm test:file test/prompt-guard-quoted-text.test.ts
@@ -13,7 +13,7 @@ import { test } from "node:test";
 
 const read = (...p: string[]) => readFileSync(join(import.meta.dirname, "..", ...p), "utf8").replace(/\s+/g, " ");
 
-for (const name of ["implement.md", "repair.md"]) {
+for (const name of ["implement.md", "repair.md", "review.md", "resolve.md"]) {
   test(`${name} sends text that names a refused git command through a file, not a command line`, () => {
     const p = read("prompts", name);
     assert.match(p, /Text that names a git command the guard refuses/);
