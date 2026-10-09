@@ -48,4 +48,8 @@ test("the implementer runs the typecheck gate and the tests covering its change,
   assert.match(p, /run in the repo root only the typecheck gate .* and the tests your change touches or that cover it, and make them pass/);
   assert.match(p, /The orchestrator runs all of them after you exit, the full suite included/);
   assert.match(p, /make sure the typecheck gate and the tests covering your change pass/);
+  // The merge-conflict step and the closing reminder must not send it back to every gate.
+  assert.doesNotMatch(p, /run the gates, then `git commit --no-edit`/);
+  assert.match(p, /run the typecheck gate and the tests that cover the conflicted files, then `git commit --no-edit`/);
+  assert.doesNotMatch(p, /The same gates are re-run/);
 });

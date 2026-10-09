@@ -40,7 +40,8 @@ Files where that merge conflicts (empty when none): !`git diff --name-only --dif
 **If any file is listed, resolve the merge before anything else**, even if the ticket looks done:
 the orchestrator merges this branch into `{{TARGET_BRANCH}}` when you finish, and an unresolved
 conflict leaves all of your work unmerged, run after run. Keep both sides' changes (theirs is
-merged work, not yours to undo), run the gates, then `git commit --no-edit`.
+merged work, not yours to undo), run the typecheck gate and the tests that cover the conflicted files,
+then `git commit --no-edit`.
 
 # Before you write anything
 
@@ -133,14 +134,14 @@ every gate: the orchestrator does, next, and a failure there sends the branch ba
 When a comment on the ticket amends its spec (changes, narrows or adds to what the body asks), that
 record also says which spec you followed: the body's or the comment's.
 
-{{KIT_CHANGELOG}}The same gates are re-run by the orchestrator after you exit, and your work is only merged if all
-of them are green. You cannot talk your way past them, so do not report success you have not
+{{KIT_CHANGELOG}}The orchestrator runs every gate after you exit, and your work is only merged if all of them
+are green. You cannot talk your way past them, so do not report success you have not
 observed.
 
 # Finishing
 
-**If you completed the ticket:** make sure the typecheck gate and the tests covering your change pass, make sure everything is committed, then
-output `<promise>COMPLETE</promise>`.
+**If you completed the ticket:** make sure the typecheck gate and the tests covering your change pass,
+make sure everything is committed, then output `<promise>COMPLETE</promise>`.
 
 **If you knowingly leave an acceptance criterion undone** (you could not do it, or it needs a decision
 that is not yours), commit the rest and say which one, in one sentence, on a line of its own in your
