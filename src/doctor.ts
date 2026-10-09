@@ -306,10 +306,6 @@ export const isProjectRoot = (repoRoot: string | undefined, kit = KIT): repoRoot
   !!repoRoot && (existsSync(join(repoRoot, CONFIG_PATH)) || realpathSync(repoRoot) !== realpathSync(kit));
 
 /**
- * `pointToSize` is false for `sandcastle setup`, which runs doctor and prints the pointer itself
- * after it, so the line is not said twice.
- */
-/**
  * The warn block for the runs live on this machine, or none: a run keeps its code loaded but reads
  * `prompts/` as each ticket starts, `container/` as each sandbox opens and `status.sh` as the view
  * redraws, so a pull of the kit under it changes what its later tickets get. A run that ended with
@@ -325,6 +321,10 @@ export const liveRunLines = (dir = RUNS_DIR, probe?: Probe): string[] => {
   ];
 };
 
+/**
+ * `pointToSize` is false for `sandcastle setup`, which runs doctor and prints the pointer itself
+ * after it, so the line is not said twice.
+ */
 export const doctor = async (repoRoot?: string, verify = false, pointToSize = true) => {
   let bad = 0;
   const check = (ok: boolean, label: string, fix: string, optional = false) => {

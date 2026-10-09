@@ -140,7 +140,9 @@ naming both numbers and the key to set. The reasoning is in the README's
 
 In a project, ask your agent for `/sandcastle update`: it pulls the kit, rebuilds the images,
 re-runs the hook check and the base gates, and walks you through anything in [`CHANGELOG.md`](../CHANGELOG.md)'s
-**Upgrading** notes that affects that project. By hand:
+**Upgrading** notes that affects that project. By hand (pull while no run is live on the machine:
+a live run reads the kit's `prompts/`, `container/` and `status.sh` from disk, so a pull changes
+what its later tickets are built from; `sandcastle doctor` lists the live runs):
 
 ```bash
 cd ~/sandcastle-kit && git pull --ff-only && pnpm install && sandcastle doctor

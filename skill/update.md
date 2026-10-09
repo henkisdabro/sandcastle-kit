@@ -6,7 +6,7 @@ apply it once the user agrees.
 
 1. **The kit.** Its location is doctor's first line. If `git -C <kit> status --porcelain` shows
    local changes, stop and tell the user - never discard them. Then run `sandcastle doctor` and
-   look for its `warn  N sandcastle run(s) live on this machine` block before pulling: a live run
+   look for its `warn N sandcastle run(s) is/are live on this machine` block before pulling: a live run
    keeps its code loaded but reads the kit's `prompts/`, `container/` and `status.sh` from disk, so
    a pull changes what its later tickets are built from. If it lists runs, ask the user to wait for
    them (`sandcastle wait` in each project) or to confirm the pull anyway, and go no further until
