@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { posix } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Project } from "./config.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
@@ -566,8 +566,8 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
         if (waiting) wanted.n--;
       }
     } catch (error) {
-      // The .git check stops the run, as before landing.
-      if (error instanceof OperatorError) throw new LandingStop(error.message, guardWords(error), { cause: error });
+      // The .git check stops the run, as before landing. A sandbox that was slow to start costs this ticket only.
+      if (error instanceof OperatorError && !(error instanceof SlowStartError)) throw new LandingStop(error.message, guardWords(error), { cause: error });
       const reason = `could not land it in a sandbox: ${errorLine(error)}`;
       console.log(`${ref(o.issue)}: ${reason}.`);
       return { kind: "not-landed", reason };

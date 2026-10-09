@@ -8,7 +8,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
-import { OperatorError } from "./errors.ts";
+import { containerStartTimeout, OperatorError } from "./errors.ts";
 import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -1114,7 +1114,7 @@ const worktreesOf = (project: Project, branch: string): string[] => {
  * run, and the run's fingerprint restores a vanished one. A worktree that existed before the open (one reused for a
  * ticket) is not the open's to remove, and stays as it stands once its container is gone: `git worktree remove`
  * without `--force` runs `git status` on the host in it, past the `.git` check a close makes first, so a filter
- * another sandbox planted since would run there. Never throws: the open's own error is the one the caller sees.
+ * another sandbox planted since would run there. Never throws from the clean-up: the open's own error is the one the caller sees, a container-start timeout as an `OperatorError` that names the cause and the fix.
  */
 export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>): Promise<T> => {
   let before: string[] = [];
@@ -1137,7 +1137,8 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
     } catch {
       /* what is left, `sandcastle clean` removes */
     }
-    throw error;
+    // A start that ran out of time is the machine's, not a fault to trace: said in words, with no stack trace.
+    throw containerStartTimeout(error) ?? error;
   }
 };
 
