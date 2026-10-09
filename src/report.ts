@@ -423,10 +423,13 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   );
 
   // Said beside the branch: the reader of this summary would otherwise have to remember the earlier run, or read outcomes.json.
+  // A landing hold's text is the same constant for every cause, so its reason is read from that run's own record in history.
   const earlierHeld = Object.fromEntries(
     standing.flatMap((b) => {
-      const o = recorded[b.replace(/^agent\/issue-/, "")];
-      return o?.kind === "held" && o.run !== run.startedAt ? [[b, o.text ?? ""]] : [];
+      const id = b.replace(/^agent\/issue-/, "");
+      const o = recorded[id];
+      if (o?.kind !== "held" || o.run === run.startedAt) return [];
+      return [[b, o.text === LANDING_HOLD ? (heldReasonIn(root, o.run, id) ?? LANDING_HOLD) : (o.text ?? "")]];
     }),
   );
 
@@ -496,6 +499,29 @@ const openedIssues = (project: Project): Opened[] => {
   } catch {
     return [];
   }
+};
+
+/**
+ * Why an earlier run held ticket `id` for a human merge, from that run's line in history.jsonl (the one whose `startedAt` is
+ * `startedAt`): the protected paths or files its note and `files` name, and the criterion it left `unmet`. Undefined when
+ * history has no such line or the line says nothing more than the hold itself.
+ */
+const heldReasonIn = (root: string, startedAt: string | undefined, id: string): string | undefined => {
+  const file = join(root, ".sandcastle/logs/history.jsonl");
+  if (!startedAt || !existsSync(file)) return undefined;
+  for (const text of readFileSync(file, "utf8").split("\n").reverse()) {
+    if (!text) continue;
+    const record = parseRecord(text);
+    if (record?.startedAt !== startedAt) continue;
+    const t = readTickets(record)[id];
+    if (!t) return undefined;
+    // The note of a protected-path hold starts with the hold's own words, which the line already says.
+    const note = (t.note ?? "").replace(/^(dry run: would hold|human merge): /, "").trim();
+    const files = (Array.isArray(t.files) ? t.files : []).filter((f) => !note.includes(f));
+    const parts = [note, files.join(", "), t.unmet ? `unmet: ${t.unmet}` : ""].filter(Boolean);
+    return parts.length ? parts.join("; ") : undefined;
+  }
+  return undefined;
 };
 
 /**
@@ -1058,10 +1084,11 @@ export const render = (f: Facts, plain = false): string => {
   // Local state
   const earlier = f.earlierHeld ?? {};
   const isResolution = (b: string) => !!f.heldResolutions?.includes(b.replace(/^agent\/issue-/, ""));
+  // The landing hold's own text is the generic wording: said once, not again as the reason.
   const earlierWords = (b: string) =>
     isResolution(b)
       ? `its conflict resolution was held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
-      : `held for a human merge in an earlier run${earlier[b] ? `: ${earlier[b]}` : ""}`;
+      : `held for a human merge in an earlier run${earlier[b] && earlier[b] !== LANDING_HOLD ? `: ${earlier[b]}` : ""}`;
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
