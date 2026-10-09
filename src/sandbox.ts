@@ -706,10 +706,13 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
   // is in it) have each prune the other's fresh image. The second waits, then finds the image built. The
   // layer build is inside too: its `FROM` names the base tag, which another project's base build would
   // otherwise prune before the layer's `docker build` resolved it.
+  let waited = false;
   return withLock(
     BASE_LOCK,
     `${project.name} ${baseTag}`,
     async () => {
+      // The wait line alone, as a command's last line, reads as though it stopped there.
+      if (waited) console.log("The other sandcastle build of the base image is done.");
       if (force || !imageExists(baseTag)) {
         // Only the base is pulled: the floating FROM tag never refreshes otherwise (the image tag hashes the
         // Dockerfile text). A project layer builds FROM the local base, which a pull would not find.
@@ -738,7 +741,10 @@ export const ensureImage = async (project: Project, force = false, versions?: Ve
       noteUse(tag);
       return tag;
     },
-    (owner) => console.log(`Waiting for another sandcastle build of the base image${owner ? ` (pid ${owner})` : ""} to finish ...`),
+    (owner) => {
+      waited = true;
+      console.log(`Waiting for another sandcastle build of the base image${owner ? ` (pid ${owner})` : ""} to finish ...`);
+    },
   );
 };
 

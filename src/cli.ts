@@ -633,11 +633,12 @@ try {
       recordGitConfigStart(project, baseline);
       const fingerprint = gitFingerprint(project);
       try {
-        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when));
+        await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when, true));
       } finally {
-        assertGitUnchanged(project, fingerprint, "after the gates");
+        assertGitUnchanged(project, fingerprint, "after the gates", true);
+        // Red gates end cleanly too: the check above passed, so the next start must not blame a sandbox for a change made since.
+        recordGitConfigEnd(project);
       }
-      recordGitConfigEnd(project);
       console.log("All gates green on the base branch.");
       break;
     }

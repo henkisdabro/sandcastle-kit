@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, checkBeforeClose, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
@@ -377,6 +377,9 @@ export const landTicket = async (
       );
     case "red": {
       const { run } = result;
+      // The gated landing was checked (`landInSandbox`) before this result came back, so a red landing ends cleanly:
+      // the next start must not blame a sandbox for a change made since.
+      recordGitConfigEnd(project);
       const setup = run.failure?.name === "setup" && project.setup.includes(run.failure.command);
       for (const line of setup ? [`  FAIL  setup  $ ${run.failure!.command}`] : gateResultLines(project.gates, run.gates)) console.log(line);
       if (run.failure) console.log(`\n--- ${run.failure.name} (exit ${run.failure.exitCode}), last lines:\n${run.failure.output.split("\n").slice(-15).join("\n")}`);
