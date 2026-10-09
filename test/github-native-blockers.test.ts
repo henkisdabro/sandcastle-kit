@@ -32,6 +32,10 @@ case "$*" in
     echo 'Unknown JSON field: "blockedBy"' >&2
     echo 'Available fields:' >&2
     exit 1
+  fi
+  if [ -e "${dir}/old-server" ]; then
+    echo "GraphQL: Field 'blockedBy' doesn't exist on type 'Issue' (repository.issues.nodes.0.blockedBy)" >&2
+    exit 1
   fi ;;
 esac
 case "$1 $2" in
@@ -135,5 +139,23 @@ test("a gh that refuses blockedBy still lists the queue, with no native edges an
   }
   assert.deepEqual(queued.map((q) => q.id), ["5"]);
   assert.deepEqual(declared, []);
-  assert.deepEqual(written, [`this gh cannot read GitHub's native issue dependencies - update gh, or write "Blocked by #N" in the body\n`]);
+  assert.deepEqual(written, [`this gh, or the GitHub server it asks, cannot read native issue dependencies - update gh, or write "Blocked by #N" in the body\n`]);
+});
+
+test("a GitHub server without issue dependencies still lists the queue, with no native edges and one line on stderr", async () => {
+  const url = new URL("../src/tracker.ts?old-server", import.meta.url).href;
+  const { makeTracker: fresh } = (await import(url)) as typeof import("../src/tracker.ts");
+  setup([issue(5, "Do it.", [{ number: 7, state: "OPEN" }])], { 7: "open" }, [issue(7)]);
+  writeFileSync(join(dir, "old-server"), "");
+  const written: string[] = [];
+  const real = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => (written.push(String(chunk)), true)) as typeof process.stderr.write;
+  let queued: { id: string }[];
+  try {
+    queued = fresh(project).queued(false);
+  } finally {
+    process.stderr.write = real;
+  }
+  assert.deepEqual(queued.map((t) => t.id), ["5"]);
+  assert.equal(written.filter((l) => /native issue dependencies/.test(l)).length, 1);
 });

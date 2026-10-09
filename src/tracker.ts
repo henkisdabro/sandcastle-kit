@@ -115,7 +115,7 @@ export const ensureTriageLabel = (label: string, gh = (args: string[]) => sh("gh
 // refuses the whole call, so the first refusal turns the field off for the rest of the process
 // and the call is repeated without it: the queue still lists, and the body's lines still hold.
 let nativeBlockers = true;
-const NATIVE_REFUSED = "this gh cannot read GitHub's native issue dependencies - update gh, or write \"Blocked by #N\" in the body";
+const NATIVE_REFUSED = "this gh, or the GitHub server it asks, cannot read native issue dependencies - update gh, or write \"Blocked by #N\" in the body";
 
 // The numbers of the blocking issues in a `blockedBy` value: gh prints an array of issues, and
 // `nodes` is the GraphQL connection's spelling of the same list.
@@ -148,14 +148,15 @@ const github = (project: Project): Tracker => {
   };
   // Each ticket's native blocker numbers, as the list and view calls read them.
   const native = new Map<string, string[]>();
-  // `fields` with `blockedBy` while gh knows it; the refusal of an old gh is told once, on stderr
+  // `fields` with `blockedBy` while gh knows it; the refusal of an old gh, or of a GitHub Enterprise Server
+  // without issue dependencies (GraphQL's "Field 'blockedBy' doesn't exist on type 'Issue'"), is told once, on stderr
   // (stdout is `queue --json`'s), and the call repeated without the field.
   const withNative = (fields: string, call: (fields: string) => string): string => {
     if (!nativeBlockers) return call(fields);
     try {
       return call(`${fields},blockedBy`);
     } catch (e) {
-      if (!(e instanceof OperatorError) || !/unknown json field.*blockedBy/i.test(e.message)) throw e;
+      if (!(e instanceof OperatorError) || !/unknown json field.*blockedBy|field 'blockedBy' doesn't exist/i.test(e.message)) throw e;
       nativeBlockers = false;
       console.warn(NATIVE_REFUSED);
       return call(fields);
