@@ -15,7 +15,7 @@ import { quietly } from "./quiet.ts";
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR|CONFIG)_?/.test(k)) delete process.env[k];
-const { createHostGit, landOne, LandingStop } = await import("../src/landing.ts");
+const { createHostGit, landingWork, landOne, LandingStop } = await import("../src/landing.ts");
 const { gitFingerprint } = await import("../src/guard.ts");
 const { assertCleanBase } = await import("../src/run.ts");
 type Ctx = import("../src/landing.ts").LandContext;
@@ -84,7 +84,7 @@ test("a run does not start while a merge is open, though git status prints nothi
   );
 });
 
-test("a landing whose merge abort fails on a stale lock stops the run with its own error, and the next landing never starts", async () => {
+test("a landing whose merge abort fails on a stale lock stops the run with its own error", async () => {
   const root = makeRepo();
   writeFileSync(mergeHead(root), `${git(root, "rev-parse", "agent/issue-1")}\n`);
   writeFileSync(lock(root), "");
@@ -95,6 +95,20 @@ test("a landing whose merge abort fails on a stale lock stops the run with its o
       e instanceof LandingStop && e.message.includes("#1") && e.message.includes(lock(root)) && e.message.includes(mergeHead(root)) && /Nothing more lands/.test(e.message),
   );
   assert.ok(existsSync(lock(root)), "the kit does not delete a lock it did not take");
+});
+
+test("a stale lock alone fails the merge's index write: the scheduler's land port stops the run, and the advice names only the lock", async () => {
+  const root = makeRepo();
+  writeFileSync(lock(root), "");
+  await assert.rejects(
+    quietly(() => landingWork(ctxFor(root)).land(green(root))),
+    (e: Error) =>
+      e instanceof LandingStop &&
+      e.message.includes(`remove ${lock(root)}`) &&
+      // No merge was left to abort: `git merge --abort` would only answer "There is no merge to abort".
+      !e.message.includes("git merge --abort"),
+  );
+  assert.equal(git(root, "rev-parse", "main"), git(root, "rev-parse", "agent/issue-1~1"), "nothing landed");
 });
 
 test("a landing that fails and leaves nothing behind costs its ticket only", async () => {

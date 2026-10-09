@@ -227,6 +227,11 @@ export const gitLeftovers = (root: string): { file: string; what: string }[] => 
   return found;
 };
 
+// What to do about each leftover, in order: the lock first, as `git merge --abort` needs the index lock too.
+// Only the files that are there: with a lock and no MERGE_HEAD, `git merge --abort` says there is no merge to abort.
+export const leftoverSteps = (left: { file: string; what: string }[]) =>
+  `Once no git process is running, ${left.map((l) => (l.file.endsWith("index.lock") ? `remove ${l.file}` : "run `git merge --abort`")).join(", then ")}, then run again.`;
+
 // Every merge lands in the primary checkout, so it has to be clean and on the base branch.
 // An OperatorError, so the CLI prints a message: a stack trace read as a kit bug, and
 // without the file list the operator had to run git status to find a stray lockfile.
@@ -234,10 +239,8 @@ export const assertCleanBase = (project: Project) => {
   // First: a leftover lock or merge makes the files below read as dirty or clean for no reason a person can see.
   const left = gitLeftovers(project.root);
   if (left.length > 0) {
-    const steps = left.map((l) => (l.what.startsWith("a lock") ? `remove ${l.file}` : "run `git merge --abort`"));
     throw new OperatorError(
-      `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n` +
-        `Once no git process is running, ${steps.join(", then ")}, then run again.`,
+      `NOT STARTED: git left something half-done in this repo, and every landing would fail on it:\n${left.map((l) => `  ${l.file} (${l.what})`).join("\n")}\n${leftoverSteps(left)}`,
     );
   }
   const dirty = dirtyFiles(project.root);

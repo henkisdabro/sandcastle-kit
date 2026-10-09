@@ -28,7 +28,7 @@ import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
-import { dirtyFiles, gitLeftovers, readHeads } from "./run.ts";
+import { dirtyFiles, gitLeftovers, leftoverSteps, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
 import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
@@ -519,7 +519,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       if (left.length > 0) {
         throw new LandingStop(
           `${ref(o.issue)} left git half-done in ${root} and the landing could not undo it (${errorLine(error)}): ${left.map((l) => `${l.file} (${l.what})`).join(", ")}. ` +
-            `Nothing more lands. Once no git process is running, remove the lock file if there is one, run \`git merge --abort\`, then run again.`,
+            `Nothing more lands. ${leftoverSteps(left)}`,
           { what: `${ref(o.issue)} left a merge open`, detail: left.map((l) => l.file).join(", ") },
           { cause: error },
         );
