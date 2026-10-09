@@ -112,7 +112,8 @@ export const squashBody = (root: string, base: string, head: string) =>
  * on the base tip with that one parent instead, as a run's squash landing would. With `gate`, the merge is gated in the
  * box first and a red one is `red`: nothing is fast-forwarded. A changed shared `.git`, or a
  * changed record of the box's worktree, throws `OperatorError`: checked before the box closes,
- * whose close is then never called (`checkBeforeClose`), and again after. With `expected` (a run's fingerprint), its base
+ * whose close is then never called (`checkBeforeClose`), and again after. `expected` (a run's fingerprint, or the one
+ * `sandcastle land` took as it started) is checked before the box opens, and its base
  * moves to the new tip in the same synchronous step as the fast-forward, so a check made by
  * another pipeline never sees the base moved and the expectation not. The sandbox's peak memory
  * is filed under `run` (a run's start time; `sandcastle land` has none, so its own) before it closes.
@@ -125,7 +126,9 @@ export const landInSandbox = async (
   expected?: Fingerprint,
 ): Promise<LandResult> => {
   // A run's base must still be the one it expects: a person's commit made while this waited for a
-  // sandbox slot is not merged over, and taken as expected, by the fresh fingerprint below.
+  // sandbox slot is not merged over, and taken as expected, by the fresh fingerprint below. The last
+  // `.git` check before the open, too: Sandcastle's open runs host git in the project, and a filter
+  // another sandbox planted since the last check would run there. The calls up to the open are synchronous.
   if (expected) assertGitUnchanged(project, expected, `before landing ${t.branch} in a sandbox`);
   // Before any container starts: it runs with the shared .git mounted.
   // The run's branches and in-flight tickets are shared: pipelines run on while this lands.
@@ -185,9 +188,9 @@ export const landInSandbox = async (
       }
       // A landing gate can be the run's largest sandbox: `sandcastle size` must see it.
       await recordPeak(box, project.root, t.run);
-      // Sandcastle's close runs `git status` on the host in the box's worktree: the `.git` check and the worktree's
-      // records come first, and a failure throws with the container removed and no close - a stop, whatever the
-      // landing's own result or error.
+      // Sandcastle's close runs `git status` on the host in the box's worktree: the container is stopped, and the
+      // `.git` check and the worktree's records made, before it. A failure throws with the container removed and no
+      // close - a stop, whatever the landing's own result or error.
       const when = `after landing ${t.branch} in a sandbox`;
       await checkBeforeClose(project, box.worktreePath, when, () => assertGitUnchanged(project, before, when));
       await box.close();
@@ -279,6 +282,10 @@ export const landTicket = async (
   prepare: () => { open: Opener } | Promise<{ open: Opener }>,
 ): Promise<string> => {
   if (!arg) throw new OperatorError("Usage: sandcastle land <ticket>");
+  // The shared `.git` as the command starts, under the run lock its caller holds: the image build and the wait for a
+  // sandbox slot come before the sandbox opens, and Sandcastle's open runs host git in the project (`git worktree add`
+  // writes every file out through the filters `.git/config` names), so `landInSandbox` checks this before it opens.
+  const expected = gitFingerprint(project);
   const id = arg.replace(/^#/, "");
   const ref = tracker.ref(id);
   const base = project.baseBranch;
@@ -310,8 +317,12 @@ export const landTicket = async (
   markLog(log, undefined, "sandcastle land gates on the merged tree");
   const unmet = recordedUnmet(project, id, branch, head);
   const result = await withSlot("sandboxes", `${project.name} ${ref} land`, () =>
-    landInSandbox(project, { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" }, open, (box) =>
-      runGates(project, box, `${ref} land gates`, false, { log }, true),
+    landInSandbox(
+      project,
+      { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" },
+      open,
+      (box) => runGates(project, box, `${ref} land gates`, false, { log }, true),
+      expected,
     ),
   );
 

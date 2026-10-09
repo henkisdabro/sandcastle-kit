@@ -13,12 +13,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { useNoDocker } from "./no-docker.ts";
 import { quietly } from "./quiet.ts";
 
 // sandbox.ts, pool.ts and peaks.ts derive their directories from these at import: nothing here may touch the user's.
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 for (const k of Object.keys(process.env)) if (/^GIT_(COMMITTER|AUTHOR)_/.test(k)) delete process.env[k];
+useNoDocker();
 const { createPipeline } = await import("../src/burndown.ts");
 const { createFixBoard, createSchedule } = await import("../src/schedule.ts");
 type Ctx = import("../src/burndown.ts").PipelineContext;
@@ -186,7 +188,8 @@ test("a ticket waiting for another's fix parks when the run is paused, and on th
 
   // Both parked: the fixer before its review after the repair, the waiter before it would repair on its own.
   await until(() => states.includes("1") && states.includes("2"), "both tickets to park");
-  assert.equal(closed.length, 2, "both sandboxes closed, the waiter's with the fixer's");
+  // A ticket says it is paused before its container is stopped and its sandbox closed.
+  await until(() => closed.length === 2, "both sandboxes to close, the waiter's with the fixer's");
   assert.equal(demands().at(-1), 0, "a paused run with both tickets parked asks for no sandbox slot");
   await sleep(60);
   assert.deepEqual(eventsOf("2"), ["impl", "review", "gate"], "the waiter started no repair pass during the pause");

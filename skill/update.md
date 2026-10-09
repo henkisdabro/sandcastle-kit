@@ -126,6 +126,11 @@ apply it once the user agrees.
        `.sandcastle/config.ts does not load` and names an `enum`, a `namespace` or a parameter
        property, propose replacing it: an object of constants for an enum, a plain field for a
        parameter property. Node runs the config with type annotations removed and nothing else.
+   16. **Refused mount.** If `sandcastle doctor`, from the project's root, prints a FIX for
+       `.sandcastle/config.ts mounts stay out of the run's own state`, a `mounts` entry reaches the
+       project root, `.sandcastle/` or `.git`, and the config no longer loads. Tell the user which
+       entry the line names, and propose removing it or pointing it at a directory elsewhere (a
+       cache directory under the project is fine). Then `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: kit version before and after, what changed

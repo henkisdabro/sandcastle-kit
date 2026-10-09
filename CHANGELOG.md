@@ -48,7 +48,9 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   at five times its price**, as most requests at `high` or `max` effort are, and advises `medium`
   or below with the effort set beside the model.
 - **A commit made on the base branch while a run's opening base gates are running stops the run**,
-  as a commit on the base already did at any later point in the run.
+  as a commit on the base already did at any later point in the run. So does a commit on the base
+  or an `agent/*` branch while a run is paused, or while `sandcastle land` builds its image: the
+  check before the next sandbox opens finds it.
 
 ### Security
 
@@ -61,13 +63,36 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   pack or reflog expiry in the shared `.git` on git 2.54 and newer. The sandboxes' git has it off
   too (`gc.auto=0`, `maintenance.auto=false` in their environment), so an agent's commit or merge
   no longer starts a detached repack and prune in the `.git` every sandbox shares.
-- **A sandbox's changes to the shared `.git`, or to its own worktree's records, are checked before
-  it closes.** Sandcastle runs a host `git status` in each sandbox's worktree as the sandbox closes,
-  so the `.git` check, and a check of each worktree's records (its `.git` pointer, `commondir` read
-  as git reads it, and no `config.worktree`), now run before every sandbox closes and before the
-  host runs git in a kept worktree, whose status never looks into a nested repository. On a failure
-  the container is removed without that host `git status`, and the run stops, leaving the worktree
-  for a person.
+- **A git filter or driver a sandbox plants can no longer run on your machine through the host git
+  that runs around the sandbox.** Sandcastle runs host git in a sandbox's worktree as it opens (`git
+  worktree add`, and `status`, `fetch` and `merge` on a reused one) and as it closes (`git status`).
+  The kit now checks the shared `.git` immediately before every sandbox opens, and stops a
+  sandbox's container before it checks `.git` and that worktree's records (its `.git` pointer,
+  `commondir` read exactly as git reads it, no `config.worktree`) ahead of every close and every
+  host git in a kept worktree. It refuses a git repository nested in a worktree or a changed
+  `.git/modules/`, and fingerprints the main worktree's `.git/config.worktree`. On a failure the
+  container is removed without the host's git, and the run stops, leaving the worktree for a
+  person. Submodules are not supported in sandboxes.
+- **A filter, hook or remote planted during a run that was killed is no longer taken as the next
+  run's baseline.** A run, `sandcastle land`, `sandcastle gates` and `sandcastle clean` record the
+  program-running and network keys of the shared `.git/config` and the main worktree's
+  `config.worktree` (filters, merge and diff drivers, the commands git runs - `core.fsmonitor`,
+  `core.hooksPath`, `core.sshCommand`, `core.pager`, `core.editor`, `gpg.program` and more - remotes'
+  URLs and transport commands, `url.*.insteadOf`, `credential.*`, `protocol.*`, proxies,
+  `extensions.*`, `include*`), `info/attributes`, and the files under `.git/hooks/` and
+  `.git/modules/`; the next start refuses a difference, naming each key and file.
+  `sandcastle run --accept-git-config` records the present state as the new baseline. `branch.*`
+  and `remote.*.fetch` stay free, so `git push -u` changes nothing.
+- **`sandcastle clean` leaves a kept worktree whose records a sandbox changed, or that has a git
+  repository nested in it, as it is**, named with the reason and its branch kept (exit code 1),
+  and cleans the rest.
+- **A failed or hung `docker` call at a sandbox's close stops the run** instead of letting the
+  `.git` check go ahead with the container possibly still running; every docker call on the close
+  path has a time limit.
+- **A project config's `mounts` entry that reaches the run's own state is refused**: one that
+  equals or contains the project root, `.sandcastle/` or the shared `.git`, or lies inside
+  `.sandcastle/` or `.git`, fails when the config loads, naming the entry, and `sandcastle doctor`
+  reports it as a FIX.
 
 ### Fixed
 
@@ -182,10 +207,36 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
   `info/attributes` and every other file under `.git/info/` are still watched, and the landing's
   fast-forward refuses to replace an untracked file of yours that the exclude file lists, rather
   than overwrite it.
+- **A directory or a FIFO under `.git/hooks/` no longer crashes or hangs the run's `.git` check.**
+  A directory there (a sandbox's, or a hook manager's `pre-commit.d/`) is fingerprinted as one,
+  with its files; a FIFO or other special file is recorded by its kind and never opened, where a
+  read blocked the whole run.
+- **Your own worktree in a folder named `sandcastle-*` no longer stops a run** as a kit worktree
+  whose record a sandbox rewrote. A record counts as rewritten only when its path leaves
+  `.sandcastle/worktrees/` and the worktree there does not name that record back.
 - **The kit's own test suite no longer flakes on a busy machine**: its environment turns off git's
   background maintenance, the merge-driver test has a temp directory of its own, and the status
   view's paused-for-usage scenario passes at any terminal width and in the ten minutes after
   midnight.
+
+### Upgrading
+
+- **The first run after this update records the program-running and network keys of the shared
+  `.git/config`, and the files under `.git/hooks/`, as its baseline: nothing to run.** A later
+  start is refused after a change between runs, yours included: `git remote add`, a fork remote
+  `gh pr create` adds, a hook manager's install (husky's `core.hooksPath`, lefthook's hooks). When
+  the keys or files it names are yours, start again with `sandcastle run --accept-git-config`. With
+  `worktree.useRelativePaths` on, expect this once, naming `extensions.relativeworktrees`.
+- **Run `sandcastle doctor` in each project that sets `mounts`.** A FIX naming a mount that reaches
+  the project root, `.sandcastle/` or `.git` means the config no longer loads: remove that entry,
+  or point it at a directory elsewhere (a cache under the project is fine).
+- **`sandcastle gates` refuses while a run of the project is live**, and **`sandcastle status`
+  with no terminal on stdout prints one frame and exits**. A script of yours that ran either during
+  a run, or piped the live view, needs `sandcastle status 0` or `sandcastle wait` first.
+- **A run stops when a sandbox has a git repository nested in its worktree.** Sandcastle never
+  initialises submodules, so this changes nothing unless your gates or agents run
+  `git submodule update` (or clone a repository) inside the worktree: move that out of the
+  sandbox, or vendor the code.
 
 ## [0.11.0] - 2026-10-08
 

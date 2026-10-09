@@ -321,17 +321,24 @@ export const gitHooksLine = (g: GitHooks) =>
 // `ownSlot` false runs it in the sandbox slot the caller holds: a ticket's pipeline that waits on
 // the answer, its own sandbox idle, would otherwise wait for a slot it holds itself - for ever
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
-// `check` is the `.git` check of the run around it (`HostGit.check`), made before the sandbox closes.
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown) => {
+// `check` is the `.git` check of the run around it (`HostGit.check`), made before the sandbox opens and before it closes.
+// `beforeOpen` is the one made before it opens, when that is another (the base gates at a run's start, below).
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown, beforeOpen = check) => {
   // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
   // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
   const asked = Date.now();
   const gated = async () => {
     const slotWaitMs = Date.now() - asked;
     const branch = `sandcastle/${label.replace(/\W+/g, "-")}-${Date.now()}`;
+    // Sandcastle's open runs host git in the project - `git worktree add`, whose checkout writes every file through the
+    // filters `.git/config` names - and the pins hold only those configured at the start: a filter another sandbox
+    // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
+    // failure throws with nothing opened.
+    await beforeOpen?.(`before opening the ${label} sandbox`);
     const sandbox = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
-    // taken once the sandbox is open: git may write the repo's config as it adds a worktree (`worktree.useRelativePaths`).
+    // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
+    // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
     const own = check ? undefined : gitFingerprint(project);
     const checkGit = (when: string) => (own ? assertGitUnchanged(project, own, when) : check?.(when));
     try {
@@ -360,8 +367,9 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       } catch {
         /* closing still has to happen */
       }
-      // Sandcastle's close runs `git status` on the host in the worktree: the `.git` check and the worktree's records
-      // come first, and a failure throws with the container removed, the worktree and its branch left for a person.
+      // Sandcastle's close runs `git status` on the host in the worktree: the container is stopped, and the `.git`
+      // check and the worktree's records made, before it. A failure throws with the container removed, the worktree
+      // and its branch left for a person.
       const when = `before closing the ${label} sandbox`;
       await checkBeforeClose(project, sandbox.worktreePath, when, () => checkGit(when));
       unlockWorktree(sandbox.worktreePath);
@@ -828,9 +836,10 @@ export const writeGateLog = (log: string, header: string, failures: GateRun["fai
 /**
  * Gates the base branch and throws if any gate is red, with each red gate's
  * output in the log. `cached` skips the check when the same base, image and
- * config were green before. `check` is the `.git` check before its sandbox closes (`gateBase`).
+ * config were green before. `check` is the `.git` check before its sandbox opens and before it closes, and
+ * `beforeOpen` the one before it opens when that is another (`gateBase`).
  */
-export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string, check?: (when: string) => unknown) => {
+export const requireGreenBase = async (project: Project, image: string, planFile: string, cached = true, runId?: string, check?: (when: string) => unknown, beforeOpen = check) => {
   const log = join(project.root, ".sandcastle/logs/base-gates.log");
   const key = baseKey(project, image, planFile);
   const base = project.baseBranch;
@@ -846,7 +855,7 @@ export const requireGreenBase = async (project: Project, image: string, planFile
     }
     console.log(`Gates on ${base}: ${seen} - gates not re-run; running the hook tests and the git-hook probe in a sandbox, before any agent starts ...`);
   } else console.log(`Gates on ${base}: running every gate on the base commit in a sandbox, before any agent starts ...`);
-  const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen, check);
+  const run = await gateBase(project, image, planFile, "base-gates", true, runId, true, !gatesGreen, check, beforeOpen);
   if (!gatesGreen) {
     console.log(`Gates on ${base}: ${gateLine(run.gates)}`);
     for (const line of gateResultLines(project.gates, run.gates)) console.log(line);

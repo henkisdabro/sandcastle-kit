@@ -143,7 +143,7 @@ export type HostGit = {
    * when `made(previous, tip)` returns nothing; a returned reason stops the run.
    */
   write<T>(fn: () => T, made?: (prev: string, tip: string) => string | undefined): Promise<T>;
-  /** The check a pipeline makes before its sandbox closes for a pause, a gate sandbox's before it closes, and the worker's before each landing. */
+  /** The check made before every sandbox of the run opens (a gate sandbox's, a ticket's), a pipeline's before its sandbox closes for a pause, a gate sandbox's before it closes, and the worker's before each landing. */
   check(when: string): Promise<void>;
   /** A ticket's pipeline starts: its branch may now move (the agent commits), and has only to exist. */
   begin(branch: string): void;

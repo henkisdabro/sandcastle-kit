@@ -84,7 +84,7 @@ test("a filter a sandbox adds to the shared .git/config stops its close: the hos
   git("config", "filter.evil.clean", `touch ${marker}`);
   writeFileSync(join(project.root, ".git/info/attributes"), "* filter=evil\n");
   utimesSync(join(wt, "tracked.txt"), new Date(2001, 0, 1), new Date(2001, 0, 1));
-  const docker = dockerStub();
+  const docker = dockerStub(true);
   const path = process.env.PATH;
   process.env.PATH = docker.first(path);
   let closed = false;
@@ -102,6 +102,6 @@ test("a filter a sandbox adds to the shared .git/config stops its close: the hos
   }
   assert.equal(closed, false);
   assert.equal(existsSync(marker), false, "the planted filter ran on the host");
-  // Its container is looked for by its mount of the worktree, to be removed: this Docker is down, so there is none.
+  // Its container is looked for by its mount of the worktree, to be removed: this Docker has no containers, so there is none. (A Docker that does not answer `ps` fails the check: test/guard-docker-unanswered.test.ts.)
   assert.match(readFileSync(docker.calls, "utf8"), /^ps -aq --filter name=\^sandcastle-$/m);
 });

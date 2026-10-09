@@ -6,7 +6,7 @@
 //                    check this machine and (inside a repo) this project are
 //                    set up; prints what is missing and how to fix it;
 //                    --verify also asks GitHub and Anthropic whether the tokens are accepted
-//   run [TICKET ...] [--dry] [--concurrency N] [--detach] [--api-key]
+//   run [TICKET ...] [--dry] [--concurrency N] [--detach] [--api-key] [--accept-git-config]
 //                    burn down the queue: build images if stale, preflight,
 //                    open the status pane (Herdr), implement/review/gate/merge;
 //                    the arguments are the same as TICKETS, DRY_RUN and CONCURRENCY;
@@ -14,7 +14,13 @@
 //                    output in .sandcastle/logs/run-output.log, and returns once it is going
 //                    (not with autonomy level 1, which asks a question a detached run cannot);
 //                    a run that would spend ANTHROPIC_API_KEY asks first, and without a
-//                    terminal needs --api-key (or SANDCASTLE_API_KEY=1), which is the yes
+//                    terminal needs --api-key (or SANDCASTLE_API_KEY=1), which is the yes;
+//                    a run, `land` or `gates` first holds what makes git run a program or reach
+//                    the network in the shared .git (those keys of .git/config and config.worktree,
+//                    info/attributes, hooks/ and modules/) to what the previous run recorded,
+//                    and refuses a difference, naming each key and file (a sandbox of a killed
+//                    run may have planted it): remove it, or if it is yours
+//                    --accept-git-config records the present state as the new baseline
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
 //                    the run alone. With no run live: the last summary and its exit code
@@ -65,9 +71,11 @@
 //   blockers         open tickets whose comments say "blocked by" while the body does not
 //                    (a run reads only the body), and queued ones whose blockers can never
 //                    close (missing, a cycle) or are ignored; no model calls
-//   gates            every gate on the base branch in a sandbox, as a run's
+//   gates [--accept-git-config]
+//                    every gate on the base branch in a sandbox, as a run's
 //                    first phase does; no model calls
-//   land <ticket>    merge one agent branch with the kit's message, gate the merge in the
+//   land <ticket> [--accept-git-config]
+//                    merge one agent branch with the kit's message, gate the merge in the
 //                    project image, then close the ticket (left open with a criterion
 //                    recorded unmet); nothing is merged on a red gate or a conflict; no
 //                    model calls
@@ -83,10 +91,12 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
-//   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
+//   clean [--all] [--accept-git-config]
+//                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
 //                    of a branch that is gone or merged, and list unmerged ones;
-//                    --all deletes those too, without asking
+//                    --all deletes those too, without asking; a worktree a sandbox
+//                    tampered with is left, named, and the exit code is 1
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
@@ -110,7 +120,7 @@ import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -258,6 +268,8 @@ try {
           throw new OperatorError("Autonomy level 1 asks a question at the end of each turn, which a detached run cannot. Use level 2 or 3, or run attached.");
         }
         sandboxPanes(project);
+        // The child checks again for itself; this one refuses before a process starts.
+        assertGitConfigBaseline(project, "sandcastle run", given.acceptGitConfig);
         assertCleanBase(project);
         await requireRepoAccess(project);
         const owner = livePid(root);
@@ -314,7 +326,7 @@ try {
       let ranTurn = false;
       for (let turn = 1; ; turn++) {
         // Only the first turn takes the start's reading; a later turn reads its own, as the runtime may have been resized since.
-        if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker } : {}) }))) {
+        if (!(await burndown(project, { settings, turn, ...(turn === 1 ? { docker, acceptGitConfig: given.acceptGitConfig } : {}) }))) {
           drain.cause ??= "no ticket could start";
           break;
         }
@@ -394,6 +406,8 @@ try {
       // A red merged base is a failed run to whoever reads the code (`sandcastle wait`, a harness), at every level.
       // Level 0 gathered no facts: the run record's verify is enough, where gather() would read the tracker again
       // after the summary has printed, and a throw there would turn a finished run into a crash.
+      // The run ended by itself (a stop throws past this): the config it held the host to is the next run's baseline.
+      recordGitConfigEnd(project);
       const redExit = redBaseExit(lastFacts ?? (ranTurn ? recordedVerify(project.root) : undefined));
       if (redExit) process.exitCode = redExit;
       break;
@@ -603,16 +617,20 @@ try {
       // The sandbox shares the repo's .git, so the run's host guards apply.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // Before the pins take the config as it is: what an earlier, killed run's sandbox planted there is refused, not pinned.
+      const baseline = assertGitConfigBaseline(project, "sandcastle gates", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
       // writes, and its commits and landings would read as tampering to the check below.
       lockRun(project);
+      recordGitConfigStart(project, baseline);
       const fingerprint = gitFingerprint(project);
       try {
         await requireGreenBase(gateOnly(project), await ensureImage(project), writePlan(project).file, false, undefined, (when) => assertGitUnchanged(project, fingerprint, when));
       } finally {
         assertGitUnchanged(project, fingerprint, "after the gates");
       }
+      recordGitConfigEnd(project);
       console.log("All gates green on the base branch.");
       break;
     }
@@ -620,15 +638,17 @@ try {
       // The merge lands in this checkout, so it must be clean and no run may be merging into it.
       disableHostGitHooks();
       const project = await loadProject(root);
+      const baseline = assertGitConfigBaseline(project, "sandcastle land", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       assertCleanBase(project);
       lockRun(project);
-      console.log(
-        await landTicket(project, makeTracker(project), args[0], async () => {
-          const image = await ensureImage(project);
-          return { open: sandboxOpener(gateOnly(project), image, writePlan(project).file) };
-        }),
-      );
+      recordGitConfigStart(project, baseline);
+      const landed = await landTicket(project, makeTracker(project), args.find((a) => a !== "--accept-git-config"), async () => {
+        const image = await ensureImage(project);
+        return { open: sandboxOpener(gateOnly(project), image, writePlan(project).file) };
+      });
+      recordGitConfigEnd(project);
+      console.log(landed);
       break;
     }
     case "preview": {
@@ -691,9 +711,13 @@ try {
       // live run's own worktrees must survive, so this takes the run lock.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // Clean runs host git over whatever a killed run's sandbox left: what was planted in the config is refused, not pinned.
+      const baseline = assertGitConfigBaseline(project, "sandcastle clean", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       lockRun(project);
-      const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      recordGitConfigStart(project, baseline);
+      const { containers, images, worktrees, deleted, kept, left } = cleanProject(project, args.includes("--all"), worktreeRefusal(project));
+      recordGitConfigEnd(project);
       // After the branches above went: a merged branch's backup entry is dropped with it, and with
       // --all an unmerged one's too, as its work was let go with the branch.
       const backups = pruneBackup(project, { goneToo: args.includes("--all") });
@@ -707,7 +731,11 @@ try {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length) console.log("Nothing to clean.");
+      if (left.length) {
+        console.log(`\nLeft as they are, git was not run in them:\n${left.map((l) => `  ${l.path}: ${l.reason}`).join("\n")}`);
+        process.exitCode = 1;
+      }
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length && !left.length) console.log("Nothing to clean.");
       break;
     }
     default:

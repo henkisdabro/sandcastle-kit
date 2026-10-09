@@ -3,11 +3,11 @@
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { removeSandboxContainer, sh } from "./sandbox.ts";
+import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -76,8 +76,8 @@ export const pinHostGitConfig = (root: string) => {
 // `core.fsmonitor` command runs on the host's next `git status`), the files in
 // `.git/info/`, plant a hook in `.git/hooks/` (it runs on the operator's next
 // checkout or commit, long after the run's own hooks-off environment is gone),
-// or move the base branch. Fingerprinted at start and checked
-// before every sandbox closes and before landing; any change stops the run before
+// or move the base branch. Fingerprinted at start and checked before every
+// sandbox opens, before every sandbox closes and before landing; any change stops the run before
 // the host runs another git command in the repo. A sandbox's own worktree record
 // is held to what git writes instead (below, `assertWorktreeRecords`).
 // ---------------------------------------------------------------------------
@@ -93,9 +93,73 @@ export const pinHostGitConfig = (root: string) => {
 // check the same two objects, hence the sharing in `gitFingerprint`.
 // `config` is `.git/config` as the list of its `key\nvalue` entries (null when git cannot read it as
 // config), kept beside its hash so a change can be told apart by key: see `configChange`.
-export type Fingerprint = { files: Record<string, string>; config: { path: string; entries: string[] | null }; base: string; branches: Record<string, string>; flying: Set<string> };
+// `worktreeConfig` is the main worktree's `.git/config.worktree` the same way (no entries when absent).
+// `files` also holds the shared `.git/modules/` (see `moduleFiles`), whose repositories a host git reaches through a gitlink.
+export type Fingerprint = { files: Record<string, string>; config: ConfigReading; worktreeConfig: ConfigReading; base: string; branches: Record<string, string>; flying: Set<string> };
+
+type ConfigReading = { path: string; entries: string[] | null };
 
 const AGENT_BRANCH = /^agent\/issue-/;
+
+/**
+ * The shared `.git/modules/`: each submodule's git directory, which a host `git status` that recurses into a gitlink reads
+ * the config and attributes of. Sandcastle never initialises a submodule, so the directory is absent in the ordinary run,
+ * and a sandbox that makes one is a difference from the run's start. Every file and directory under it, keyed by path,
+ * except what git reads as data and a host's own use of a submodule rewrites (`objects/`, `refs/`, `logs/`, `index`,
+ * `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`): a symlink is its target, a directory a marker, a file its hash.
+ */
+const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
+const moduleFiles = (modules: string, hashOf: (f: string) => string) => treeFiles(modules, hashOf, MODULE_DATA);
+
+/**
+ * What a path in the shared `.git` holds, for a fingerprint, without ever reading what is not a regular file: a FIFO a
+ * sandbox planted would block the read, and with it the whole run (the read is synchronous), and a directory throws.
+ * A regular file is its content's hash (as before); a missing one the hash of nothing; a link its target; anything else
+ * its kind. Opened without following a link and without blocking, and checked again once open, so an entry swapped
+ * between the lstat and the open is never read either.
+ */
+export const entryHash = (f: string): string => {
+  const at = lstatSync(f, { throwIfNoEntry: false });
+  if (!at) return createHash("sha256").update("").digest("hex");
+  if (at.isSymbolicLink()) return `link ${readlinkSync(f)}`;
+  if (at.isDirectory()) return "directory";
+  if (!at.isFile()) return `special ${at.isFIFO() ? "fifo" : at.isSocket() ? "socket" : "device"}`;
+  let fd: number;
+  try {
+    fd = openSync(f, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    return `unreadable ${(error as NodeJS.ErrnoException).code ?? "error"}`;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return "special";
+    return createHash("sha256").update(readFileSync(fd)).digest("hex");
+  } finally {
+    closeSync(fd);
+  }
+};
+
+/** Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything). */
+const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set()): Record<string, string> => {
+  const found: Record<string, string> = {};
+  const at = lstatSync(top, { throwIfNoEntry: false });
+  if (!at) return found;
+  // `container`: a directory of modules, whose entries are module names (a module may be named `objects`), not a git
+  // directory's own, whose data names are left out.
+  const visit = (dir: string, container: boolean) => {
+    found[dir] = "directory";
+    for (const name of readdirSync(dir).sort()) {
+      if (!container && data.has(name)) continue;
+      const path = join(dir, name);
+      const info = lstatSync(path);
+      if (info.isSymbolicLink()) found[path] = `link ${readlinkSync(path)}`;
+      else if (info.isDirectory()) visit(path, !container && name === "modules");
+      else found[path] = hashOf(path);
+    }
+  };
+  if (at.isDirectory()) visit(top, true);
+  else found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
+  return found;
+};
 
 const commonDir = (root: string) => sh("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
 
@@ -136,27 +200,42 @@ export const gitFingerprint = (project: Project, share?: Pick<Fingerprint, "bran
   // info/attributes (maps paths to filter, merge and diff drivers), grafts, sparse-checkout, any new file.
   const unwatched = new Set([join(dir, "info", "refs"), join(dir, "info", "exclude")]);
   const info = inside("info").filter((f) => !unwatched.has(f));
-  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...inside("hooks")];
+  // config.worktree: the main worktree's config, which git reads on top of `config` once
+  // `extensions.worktreeConfig` is on (a sandbox can turn that on in `config`, itself watched, but a file
+  // already there waits for it). Listed only while it exists, so creating one, even an empty one, differs
+  // from its absence, which an empty file's hash would not.
+  const worktreeConfigPath = join(dir, "config.worktree");
+  const paths = [join(dir, "config"), join(dir, "HEAD"), ...info, ...(existsSync(worktreeConfigPath) ? [worktreeConfigPath] : [])];
   const files: Record<string, string> = {};
-  const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  const hashOf = entryHash;
   for (const f of paths) files[f] = hashOf(f);
+  // The hooks as a tree, as the start record reads them: a directory under hooks/ (a sandbox's, or a hook manager's
+  // `pre-commit.d/`) is an entry of its own and its files are watched, where reading it as a file threw.
+  Object.assign(files, treeFiles(join(dir, "hooks"), hashOf));
+  Object.assign(files, moduleFiles(join(dir, "modules"), hashOf));
   // The entries are read between two hashes of the file: one a sandbox rewrote meanwhile would
   // otherwise leave the entries newer than the hash, and the change would never be compared.
-  const configPath = join(dir, "config");
-  let entries: string[] | null = null;
-  for (let attempt = 0; attempt < 3 && !entries; attempt++) {
-    try {
-      const listed = sh("git", ["config", "--file", configPath, "-z", "--list"], project.root).split("\0").filter(Boolean);
-      const again = hashOf(configPath);
-      if (again === files[configPath]) entries = listed;
-      else files[configPath] = again;
-    } catch {
-      break;
+  const readEntries = (path: string): ConfigReading => {
+    if (!(path in files)) return { path, entries: [] };
+    let entries: string[] | null = null;
+    for (let attempt = 0; attempt < 3 && !entries; attempt++) {
+      try {
+        const listed = sh("git", ["config", "--file", path, "-z", "--list"], project.root).split("\0").filter(Boolean);
+        const again = hashOf(path);
+        if (again === files[path]) entries = listed;
+        else files[path] = again;
+      } catch {
+        break;
+      }
     }
-  }
+    return { path, entries };
+  };
+  const config = readEntries(join(dir, "config"));
+  const worktreeConfig = readEntries(worktreeConfigPath);
   return {
     files,
-    config: { path: configPath, entries },
+    config,
+    worktreeConfig,
     base: tipOf(project.root, `refs/heads/${project.baseBranch}`),
     branches: share?.branches ?? agentBranches(project.root),
     flying: share?.flying ?? new Set(),
@@ -232,6 +311,155 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
     else words.push(`${name}: ${old.map(shown).join(", ")} -> ${next.map(shown).join(", ")}`);
   }
   return { benign: allBenign ? benign : [], words };
+};
+
+// ---------------------------------------------------------------------------
+// The start baseline. The pins and the fingerprint both take the shared `.git` as they find it when a
+// run starts, so whatever a sandbox wrote there in a run that was killed before any check (Ctrl-C at the
+// wrong moment, a crash, a machine asleep) would be that run's baseline and never reported. What makes
+// git run a program or reach the network - those keys of `.git/config` and of the main worktree's
+// `.git/config.worktree`, `info/attributes`, which maps paths to drivers, the hooks, which the kit's git
+// ignores but the operator's next commit runs, and `modules/`, whose configs a git that looks into a
+// submodule reads - is therefore recorded when a run starts and again when it ends cleanly, in the
+// project's gitignored `.sandcastle/.run/`, and compared before anything is pinned: a difference from the
+// previous run's record is a refusal, until a person says it is theirs.
+// ---------------------------------------------------------------------------
+
+// Every key that runs a program, loads more config or decides where and how git connects. All of
+// `filter.*` (its `required` decides whether a failing filter stops git), every key `pinHostGitConfig`
+// pins (a value planted in a killed run would be pinned as the run's own, not refused), the other drivers
+// and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
+// it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
+// proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
+// `extensions.*`. Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
+// them, and they run nothing.
+const PROGRAM_KEYS = new RegExp(
+  `${COMMAND_KEYS}|^(filter\\..+|merge\\..+\\.driver|diff\\..+\\.(textconv|command)|core\\.(fsmonitor|hookspath|sshcommand|gitproxy)|include.*` +
+    "|remote\\..+\\.(url|pushurl|uploadpack|receivepack|proxy)|url\\..+\\.(insteadof|pushinsteadof)|credential\\..+|protocol\\..+" +
+    "|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+)$",
+  "i",
+);
+
+// `entries` and `worktreeEntries`: those keys of `.git/config` and of `.git/config.worktree` (none when it
+// is absent), `key\nvalue`, sorted. `attributes`: the hash of `info/attributes` ("" when absent). `files`:
+// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory.
+type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string> };
+type BaselineRecord = ProgramState & { clean: boolean };
+
+const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
+
+const programState = (project: Project): ProgramState => {
+  const dir = commonDir(project.root);
+  const entries = (path: string) => {
+    if (!existsSync(path)) return [];
+    try {
+      // `--file`: only this file, not the user's or the system's, which a sandbox cannot write.
+      const listed = sh("git", ["config", "--file", path, "-z", "--list"], project.root).split("\0").filter(Boolean);
+      return listed.filter((e) => PROGRAM_KEYS.test(e.split("\n")[0])).sort();
+    } catch (error) {
+      throw new OperatorError(`NOT STARTED: git cannot read ${relative(realpathSync(project.root), path)} as config, so the program-running keys a sandbox may have planted there cannot be checked. Inspect it before running any other git command there.`, { cause: error });
+    }
+  };
+  const hashOf = entryHash;
+  const files: Record<string, string> = {};
+  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf), ...moduleFiles(join(dir, "modules"), hashOf) })) files[relative(dir, path)] = hash;
+  const attributes = join(dir, "info", "attributes");
+  return {
+    entries: entries(join(dir, "config")),
+    worktreeEntries: entries(join(dir, "config.worktree")),
+    attributes: existsSync(attributes) ? hashOf(attributes) : "",
+    files,
+  };
+};
+
+const strings = (value: unknown) => Array.isArray(value) && value.every((e) => typeof e === "string");
+
+const readBaseline = (project: Project): BaselineRecord | undefined => {
+  try {
+    const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
+    const files = record.files;
+    // A record an earlier kit wrote holds fewer keys and no files, so it fails here and is read as none: compared
+    // with today's state it would name every remote's URL and every sample hook as added.
+    if (strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
+      return { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true };
+    }
+  } catch {
+    // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
+  }
+  return undefined;
+};
+
+const writeBaseline = (project: Project, record: BaselineRecord) => {
+  mkdirSync(dirname(baselineFile(project)), { recursive: true });
+  writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
+};
+
+/** What differs between a record and the present state, as the refusal says it: one part per place, none when nothing does. */
+const differences = (project: Project, was: ProgramState, now: ProgramState) => {
+  const config = configChange(project, was.entries, now.entries).words;
+  const worktree = configChange(project, was.worktreeEntries, now.worktreeEntries).words;
+  const word = (inWas: boolean, inNow: boolean) => (!inWas ? "added" : !inNow ? "removed" : "changed");
+  const files = changedFiles(was.files, now.files).map((f) => `${clean(f)} ${word(f in was.files, f in now.files)}`);
+  if (was.attributes !== now.attributes) files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  return {
+    config,
+    worktree,
+    files,
+    parts: [
+      ...(config.length ? [`In .git/config: ${config.join("; ")}.`] : []),
+      ...(worktree.length ? [`In .git/config.worktree: ${worktree.join("; ")}.`] : []),
+      ...(files.length ? [`Under .git/: ${files.join(", ")}.`] : []),
+    ],
+  };
+};
+
+/**
+ * Before a run, `land` or `gates` pins anything: holds what the start baseline records (above) to what the
+ * previous run recorded. A difference throws an `OperatorError` that names each added, changed or removed
+ * key (no value for a key that runs a program or carries credentials, as the `.git` stop says it) and file,
+ * and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's own. No record
+ * (the first run under this kit) is no difference. A previous run that never ended cleanly says so in the
+ * refusal, since a sandbox may have written the difference. Writes nothing: `recordGitConfigStart` does,
+ * once the run holds its lock. Returns the state it read.
+ */
+export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramState => {
+  const now = programState(project);
+  const was = readBaseline(project);
+  if (!was || accept) return now;
+  const { config, worktree, files, parts } = differences(project, was, now);
+  if (!parts.length) return now;
+  const root = project.root;
+  const inspect = [
+    ...(config.length ? [`\`git -C ${root} config --local --list\``] : []),
+    ...(worktree.length ? [".git/config.worktree"] : []),
+    ...(files.length ? ["the files it names"] : []),
+  ];
+  const remove = [
+    ...(config.length ? [`a key in .git/config with \`git -C ${root} config --local --unset-all <key>\``] : []),
+    ...(worktree.length ? [`a key in .git/config.worktree with \`git -C ${root} config --file .git/config.worktree --unset-all <key>\``] : []),
+    ...(files.length ? ["a file by deleting it"] : []),
+  ];
+  const listed = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0]);
+  throw new OperatorError(
+    `NOT STARTED: the shared .git differs from what the last run left, in what makes git run a program or reach the network. ${parts.join(" ")} ` +
+      `${was.clean ? "Something wrote them between the runs." : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them."} ` +
+      `Inspect ${listed(inspect)} before running any other git command there. Remove what is not yours (${remove.join(", ")}), ` +
+      `or, if it is your own, start again with \`${command} --accept-git-config\`, which records the present state as the new baseline.`,
+  );
+};
+
+/** Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended. */
+export const recordGitConfigStart = (project: Project, state: ProgramState) => writeBaseline(project, { ...state, clean: false });
+
+/**
+ * At a run's clean end: marks the record clean when the `.git` still holds what the run started
+ * with. A key or a hook a sandbox wrote after the last check stays different from the record, so the
+ * next start refuses it: the end never records a state it did not check.
+ */
+export const recordGitConfigEnd = (project: Project) => {
+  const was = readBaseline(project);
+  if (!was) return;
+  if (!differences(project, was, programState(project)).parts.length) writeBaseline(project, { ...was, clean: true });
 };
 
 // Names, subjects and paths are the sandbox's to choose: shown without
@@ -429,7 +657,22 @@ const restoreBranch = (project: Project, name: string, want: string, when: strin
 // A sandbox's worktree record names the worktree by its host path. `git worktree repair` run in a
 // container rewrites it to the container path, and the host then cannot find that sandbox.
 // Kit-made worktrees only (`agent-issue-*`, and `sandcastle-*` for a landing's scratch): a person's
-// own worktrees live where they like.
+// own worktrees live where they like. The name alone cannot tell: Sandcastle names a worktree after its branch, and a
+// person's worktree in a folder named `sandcastle-*` (a clone of the kit, say) has the same form. One whose `.git` file
+// names this very record was written by git at both ends, so it is a worktree elsewhere, not a record a sandbox
+// rewrote: a rewrite points at a container path, where the host finds no such file.
+/** True when `pointer` is a worktree's `.git` file naming `record`. */
+const namesRecord = (pointer: string, record: string): boolean => {
+  try {
+    if (!lstatSync(pointer, { throwIfNoEntry: false })?.isFile()) return false;
+    const text = readFileSync(pointer, "utf8").replace(/[\r\n]+$/, "");
+    if (!text.startsWith("gitdir: ")) return false;
+    return realpathSync(resolve(dirname(pointer), text.slice("gitdir: ".length))) === realpathSync(record);
+  } catch {
+    return false;
+  }
+};
+
 const rewrittenWorktrees = (project: Project): string[] => {
   const records = join(commonDir(project.root), "worktrees");
   if (!existsSync(records)) return [];
@@ -440,7 +683,7 @@ const rewrittenWorktrees = (project: Project): string[] => {
       // `worktree.useRelativePaths` (git 2.48+) writes the path relative to the record's own
       // directory: read as it stands, every kit worktree would look rewritten.
       const at = resolve(join(records, name), readFileSync(join(records, name, "gitdir"), "utf8").trim());
-      return !under.some((u) => at.startsWith(u));
+      return !under.some((u) => at.startsWith(u)) && !namesRecord(at, join(records, name));
     })
     .sort();
 };
@@ -474,13 +717,25 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
       console.log(`${benign.map(hidden).join(", ")} changed in the shared .git/config while sandboxes ran: an upstream for a branch that is neither ${base} nor a ticket's, which runs nothing (another worktree's own work, say) - the run goes on.`);
     }
   }
+  // No benign key here: nothing a person's own work adds to a worktree's config is let through. An empty
+  // file created or removed has no key to name, so the word says that.
+  const worktreeWords = changed.includes(now.worktreeConfig.path)
+    ? (() => {
+        const { words } = configChange(project, before.worktreeConfig.entries, now.worktreeConfig.entries);
+        if (words.length) return words;
+        const had = before.worktreeConfig.path in before.files;
+        const has = now.worktreeConfig.path in now.files;
+        return [!had ? "created, with no key" : !has ? "removed" : "rewritten, with the same keys"];
+      })()
+    : [];
   if (changed.length) {
     const names = changed.map((f) => relative(realpathSync(root), f)).join(", ");
     const keys = changed.includes(now.config.path) && configWords.length ? ` In .git/config: ${configWords.join("; ")}.` : "";
+    const worktreeKeys = changed.includes(now.worktreeConfig.path) ? ` In .git/config.worktree: ${worktreeWords.join("; ")}.` : "";
     throw new GuardStop(
-      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys} ` +
-        `Inspect \`git -C ${root} config --local --list\` and .git/info/ before running any other git command there.`,
-      { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`})` },
+      `STOPPED ${when}: ${names} changed while sandboxes ran. A sandbox may have tampered with the shared .git.${keys}${worktreeKeys} ` +
+        `Inspect \`git -C ${root} config --local --list\` and .git/info/${worktreeKeys && ", and .git/config.worktree,"} before running any other git command there.`,
+      { what: "the shared .git changed while sandboxes ran", detail: `(${names}${keys && `; ${configWords.join("; ")}`}${worktreeKeys && `; config.worktree: ${worktreeWords.join("; ")}`})` },
     );
   }
   const rewritten = rewrittenWorktrees(project);
@@ -579,31 +834,118 @@ const recordProblem = (project: Project, path: string): string | undefined => {
   return undefined;
 };
 
+/** Most entries a stop names: a tree full of them says no more. */
+const NESTED_SHOWN = 5;
+
+/**
+ * The paths below the worktree's root, relative to it, of every `.git` entry (file, directory or link) other than the
+ * root's own `.git`, in any case: a repository nested in the worktree. The tree is walked, never read through git, and no link is
+ * followed. A found `.git` directory is not walked into.
+ */
+const nestedGit = (path: string): string[] => {
+  const found: string[] = [];
+  const walk = (dir: string, rel: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return; // gone or unreadable: nothing git could read either
+    }
+    for (const name of names) {
+      const at = rel ? `${rel}/${name}` : name;
+      // Any case: on a case-insensitive disk (macOS's default) a host git opening `sub/.git` finds a `.GIT` a sandbox made.
+      if (name.toLowerCase() === ".git") {
+        if (rel) found.push(at);
+        continue;
+      }
+      if (found.length >= NESTED_SHOWN) return;
+      let info: ReturnType<typeof lstatSync>;
+      try {
+        info = lstatSync(join(dir, name));
+      } catch {
+        continue;
+      }
+      if (info.isDirectory()) walk(join(dir, name), at);
+    }
+  };
+  walk(path, "");
+  return found;
+};
+
 /**
  * Holds the records of the worktree at `path` to what git writes (above): its `.git` file names
  * `<common>/worktrees/<name>`, that record's `commondir` is `../..`, and it has no `config.worktree`. A difference
- * throws a `GuardStop` naming it. Before every host git command in a sandbox's worktree.
+ * throws a `GuardStop` naming it. So does a repository nested in the worktree (`nestedGit`): a host `git status` recurses
+ * into a gitlink and reads that repository's own config and attributes, past the pins and the fingerprint. Before every
+ * host git command in a sandbox's worktree.
  */
 export const assertWorktreeRecords = (project: Project, path: string, when: string) => {
   const problem = recordProblem(project, path);
-  if (!problem) return;
   const name = clean(basename(path));
+  if (problem) {
+    throw new GuardStop(
+      `STOPPED ${when}: the worktree record of ${name} is not the one git wrote: ${problem}. A sandbox may have tampered with it, and a git command run in that worktree would read config no check has seen, so the kit runs none there. ` +
+        `Inspect .git/worktrees/${name} and the worktree's .git file before running any git command in ${clean(path)}.`,
+      { what: "a sandbox's worktree record was changed", detail: `(${name}: ${problem})` },
+    );
+  }
+  const nested = nestedGit(path);
+  if (!nested.length) return;
+  const named = nested.map((p) => clean(p)).join(", ");
   throw new GuardStop(
-    `STOPPED ${when}: the worktree record of ${name} is not the one git wrote: ${problem}. A sandbox may have tampered with it, and a git command run in that worktree would read config no check has seen, so the kit runs none there. ` +
-      `Inspect .git/worktrees/${name} and the worktree's .git file before running any git command in ${clean(path)}.`,
-    { what: "a sandbox's worktree record was changed", detail: `(${name}: ${problem})` },
+    `STOPPED ${when}: ${named} in the worktree of ${name} ${nested.length === 1 ? "marks a git repository" : "mark git repositories"} nested in it. A host \`git status\` there looks into a nested repository and reads its own config and attributes, so a filter in it would run on the host; submodules are not supported in sandboxes. ` +
+      `Inspect ${nested.length === 1 ? "it" : "them"} and remove ${nested.length === 1 ? "it" : "them"} (or the gitlink that points there) before running any git command in ${clean(path)}.`,
+    { what: "a sandbox nested a git repository in its worktree", detail: `(${name}: ${named})` },
   );
+};
+
+/**
+ * For `cleanProject`: why git must not run in the worktree at `path`, or undefined when it may - the stop
+ * `assertWorktreeRecords` would throw, said without its "STOPPED <when>: " lead. A directory already gone has nothing
+ * for a host git to read.
+ */
+export const worktreeRefusal = (project: Project) => (path: string): string | undefined => {
+  if (!existsSync(path)) return undefined;
+  try {
+    assertWorktreeRecords(project, path, "in sandcastle clean");
+  } catch (error) {
+    if (!(error instanceof GuardStop)) throw error;
+    return error.message.replace(/^STOPPED in sandcastle clean: /, "");
+  }
+  return undefined;
 };
 
 /**
  * The check before a sandbox closes. Sandcastle's close stops the container, then runs `git status` on the host in its
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
- * drivers configured at the start) or in config a changed record names would run there. `check` is the site's `.git`
- * check; the worktree's records follow. On a failure the container is removed here, without that close - the caller
- * must not call it - the worktree is left as it stands for a person, and the error is thrown.
+ * drivers configured at the start) or in config a changed record names would run there. The container is stopped
+ * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop,
+ * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
+ * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
+ * error is thrown.
  */
 export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
   try {
+    const [running] = await stopSandboxContainer(worktree).catch((e) => {
+      if (!(e instanceof DockerAnswerError)) throw e;
+      const name = clean(basename(worktree));
+      const said = clean(e.message).slice(0, 200);
+      throw new GuardStop(
+        `STOPPED ${when}: Docker did not say whether the container of ${name} is stopped (${said}), so a process left running there could still write the shared .git after the check. ` +
+          `Make sure no container of it runs (docker ps, docker rm -f), then inspect .git/config, .git/info/ and .git/worktrees/${name} before running any git command in ${clean(worktree)}.`,
+        { what: "Docker gave no answer on a sandbox's container", detail: `(${name}: ${said})` },
+        { cause: e },
+      );
+    });
+    if (running) {
+      const name = clean(basename(worktree));
+      const said = clean(running.said).slice(0, 200);
+      throw new GuardStop(
+        `STOPPED ${when}: the container of ${name} could not be stopped (${said}), so a process left running there could still write the shared .git after the check. ` +
+          `Make sure it is gone (docker rm -f ${running.id}), then inspect .git/config, .git/info/ and .git/worktrees/${name} before running any git command in ${clean(worktree)}.`,
+        { what: "a sandbox's container could not be stopped", detail: `(${name}: ${said})` },
+      );
+    }
     await check();
     assertWorktreeRecords(project, worktree, when);
   } catch (error) {
