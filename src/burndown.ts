@@ -721,9 +721,11 @@ export type FollowUpBook = {
   file(unsafe?: string): Promise<FiledFollowUp[]>;
   /** What is named already from one ticket, for its agents' prompts: earlier runs' filings, then this run's lines (`alreadyNamedView`). */
   namedFrom(from: string): NamedFollowUp[];
+  /** What this run's passes named from every ticket but one, for that ticket's agents' prompts (`alreadyNamedView`). Earlier runs' filings are left out: they are another run's. */
+  namedByOthers(from: string): NamedFollowUp[];
 };
-/** A follow-up named from a ticket already: `id` is the issue it was filed as, absent while this run has yet to file it; `phase` the pass of this run that named it. */
-export type NamedFollowUp = { title: string; id?: string; phase?: string };
+/** A follow-up named from a ticket already: `id` is the issue it was filed as, absent while this run has yet to file it; `phase` the pass of this run that named it; `from` the ticket whose agent named it, in `namedByOthers`. */
+export type NamedFollowUp = { title: string; id?: string; phase?: string; from?: string };
 export const createFollowUpBook = (
   run: { update(fields: { followUps: FiledFollowUp[] }): void },
   o: {
@@ -801,6 +803,9 @@ export const createFollowUpBook = (
       for (const l of listed.values()) if (l.from === from) out.set(titleKey(l.title), { title: l.title, ...(l.id !== undefined ? { id: l.id } : { phase: l.phase }) });
       return [...out.values()];
     },
+    namedByOthers(from) {
+      return [...listed.values()].filter((l) => l.from !== from).map((l) => ({ title: l.title, from: l.from, ...(l.id !== undefined ? { id: l.id } : { phase: l.phase }) }));
+    },
   };
 };
 
@@ -817,6 +822,32 @@ export const alreadyNamedView = (named: readonly NamedFollowUp[], ref: (id: stri
       named.map((n) => (n.id !== undefined ? `- ${ref(n.id)} ${n.title}` : `- ${n.title} (named by this ticket's ${n.phase ?? "earlier"} pass)`)).join("\n") +
       "\n\n"
     : "";
+
+/**
+ * The rest of `FOLLOWUPS_NAMED`: the run's other tickets (`others`, by ref and title) and what their agents have named
+ * so far (`byOthers`), each list left out when empty. A problem one of them covers is that ticket's work or filed
+ * already, and the agent judges the meaning: the kit compares nothing across tickets (`sameFinding` stays per source
+ * ticket) and writes nothing to them.
+ */
+export const runTicketsView = (
+  others: readonly { id: string; title: string }[],
+  byOthers: readonly NamedFollowUp[],
+  ref: (id: string) => string,
+): string =>
+  (others.length
+    ? "# Other tickets in this run\n\nThese tickets run in this same run. A problem one of them covers is that ticket's work, not a finding of yours: " +
+      "give it no `<followup>` line, in any wording.\n\n" +
+      others.map((t) => `- ${ref(t.id)} ${t.title}`).join("\n") +
+      "\n\n"
+    : "") +
+  (byOthers.length
+    ? "# Named by other tickets this run\n\nThese problems were named by the agents of other tickets of this run, and are filed already or will be when this run lands. " +
+      "Give no `<followup>` line for any of them, in any wording.\n\n" +
+      byOthers
+        .map((n) => (n.id !== undefined ? `- ${ref(n.id)} ${n.title}` : `- ${n.title} (named by ${n.from !== undefined ? ref(n.from) : "another ticket"}'s ${n.phase ?? "earlier"} pass)`))
+        .join("\n") +
+      "\n\n"
+    : "");
 
 /**
  * The follow-ups earlier runs filed (an issue id on the entry), from the project's `logs/history.jsonl`, read as
@@ -1153,7 +1184,9 @@ export type PipelineContext = {
   reports: Map<string, string>;
   notes: Note[];
   /** Where the `<followup>` lines of every agent pass go as the pass ends: the run's book (`createFollowUpBook`), which records and later files them. A pipeline given none keeps none. */
-  followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[] };
+  followUps?: { push(f: FollowUp): unknown; namedFrom?(from: string): NamedFollowUp[]; namedByOthers?(from: string): NamedFollowUp[] };
+  /** The tickets this turn may run (`burndown()`'s `candidates`): each agent is shown the others by ref and title (`alreadyNamedView`). None, and it is shown none. */
+  tickets?: readonly { id: string; title: string }[];
   /** Each ticket's time in its pipelines, added up over its attempts. */
   took: Map<string, number>;
   /** Each ticket's waits inside `took` that are not its work - a gates slot, another ticket's fix - left out of its usual time. */
@@ -1475,7 +1508,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       agentsRan = true;
       // What the ticket's earlier passes and earlier runs named, as of this pass: the review sees the implementer's lines.
       const opts = given.promptArgs && "FOLLOWUPS_NAMED" in given.promptArgs
-        ? { ...given, promptArgs: { ...given.promptArgs, FOLLOWUPS_NAMED: alreadyNamedView(ctx.followUps?.namedFrom?.(issue.id) ?? [], ref) } }
+        ? { ...given, promptArgs: { ...given.promptArgs, FOLLOWUPS_NAMED: alreadyNamedView(ctx.followUps?.namedFrom?.(issue.id) ?? [], ref) + runTicketsView(ctx.tickets?.filter((t) => t.id !== issue.id) ?? [], ctx.followUps?.namedByOthers?.(issue.id) ?? [], ref) } }
         : given;
       const phase = phaseOf(opts.name ?? "");
       const parkedBefore = parkedInStep;
@@ -2871,6 +2904,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     reports,
     notes,
     followUps,
+    tickets: candidates,
     took,
     waited,
     ...(usagePause
