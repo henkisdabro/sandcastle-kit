@@ -230,7 +230,7 @@ const ROWS: Row[] = [
     `comment: ${REPORTED}`,
   ],
   ["handed back with a hold note, with a report: the note, never a second comment", pipeline({}), { hold: "note", report: REPORT }, "held - handed back - for a human", "no change - nochange", "needs a human (a person acts)"],
-  ["crashed after a hold note: the note, never a second comment", { kind: "crashed", error: new Error("x"), attempts: 1 }, { hold: "note", report: REPORT }, "crashed - Error: x", "crashed - crashed"],
+  ["crashed after a hold note: the note, never a second comment", { kind: "crashed", error: new Error("x"), attempts: 1 }, { hold: "note", report: REPORT }, "crashed - x", "crashed - crashed"],
   ["work left uncommitted", pipeline({}), { kept: ".sandcastle/worktrees/agent-issue-2" }, "uncommitted - work left uncommitted in .sandcastle/worktrees/agent-issue-2", "uncommitted - uncommitted"],
   ["handed back, its work uncommitted", pipeline({}), { kept: ".sandcastle/worktrees/agent-issue-2", hold: "note" }, "uncommitted - work left uncommitted in .sandcastle/worktrees/agent-issue-2", "uncommitted - uncommitted"],
   [
@@ -250,7 +250,7 @@ const ROWS: Row[] = [
   ],
 
   // Crashed, stopped, never begun, still waiting.
-  ["crashed in its pipeline", { kind: "crashed", error: new Error("idle timeout\n    at x"), attempts: 1 }, { report: REPORT }, "crashed - Error: idle timeout", "crashed - crashed", undefined, `comment: ${REPORTED}`],
+  ["crashed in its pipeline", { kind: "crashed", error: new Error("idle timeout\n    at x"), attempts: 1 }, { report: REPORT }, "crashed - idle timeout", "crashed - crashed", undefined, `comment: ${REPORTED}`],
   ["crashed at landing", { kind: "crashed", error: new Error("ENOSPC: no space left"), attempts: 1, green: green() }, {}, "crashed - ENOSPC: no space left", "crashed - crashed"],
   [
     "stopped while it waited to land",
@@ -348,7 +348,7 @@ test("the writer records the state, the outcome and the view's word of every end
     ["3", { state: "held", note: "handed back - for a human" }],
     ["4", { state: "crashed", note: "ENOSPC" }],
     ["5", { state: "red", note: "test red" }],
-    ["6", { state: "crashed", note: "Error: idle timeout" }],
+    ["6", { state: "crashed", note: "idle timeout" }],
     ["7", { state: "stopped", note: "finished before the run stopped - lands on a later run" }],
   ]);
   assert.deepEqual(Object.keys(outcomes), ["1", "3", "4", "5", "6", "7"]);

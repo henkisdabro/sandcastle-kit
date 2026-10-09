@@ -12,7 +12,7 @@ import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
 import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
-import { OperatorError } from "./errors.ts";
+import { OperatorError, promptExpansionLine } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
 import { liveness } from "../mod/hooks/run-live.ts";
@@ -406,6 +406,21 @@ export const agentLogging = (project: Project, id: string, name: string, runId: 
       }
     },
   };
+};
+
+/**
+ * The line a pass that died expanding its prompt leaves at the end of its readable log, which otherwise stops at
+ * "Expanding shell expressions" with no error: `! error: <cleaned line>`, the form a failed tool call takes there.
+ * Nothing for any other error (an agent's own log already ends with its cause) and for a pass with no file log.
+ */
+export const logExpansionFailure = (logging: LoggingOption | undefined, error: unknown): void => {
+  const line = promptExpansionLine(error);
+  if (line === undefined || logging?.type !== "file" || typeof logging.path !== "string") return;
+  try {
+    appendFileSync(logging.path, `! error: ${line}\n`);
+  } catch {
+    // A full disk must not hide the crash itself.
+  }
 };
 
 /**

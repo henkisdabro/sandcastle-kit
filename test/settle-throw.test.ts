@@ -113,6 +113,6 @@ test("a green pipeline whose .git check fails after it is finished, lands on a l
 test("a pipeline that crashed keeps its own error when the check after it fails too", async () => {
   const r = await run(new Error("idle timeout"));
   assert.equal(r.ending?.kind, "crashed");
-  assert.deepEqual([r.record.state, r.record.note], ["crashed", "Error: idle timeout"]);
+  assert.deepEqual([r.record.state, r.record.note], ["crashed", "idle timeout"]);
   assert.equal(r.stop.headline?.kind, "tampered");
 });

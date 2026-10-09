@@ -40,7 +40,7 @@ import { agentBaseline, peakOf, recordPeak, sampling } from "./peaks.ts";
 import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type TicketState } from "../mod/hooks/run-record.ts";
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
-  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
+  addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
@@ -1597,6 +1597,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             .finally(() => opts.logging && "path" in opts.logging && relabelContextWindow(opts.logging.path));
           return parkedInStep > parkedBefore ? Object.assign(r, { waitMs: parkedInStep - parkedBefore }) : r;
         } catch (error) {
+          logExpansionFailure(opts.logging, error);
           // The cross-review is a second opinion that never stopped a run, so its limit is not waited out either.
           // Without a juncture there is nothing to park at, and a pass run again at once would only fail again.
           const parks = parkCount;
@@ -3177,6 +3178,11 @@ export const burndown = async (
         // Only the run line: the next landing writes it again.
         run.update({ stage: `landing ${c.at}/${c.of}` });
         return;
+      case "setup problem":
+        // Said as it holds: the tickets in flight go on printing, and each would read as a run that still starts more.
+        run.update({ setupProblem: c.line });
+        console.log(`\nSTOPPED starting tickets: ${causeWords({ kind: "setup problem", line: c.line }, ref)}. Tickets already running finish.`);
+        return view.refresh();
       case "requeued":
         // Written before the ticket is queued again, with the line its second pipeline's setup carries.
         ledger.tell(c);
