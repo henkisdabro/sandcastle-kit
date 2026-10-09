@@ -265,6 +265,8 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   "merged by hand, partly done: stays open", with its unmet criterion: the push does not close it. That holds after `sandcastle clean` has
   deleted the branch, if the merge's own subject (`Merge agent/issue-<n> (closes|part of ...)`) is on
   the base; a held branch that is gone with no such subject is listed with no merge command.
+  A `stopped` ticket landed afterwards with `sandcastle land <n>` reads the same way, as "stopped,
+  merged by hand".
   A held conflict resolution (it changed files git had merged cleanly) is checked for lost lines
   (`git log -p`) and landed with `sandcastle land <n>`, which gates the merge - not merged by hand,
   which runs no gate - or fixed on the branch, or requeued with a note; the summary lists it with
