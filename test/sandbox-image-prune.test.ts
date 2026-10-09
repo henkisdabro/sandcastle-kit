@@ -147,13 +147,14 @@ test("an old base image a live kit process used survives, and is pruned once tha
   assert.ok(!has(m, "running"), "the tag stayed after its run ended");
 });
 
-test("the built base image is stamped as used now", () => {
+test("every built image is stamped as used now, the base image's among them", () => {
   const m = machine();
   assert.equal(build(m, "real").status, 0);
   const dir = join(m.cache, "sandcastle-kit", "image-use");
   const files = execFileSync("ls", [dir], { encoding: "utf8" }).trim().split("\n");
-  assert.equal(files.length, 1, files.join(","));
-  assert.match(files[0]!, /^sandcastle-base_\w+$/);
+  // The base, the agents image and the project's final image (this project has no layer).
+  assert.deepEqual(files.map((f) => f.replace(/_\w+$/, "")).sort(), ["sandcastle-agents", "sandcastle-base", "sandcastle-one-run"], files.join(","));
+  for (const f of files) assert.ok(Math.abs(Date.now() - (JSON.parse(readFileSync(join(dir, f), "utf8")) as { at: number }).at) < 60_000, f);
 });
 
 test("a build in which every step was cached prints one line, not docker's output", () => {

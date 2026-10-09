@@ -1,9 +1,9 @@
 // A project's layer build FROM the base image, while another project builds a base of a different
-// tag: that build prunes every other base tag, so unless the layer build is inside the same
-// machine-wide lock as the base step, `FROM sandcastle-base:<tag>` can resolve to an image that is
-// gone. Two real `sandcastle build` processes against a fake docker that keeps its images as files
-// (as test/sandbox-image-lock.test.ts's does) and whose layer build fails when its base image is not
-// there once it resolves `FROM`. No Docker or network.
+// tag (other user ids, made by a fake `id`): that build prunes other base tags, so unless the layer build
+// is inside the same machine-wide lock as the base step, `FROM sandcastle-base:<tag>` can resolve to an
+// image that is gone. Two real `sandcastle build` processes against a fake docker that keeps its images
+// as files (as test/sandbox-image-lock.test.ts's does) and whose layer build fails when its base image
+// is not there once it resolves `FROM`. No Docker or network.
 //
 //   pnpm test:file test/sandbox-layer-lock.test.ts
 
@@ -15,9 +15,10 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { startKit } from "./cli-spawn.ts";
 
-// An image is a file under $STATE/img. A build with `--build-arg BASE=<tag>` is a layer build: it
-// logs that it started, then (with `FAKE_LAYER_HOLDS`) waits until $STATE/go exists, at most 15 s -
-// the time the daemon takes to resolve `FROM` - and only then fails if the base image is missing.
+// An image is a file under $STATE/img. A build with `--build-arg BASE=<tag>` that is not the agents
+// image's is a layer build: it logs that it started, then (with `FAKE_LAYER_HOLDS`) waits until $STATE/go
+// exists, at most 15 s - the time the daemon takes to resolve `FROM` - and only then fails if the base
+// image is missing.
 const DOCKER = `#!/bin/sh
 img="$FAKE_DOCKER_STATE/img"
 mkdir -p "$img"
@@ -41,6 +42,7 @@ case "$1" in
       shift
     done
     echo "start $tag" >> "$FAKE_DOCKER_STATE/log"
+    case "$tag" in sandcastle-agents:*) base="";; esac
     if [ -n "$base" ]; then
       if [ -n "$FAKE_LAYER_HOLDS" ]; then
         n=0
@@ -67,12 +69,19 @@ esac
 exit 0
 `;
 
+// `id -u` and `id -g` are all the kit asks it: $FAKE_UID and $FAKE_GID, so a process can be given other ids.
+const ID = `#!/bin/sh
+case "$1" in -u) echo "\${FAKE_UID:-1000}";; -g) echo "\${FAKE_GID:-1000}";; *) exit 1;; esac
+`;
+
 const machine = () => {
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-layerlock-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "docker"), DOCKER);
   chmodSync(join(bin, "docker"), 0o755);
+  writeFileSync(join(bin, "id"), ID);
+  chmodSync(join(bin, "id"), 0o755);
   const state = join(dir, "state");
   mkdirSync(state);
   return { dir, bin, state, cache: join(dir, "cache"), config: join(dir, "config") };
@@ -132,7 +141,7 @@ test("a layer build still finds its base image when another project builds a bas
   await until("the layer build's start", () => log(m).some((l) => l.startsWith("start sandcastle-one:")));
   // The other project's build of a 2.0.0 base prunes the 1.0.0 one - unless it must wait for the layer.
   // Whichever it does, the layer's `FROM` resolves once that build has either waited or finished.
-  const other = finished(startKit(["build"], { cwd: project("two", false), env: env(m, "2.0.0"), stdio: ["ignore", "pipe", "pipe"] }), (out) => {
+  const other = finished(startKit(["build"], { cwd: project("two", false), env: env(m, "2.0.0", { FAKE_UID: "2000" }), stdio: ["ignore", "pipe", "pipe"] }), (out) => {
     if (WAITING.test(out)) writeFileSync(go, "");
   });
   const done = await Promise.race([other.then(() => "other"), new Promise((r) => setTimeout(r, 8000, "timeout"))]);

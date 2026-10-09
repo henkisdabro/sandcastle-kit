@@ -64,7 +64,7 @@ apply it once the user agrees.
       images, and the hook check against them.
       If it refuses the config instead (`unknown key`, `must be ...`: a typo or a wrong type that
       older versions ignored), fix the key it names - it suggests the nearest real one - and run
-      it again.
+      it again. A layer step that fails with `claude: not found` or `codex: not found` is step 17's.
       Fix a `HOOK FAIL` as in init.md step 4. Then `sandcastle gates` (no model calls): a new image
       can turn a gate red or green on base. Fix a red gate as in init.md step 6. It also runs the
       repo's `pre-commit` and `commit-msg` hooks in the sandbox: a refused hook means the tool it
@@ -152,6 +152,16 @@ apply it once the user agrees.
        project root, `.sandcastle/` or `.git`, and the config no longer loads. Tell the user which
        entry the line names, and propose removing it or pointing it at a directory elsewhere (a
        cache directory under the project is fine). Then `sandcastle gates`.
+   17. **Layer steps that call the agents.** Claude Code and Codex are no longer in the base image:
+       the kit copies them onto the project's image after the layer named by `dockerfile` is built.
+       Read that file (skip this step when the config names none) for a `RUN` step, continuations
+       joined, that runs `claude` or `codex` (a plugin install, a login, a version check). It
+       finds neither, and `sandcastle build` fails at that step with `not found`. For each, propose
+       moving the command to an entry of `setup` in `.sandcastle/config.ts`, which runs in the
+       finished image before the agents, or dropping it when it only checked a version. The base
+       no longer puts `~/.local/bin` on `PATH` either: a `RUN` step that calls a tool an earlier
+       step installed there (`uv`, `pipx`) by its bare name fails the same way; propose its full
+       path, `/home/agent/.local/bin/<tool>`. Then `sandcastle build` and `sandcastle gates`.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Commit any project file
    that changed, by the repo's own rules, and report: this project's release before and after

@@ -13,11 +13,12 @@ import { test } from "node:test";
 import { runKit } from "./cli-spawn.ts";
 
 
-// The base image exists; anything else does not, and every build fails as docker reports it.
+// The base and agents images exist; anything else does not, and every build fails as docker reports
+// it - except the final image's (the copy of the agents onto the layer), which builds.
 const DOCKER = `#!/bin/sh
 case "$1" in
-  image) case "$3" in sandcastle-base:*) exit 0;; esac; [ "$2" = ls ] && exit 0; exit 1;;
-  build) cat >/dev/null; echo 'ERROR: failed to solve: process "/bin/sh -c false" did not complete successfully: exit code: 1' >&2; exit 1;;
+  image) case "$3" in sandcastle-base:*|sandcastle-agents:*) exit 0;; esac; [ "$2" = ls ] && exit 0; exit 1;;
+  build) cat >/dev/null; case "$*" in *-run:*) exit 0;; esac; echo 'ERROR: failed to solve: process "/bin/sh -c false" did not complete successfully: exit code: 1' >&2; exit 1;;
 esac
 exit 0
 `;

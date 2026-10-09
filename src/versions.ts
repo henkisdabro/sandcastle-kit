@@ -64,12 +64,12 @@ const writeCache = (cache: Cache) => {
   }
 };
 
-/** The `ARG` defaults of docker/base.Dockerfile: what an offline machine with no cache builds. */
+/** The `ARG` defaults of docker/agents.Dockerfile: what an offline machine with no cache builds. */
 const dockerfileDefaults = () => {
-  const text = readFileSync(join(KIT, "docker/base.Dockerfile"), "utf8");
+  const text = readFileSync(join(KIT, "docker/agents.Dockerfile"), "utf8");
   const arg = (name: string) => {
     const v = text.match(new RegExp(`^ARG ${name}=(\\S+)\\s*$`, "m"))?.[1];
-    if (!v || !VERSION.test(v)) throw new Error(`docker/base.Dockerfile has no ARG ${name}=<x.y.z> default`);
+    if (!v || !VERSION.test(v)) throw new Error(`docker/agents.Dockerfile has no ARG ${name}=<x.y.z> default`);
     return v;
   };
   return { claude: arg("CLAUDE_CODE_VERSION"), codex: arg("CODEX_VERSION") };

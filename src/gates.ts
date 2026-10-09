@@ -830,13 +830,13 @@ export class BaseRedError extends OperatorError {
 export const VERIFY_LOG = ".sandcastle/logs/verify-gates.log";
 
 /**
- * The Dockerfiles a run's merges changed between `from` and `to` (commits on the base): the kit's base image
- * (`docker/base.Dockerfile`) and the project's own layer (the config's `dockerfile`). The run's image is
- * built before the first landing, so the verify gates the merged tree on an image without them; the closing
- * summary says so. A path git cannot place is no change: nothing here may fail a run that has landed.
+ * The Dockerfiles a run's merges changed between `from` and `to` (commits on the base): the kit's base and
+ * agents images (`docker/base.Dockerfile`, `docker/agents.Dockerfile`) and the project's own layer (the
+ * config's `dockerfile`). The run's image is built before the first landing, so the verify gates the merged
+ * tree on an image without them; the closing summary says so. A path git cannot place is no change: nothing here may fail a run that has landed.
  */
 export const changedDockerfiles = (project: Pick<Project, "root" | "dockerfile">, from: string, to: string): string[] => {
-  const watched = ["docker/base.Dockerfile", ...(project.dockerfile ? [project.dockerfile] : [])].map((d) => posix.normalize(d));
+  const watched = ["docker/base.Dockerfile", "docker/agents.Dockerfile", ...(project.dockerfile ? [project.dockerfile] : [])].map((d) => posix.normalize(d));
   try {
     const changed = new Set(sh("git", ["diff", "--no-renames", "--name-only", from, to], project.root).split("\n").filter(Boolean).map((l) => posix.normalize(l)));
     return [...new Set(watched.filter((d) => changed.has(d)))];
