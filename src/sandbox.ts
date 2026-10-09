@@ -77,18 +77,20 @@ export const AGENT_COMMITTER = {
 export const ownCommits = (base: string, branch: string, cwd?: string) =>
   Number(sh("git", ["rev-list", "--count", "--no-merges", `${base}..${branch}`], cwd));
 
+const WORKTREES = ".sandcastle/worktrees/";
+
 /**
  * Stops the sandboxes a killed run of this project left working. A run killed
  * outright (SIGKILL, a closed terminal) cannot close its containers, and their
  * agents went on spending the plan's allowance on work nobody would gate or
  * land. Call only while holding the project's run lock: then no live run owns
- * a container that mounts one of its agent worktrees. `sandcastle gates` uses
- * other worktrees and is never touched.
+ * a container that mounts a worktree under the project's `.sandcastle/worktrees/` - a ticket's, or the base
+ * gates' and a landing's, which a failed open leaves running too. Another project's is never touched.
  */
 export const reapOrphans = (project: Project) => {
   // Docker records a bind mount's source as it was given: either spelling.
   const root = realpathSync(project.root);
-  const prefixes = [...new Set([root, project.root])].map((r) => join(r, ".sandcastle/worktrees/agent-issue-"));
+  const prefixes = [...new Set([root, project.root])].map((r) => join(r, WORKTREES));
   let ids: string[];
   try {
     ids = sh("docker", ["ps", "-q", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
@@ -332,6 +334,27 @@ export type CleanResult = {
   left: { path: string; branch?: string; reason: string }[];
 };
 
+/** The worktrees git lists under the project's `.sandcastle/worktrees/`: the ones `sandcastle clean` removes, with the branch each has checked out. */
+export const projectWorktrees = (project: Project): { path: string; branch: string | undefined }[] => {
+  const underWorktrees = join(project.root, ".sandcastle/worktrees/");
+  return sh("git", ["worktree", "list", "--porcelain"], project.root)
+    .split("\n\n")
+    .map((e) => e.split("\n"))
+    .map((lines) => ({
+      path: lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length),
+      branch: lines.find((l) => l.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length),
+    }))
+    .filter((e): e is { path: string; branch: string | undefined } => !!e.path && e.path.startsWith(underWorktrees));
+};
+
+/**
+ * Whether `clean` would delete this branch as finished: a base-gate or verify branch is always scratch,
+ * and an agent branch is finished when every commit is on base, merged or as an equal patch. The one
+ * rule `cleanProject` and the closing summary share.
+ */
+export const branchFinished = (project: Project, branch: string): boolean =>
+  branch.startsWith("sandcastle/") || !sh("git", ["cherry", project.baseBranch, branch], project.root).split("\n").some((l) => l.startsWith("+"));
+
 /**
  * `sandcastle clean`: removes the worktrees under `.sandcastle/worktrees/` and deletes the agent
  * branches that are finished (and, with `all`, the unmerged ones too). Call only while holding
@@ -346,15 +369,7 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
   reapOrphans(project);
   const containers = removeExitedSandboxes(project);
   const images = removeDanglingImages();
-  const underWorktrees = join(project.root, ".sandcastle/worktrees/");
-  const entries = sh("git", ["worktree", "list", "--porcelain"], cwd)
-    .split("\n\n")
-    .map((e) => e.split("\n"))
-    .map((lines) => ({
-      path: lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length),
-      branch: lines.find((l) => l.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length),
-    }))
-    .filter((e): e is { path: string; branch: string | undefined } => !!e.path && e.path.startsWith(underWorktrees));
+  const entries = projectWorktrees(project);
   const worktrees: string[] = [];
   const left: CleanResult["left"] = [];
   for (const { path, branch } of entries) {
@@ -378,9 +393,7 @@ export const cleanProject = (project: Project, all: boolean, refuse?: (worktree:
   const held = new Set(left.map((l) => l.branch));
   for (const branch of sh("git", ["branch", "--format=%(refname:short)", "--list", "agent/*", "sandcastle/*"], cwd).split("\n").filter(Boolean)) {
     if (held.has(branch)) continue;
-    // A base-gate or verify branch is always scratch. An agent branch is
-    // finished when every commit is on base, merged or as an equal patch.
-    const finished = branch.startsWith("sandcastle/") || !sh("git", ["cherry", base, branch], cwd).split("\n").some((l) => l.startsWith("+"));
+    const finished = branchFinished(project, branch);
     if (finished || all) {
       sh("git", ["branch", "-D", branch], cwd);
       deleted.push({ branch, unmerged: !finished });

@@ -11,14 +11,14 @@
 // sections are testable without a repo (test/report.test.ts).
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { red } from "./api-key.ts";
 import { afterTurn, DRAIN_CAP, type Level, needsDecision, partialRerunnable, rerunnable, stillOpen } from "./autonomy.ts";
 import { blockerResolver, blockerWhy, openBlockers, refLabel, whyShort } from "./blockers.ts";
 import type { Project } from "./config.ts";
 import { addTokens, HANDED_BACK, mergedByHand, mergedPartly, NO_TOKENS, readHeads, readOutcomes, type Tokens, tokenLine } from "./run.ts";
 import { commandOf } from "./live-runs.ts";
-import { sh } from "./sandbox.ts";
+import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD } from "./ledger.ts";
@@ -74,6 +74,11 @@ export type Facts = {
   /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
   heldResolutions?: string[];
   keptWorktrees: { issue: string; path: string }[];
+  /**
+   * Every other worktree left under `.sandcastle/worktrees/`, from any earlier run: `merged` is `clean`'s own rule for its branch
+   * (nothing on it that the base lacks), `kb` its disk use when it could be read. A live run's own tickets are left out: in flight, not kept.
+   */
+  earlierKept?: { path: string; issue?: string; merged: boolean; kb?: number }[];
   /** Tracked files a gate rewrote and the kit put back. */
   gateRewrites?: string[];
   dryRunCheck?: string;
@@ -191,6 +196,62 @@ const git = (args: string[], cwd: string) => {
     return sh("git", args, cwd);
   } catch {
     return undefined;
+  }
+};
+
+/**
+ * The worktrees under `.sandcastle/worktrees/` that this run's record does not list as kept: an earlier run's, which the
+ * run's own `keptWorktrees` never reaches and which pile up (about a GB each). A live run's tickets are in flight, so their
+ * worktrees (and the scratch ones of a base gate or a landing) are not kept yet and are left out.
+ */
+const earlierKeptWorktrees = (project: Project, run: any, tickets: Record<string, TicketRecord>, live: boolean): NonNullable<Facts["earlierKept"]> => {
+  const root = project.root;
+  let entries: ReturnType<typeof projectWorktrees>;
+  try {
+    entries = projectWorktrees(project);
+  } catch {
+    return [];
+  }
+  const mine = new Set((Array.isArray(run.keptWorktrees) ? run.keptWorktrees : []).map((k: { path?: unknown }) => resolve(root, String(k?.path ?? ""))));
+  const found: NonNullable<Facts["earlierKept"]> = [];
+  for (const { path, branch } of entries) {
+    if (mine.has(resolve(root, path)) || !existsSync(path)) continue;
+    const issue = /^agent-issue-(.+)$/.exec(basename(path))?.[1];
+    if (live && (!issue || issue in tickets || branch?.startsWith("sandcastle/"))) continue;
+    let merged = false;
+    try {
+      merged = !!branch && branchFinished(project, branch);
+    } catch {
+      /* a branch git cannot compare is not said to be merged */
+    }
+    // `du -sk` reads the same on macOS and Linux; a tree that cannot be read has no figure.
+    const kb = duKb(path);
+    found.push({ path, ...(issue ? { issue } : {}), merged, ...(Number.isFinite(kb) ? { kb } : {}) });
+  }
+  return found;
+};
+
+const GB_KB = 1024 * 1024;
+/** The disk use of the earlier kept worktrees, said only from 1 GB up: below that it is not why anyone cleans. */
+const sizeWords = (kept: NonNullable<Facts["earlierKept"]>) => {
+  const kb = kept.reduce((sum, k) => sum + (k.kb ?? 0), 0);
+  return kb >= GB_KB ? ` (${kb >= 10 * GB_KB ? Math.round(kb / GB_KB) : (kb / GB_KB).toFixed(1)} GB on disk)` : "";
+};
+
+const earlierKeptLines = (f: Facts): string[] => {
+  const kept = f.earlierKept ?? [];
+  if (!kept.length) return [];
+  const merged = kept.filter((k) => k.merged).length;
+  const open = kept.length - merged;
+  const n = (c: number) => `${c} worktree${c === 1 ? "" : "s"}`;
+  return [`Worktrees kept by earlier runs: ${n(kept.length)}${sizeWords(kept)} - ${merged} merged, ${open} with work not on ${f.base}`];
+};
+
+const duKb = (path: string) => {
+  try {
+    return Number(sh("du", ["-sk", path]).split(/\s/)[0]);
+  } catch {
+    return NaN;
   }
 };
 
@@ -402,6 +463,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     earlierHeld,
     heldResolutions,
     keptWorktrees: run.keptWorktrees ?? [],
+    earlierKept: earlier ? undefined : earlierKeptWorktrees(project, run, tickets, live),
     gateRewrites: run.gateRewrites,
     dryRunCheck: run.dryRunCheck,
     stopped: run.stopped,
@@ -462,6 +524,9 @@ const earlierTurns = (root: string, run: any): any[] => {
 /** Whether a later turn's record of a ticket is an attempt at it: not still waiting, and not a ticket put back in the queue unstarted. */
 const attemptedIn = (t: TicketRecord) => sectionOf(t.state) !== undefined && !LEFT.includes(t.state!) && !(t.state === "queued" && !t.requeued);
 
+/** The kept worktrees of an earlier turn's tickets that stand in its facts: a ticket a later turn ran again was cut from them. */
+const carriedKept = (facts: Facts) => facts.keptWorktrees.filter((k) => k.issue in facts.tickets);
+
 /**
  * What the earlier turns of this run left, each turn's facts cut to the tickets no later turn attempted (a
  * later ending replaces an earlier one), and a partly done ticket closed since dropped.
@@ -500,7 +565,10 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   // A branch an earlier turn held is said with its turn: not again as held "in an earlier run", with a second step.
   const heldBefore = new Set(carried.flatMap((c) => Object.entries(c.facts.tickets).filter(([, t]) => t.state === "held").map(([id]) => `agent/issue-${id}`)));
   const earlierHeld = Object.fromEntries(Object.entries(facts.earlierHeld ?? {}).filter(([b]) => !heldBefore.has(b)));
-  return { ...facts, earlierHeld, carried };
+  // A worktree an earlier turn kept is named under its turn: not counted again among the earlier runs'.
+  const named = new Set(carried.flatMap((c) => carriedKept(c.facts).map((k) => resolve(project.root, k.path))));
+  const earlierKept = facts.earlierKept?.filter((k) => !named.has(resolve(project.root, k.path)));
+  return { ...facts, earlierHeld, earlierKept, carried };
 };
 
 const LEVELS = [0, 1, 2, 3, "drain"];
@@ -756,6 +824,10 @@ export const render = (f: Facts, plain = false): string => {
   // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
   const carried = (f.carried ?? []).map(({ turn, facts }) => ({ turn, facts, o: owed(facts) }));
   const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated, ...c.o.gapped]).size + c.o.filingFailed, 0);
+  // The kept worktrees of the earlier turns' tickets, oldest first, one per path and none the last turn lists itself.
+  const earlierTurnKept = carried
+    .flatMap((c) => carriedKept(c.facts).map((k) => ({ ...k, turn: c.turn, state: c.facts.tickets[k.issue]?.state })))
+    .filter((k, i, all) => all.findIndex((o) => o.path === k.path) === i && !f.keptWorktrees.some((own) => own.path === k.path));
   const carriedTriage = carried.reduce((n, c) => n + c.o.toTriage, 0);
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
@@ -1000,6 +1072,9 @@ export const render = (f: Facts, plain = false): string => {
     ...f.keptWorktrees
       .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i)
       .map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    // An earlier turn's, which the last turn's record never lists (each turn starts a fresh list).
+    ...earlierTurnKept.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path} (turn ${k.turn})`),
+    ...earlierKeptLines(f),
     ...(f.gateRewrites ?? []).map(rewroteLine),
   ]);
 
@@ -1088,12 +1163,22 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
   // and no other step reaches it. Only a merged one: `clean` removes every worktree, and the others hold work a run or a person still needs.
-  const mergedKept = f.keptWorktrees
-    .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i && f.tickets[k.issue]?.state === "merged")
-    .map((k) => `${refOf(k.issue)} (\`${k.path}\`)`);
+  const mergedKept = [
+    ...f.keptWorktrees
+      .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i && f.tickets[k.issue]?.state === "merged")
+      .map((k) => `${refOf(k.issue)} (\`${k.path}\`)`),
+    ...earlierTurnKept.filter((k) => k.state === "merged").map((k) => `${refOf(k.issue)} (\`${k.path}\`, turn ${k.turn})`),
+  ];
+  // Earlier runs' kept worktrees (`earlierKept`): too many to name, so counted. `clean` removes the unmerged ones with their uncommitted files, so those are looked at first.
+  const earlierKept = f.earlierKept ?? [];
+  const earlierMerged = earlierKept.filter((k) => k.merged);
+  const earlierOpen = earlierKept.length - earlierMerged.length;
+  const earlierKeptWords = earlierMerged.length
+    ? `${earlierMerged.length === 1 ? "the 1 merged worktree" : `the ${earlierMerged.length} merged worktrees`} kept by earlier runs${sizeWords(earlierMerged)}${earlierOpen ? `, and the ${earlierOpen} that ${earlierOpen === 1 ? "holds" : "hold"} work not on ${f.base} (their uncommitted files too: look at those first)` : ""}`
+    : "";
   if (!baseRed) {
     if (f.standing.length) {
-      next.push(`\`sandcastle clean\` once the branches above are resolved${mergedKept.length ? ` and you have looked at the files left in the kept worktree of ${mergedKept.join(", ")}` : ""}.`);
+      next.push(`\`sandcastle clean\` once the branches above are resolved${mergedKept.length ? ` and you have looked at the files left in the kept worktree of ${mergedKept.join(", ")}` : ""}${earlierKeptWords ? `: it also removes ${earlierKeptWords}` : ""}.`);
     } else if (mergedKept.length) {
       next.push(
         mergedKept.length === 1
@@ -1102,6 +1187,9 @@ export const render = (f: Facts, plain = false): string => {
           : `Look at the files left in the kept worktrees of ${mergedKept.join(", ")}: their work is merged. ` +
               "Then `sandcastle clean` removes them and the branches they hold and archives their logs - and removes every other kept worktree too, so do the steps above first.",
       );
+      if (earlierKeptWords) next[next.length - 1] += ` Among them: ${earlierKeptWords}.`;
+    } else if (earlierKeptWords) {
+      next.push(`\`sandcastle clean\` removes ${earlierKeptWords}, with the branches they hold, and archives their logs - after the steps above.`);
     }
   }
   // Another turn follows at once: everything above is that turn's work, and only the last turn's steps are the operator's.
