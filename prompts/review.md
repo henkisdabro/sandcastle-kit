@@ -25,7 +25,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 {{KIT_TICKET_VIEW}}
 
-{{KIT_COMMENTS_VIEW}}{{IMPL_UNMET}}{{IMPL_SAID}}# What was changed
+{{KIT_COMMENTS_VIEW}}{{IMPL_UNMET}}{{IMPL_SAID}}{{FOLLOWUPS_NAMED}}# What was changed
 
 !`git diff {{TARGET_BRANCH}}...HEAD --stat`
 

@@ -28,7 +28,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 {{KIT_TICKET_VIEW}}
 
-{{KIT_COMMENTS_VIEW}}# Where this branch stands
+{{KIT_COMMENTS_VIEW}}{{FOLLOWUPS_NAMED}}# Where this branch stands
 
 Work already on this branch from an earlier run (empty for a new branch):
 

@@ -554,6 +554,8 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     if (kind === "review" || kind === "rereview" || kind === "remerge") for (const k of ["IMPL_UNMET", "IMPL_SAID"]) allowed.add(k);
     // Likewise the implementer's changelog lines, in the full review's changelog ask only (CHANGELOG_REVIEW).
     if (kind === "review") allowed.add("IMPL_CHANGELOG");
+    // What is named already from the ticket, so no pass names it again: every kind that gives `<followup>` lines (not the resolver).
+    if (kind !== "resolve") allowed.add("FOLLOWUPS_NAMED");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
     if (kind === "remerge") allowed.add("REVIEW_BASE");
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
