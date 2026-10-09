@@ -18,7 +18,9 @@ This continues SKILL.md: run its "Before every action" first.
    - **What runs.** The queue (`sandcastle queue`) and the models: a ticket whose label sets its
      own implementer shows `[implement <model>/<effort>]` after its title there ("Models and
      effort" below has the order). Whether it is a dry run: `DRY_RUN=1` merges and closes nothing,
-     and its agents are told to write nothing to the tracker.
+     and its agents are told to write nothing to the tracker. A run limited to some tickets names
+   them (`sandcastle run 12 15`): pass the same numbers to `sandcastle queue --lint 12 15`, or it
+   lints the whole queue and its chain and hot files are not the run's.
    - **What it writes.** A run comments on and closes tickets in the tracker (GitHub, or commits
      to ticket files) and merges into the base branch locally.
    - **The base is the run's.** Until the run ends, nobody commits, pulls or merges on the base

@@ -181,7 +181,7 @@ The `Touches:` line of a ticket body: `parseTouches`, `expandTouches` against a 
 
 ## `src/lint.ts`
 
-`lintQueue()`: the queue's shape for `sandcastle queue --lint` - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths absent from the base branch (`missingTouches`: a plain path with no match, unless the body names it beside "new" outside the `Touches:` line - that exception is for a plain path only - or a glob matching nothing, which gets its own line, as saying "new" changes nothing for a glob), `blockerProblems` (blockers listed under a heading, which the parser does not read, among them), a rough estimate. Read-only advice
+`lintQueue()`: the queue's shape for `sandcastle queue --lint` (given ticket numbers, it lints `namedTickets` of them, as the run does, with `named` set: only those count toward the chain, hot files and estimate, and a blocker outside them is listed as a wait) - longest `Blocked by` chain, edges that only order overlapping `Touches:`, wide tickets, hot and shared unmergeable files, tickets whose `Touches:` names a protected path (always held), `Touches:` paths absent from the base branch (`missingTouches`: a plain path with no match, unless the body names it beside "new" outside the `Touches:` line - that exception is for a plain path only - or a glob matching nothing, which gets its own line, as saying "new" changes nothing for a glob), `blockerProblems` (blockers listed under a heading, which the parser does not read, among them), a rough estimate. Read-only advice
 
 ## `src/detach.ts`
 

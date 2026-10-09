@@ -66,8 +66,11 @@
 //                    does, when it would spend ANTHROPIC_API_KEY
 //   queue [--json]   the queue and what holds each ticket back (the tracker in use:
 //                    GitHub issues or ticket files; see README, Trackers); no model calls
-//   queue --lint     the queue's shape before a run: blocker chain, Touches overlaps, wide
-//                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0
+//   queue --lint [TICKET ...]
+//                    the queue's shape before a run: blocker chain, Touches overlaps, wide
+//                    tickets, hot and unmergeable files, a rough turn count; read-only, exit 0;
+//                    given tickets, only those are linted (pass the run's own), and a blocker
+//                    outside them is listed as a wait, as the run would hold it
 //   requeue <ticket> [--note TEXT]
 //                    put a ticket back in the queue (hold label off) with an optional
 //                    note for the next run; on a queued ticket, only adds the note
@@ -127,7 +130,7 @@ import { confirmApiKey } from "./api-key.ts";
 import { resolveClickHint } from "./click-hint.ts";
 import { blockerProblems, blockerResolver, commentBlockLine, commentOnlyBlocks, openBlockers, refLabel } from "./blockers.ts";
 import { afterTurn, capLine, conflictedIn, confirm, DRAIN_CAP, type DrainTurn, drainLine, drainStop, lateQueueLines, noRerunCause, redBaseExit, rerunList, stillOpen } from "./autonomy.ts";
-import { burndown, openOnQueue } from "./burndown.ts";
+import { burndown, namedTickets, openOnQueue } from "./burndown.ts";
 import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
@@ -546,12 +549,16 @@ try {
       // The queue and what holds each ticket back; `--json` is what the status view reads.
       const project = await loadProject(root);
       const tracker = makeTracker(project);
-      const queued = tracker.queued(false);
       if (args.includes("--lint")) {
-        // Advice only: exit 0 whatever it finds.
-        for (const line of await lintQueue(project, tracker, queued)) console.log(line);
+        // Advice only: exit 0 whatever it finds. Tickets named here are the run's own: the same
+        // set `sandcastle run N N` takes (a closed one is refused alike), not the whole queue.
+        const given = args.filter((a) => !a.startsWith("-"));
+        if (given.length) {
+          for (const line of await lintQueue(project, tracker, namedTickets(tracker, given.join(",")), true)) console.log(line);
+        } else for (const line of await lintQueue(project, tracker, tracker.queued(false))) console.log(line);
         break;
       }
+      const queued = tracker.queued(false);
       const resolve = blockerResolver(project, tracker, new Set(queued.map((t) => t.id)));
       const rows = await Promise.all(
         queued.map(async (t) => ({
