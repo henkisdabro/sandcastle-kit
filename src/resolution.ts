@@ -190,6 +190,9 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
   }
 };
 
+/** How a `strayNote` begins: the closing summary tells a held conflict resolution from any other hold by the outcome text `needs a human: <note>` containing it. */
+export const STRAY_NOTE_START = "conflict resolution changed";
+
 /** The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it. */
 export const strayNote = (stray: string[]): string =>
-  `conflict resolution changed ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;
+  `${STRAY_NOTE_START} ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;

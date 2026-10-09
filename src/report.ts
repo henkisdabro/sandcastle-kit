@@ -22,6 +22,7 @@ import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD } from "./ledger.ts";
+import { STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
@@ -437,8 +438,9 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     }),
   );
 
-  // Told from a landing hold (`LANDING_HOLD`) and an agent's hand-back by the outcome's text: neither has a `files` list to tell it by.
-  const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text !== LANDING_HOLD && o.text !== HANDED_BACK).map(([id]) => id);
+  // Matched by its own wording (`needs a human: conflict resolution changed ...`, what `heldResolution` records; the files after it vary, so no whole-line compare): a hold in any other
+  // words (an older kit's, a protected path's) keeps the hand merge, which `sandcastle land` would refuse or skip the review of.
+  const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
