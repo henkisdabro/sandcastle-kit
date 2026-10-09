@@ -197,7 +197,7 @@ flowchart LR
 | 🧑‍💻 | **Implement, then review** | Claude Sonnet 5.5 implements and tests at the ticket's seams, Claude Opus 5.5 reviews the tests as well as the code, on the same warm sandbox; a failed review falls back to the implementer's model. A `model:` or `effort:` label gives one ticket a different implementer. Optional third review by an OpenAI model through Codex (`CROSS_REVIEW=1`). |
 | 🪶 | **Lean sandboxes** | The project's skills, subagents, commands and MCP servers are hidden from sandbox agents unless you keep them, and its plugins always, because each one costs context on every turn. |
 | 🪝 | **Hooks enforced** | The project's Claude Code hooks are kept, and checked to be runnable in the image before any sandbox starts. |
-| 🐳 | **One base image, a layer per project** | Rebuilt only when a Dockerfile or the Claude Code or Codex version changes - see [The image's agent versions](#-the-images-agent-versions). |
+| 🐳 | **One base image, a layer per project** | The base and a project's layer are rebuilt only when a Dockerfile changes; a Claude Code or Codex release rebuilds one shared agents image and copies it onto each project's image - see [The image's agent versions](#-the-images-agent-versions). |
 | 🛫 | **Preflight** | One short reply from every model before any sandbox starts, so an exhausted plan or a too-old CLI stops the run up front instead of halfway through. |
 | ♻️ | **Picks up where it stopped** | A ticket re-run on its old branch builds on it instead of starting again, and a branch that was already green costs only the gates - see [Re-runs](#-re-runs). A killed run's leftover sandboxes are stopped by the next run, `sandcastle land`, `gates` or `clean`. |
 | 🛬 | **Landing you control** | Each ticket lands as soon as its gates are green, while the others still run, as a merge commit or squashed (`land`); a conflict or a red merge is sent back once for a second try in the same run (a conflict's resolve waits for the green branches that share its files to land first), and a ticket whose last blocker lands starts at once. Between runs, `sandcastle preview` shows which unlanded branches would conflict, `sandcastle land <n>` merges and gates one by hand, and `sandcastle requeue <n>` sends one back with a note. `autonomy` lets one run take further turns by itself, up to `drain`. |
@@ -1255,7 +1255,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `sandcastle init` | Scaffolds `.sandcastle/` in the current project with gates guessed from its stack, then the lean check | ➖ no |
 | `sandcastle updated` | Records that this project has acted on the kit's Upgrading notes (the last step of `/sandcastle update`), as the update record `.sandcastle/.run/kit-updated`: the kit's release and every Upgrading note it has now. Until then, after a pull, doctor lists the notes the project has not had and a run warns about them | ➖ no |
 | `sandcastle changes [--since RELEASE]` | The `CHANGELOG.md` entries of every release after the one this project's update record holds (or after `RELEASE`), up to the kit's own release, `[Unreleased]` left out: per release, grouped Added, Changed, Security, Fixed and Upgrading, each entry cut to its bold lead. With no record and no `--since`, it says so and prints the current release's. Then, from the kit's git tags of the two releases, the README Configuration section's config keys, personal settings and environment variables, and the help text's commands and flags, that were added, removed or changed (a default too); a missing tag, as in a shallow clone, is said and the changelog stands alone. Read-only | ➖ no |
-| `sandcastle build [--force]` | Builds `sandcastle-base:<hash>` and `sandcastle-<name>:<hash>` when missing (a run does the same) and prunes the tags of its repository that nothing has used or built for 14 days (a tag a live run uses is kept; the kit stamps each tag it builds or uses under its cache directory, `image-use/`, as docker keeps no last-used time), so kit checkouts on different commits do not delete each other's images. A build in which every step was cached prints one line (`Image <tag> re-tagged from cache`); docker's output is shown for a real build or a failure. `--force` rebuilds both and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
+| `sandcastle build [--force]` | Builds `sandcastle-base:<hash>`, `sandcastle-agents:<hash>` (Claude Code and Codex, shared by every project), `sandcastle-<name>:<hash>` (the project's layer) and `sandcastle-<name>-run:<hash>` (the image a sandbox starts from: the layer, or the base when the project has none, with the two CLIs copied in) when missing (a run does the same) and prunes the tags of its repository that nothing has used or built for 14 days (a tag a live run uses is kept; the kit stamps each tag it builds or uses under its cache directory, `image-use/`, as docker keeps no last-used time), so kit checkouts on different commits do not delete each other's images. A build in which every step was cached prints one line (`Image <tag> re-tagged from cache`); docker's output is shown for a real build or a failure. `--force` rebuilds all of them and pulls the base OS image afresh (Debian and Node security updates); nothing else pulls it | ➖ no |
 | `sandcastle lean [--measure] [--api-key]` | Lists skills/agents/commands/MCP/plugins (hidden or kept) and hooks (kept or dropped); checks kept hooks in the image. `--measure` runs one real turn with and without the extras, asking first when it would spend `ANTHROPIC_API_KEY`, as a run does | 💸 only with `--measure` |
 | `sandcastle gates` | Every gate on the base branch, in a sandbox set up as an agent's is; prints each gate's command with its result. A run does the same first and stops on red; full output in `.sandcastle/logs/base-gates.log`. Refuses while a run of the project is live, whose lean plan and green-base record it would rewrite | ➖ no |
 | `sandcastle land <ticket>` | Merges one `agent/issue-<n>` branch into the base with the run's message (`Merge agent/issue-N (closes #N)`, squashed with `land: "squash"`), gates the merge in a sandbox, then closes the ticket with a comment. A branch whose agents recorded an unmet acceptance criterion (`.sandcastle/logs/heads.json`, or `unmet` on the last run's ticket) lands as a run lands it: merged as `part of` the ticket, which stays open with the criterion commented. Needs a clean tree on the base branch and no live run. Refuses a closed ticket, a branch that changes hooks, CI or install scripts, and one that adds a file over 50 MB; on a conflict or a red gate merges nothing. A conflict only in `generated` paths is resolved by regenerating them | ➖ no |
@@ -1295,7 +1295,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `usagePause` | unset | Plan usage in percent (1 to 100) at which a run pauses itself and resumes after the window's reset; `USAGE_PAUSE` overrides it for one run. Unset: no pause, and a limit an agent hits stops the queue as before. See [Pausing a run](#-pausing-a-run) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, and tickets that merged partly done and are still queued (unless the agent's note says the remainder needs a person); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting or left partly done twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
-| `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}` |
+| `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}`. Claude Code and Codex are copied in after it, so a step of the layer cannot run `claude` or `codex` (the base has neither) |
 | `mounts` | `[]` | Extra bind mounts `{ hostPath, sandboxPath, readonly? }`. A `hostPath` that equals or contains the project root, `.sandcastle/` or the shared `.git` (after `~` and symlinks are resolved), or lies inside `.sandcastle/` or `.git`, is refused when the config loads, naming the entry, and `sandcastle doctor` reports it as a FIX: a sandbox that could write there could rewrite the run's own state (the start baseline, the branch backup, the run lock). A cache directory elsewhere, or under the project, is fine |
 | `setup` | `[]` | Commands run in each sandbox before the agents (dependency install) |
 | `pnpmStore` | `false` | `true`: the kit runs `pnpm store path` on the host before each command, mounts that store's parent (the store-dir, without the `vN` segment pnpm adds) into every sandbox and points the sandbox's pnpm at it before `setup`. With the same pnpm major the sandbox's `<mount>/vN` is the host's own store, so installs hardlink instead of downloading; a different major keeps its own `vN` beside it. `sandcastle init` writes it for a pnpm project; the config holds no host path, so it works for a teammate on another OS. Without pnpm on the host the mount is skipped, with a note. A store that is the project root, `.sandcastle/` or `.git` (or holds one) is refused like any other mount |
@@ -1376,12 +1376,17 @@ A key not in this table is refused, naming the nearest real one, as the project 
 
 ### 🐳 The image's agent versions
 
-Claude Code ships almost daily, so the base image follows a release channel instead of a version
+Claude Code ships almost daily, so the sandbox image follows a release channel instead of a version
 written into the Dockerfile: by default Claude Code's `stable` channel (`"latest"` or an exact version
 can be set), and for Codex the newest plain release on npm that is at least 72 hours old (pre-releases,
 deprecated or unpublished releases and any above npm's `latest` tag are skipped, and a fresh release waits out the cooldown, as the kit's own pnpm config does). The kit resolves both versions on the host when it ensures the image (`sandcastle
-build`, and the start of every run) and makes them part of the image's tag. A release therefore
-triggers one rebuild, of about a minute, and every sandbox of a run has the same version. A run's
+build`, and the start of every run) and makes them part of the tag of a shared `sandcastle-agents`
+image, built `FROM` the base (`docker/agents.Dockerfile`). The base and the project's own layer do
+not carry them, so a release leaves their tags, and Docker's cache for the layer's steps (browsers, a
+toolchain), where they were. It rebuilds the agents image once, about a minute, and a copy layer per
+project that takes seconds: each project's image is its layer (or the base) plus Claude Code and Codex
+copied in from the agents image, which is the image a sandbox starts from. Every sandbox of a run has the
+same version. Each project's image carries its own copy of the two CLIs. A run's
 start lines and `sandcastle build` print `Claude Code <version> (<channel>) · Codex <version>`, and
 `run.json` records them.
 
@@ -1390,11 +1395,15 @@ start lines and `sandcastle build` print `Claude Code <version> (<channel>) · C
   for one command, and `CODEX_VERSION=0.159.2` pins Codex.
 - **Offline**: the resolved pair is cached for six hours in `~/.cache/sandcastle-kit/versions.json`
   (`$XDG_CACHE_HOME` when set). If the channel cannot be reached, the cached value is used whatever its age,
-  and with no cache the defaults in `docker/base.Dockerfile`, with one line saying so. A run never fails
+  and with no cache the defaults in `docker/agents.Dockerfile`, with one line saying so. A run never fails
   for a network error here.
-- **Operating system updates**: the image's tag follows the Dockerfiles and the agent versions, not
-  the Debian and Node base it is built from. `sandcastle build --force` pulls that base afresh;
-  `sandcastle doctor` warns once a project's base image is more than 30 days old.
+- **Operating system updates**: the base's tag follows its Dockerfile, not the Debian and Node image it
+  is built from, and no release moves it. `sandcastle build --force` pulls that base afresh and
+  rebuilds every image on it; `sandcastle doctor` warns once a project's base image is more than 30
+  days old.
+- **In a project's layer**: Claude Code and Codex are copied in after the layer, so a `RUN` step of
+  the layer that calls `claude` or `codex` finds neither. Move that work to a `setup` command, which
+  runs in the finished image.
 
 ## 🪶 Lean sandboxes and hooks
 

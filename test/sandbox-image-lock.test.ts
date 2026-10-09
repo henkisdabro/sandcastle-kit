@@ -1,9 +1,10 @@
 // Two projects building the base image at the same moment: the base step (build, prune of
-// superseded tags, `docker tag`) is one machine-wide critical section, so the second build waits and
-// then finds the image built; and a docker failure is a refusal naming the image, not a stack trace.
-// Two real `sandcastle build` processes against a fake docker that keeps its images as files, shares
-// no state but the cache directory, and fails as docker does when a tag names an image that is not
-// there. No Docker or network.
+// superseded tags, `docker tag`), the agents image and the project's final image are one machine-wide
+// critical section, so the second build waits and then finds the image built; and a docker failure is
+// a refusal naming the image, not a stack trace. Two real `sandcastle build` processes against a fake
+// docker that keeps its images as files, shares no state but the cache directory, and fails as docker
+// does when a tag names an image that is not there. A different base tag is made by a fake `id` (the
+// user ids are in the base's tag; a Claude Code version is in the agents image's). No Docker or network.
 //
 //   pnpm test:file test/sandbox-image-lock.test.ts
 
@@ -55,12 +56,19 @@ esac
 exit 0
 `;
 
+// `id -u` and `id -g` are all the kit asks it: $FAKE_UID and $FAKE_GID, so a process can be given other ids.
+const ID = `#!/bin/sh
+case "$1" in -u) echo "\${FAKE_UID:-1000}";; -g) echo "\${FAKE_GID:-1000}";; *) exit 1;; esac
+`;
+
 const machine = () => {
   const dir = mkdtempSync(join(tmpdir(), "sandcastle-imagelock-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "docker"), DOCKER);
   chmodSync(join(bin, "docker"), 0o755);
+  writeFileSync(join(bin, "id"), ID);
+  chmodSync(join(bin, "id"), 0o755);
   const state = join(dir, "state");
   mkdirSync(state);
   return { dir, bin, state, cache: join(dir, "cache"), config: join(dir, "config") };
@@ -90,8 +98,8 @@ const env = (m: ReturnType<typeof machine>, claude: string, extra: Record<string
 const WAITING = /Waiting for another sandcastle build of the base image/;
 
 // `hold`: the build holds until a process prints that it waits for it, then lets it go.
-const buildInBackground = (m: ReturnType<typeof machine>, name: string, claude: string, hold = false) => {
-  const child = startKit(["build"], { cwd: project(name), env: env(m, claude, hold ? { FAKE_BUILD_HOLDS: "1" } : {}), stdio: ["ignore", "pipe", "pipe"] });
+const buildInBackground = (m: ReturnType<typeof machine>, name: string, claude: string, hold = false, uid = "1000") => {
+  const child = startKit(["build"], { cwd: project(name), env: env(m, claude, { FAKE_UID: uid, ...(hold ? { FAKE_BUILD_HOLDS: "1" } : {}) }), stdio: ["ignore", "pipe", "pipe"] });
   return finished(child, hold ? join(m.state, "go") : undefined);
 };
 
@@ -114,20 +122,22 @@ test("two projects building the same new base tag build it once, and both succee
   const [a, b] = await Promise.all([buildInBackground(m, "one", "1.0.0", true), buildInBackground(m, "two", "1.0.0", true)]);
   assert.equal(a.status, 0, a.out);
   assert.equal(b.status, 0, b.out);
-  assert.equal(log(m).filter((l) => l.startsWith("start ")).length, 1, `built twice:\n${log(m).join("\n")}`);
+  // The base is built once; the agents image and each project's final image are the other builds.
+  assert.equal(log(m).filter((l) => l.startsWith("start sandcastle-base:")).length, 1, `built twice:\n${log(m).join("\n")}`);
+  assert.equal(log(m).filter((l) => l.startsWith("start sandcastle-agents:")).length, 1, `built twice:\n${log(m).join("\n")}`);
   assert.match(a.out + b.out, WAITING);
 });
 
 test("two projects building different base tags build one after the other, each tagging its own image", async () => {
   const m = machine();
-  const [a, b] = await Promise.all([buildInBackground(m, "one", "1.0.0"), buildInBackground(m, "two", "2.0.0")]);
+  const [a, b] = await Promise.all([buildInBackground(m, "one", "1.0.0", false, "1000"), buildInBackground(m, "two", "1.0.0", false, "2000")]);
   assert.equal(a.status, 0, a.out);
   assert.equal(b.status, 0, b.out);
   const lines = log(m);
-  assert.equal(lines.length, 4, lines.join("\n"));
-  // start X, end X, start Y, end Y - never start X, start Y.
-  assert.equal(lines[0]!.replace("start ", ""), lines[1]!.replace("end ", ""), lines.join("\n"));
-  assert.equal(lines[2]!.replace("start ", ""), lines[3]!.replace("end ", ""), lines.join("\n"));
+  // Each project builds its base, agents image and final image: start X, end X, start Y, end Y - never start X, start Y.
+  assert.equal(lines.length, 12, lines.join("\n"));
+  for (let i = 0; i < lines.length; i += 2) assert.equal(lines[i]!.replace("start ", ""), lines[i + 1]!.replace("end ", ""), lines.join("\n"));
+  assert.equal(new Set(lines.filter((l) => l.startsWith("start sandcastle-base:"))).size, 2, "the two projects share a base tag");
 });
 
 test("a failing docker tag is a refusal naming the image and docker's message, with no stack trace", () => {
