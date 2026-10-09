@@ -818,7 +818,8 @@ a turn cannot end while it is paused.
 
 **Working while paused.** A pause frees the machine, not the repository: the base branch and the
 `agent/*` branches are still the run's. A commit, merge or pull on them in the run's checkout trips
-its `.git` check, and the run stops at the next landing, landing nothing more. Work in another clone
+its `.git` check, and the run stops at the next landing or as the next sandbox opens (the resume's,
+at the latest), landing nothing more. Work in another clone
 or a worktree, or `sandcastle stop` the run first.
 
 **Pausing for the plan's usage.** An unattended run that spends a subscription can run the plan out
@@ -1490,6 +1491,15 @@ and the kit narrows what can cross it:
   prints one line and goes on. Any other change stops it, and the stop names the keys (with old and new
   values, except for keys that run a program or carry credentials, and with any token in a URL hidden): a remote, a hook path, an `include`, `rebase` or
   `pushRemote`, or an upstream on the base or an `agent/issue-*` branch.
+- 🛂 **Checked before every sandbox opens.** Sandcastle's open runs git on your machine in the
+  project: `git worktree add`, whose checkout writes every file out through the filters
+  `.git/config` names, or `git status`, `git fetch` and `git merge` in a worktree it reuses. The pins
+  hold only the filters configured when the run started, so a filter another sandbox planted since
+  the last check would run there. So the fingerprint is checked last thing before each sandbox is
+  created - a ticket's, as it starts and when it resumes after a pause, the gate sandboxes and the
+  landing sandbox, and those of `sandcastle land` and `sandcastle gates`, against a reading each takes
+  as it starts - and a change stops the run with nothing opened. What remains is the moment between
+  that check and Sandcastle's own git calls.
 - 🚪 **Checked before every sandbox closes.** Sandcastle's close stops the container, then runs
   `git status` on your machine in the sandbox's worktree, which reads `.git/config` and that
   worktree's record in `.git/worktrees/<name>/`. So before each close - a ticket's sandbox at the end

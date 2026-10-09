@@ -32,7 +32,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -1155,6 +1155,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       throw error;
     }
   };
+  /** The run's `.git` check (`host.check`) before a ticket's sandbox opens. A failure is the ticket's `tampered`, as above, and is thrown. */
+  const checkGit = async (issue: string, when: string) => {
+    try {
+      await host.check?.(when);
+    } catch (error) {
+      tampered.set(issue, error);
+      throw error;
+    }
+  };
 
   // A run that died between merging a branch and closing its issue leaves the
   // issue queued with its work already on base. Re-running it finds nothing
@@ -1335,11 +1344,15 @@ export const createPipeline = (ctx: PipelineContext) => {
     }
     view.claim(issue.id, issue.title);
 
-    // Sandcastle reuses a kit worktree that holds the branch or sits at its path, and runs `git status`, `git fetch`
-    // and `git merge --ff-only` on the host in it as it opens: one kept from an earlier run, or from before a pause,
-    // has its records held to git's own first, and a failure stops the run before the sandbox opens.
-    const openChecked = () => {
+    // Sandcastle's open runs host git in the project: `git worktree add`, whose checkout writes every file through the
+    // filters `.git/config` names, or in a kit worktree it reuses (one that holds the branch or sits at its path)
+    // `git status`, `git fetch` and `git merge --ff-only`. The pins hold only the filters configured at the start, so a
+    // filter another sandbox planted since the last check would run on the host. A reused worktree - one kept from an
+    // earlier run, or from before a pause - has its records held to git's own, then the run's `.git` check comes, the
+    // last thing before every open, the first and a resume's. A failure stops the run before the sandbox opens.
+    const openChecked = async (when: string) => {
       for (const kept of reusedWorktrees(project, branch)) checkRecords(issue.id, kept, `before reusing ${keptPath(project.root, kept)}`);
+      await checkGit(issue.id, when);
       return open(branch);
     };
 
@@ -1353,12 +1366,15 @@ export const createPipeline = (ctx: PipelineContext) => {
       "setup",
       async () => {
         await cutFromBase(issue.id, branch);
-        return openChecked();
+        return openChecked(`before opening ${ref(issue.id)}'s sandbox`);
       },
       requeuedAs.get(issue.id),
       undefined,
       at?.resolveWaitMs,
     ).catch(async (error) => {
+      // The cut goes through the host's one writer, whose `.git` check comes first: a change it finds, made before the
+      // setup began, stops the run as the open's own check would, not only this ticket.
+      if (error instanceof GuardStop && !tampered.has(issue.id)) tampered.set(issue.id, error);
       await host.settle(branch, `after ${ref(issue.id)}`).catch(() => {});
       throw error;
     });
@@ -1459,7 +1475,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (inPass) parkedInStep += parked;
           else waited.set(issue.id, (waited.get(issue.id) ?? 0) + parked);
           releaseBranchWorktree(branch, project.root);
-          sandbox = await timed(issue.id, "setup", openChecked, `resumed before ${phase}`);
+          sandbox = await timed(issue.id, "setup", () => openChecked(`before reopening ${ref(issue.id)}'s sandbox after the pause`), `resumed before ${phase}`);
           lockWorktree(sandbox.worktreePath, project.root);
           closedWhileParked = false;
         },
@@ -2142,6 +2158,10 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   lockRun(project);
   recordGitConfigStart(project, gitConfig);
   reapOrphans(project);
+  // The shared `.git` as the run starts, under its lock and with nothing a killed run left running: the base gates'
+  // sandbox, the run's first, opens behind a check against it (the run's own fingerprint is taken once that sandbox
+  // has closed). Sandcastle's open runs host git in the project, and the image build and preflight come between.
+  const atStart = gitFingerprint(project);
   // A held branch merged or deleted by hand leaves its backup entry behind: only a landing drops one.
   const swept = pruneBackup(project);
   if (swept.length) console.log(`Dropped the backup of ${swept.length} branch(es) that no longer need one: ${swept.join(", ")}.`);
@@ -2537,7 +2557,8 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
-      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId));
+      // Checked against the start's reading before its sandbox opens; closed behind a reading of its own (`gateBase`).
+      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when)));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
