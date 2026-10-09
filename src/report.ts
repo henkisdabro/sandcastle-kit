@@ -1022,7 +1022,7 @@ export const render = (f: Facts, plain = false): string => {
   done.push(...changelogLines(merged.flatMap((id) => (f.tickets[id].changelog ?? []).map((line) => ({ id, line })))));
   const dropped = merged.filter((id) => f.tickets[id].changelogDropped);
   // Never shown cut off: a tag too long, a list or holding a commit sha is an agent's message, not a line.
-  for (const id of dropped) done.push(`A suggested line for ${refOf(id)} was not a changelog line${f.tickets[id].changelogDropped! > 1 ? ` (${f.tickets[id].changelogDropped} of them)` : ""}: it is left out, so write that entry from the ticket.`);
+  for (const id of dropped) done.push(...droppedLines(refOf(id), f.tickets[id].changelogDropped!, f.tickets[id].changelogDroppedWhy));
   section(h("## ✅ Done", "## Done"), done);
 
   // Needs you
@@ -1313,6 +1313,19 @@ const parseRecord = (text: string): HistoryRecord | undefined => {
 /** The commit time (ISO) of a git ref, or undefined when the ref names no commit. */
 const commitTime = (root: string, ref: string) => git(["log", "-1", "--format=%cI", `${ref}^{commit}`], root) || undefined;
 
+// What the summary says of the changelog tags a ticket's agents gave that were left out. Each one `why` knows
+// (`changelogScan`) is told by its reason, a length drop with its length; the rest - an older record has a
+// count and no reasons - are one line, as before. Never shown cut off: a tag too long, a list or holding a
+// commit sha is an agent's message, not a line.
+const droppedLines = (ref: string, count: number, why: unknown): string[] => {
+  const known = Array.isArray(why) ? why.filter((w): w is string => typeof w === "string").slice(0, count) : [];
+  const left = ", so write that entry from the ticket.";
+  const out = known.map((w) => (w.startsWith("too long") ? `A suggested line for ${ref} was ${w}: it is left out${left}` : `A suggested line for ${ref} was not a changelog line (it ${w}): it is left out${left}`));
+  const unknown = count - known.length;
+  if (unknown > 0) out.push(`A suggested line for ${ref} was not a changelog line${unknown > 1 ? ` (${unknown} of them)` : ""}: it is left out${left}`);
+  return out;
+};
+
 /**
  * What landed since `since` (a git ref; default the latest tag reachable from the base branch,
  * else all history): the tickets merged in runs that started after the ref's commit time, read
@@ -1334,7 +1347,7 @@ export const changelogSince = (project: Project, since?: string): string => {
     const run = parseRecord(text);
     if (run && typeof run.startedAt === "string" && !Number.isNaN(Date.parse(run.startedAt))) runs.set(run.startedAt, run);
   }
-  const landed = new Map<string, { title?: string; lines: string[]; dropped: number }>();
+  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; why?: unknown }>();
   for (const run of [...runs.values()].sort((a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!))) {
     if (run.dryRun || (after && Date.parse(run.startedAt!) <= Date.parse(after))) continue;
     for (const [id, t] of Object.entries(readTickets(run))) {
@@ -1342,8 +1355,8 @@ export const changelogSince = (project: Project, since?: string): string => {
       const before = landed.get(id);
       const lines = Array.isArray(t.changelog) ? t.changelog.filter((l): l is string => typeof l === "string") : [];
       // The latest run's lines; an earlier run's stand only while no later one gave any.
-      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0 } : before;
-      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped });
+      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, why: t.changelogDroppedWhy } : before;
+      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, why: kept.why });
     }
   }
   // Tickets landed with `sandcastle land` after a run stopped: no run record says `merged`, but the kit's merge subject is on
@@ -1357,15 +1370,13 @@ export const changelogSince = (project: Project, since?: string): string => {
     const records = [heads[id], ...[...runs.values()].filter((run) => !run.dryRun).sort((x, y) => Date.parse(y.startedAt!) - Date.parse(x.startedAt!)).map((run) => readTickets(run)[id])].filter((r) => !!r);
     const linesOf = (r: { changelog?: unknown }) => (Array.isArray(r.changelog) ? r.changelog.filter((l): l is string => typeof l === "string") : []);
     const source = records.find((r) => linesOf(r).length) ?? records.find((r) => r.changelogDropped);
-    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0 });
+    landed.set(id, { title: (records.find((r) => "title" in r && r.title) as { title?: string } | undefined)?.title, lines: source ? linesOf(source) : [], dropped: source?.changelogDropped ?? 0, why: source?.changelogDroppedWhy });
   }
   const ids = [...landed.keys()];
   const out = [`${ids.length} ticket(s) landed in runs started after ${ref ? `${ref} (${after})` : "the start of the history"}.`];
   const all = ids.flatMap((id) => landed.get(id)!.lines.map((line) => ({ id, line })));
   out.push(...changelogLines(all));
-  for (const id of ids.filter((id) => landed.get(id)!.dropped)) {
-    out.push(`A suggested line for ${refOf(id)} was not a changelog line: it is left out, so write that entry from the ticket.`);
-  }
+  for (const id of ids.filter((id) => landed.get(id)!.dropped)) out.push(...droppedLines(refOf(id), landed.get(id)!.dropped, landed.get(id)!.why));
   const bare = ids.filter((id) => !landed.get(id)!.lines.length);
   if (bare.length) {
     out.push("No suggested line - write from the ticket:");

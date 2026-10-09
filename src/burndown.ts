@@ -106,6 +106,8 @@ type Outcome = {
   changelog?: string[];
   /** How many `<changelog>` tags were no changelog line (too long, a list, a commit sha) and were left out: the summary says so. */
   changelogDropped?: number;
+  /** Why each dropped tag was (`changelogScan`), as many as the pass that gave the lines saw; older records have none. */
+  changelogDroppedWhy?: string[];
   /** The acceptance criterion an agent knowingly left undone (its <unmet> line): the branch lands, the ticket stays open. */
   unmet?: string;
   /** What a reviewer said in prose about a gap it filed neither as a `<followup>` nor as an `<unmet>` line (`gapOf`), for the closing summary. */
@@ -349,34 +351,56 @@ export const implSaidView = (said: string | undefined): string =>
 export const CHANGELOG_MAX = 500;
 const listItem = /^[ \t]*(?:[-*+•]|\d+[.)])[ \t]/m;
 const commitSha = /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/;
-export const changelogRead = (text: string): { lines: string[]; dropped: number } => {
+// `why` has one entry per dropped tag, in order: what the closing summary says of it (`droppedWords`).
+export const changelogScan = (text: string): { lines: string[]; why: string[] } => {
   const lines: string[] = [];
-  let dropped = 0;
+  const why: string[] = [];
   for (const raw of ownLineTags(text, "changelog")) {
     const said = raw.replace(/\s+/g, " ").trim();
     if (!said || said === "...") continue;
-    if (said.length > CHANGELOG_MAX || listItem.test(raw) || commitSha.test(said)) dropped++;
+    if (said.length > CHANGELOG_MAX) why.push(`too long (${said.length} characters)`);
+    else if (listItem.test(raw)) why.push("spans list items");
+    else if (commitSha.test(said)) why.push("holds a commit sha");
     else lines.push(said);
   }
-  return { lines, dropped };
+  return { lines, why };
 };
-export const changelogOf = (text: string): string[] => changelogRead(text).lines;
+export const changelogRead = (text: string): { lines: string[]; dropped: number } => {
+  const { lines, why } = changelogScan(text);
+  return { lines, dropped: why.length };
+};
+export const changelogOf = (text: string): string[] => changelogScan(text).lines;
+
+/** A ticket's dropped tags as the run keeps them: how many, and why where a pass said (an older record has a count alone). */
+export type ChangelogDrops = { count: number; why: string[] };
 
 // Adds one pass's lines to the ticket's and returns how many tags were no line. A full review that gives
 // any lines gives the full set for the branch (its prompt asks it to restate the implementer's along with
 // its own), so its set replaces the earlier one: a rewording then shows once however few words it shares,
-// and a distinct change that shares words is not dropped for it. A narrow pass (after a conflict
-// resolution, a base merge or a repair) sees only what it reviewed, not the branch: its set is lines for
-// what it changed itself, so it adds to the earlier set - replacing would drop every line the implementer
-// gave. A pass that gives none leaves the earlier set standing. Two lines of one pass are two changes,
-// however alike their words ("`size --json` prints ..." and "`status --json` prints ...").
-export const addChangelog = (have: string[], text: string, narrow = false): number => {
-  const read = changelogRead(text);
-  if (!read.lines.length) return read.dropped;
+// and a distinct change that shares words is not dropped for it. The tags the implementer's message had
+// dropped went with that message: `drops`, when given, becomes the review's own. A narrow pass (after a
+// conflict resolution, a base merge or a repair) sees only what it reviewed, not the branch: its set is
+// lines for what it changed itself, so it adds to the earlier set - replacing would drop every line the
+// implementer gave - and its drops are added. A pass that gives none leaves the earlier set standing and
+// adds its drops. Two lines of one pass are two changes, however alike their words ("`size --json`
+// prints ..." and "`status --json` prints ...").
+export const addChangelog = (have: string[], text: string, narrow = false, drops?: ChangelogDrops): number => {
+  const read = changelogScan(text);
+  const replaces = !!read.lines.length && !narrow;
+  if (drops) {
+    if (replaces) {
+      drops.count = read.why.length;
+      drops.why = [...read.why];
+    } else {
+      drops.count += read.why.length;
+      drops.why.push(...read.why);
+    }
+  }
+  if (!read.lines.length) return read.why.length;
   if (narrow) {
     for (const line of read.lines) if (!have.includes(line)) have.push(line);
   } else have.splice(0, have.length, ...read.lines);
-  return read.dropped;
+  return read.why.length;
 };
 
 /** A problem outside its ticket that an agent named in a `<followup>` line: the kit files it for triage once the run has landed. */
@@ -1357,7 +1381,7 @@ export const createPipeline = (ctx: PipelineContext) => {
   // A later run skips work a branch already passed (see recordHead). A dry run's
   // work must not change what a real run skips, and a failed write never fails
   // the ticket: the cost is only that a re-run runs it in full.
-  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }) => {
+  const noteHead = (id: string, branch: string, fields: { reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; ungated?: string; gap?: string; repaired?: string[] }) => {
     if (dryRun) return;
     try {
       recordHead(project.root, id, { branch, ...fields }, runId);
@@ -1822,12 +1846,13 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The lines of every agent's final message, only when the project asked for them. A land-only
       // branch runs no implementer or review: its lines stand from its head record, as `unmet` does.
       const changelog: string[] = landOnly ? [...(readHeads(project.root)[issue.id]?.changelog ?? [])] : [];
-      let changelogDropped = landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0;
+      const drops: ChangelogDrops = { count: landOnly ? (readHeads(project.root)[issue.id]?.changelogDropped ?? 0) : 0, why: landOnly ? [...(readHeads(project.root)[issue.id]?.changelogDroppedWhy ?? [])] : [] };
       // The implementer's lines come first; a later full review that gives lines restates the branch's whole
-      // set and replaces them, a narrow pass adds its own (see addChangelog).
+      // set and replaces them - and the tags dropped from the set it replaced - a narrow pass adds its own
+      // (see addChangelog).
       const noteChangelog = (text: string | undefined, narrow = false) => {
         if (!project.changelog || !text) return;
-        changelogDropped += addChangelog(changelog, text, narrow);
+        addChangelog(changelog, text, narrow, drops);
       };
       // What the agents knowingly left undone. The implementer's word stands only until a full
       // review has read the branch after it: the reviewer may have finished the criterion.
@@ -1846,7 +1871,8 @@ export const createPipeline = (ctx: PipelineContext) => {
           unmet: left.length ? cutAtWord([...new Set(left)].join("; "), UNGATED_MAX) : undefined,
           implSaid,
           changelog: changelog.length ? [...new Set(changelog)] : undefined,
-          changelogDropped: changelogDropped || undefined,
+          changelogDropped: drops.count || undefined,
+          changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,
           ungated: ungated.length ? cutAtWord([...new Set(ungated)].join("; "), UNGATED_MAX) : undefined,
           gap: gaps.length ? cutAtWord([...new Set(gaps)].join(" "), UNGATED_MAX) : undefined,
         };
@@ -2206,7 +2232,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       const head = sh("git", ["rev-parse", branch], project.root);
       const { unmet: unmetNote, implSaid: implSaidNote, changelog: changelogNote, ungated: ungatedNote, gap: gapNote } = agentsSaid();
       // `unmet` written even when undefined, so a green head with every criterion met drops an earlier one.
-      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: changelogDropped || undefined, ungated: ungatedNote, gap: gapNote });
+      if (!gated.failure && !unreviewed) noteHead(issue.id, branch, { green: head, red: undefined, unmet: unmetNote, implSaid: implSaidNote, gates: gated.gates, changelog: changelogNote, changelogDropped: drops.count || undefined, changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined, ungated: ungatedNote, gap: gapNote });
       // A red result is told apart from a stop mid-gates, which records none: only the second re-runs from its review.
       else if (gated.failure) noteHead(issue.id, branch, { red: head });
       return {
@@ -2227,7 +2253,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         ungated: ungatedNote,
         gap: gapNote,
         changelog: changelogNote,
-        changelogDropped: changelogDropped || undefined,
+        changelogDropped: drops.count || undefined,
+        changelogDroppedWhy: drops.why.length ? [...drops.why] : undefined,
         unmet: unmetNote,
       };
     } finally {
@@ -3041,6 +3068,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
           ...(value.gap ? { gap: value.gap } : {}),
           ...(value.changelog?.length ? { changelog: value.changelog } : {}),
           ...(value.changelogDropped ? { changelogDropped: value.changelogDropped } : {}),
+          ...(value.changelogDroppedWhy?.length ? { changelogDroppedWhy: value.changelogDroppedWhy } : {}),
           ...(value.unmet ? { unmet: value.unmet } : {}),
         });
         run.update({ typical: typicalTimes(project, [...took].map(([id, ms]) => ms - (waited.get(id) ?? 0))) });

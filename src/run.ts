@@ -1183,6 +1183,8 @@ export type BranchHead = {
   changelog?: string[];
   /** How many `<changelog>` tags by `green` were no changelog line and were left out, carried like `changelog`. */
   changelogDropped?: number;
+  /** Why each of those was dropped, in order (an older record has none). */
+  changelogDroppedWhy?: string[];
   /** What a reviewer said no gate exercises, by `green` (its `<ungated>` line): a later land-only run reads no reviewer, so without it the "check by hand" note would not reach the closing summary. */
   ungated?: string;
   /** What a reviewer said of a gap in prose and filed nowhere, carried like `ungated`. */
@@ -1205,7 +1207,7 @@ export const readHeads = (root: string): Record<string, BranchHead> => {
   }
 };
 
-export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
+export const recordHead = (root: string, id: string, fields: { branch: string; reviewed?: string; green?: string; red?: string; unmet?: string; implSaid?: string; gates?: Gate[]; changelog?: string[]; changelogDropped?: number; changelogDroppedWhy?: string[]; ungated?: string; gap?: string; repaired?: string[] }, run: string): void => {
   const file = headsFile(root);
   mkdirSync(dirname(file), { recursive: true });
   const all = readHeads(root);
