@@ -1478,9 +1478,9 @@ and the kit narrows what can cross it:
   `.git/config.worktree` (which git reads once `extensions.worktreeConfig` is on: created, changed
   or removed, it stops the run, naming its keys) and the base branch are fingerprinted; if a
   sandbox changes them, the run stops before the host runs another git command there, naming the
-  file. A hook planted there would otherwise run on your next checkout or commit. So is
-  `.git/modules/` (the git directories of submodules), where a config a sandbox adds would run on a
-  `git status` that looks into a submodule. While tickets land during the run, the base may move only by the kit's own
+  file. A hook planted there would otherwise run on your next checkout or commit. `.git/modules/`
+  (the git directories of submodules) is fingerprinted too, since a config a sandbox adds there would
+  run on a `git status` that looks into a submodule. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line

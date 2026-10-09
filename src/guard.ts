@@ -735,7 +735,7 @@ const NESTED_SHOWN = 5;
 
 /**
  * The paths below the worktree's root, relative to it, of every `.git` entry (file, directory or link) other than the
- * root's own `.git`: a repository nested in the worktree. The tree is walked, never read through git, and no link is
+ * root's own `.git`, in any case: a repository nested in the worktree. The tree is walked, never read through git, and no link is
  * followed. A found `.git` directory is not walked into.
  */
 const nestedGit = (path: string): string[] => {
@@ -749,7 +749,8 @@ const nestedGit = (path: string): string[] => {
     }
     for (const name of names) {
       const at = rel ? `${rel}/${name}` : name;
-      if (name === ".git") {
+      // Any case: on a case-insensitive disk (macOS's default) a host git opening `sub/.git` finds a `.GIT` a sandbox made.
+      if (name.toLowerCase() === ".git") {
         if (rel) found.push(at);
         continue;
       }

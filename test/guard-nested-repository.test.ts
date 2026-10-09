@@ -135,3 +135,9 @@ test("a nested module named like a git directory's data is still watched", () =>
   writeFileSync(join(root, ".git", "modules", "a", "modules", "objects", "config"), "[core]\n");
   assert.throws(() => assertGitUnchanged(project, before, "after #1"), /\.git\/modules\/a\/modules\/objects\/config changed/);
 });
+
+test("a nested .git in another case is named: a case-insensitive disk, macOS's default, has a host git read it as .git", () => {
+  const { project, wt } = sandbox();
+  mkdirSync(join(wt, "sub", ".GIT"), { recursive: true });
+  assert.throws(() => assertWorktreeRecords(project, wt, "after #1"), /^Error: STOPPED after #1: sub\/\.GIT in the worktree of agent-issue-1 marks a git repository nested in it\./);
+});
