@@ -75,7 +75,7 @@ and output `<promise>COMPLETE</promise>` - do not rebuild it.
 
 # What to do about what you find
 
-**Fix it yourself and commit**, in the same style as the existing commits. You are not writing a
+**Fix it yourself and commit**, in the same style as the existing commits. Never write an issue-closing keyword (`Closes #N`, `Fixes #N`, `Resolves #N`) in a commit: the kit decides whether the ticket closes, and one left partly done must stay open when the branch reaches the default branch; write `(#N)` to refer to it. You are not writing a
 report for a human - your commits are the deliverable, and they will be gated alongside the
 implementer's. Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
 then `git commit -F <file>`: never `git commit -m "..."`. Free text on the

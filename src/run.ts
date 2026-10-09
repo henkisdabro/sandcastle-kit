@@ -548,11 +548,14 @@ const CHANGELOG_ASK =
   "Say what each user-facing change belongs in it as, one line each, in a tag on a line of its own:\n\n" +
   "<changelog>...</changelog>\n\n" +
   "with a sentence in place of the dots, starting `Added:`, `Changed:` or `Fixed:`. Write the sentence for a reader of the " +
-  "changelog, not the diff. " +
+  // 500: CHANGELOG_MAX in src/burndown.ts, past which a line is dropped as an agent's whole message.
+  "changelog, not the diff: one or two sentences under 500 characters, with no list and no chain of clauses joined by " +
+  "semicolons - a longer line is dropped. " +
   "A change an existing project must act on - a new default that changes what a run does or spends, a new convention, " +
   "something `init` now writes differently, a step to run again (a setup or configure command, say) - also needs a line " +
   "starting `Upgrading:` that says what to do, in its own tag. The closing summary lists it apart from the ordinary lines, " +
-  "so do not fold the instruction into a `Changed:` line. If this project's own rules define an upgrading or migration note, " +
+  "so do not fold the instruction into a `Changed:` line. Write no `Upgrading:` line when an existing project has nothing " +
+  "to do: \"nothing to do\" is not a note. If this project's own rules define an upgrading or migration note, " +
   "write it in their words. ";
 const CHANGELOG_IMPLEMENT = `${CHANGELOG_ASK}For a change nobody outside the code would notice, answer exactly \`<changelog>none</changelog>\`: it is no line, and the ticket is listed as needing no entry.\n\n`;
 // A full review that could not see the implementer's lines wrote the whole set again from the diff; it is

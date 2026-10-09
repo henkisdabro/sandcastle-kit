@@ -88,6 +88,7 @@ ticket names. The project rules below say what else to read.
   where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is blocked and Monitor is not
   available here.
 - Commit as you go, in coherent steps. Write commit messages in the style of the repo's history.
+  Never write an issue-closing keyword (`Closes #N`, `Fixes #N`, `Resolves #N`) in a commit: the kit decides whether the ticket closes, and one left partly done must stay open when the branch reaches the default branch; write `(#N)` to refer to it.
   Write each commit message with the Write tool to a file outside the worktree (under `/tmp`),
   then `git commit -F <file>`: never `git commit -m "..."`. Free text on the
   command line can match a command rule of the project's permissions and be refused, where nobody can answer.
