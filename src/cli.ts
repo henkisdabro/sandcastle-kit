@@ -15,11 +15,11 @@
 //                    (not with autonomy level 1, which asks a question a detached run cannot);
 //                    a run that would spend ANTHROPIC_API_KEY asks first, and without a
 //                    terminal needs --api-key (or SANDCASTLE_API_KEY=1), which is the yes;
-//                    a run, `land` or `gates` first holds the shared .git/config's program-running
-//                    keys (every filter.*, merge.*.driver, diff.*.textconv and .command,
-//                    core.fsmonitor, core.hooksPath, core.sshCommand, include*) and info/attributes
-//                    to what the previous run recorded, and refuses a difference, naming each key
-//                    (a sandbox of a killed run may have planted it): remove it, or if it is yours
+//                    a run, `land` or `gates` first holds what makes git run a program or reach
+//                    the network in the shared .git (those keys of .git/config and config.worktree,
+//                    info/attributes, hooks/ and modules/) to what the previous run recorded,
+//                    and refuses a difference, naming each key and file (a sandbox of a killed
+//                    run may have planted it): remove it, or if it is yours
 //                    --accept-git-config records the present state as the new baseline
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
