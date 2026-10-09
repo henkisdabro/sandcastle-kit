@@ -1094,7 +1094,11 @@ export type PipelineContext = {
  */
 const keptWorktreeOf = (project: Project, branch: string): string | undefined => kitWorktrees(project).find((w) => w.branch === branch)?.path;
 
-/** Every worktree git lists under the project's `.sandcastle/worktrees/`, with the branch it has checked out ("" for none). */
+/**
+ * Every worktree git lists under the project's `.sandcastle/worktrees/`, with the branch it has checked out ("" for none).
+ * Not one whose directory is gone (a person removed it): no git runs there, Sandcastle's open prunes its record, and
+ * its record check would read the missing `.git` file as tampering.
+ */
 const kitWorktrees = (project: Project): { path: string; branch: string }[] => {
   const under = [...new Set([project.root, realpathSync(project.root)])].map((r) => join(r, ".sandcastle", "worktrees") + sep);
   return sh("git", ["worktree", "list", "--porcelain"], project.root)
@@ -1103,7 +1107,7 @@ const kitWorktrees = (project: Project): { path: string; branch: string }[] => {
       const lines = entry.split("\n");
       const path = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
       const branch = lines.find((l) => l.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length) ?? "";
-      return path && under.some((u) => resolve(path).startsWith(u)) ? [{ path, branch }] : [];
+      return path && under.some((u) => resolve(path).startsWith(u)) && existsSync(path) ? [{ path, branch }] : [];
     });
 };
 

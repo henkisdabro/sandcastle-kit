@@ -190,6 +190,8 @@ const harness = (o: { act?: (root: string, wt: string) => void; earlier?: (root:
   const closed: string[] = [];
   const open = async (branch: string): Promise<Box> => {
     const path = join(root, ".sandcastle", "worktrees", branch.replace(/\//g, "-"));
+    // Sandcastle's open prunes the records of worktrees whose directory is gone (a scratch repo: never the project's).
+    git(root, "worktree", "prune");
     if (existsSync(path)) spawnSync("git", ["status", "--porcelain"], { cwd: path });
     else if (spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root }).status === 0) git(root, "worktree", "add", "-q", path, branch);
     else git(root, "worktree", "add", "-q", "-b", branch, path, "main");
@@ -356,6 +358,17 @@ test("a kept worktree whose record an earlier run changed is not reused: the run
   assert.equal(filterRan(), false, "the planted filter ran on the host as the sandbox opened");
   assert.deepEqual(h.opened, []);
   assert.ok(h.tampered.has(ID));
+});
+
+test("a kept worktree whose directory a person removed is no tampering: the run opens a fresh one, as Sandcastle's prune lets it", async () => {
+  // git still lists the record, as prunable; no git can run in a directory that is gone.
+  for (const behind of [false, true]) {
+    const h = harness({ earlier: earlierRun({ behind, tamper: (_root, wt) => rmSync(wt, { recursive: true, force: true }) }) });
+    const { result: o } = await h.attempt();
+    assert.equal(h.tampered.size, 0, String(h.tampered.get(ID)));
+    assert.equal(o.status, "green", behind ? "behind the base" : "ahead of the base");
+    assert.deepEqual(h.opened, [h.wt]);
+  }
 });
 
 test("a landing sandbox whose worktree's .git is repointed is never closed: the landing stops, the base where it was", async () => {
