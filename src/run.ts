@@ -1072,11 +1072,13 @@ export const HANDED_BACK = "needs a human: handed back";
  * A branch the kit held for a person - at landing, or a conflict resolution it would not trust - which a
  * person has since merged by hand: its tip is on the base, so its diff is empty, as a hand-back's is.
  * Only the outcome tells the two apart, and only an ancestor check says the merge happened. The ticket
- * stays open until the push closes it.
+ * stays open until the push closes it. A ticket a stopped run left finished and
+ * `sandcastle land` then merged counts too: `land` records its outcome `merged`, but the run record still says `stopped`.
  */
 export const mergedByHand = (root: string, base: string, id: string): boolean => {
   const o = readOutcomes(root)[id];
-  if (o?.kind !== "held" || o.text === HANDED_BACK) return false;
+  if (o?.kind !== "held" && o?.kind !== "stopped" && o?.kind !== "merged") return false;
+  if (o.text === HANDED_BACK) return false;
   const git = (args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   try {
     git(["rev-parse", "--verify", "--quiet", `refs/heads/agent/issue-${id}`]);

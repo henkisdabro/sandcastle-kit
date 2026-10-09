@@ -1026,7 +1026,14 @@ export const createSlotWaits = (share: (held: boolean, waitsFor?: "share" | "lan
  * a ticket that starts, one that waits (and for whom now), one left for the next run - written to
  * the record, with `waiting` naming the ticket in flight each waits for now, never one that is gone.
  */
-export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]; ref(id: string): string; say(line: string): void; log?(line: string): void }) => {
+export const createHoldRecord = (o: {
+  waiting: { issue: string; on: string[] }[];
+  ref(id: string): string;
+  say(line: string): void;
+  log?(line: string): void;
+  /** Tickets whose hold the start plan's ticket list already says: `start` records them but does not say them a second time. */
+  listed?: ReadonlySet<string>;
+}) => {
   // Every ticket started so far: `waiting` is the start-of-run list, so each write filters against all of them.
   const started = new Set<string>();
   // The status view's queue position (`order`) follows the scheduler's start queue: a requeued ticket
@@ -1063,7 +1070,7 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
       for (const { ticket, file, shares } of candidates) {
         if (file) {
           o.waiting.push({ issue: ticket.id, on: [o.ref(file.with)] });
-          o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
+          if (!o.listed?.has(ticket.id)) o.say(`  ${o.ref(ticket.id)} ${fileWaitNote(o.ref, file)}`);
         }
         for (const share of shares ?? []) pairs.push({ id: ticket.id, share });
       }
@@ -1076,7 +1083,7 @@ export const createHoldRecord = (o: { waiting: { issue: string; on: string[] }[]
           return;
         case "started":
           started.add(c.id);
-          o.say(`  ${o.ref(c.id)} ${c.after.kind === "blockers" ? "released: its last blocker has landed; it starts at the next free slot" : `starts: ${o.ref(c.after.freed)} is done with the file they both change`}`);
+          o.say(`  ${o.ref(c.id)} ${c.after.kind === "blockers" ? "released: its last blocker has landed; it starts at the next free slot" : `released: ${o.ref(c.after.freed)} is done with the file they both change; it starts at the next free slot`}`);
           sayShares(c.shares.map((share) => ({ id: c.id, share })));
           run.ticket(c.id, { state: "queued", note: null, ...(c.after.kind === "blockers" && { order: released++ - AHEAD }) });
           write(run, { stage: "running" });
@@ -2370,9 +2377,12 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   });
   const sharesLog = join(project.root, ".sandcastle/logs/file-shares.log");
   let sharesHeaded = false;
+  // Filled by the ticket list below, which already says a file hold; `holds.start` then does not say it again.
+  const listed = new Set<string>();
   const holds = createHoldRecord({
     waiting,
     ref,
+    listed,
     say: (line) => console.log(line),
     log: (line) => {
       mkdirSync(dirname(sharesLog), { recursive: true });
@@ -2416,6 +2426,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const own = implementNote(o);
     const later = parked.find((p) => p.ticket.id === i.id);
     const blockers = waiting.find((w) => w.issue === i.id)?.on.join(", ") || "a blocker";
+    if (later) listed.add(i.id);
     console.log(`  ${ref(i.id)} ${i.title}${own}${dependants.includes(i) ? ` - waits for ${blockers} in this run` : later ? ` - ${fileWaitNote(ref, later.wait)}` : ""}`);
   }
   // A Touches line naming a path the kit always holds: the work is still wanted and runs, only its merge is a
