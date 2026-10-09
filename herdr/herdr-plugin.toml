@@ -7,7 +7,7 @@
 # manifest, so the keys live in that config block (src/herdr-plugin.ts).
 id = "sandcastle-kit"
 name = "Sandcastle"
-version = "0.11.0"
+version = "0.12.0"
 min_herdr_version = "0.9.3"
 description = "Watch sandcastle-kit runs: the status view and report over any tab, Ctrl-click a ticket for its card, sandboxes first in Agents"
 platforms = ["linux", "macos"]
