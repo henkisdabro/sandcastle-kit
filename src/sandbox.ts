@@ -868,10 +868,25 @@ const withGitMaintenanceOff = (env: Record<string, string>): Record<string, stri
   return { ...env, ...Object.fromEntries(pairs), GIT_CONFIG_COUNT: String(n + SANDBOX_GIT_MAINTENANCE_OFF.length) };
 };
 
+// The host's IANA zone name, resolved here and not read from `TZ`: macOS often has none set. A
+// sandbox has no `TZ` of its own, so its commits are dated `+0000` beside the host's merges in
+// local time; the base image has tzdata, so the name works without an image change. Nothing when
+// the host cannot name one: the sandbox then stays on UTC as before.
+export const hostTimeZone = (): string | undefined => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Not part of credentials(): doctor and the token checks read that as what the user configured.
-// Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`.
-export const sandboxEnv = (project: Project): Record<string, string> =>
-  withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER });
+// Every sandbox - a ticket's, a landing's, a gate-only one - is built from this through `sandboxConfig`,
+// so gates run in the host's zone too, not CI's usual UTC.
+export const sandboxEnv = (project: Project): Record<string, string> => {
+  const TZ = hostTimeZone();
+  return withGitMaintenanceOff({ ...credentials(project), ...AGENT_COMMITTER, ...(TZ && { TZ }) });
+};
 
 // Claude Code reads /etc/claude-code/managed-settings.json above user and project settings, so a
 // branch's own `disableAllHooks` cannot switch the git guard off. A read-only *directory* mount
