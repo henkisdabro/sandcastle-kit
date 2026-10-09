@@ -2519,11 +2519,13 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     // A finished record is the next turn's to replace: a timer writing to it would undo that.
     if (run.finished) return clearInterval(poolWatch);
     const mine = myShare();
-    if (!mine || (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap)) return;
+    if (!mine) return;
+    // As at the start: beside another run a share keeps a slot for landing; alone, the machine limit and the workers bound it.
+    // At every look, not only on a change: another run beginning or ending moves that with this run's share unchanged.
+    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN));
+    if (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap) return;
     // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
     shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
-    // As at the start: beside another run a share keeps a slot for landing; alone, the machine limit and the workers bound it.
-    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN));
     run.update(shown);
   };
   const poolWatch: ReturnType<typeof setInterval> = setInterval(poolValues, 5000);
