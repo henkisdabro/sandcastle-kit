@@ -6,6 +6,7 @@
 //   pnpm test:file test/recorded-release.test.ts
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,9 +39,25 @@ test("a project with no update record has no recorded release", () => {
   assert.equal(recordedRelease(project(), kit("0.13.0")), undefined);
 });
 
-test("a record that names no release (an unreadable or older one) has no recorded release", () => {
+test("an unreadable record, or one that names no release, has no recorded release", () => {
   assert.equal(recordedRelease(project("{not json"), kit("0.13.0")), undefined);
   assert.equal(recordedRelease(project(JSON.stringify({ notes: [] })), kit("0.13.0")), undefined);
+});
+
+test("an older record holding a kit commit names the release the kit's package.json had at that commit", () => {
+  const dir = kit("0.10.0");
+  const git = (...a: string[]) => spawnSync("git", ["-C", dir, ...a], { encoding: "utf8" }).stdout.trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.com");
+  git("add", "-A");
+  git("commit", "-q", "-m", "0.10.0");
+  const old = git("rev-parse", "HEAD");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ version: "0.13.0" }));
+  git("commit", "-q", "-am", "0.13.0");
+  assert.equal(recordedRelease(project(`${old}\n`), dir), "0.10.0");
+  // A commit this kit's git does not have is no record at all, as doctor counts it.
+  assert.equal(recordedRelease(project("0123456789abcdef0123456789abcdef01234567\n"), dir), undefined);
 });
 
 test("the update line names the project's earlier release against the kit now, or says there was none", () => {
