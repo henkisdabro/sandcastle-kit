@@ -524,6 +524,9 @@ const earlierTurns = (root: string, run: any): any[] => {
 /** Whether a later turn's record of a ticket is an attempt at it: not still waiting, and not a ticket put back in the queue unstarted. */
 const attemptedIn = (t: TicketRecord) => sectionOf(t.state) !== undefined && !LEFT.includes(t.state!) && !(t.state === "queued" && !t.requeued);
 
+/** The kept worktrees of an earlier turn's tickets that stand in its facts: a ticket a later turn ran again was cut from them. */
+const carriedKept = (facts: Facts) => facts.keptWorktrees.filter((k) => k.issue in facts.tickets);
+
 /**
  * What the earlier turns of this run left, each turn's facts cut to the tickets no later turn attempted (a
  * later ending replaces an earlier one), and a partly done ticket closed since dropped.
@@ -562,7 +565,10 @@ export const gather = async (project: Project, probe: Probe = commandOf): Promis
   // A branch an earlier turn held is said with its turn: not again as held "in an earlier run", with a second step.
   const heldBefore = new Set(carried.flatMap((c) => Object.entries(c.facts.tickets).filter(([, t]) => t.state === "held").map(([id]) => `agent/issue-${id}`)));
   const earlierHeld = Object.fromEntries(Object.entries(facts.earlierHeld ?? {}).filter(([b]) => !heldBefore.has(b)));
-  return { ...facts, earlierHeld, carried };
+  // A worktree an earlier turn kept is named under its turn: not counted again among the earlier runs'.
+  const named = new Set(carried.flatMap((c) => carriedKept(c.facts).map((k) => resolve(project.root, k.path))));
+  const earlierKept = facts.earlierKept?.filter((k) => !named.has(resolve(project.root, k.path)));
+  return { ...facts, earlierHeld, earlierKept, carried };
 };
 
 const LEVELS = [0, 1, 2, 3, "drain"];
@@ -818,6 +824,10 @@ export const render = (f: Facts, plain = false): string => {
   // What the earlier turns of this run left for a person (`Facts.carried`), one set per turn.
   const carried = (f.carried ?? []).map(({ turn, facts }) => ({ turn, facts, o: owed(facts) }));
   const carriedNeed = carried.reduce((n, c) => n + c.o.held.length + new Set([...c.o.partly, ...c.o.ungated, ...c.o.gapped]).size + c.o.filingFailed, 0);
+  // The kept worktrees of the earlier turns' tickets, oldest first, one per path and none the last turn lists itself.
+  const earlierTurnKept = carried
+    .flatMap((c) => carriedKept(c.facts).map((k) => ({ ...k, turn: c.turn, state: c.facts.tickets[k.issue]?.state })))
+    .filter((k, i, all) => all.findIndex((o) => o.path === k.path) === i && !f.keptWorktrees.some((own) => own.path === k.path));
   const carriedTriage = carried.reduce((n, c) => n + c.o.toTriage, 0);
   const fixing = ids(NEEDS_FIXING);
   // Put back in the queue while the run was going (landing found it red together with another ticket, say):
@@ -1062,6 +1072,8 @@ export const render = (f: Facts, plain = false): string => {
     ...f.keptWorktrees
       .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i)
       .map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path}`),
+    // An earlier turn's, which the last turn's record never lists (each turn starts a fresh list).
+    ...earlierTurnKept.map((k) => `Worktree kept with uncommitted files: ${refOf(k.issue)} - ${k.path} (turn ${k.turn})`),
     ...earlierKeptLines(f),
     ...(f.gateRewrites ?? []).map(rewroteLine),
   ]);
@@ -1151,9 +1163,12 @@ export const render = (f: Facts, plain = false): string => {
   }
   // A merged ticket's kept worktree (a stray file its agent left, a gate restore that failed) holds the branch the landing could not delete,
   // and no other step reaches it. Only a merged one: `clean` removes every worktree, and the others hold work a run or a person still needs.
-  const mergedKept = f.keptWorktrees
-    .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i && f.tickets[k.issue]?.state === "merged")
-    .map((k) => `${refOf(k.issue)} (\`${k.path}\`)`);
+  const mergedKept = [
+    ...f.keptWorktrees
+      .filter((k, i) => f.keptWorktrees.findIndex((o) => o.path === k.path) === i && f.tickets[k.issue]?.state === "merged")
+      .map((k) => `${refOf(k.issue)} (\`${k.path}\`)`),
+    ...earlierTurnKept.filter((k) => k.state === "merged").map((k) => `${refOf(k.issue)} (\`${k.path}\`, turn ${k.turn})`),
+  ];
   // Earlier runs' kept worktrees (`earlierKept`): too many to name, so counted. `clean` removes the unmerged ones with their uncommitted files, so those are looked at first.
   const earlierKept = f.earlierKept ?? [];
   const earlierMerged = earlierKept.filter((k) => k.merged);
