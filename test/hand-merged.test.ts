@@ -17,7 +17,7 @@ import { test } from "node:test";
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 delete process.env.LINEAR_API_KEY;
-const { blockerProblems, blockerWhy, whyShort } = await import("../src/blockers.ts");
+const { blockerProblems, blockerWhy } = await import("../src/blockers.ts");
 const { gather, render } = await import("../src/report.ts");
 const { mergedByHand } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");
@@ -89,7 +89,14 @@ test("queue: a dependant of a blocker merged by hand as 'part of' it is told the
   assert.deepEqual(lines, ["shop-02 waits for shop-01, which is merged by hand but only partly done, so it stays open - it starts once shop-01 is closed."]);
   const b = { kind: "ticket" as const, id: "shop-01", state: "open" as const };
   assert.equal(blockerWhy(project, tracker)(b), "merged-partly");
-  assert.equal(whyShort["merged-partly"], "merged by hand, partly done: stays open");
+  // The closing summary's blocker note, for a dependant this run left blocked.
+  writeFileSync(
+    join(project.root, ".sandcastle/logs/run.json"),
+    JSON.stringify({ orchestrator: "fixture", pid: 1, startedAt: started, finishedAt: "2026-10-01T09:00:00.000Z", exitCode: 0, stage: "report", tickets: { "shop-02": { state: "blocked", title: "B" } } }),
+  );
+  const facts = await gather(project, () => undefined);
+  assert.deepEqual(facts.blocked, [{ id: "shop-02", on: ["shop-01"], why: { "shop-01": "merged by hand, partly done: stays open" } }]);
+  assert.match(render(facts, true), /shop-02 waits for shop-01.* - merged by hand, partly done: stays open/);
   // A merge worded "closes" is still the push-closes case.
   const closing = repo("merged", "shop-01", HELD, "Merge agent/issue-shop-01 (closes shop-01)");
   assert.equal(blockerWhy(closing.project, closing.tracker)(b), "merged-by-hand");
