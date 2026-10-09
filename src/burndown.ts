@@ -451,6 +451,10 @@ const boldLine = (line: string): { label: boolean; prose: string } | undefined =
 };
 // Code is no prose of the reviewer's: `gap-in-prose` is a file name, and `\b` treats its hyphen as a word edge.
 const withoutCode = (sentence: string) => sentence.replace(/`[^`\n]*`/g, "");
+// Nor is a sentence in double quotes: a review of the detector itself quotes its example sentences ("The gap
+// remains; I have not yet fixed it."), and an approving one quotes what a document says. Taken out of a whole
+// unit, before it is split into sentences, as a quoted sentence ends its own sentence mid-quote.
+const withoutQuotes = (unit: string) => unit.replace(/"[^"]*"|\u201c[^\u201d]*\u201d/g, "");
 // The sentences of a message, read as a person would: a tag's content (`<ungated>`, `<changelog>`) and a
 // fenced block are no prose, a heading is no sentence, a list item is a unit of its own, and a paragraph's
 // wrapped lines join. Each sentence keeps the unit it came from, for the context a gap sentence needs.
@@ -470,7 +474,7 @@ const sentencesOf = (text: string): { text: string; unit: number }[] => {
     }
   }
   return units.flatMap((u, unit) =>
-    u
+    withoutQuotes(u)
       .split(/(?<=[.!?])\s+(?=[A-Z"`(*])/)
       .map((s) => s.replace(/^(?:[-*+•]|\d+[.)])\s+/, "").trim())
       .map((s) => ({ text: s, unit })),
