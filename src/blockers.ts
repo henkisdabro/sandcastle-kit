@@ -195,10 +195,13 @@ export const blockerWhy = (project: Project, tracker: Tracker, queued?: Set<stri
   };
 };
 
-/** Every blocker a ticket names: in its body, and any its tracker declares. */
+/** Every blocker a ticket names: in its body, and any its tracker declares (a ticket file's `Blocked by:` line, GitHub's native edge). */
 export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] => {
   const refs = parseRefs(project, t.body ?? "");
-  for (const id of tracker.declaredBlockers(t.id)) refs.push({ kind: "ticket", id });
+  // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
+  // as not planned included. One the body names too is one blocker.
+  const kind = tracker.kind === "github" ? "github" : "ticket";
+  for (const id of tracker.declaredBlockers(t.id)) if (!refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind, id });
   return refs;
 };
 

@@ -173,7 +173,7 @@ The status view's click hint. `resolveClickHint` runs once when `sandcastle stat
 
 ## `src/blockers.ts`
 
-What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), and comments a run would ignore; `blockerProblems`, the one list `queue`, `queue --lint`, `blockers` and the run's start print, which includes blockers listed under a `Blocked by` heading (the parser does not read them); `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
+What holds a ticket back: `Blocked by` refs (GitHub, Linear, ticket files), GitHub's native "blocked by" edges (the GitHub adapter reads `blockedBy` in its list and view calls, `declaredBlockers` returns them and `refsOf` joins them as `github` refs, a body ref to the same issue counting once; a gh too old for the field is told once on stderr and the body is read alone), and comments a run would ignore; `blockerProblems`, the one list `queue`, `queue --lint`, `blockers` and the run's start print, which includes blockers listed under a `Blocked by` heading (the parser does not read them); `openBlockersNow`: the scheduler's blockers port, the open blockers of the tickets held for one that has just landed; `blockedNote`: the wording of what a held ticket waits for
 
 ## `src/touches.ts`
 
