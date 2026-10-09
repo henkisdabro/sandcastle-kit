@@ -132,7 +132,7 @@ import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, holdAndReap, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -632,12 +632,13 @@ try {
       // The sandbox shares the repo's .git, so the run's host guards apply.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
+      // writes, and its commits and landings would read as tampering to the check below. A killed run's
+      // containers are reaped under the lock before the config is read: one still alive could write it past the pins.
+      holdAndReap(project);
       // Before the pins take the config as it is: what an earlier, killed run's sandbox planted there is refused, not pinned.
       const baseline = assertGitConfigBaseline(project, "sandcastle gates", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
-      // A live run's sandboxes apply the lean-plan file this writes, it reads the base record this
-      // writes, and its commits and landings would read as tampering to the check below.
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const fingerprint = gitFingerprint(project);
       try {
@@ -654,10 +655,11 @@ try {
       // The merge lands in this checkout, so it must be clean and no run may be merging into it.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // The lock and the reap of a killed run's containers come before the config is read, as a run's start has them.
+      holdAndReap(project);
       const baseline = assertGitConfigBaseline(project, "sandcastle land", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       assertCleanBase(project);
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const landed = await landTicket(project, makeTracker(project), args.find((a) => a !== "--accept-git-config"), async () => {
         const image = await ensureImage(project);
@@ -737,10 +739,11 @@ try {
       // live run's own worktrees must survive, so this takes the run lock.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // The lock and the reap come first: a container a killed run left could still write the config being checked.
+      holdAndReap(project);
       // Clean runs host git over whatever a killed run's sandbox left: what was planted in the config is refused, not pinned.
       const baseline = assertGitConfigBaseline(project, "sandcastle clean", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
-      lockRun(project);
       recordGitConfigStart(project, baseline);
       const { containers, images, worktrees, deleted, kept, left } = cleanProject(project, args.includes("--all"), worktreeRefusal(project));
       recordGitConfigEnd(project);

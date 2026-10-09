@@ -32,7 +32,7 @@ import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
 import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, largeFiles, lockRun, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
 import { IN_HERDR, openSandboxView, type SandboxView, sandboxPanes } from "./herdr.ts";
 import { registerRun } from "./live-runs.ts";
@@ -45,7 +45,7 @@ import {
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, strayChanges, strayNote } from "./resolution.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
-import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, reapOrphans, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
+import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, projectApiKeySpend, sandboxConfig, sandboxCpus, sh } from "./sandbox.ts";
 import { readDockerInfo, turnDockerInfo } from "./runtime.ts";
 import { poolWarningsNow } from "./size.ts";
 import { LATEST_ISSUE, ensureTriageLabel, makeTracker, type Ticket, type Tracker } from "./tracker.ts";
@@ -2245,13 +2245,14 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
   const notify = notifyCommand();
   disableHostGitHooks();
   disableHostGitGc();
-  // Before the pins take the config as it is: a key an earlier, killed run's sandbox planted is refused, not pinned.
+  // The lock, and what a killed run's sandboxes left working stopped, before anything reads or pins the shared `.git`:
+  // a container still alive could write it between the baseline check and the reap, past both the refusal and the pins.
+  holdAndReap(project);
+  // Then, before the pins take the config as it is: a key an earlier, killed run's sandbox planted is refused, not pinned.
   const gitConfig = assertGitConfigBaseline(project, "sandcastle run", turn?.acceptGitConfig);
   pinHostGitConfig(project.root);
   assertCleanBase(project);
-  lockRun(project);
   recordGitConfigStart(project, gitConfig);
-  reapOrphans(project);
   // The shared `.git` as the run starts, under its lock and with nothing a killed run left running: the base gates'
   // sandbox, the run's first, opens behind a check against it (the run's own fingerprint is taken once that sandbox
   // has closed). Sandcastle's open runs host git in the project, and the image build and preflight come between.

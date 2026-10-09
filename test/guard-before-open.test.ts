@@ -426,10 +426,10 @@ test("`sandcastle land` lands as before when nothing was planted: the check befo
 test("a run's base gates open behind a check against the shared .git as the run started, read under its lock once a killed run's sandboxes are reaped", () => {
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
   const body = src.indexOf("export const burndown = ");
-  const reaped = src.indexOf("reapOrphans(project);", body);
+  const reaped = src.indexOf("holdAndReap(project);", body);
   const reading = src.indexOf("const atStart = gitFingerprint(project);", body);
   const gates = src.indexOf("requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))", body);
-  assert.ok(src.indexOf("lockRun(project);", body) < reaped && reaped < reading, "the reading is taken before the lock is held, or before a killed run's sandboxes are stopped");
+  assert.ok(reaped > body && reaped < reading, "the reading is taken before the lock is held, or before a killed run's sandboxes are stopped");
   assert.ok(reading < gates, "the base gates open with no check against the start's reading");
   // Every sandbox a ticket's pipeline opens goes through the check: `open` is called in one place.
   const pipeline = src.slice(src.indexOf("export const createPipeline = "), body);
