@@ -73,6 +73,18 @@ const readRecord = (root: string, kit: string): { version?: string; notes: strin
 const kitNotes = (kit: string) => upgradingNotes(readFileSync(join(kit, "CHANGELOG.md"), "utf8"));
 
 /**
+ * The release this project last updated at, from its update record; undefined when there is no
+ * record or it names no release (an older record holds a kit commit). What `/sandcastle update`
+ * reports as "this project: <release> -> <kit now>": the kit's own pre-pull version is no use there,
+ * since another session may have pulled the kit already.
+ */
+export const recordedRelease = (root: string, kit = KIT): string | undefined => readRecord(root, kit)?.version;
+
+/** What `sandcastle updated` prints: the earlier recorded release (or that there was none) and the kit version now. Call before `markUpdated`, which replaces the record. */
+export const updatedLine = (before: string | undefined, now: string): string =>
+  `Recorded: this project is up to date with sandcastle-kit ${now} (this project: ${before ?? "no earlier record"} -> ${now}).`;
+
+/**
  * The Upgrading notes this project has not had: those in the kit's changelog and not in its update
  * record. A note is told by its text, so one moved from Unreleased into a release is not new again.
  * `recorded: false` when there is no record, or an older one whose commit this kit cannot read.

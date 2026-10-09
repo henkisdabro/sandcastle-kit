@@ -93,7 +93,8 @@
 //                    when it would spend ANTHROPIC_API_KEY)
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
-//                    update action's last step); doctor and run then stop listing them
+//                    update action's last step); doctor and run then stop listing them;
+//                    prints the release recorded before and the kit's version now
 //   changes [--since RELEASE]
 //                    the CHANGELOG entries of every release after the one this project last
 //                    updated at (or after RELEASE), up to the kit's own: per release grouped
@@ -143,7 +144,7 @@ import { archiveFinishedLogs, assertCleanBase, exitOnSignal, forgetHead, namedTi
 import { claudeCredentials, cleanProject, ensureImage, KIT, machineSettings, projectApiKeySpend, sandboxCpus } from "./sandbox.ts";
 import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
-import { changesDiffLines, changesLines, kitVersion, markUpdated, upgradeLines } from "./upgrading.ts";
+import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
@@ -724,7 +725,9 @@ try {
       break;
     }
     case "updated": {
-      console.log(`Recorded: this project is up to date with sandcastle-kit ${markUpdated(root)}.`);
+      // Read first: marking replaces the record, and the update action reports where the project was.
+      const before = recordedRelease(root);
+      console.log(updatedLine(before, markUpdated(root)));
       break;
     }
     case "changes": {
