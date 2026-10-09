@@ -9,6 +9,8 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-10
+
 ### Added
 
 - **`sandcastle changes [--since RELEASE]`** prints the CHANGELOG entries of every release after the
@@ -2496,7 +2498,8 @@ If you cloned the first v0.1.0 cut, pull and run `/sandcastle update` in each pr
 - A sandbox pane in Herdr read `shipped` as soon as its gates passed, before anything had landed,
   and `gate-failed` for a red one; they now read `gated green` and `gate red`.
 
-[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/henkisdabro/sandcastle-kit/compare/v0.9.0...v0.10.0

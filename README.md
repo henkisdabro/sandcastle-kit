@@ -10,7 +10,7 @@ gated and merged while you are away from the keyboard.
 [![Built on Sandcastle](https://img.shields.io/badge/built%20on-Sandcastle%20by%20Matt%20Pocock-f59e0b?style=flat-square)](https://github.com/mattpocock/sandcastle)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-22c55e?style=flat-square)](LICENSE)
 [![Secret scan](https://img.shields.io/github/actions/workflow/status/henkisdabro/sandcastle-kit/secret-scan.yml?branch=main&label=secret%20scan&style=flat-square)](.github/workflows/secret-scan.yml)
-[![Release](https://img.shields.io/badge/release-v0.12.0-8b5cf6?style=flat-square)](https://github.com/henkisdabro/sandcastle-kit/releases/latest)
+[![Release](https://img.shields.io/badge/release-v0.13.0-8b5cf6?style=flat-square)](https://github.com/henkisdabro/sandcastle-kit/releases/latest)
 
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-implement%20%2B%20review-d97757?style=flat-square&logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-cross--review-10a37f?style=flat-square&logo=openai&logoColor=white)](https://github.com/openai/codex)
