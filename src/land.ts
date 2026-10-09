@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, checkBeforeClose, dropBackup, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, dropBackup, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
 import { mergeSubject } from "./landing.ts";
 import { withSlot } from "./pool.ts";
@@ -239,7 +239,7 @@ export const landInSandbox = async (
 export const sandboxOpener =
   (project: Project, image: string, planFile: string): Opener =>
   async (branch) => {
-    const s = await createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) });
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }));
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,
