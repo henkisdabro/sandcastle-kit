@@ -1621,7 +1621,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         const conflict = conflictBefore(branch);
         if (!conflict) return undefined;
         console.log(`${ref(issue.id)}: ${branch} no longer merges onto ${base} (${conflictLine(conflict)}) - its ${before === "review" ? "review and gates are" : "gates are"} skipped.`);
-        return { issue: issue.id, branch, status: "conflict", conflict, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
+        return { issue: issue.id, branch, status: "conflict", conflict: { ...conflict, found: before }, commits: ownCommits(base, branch, project.root), gates: [], head: sh("git", ["rev-parse", branch], project.root), ...o };
       };
       // A branch kept from an earlier run (red, conflicted, crashed) forks from
       // an older base. Asked to "merge it in", an agent that found the work

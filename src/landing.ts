@@ -30,7 +30,7 @@ import type { TicketRecord } from "../mod/hooks/run-record.ts";
 import { describe, UNREVIEWED } from "./ledger.ts";
 import { dirtyFiles, readHeads } from "./run.ts";
 import { AGENT_COMMITTER, errorLine, sh } from "./sandbox.ts";
-import type { LandPorts } from "./schedule.ts";
+import type { ConflictFound, LandPorts } from "./schedule.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { expandTouches, isAgentDoc, isTestPath, parseTouches } from "./touches.ts";
 
@@ -815,10 +815,13 @@ export const againLine = (kind: "conflict" | "red", tickets: string[], red?: { g
     : `red${first === kind ? " again" : ""} ${redWith(tickets)} ${after}${redDetail(red)}`;
 };
 
-/** "requeued after conflict with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)": the second attempt, as the status view and run.json say it. */
-export const requeuedLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }) =>
+/** Where a conflict was found, as a requeue line says it: "requeued after conflict before review with #1". */
+export const FOUND_WORDS: Record<ConflictFound, string> = { review: "before review", gates: "before gates", landing: "at landing" };
+
+/** "requeued after conflict at landing with #1", "requeued after red on the merged tree (gate test; failing a.test.ts)": the second attempt, as the status view and run.json say it. */
+export const requeuedLine = (kind: "conflict" | "red", tickets: string[], red?: { gates?: string[]; failing?: string[] }, found?: ConflictFound) =>
   kind === "conflict"
-    ? `requeued after conflict${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`
+    ? `requeued after conflict${found ? ` ${FOUND_WORDS[found]}` : ""}${tickets.length ? ` with ${tickets.map(refOf).join(", ")}` : ""}`
     : `requeued after red ${redWith(tickets)}${redDetail(red)}`;
 
 /** The note a first red lands on: "red with #1 (gate test; failing a.test.ts)" or "red on the merged tree (gate test)". */

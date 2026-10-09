@@ -242,13 +242,13 @@ test("a branch that conflicts before its review starts neither review nor gates,
   const { o, lines } = await h.attempt();
   assert.deepEqual(h.events, ["impl"]);
   assert.equal(o.status, "conflict");
-  assert.deepEqual(o.conflict, { files: ["shared.txt"], with: ["1"] });
+  assert.deepEqual(o.conflict, { files: ["shared.txt"], with: ["1"], found: "review" });
   assert.equal(o.commits, 1);
   assert.ok(lines.includes(`#7: ${BRANCH} no longer merges onto main (with #1: shared.txt) - its review and gates are skipped.`), lines.join("\n"));
   // What the scheduler is handed: a conflict for its requeue-once rule, not a green for the landing worker.
   const report = attempted(ID, { status: "fulfilled", value: o });
   assert.equal(report.kind, "conflict");
-  assert.deepEqual(report.kind === "conflict" && report.conflict, { files: ["shared.txt"], with: ["1"] });
+  assert.deepEqual(report.kind === "conflict" && report.conflict, { files: ["shared.txt"], with: ["1"], found: "review" });
 });
 
 test("a branch that conflicts only before its gates is reviewed, then skips the gates", async () => {
@@ -258,7 +258,7 @@ test("a branch that conflicts only before its gates is reviewed, then skips the 
   const { o, lines } = await h.attempt();
   assert.deepEqual(h.events, ["impl", "review"]);
   assert.equal(o.status, "conflict");
-  assert.deepEqual(o.conflict, { files: ["shared.txt"], with: ["1"] });
+  assert.deepEqual(o.conflict, { files: ["shared.txt"], with: ["1"], found: "gates" });
   assert.ok(lines.includes(`#7: ${BRANCH} no longer merges onto main (with #1: shared.txt) - its gates are skipped.`), lines.join("\n"));
 });
 
@@ -289,12 +289,12 @@ test("a conflict before review takes the requeue-once path: sent back, the imple
   h.gates.push(GREEN);
   const { passes, told, endings } = await h.schedule({ landWhen: { 1: () => implemented }, changes: { 1: ["shared.txt", "one\n"] } });
   assert.deepEqual(passes, [["impl"], ["impl", "review", "gate"]]);
-  assert.deepEqual(told.filter((c) => c.kind === "requeued"), [{ kind: "requeued", id: ID, again: { kind: "conflict", with: ["1"] } }]);
+  assert.deepEqual(told.filter((c) => c.kind === "requeued"), [{ kind: "requeued", id: ID, again: { kind: "conflict", with: ["1"], found: "review" } }]);
   const seven = endings.get(ID);
   assert.equal(seven?.kind, "landing");
   assert.equal(seven?.kind === "landing" && seven.landed.kind, "merged");
   assert.equal(seven?.kind === "landing" && seven.attempts, 2);
-  assert.deepEqual(seven?.kind === "landing" && seven.again, { kind: "conflict", with: ["1"] });
+  assert.deepEqual(seven?.kind === "landing" && seven.again, { kind: "conflict", with: ["1"], found: "review" });
 });
 
 test("a conflict before the gates takes the requeue-once path: sent back, a resolver resolves the merge, a narrow review reads it and it lands", async () => {
@@ -311,7 +311,7 @@ test("a conflict before the gates takes the requeue-once path: sent back, a reso
   const { passes, told, endings } = await h.schedule({ landWhen: { 1: () => reviewed }, changes: { 1: ["shared.txt", "one\n"] } });
   // Reviewed on the first attempt, so the second needs no implementer: the resolve, its narrow review, then the gates.
   assert.deepEqual(passes, [["impl", "review"], ["resolve", "review", "gate"]]);
-  assert.deepEqual(told.filter((c) => c.kind === "requeued"), [{ kind: "requeued", id: ID, again: { kind: "conflict", with: ["1"] } }]);
+  assert.deepEqual(told.filter((c) => c.kind === "requeued"), [{ kind: "requeued", id: ID, again: { kind: "conflict", with: ["1"], found: "gates" } }]);
   const seven = endings.get(ID);
   assert.equal(seven?.kind === "landing" && seven.landed.kind, "merged");
   assert.equal(seven?.kind === "landing" && seven.attempts, 2);
@@ -332,8 +332,8 @@ test("a second conflict after the requeue is final: the ticket ends as a conflic
   assert.equal(told.filter((c) => c.kind === "requeued").length, 1);
   const seven = endings.get(ID);
   assert.equal(seven?.kind, "conflict");
-  assert.deepEqual(seven?.kind === "conflict" && seven.conflict, { files: ["shared.txt"], with: ["1"] });
-  assert.deepEqual(seven?.kind === "conflict" && seven.again, { kind: "conflict", with: ["1"] });
+  assert.deepEqual(seven?.kind === "conflict" && seven.conflict, { files: ["shared.txt"], with: ["1"], found: "review" });
+  assert.deepEqual(seven?.kind === "conflict" && seven.again, { kind: "conflict", with: ["1"], found: "review" });
   assert.equal(seven?.kind === "conflict" && seven.attempts, 2);
 });
 

@@ -981,7 +981,10 @@ export const render = (f: Facts, plain = false): string => {
   const sentBack = new Map<string, string[]>();
   for (const id of merged.filter((id) => !!f.tickets[id].requeued)) {
     const line = f.tickets[id].requeued!;
-    const why = line.startsWith("requeued after conflict") ? "sent back after a conflict at landing" : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : "sent back at landing";
+    // Where the conflict was found is in the line (`requeuedLine`); an older run record has none, and says none.
+    const found = line.match(/^requeued after conflict (before review|before gates|at landing)/)?.[1];
+    const where = found === "at landing" ? " at landing" : found ? ` found ${found.replace("before ", "before its ")}` : "";
+    const why = line.startsWith("requeued after conflict") ? `sent back after a conflict${where}` : line.startsWith("requeued after red") ? "sent back after a red gate at landing" : "sent back at landing";
     sentBack.set(why, [...(sentBack.get(why) ?? []), id]);
   }
   if (sentBack.size) done.push(`Landed on a second attempt: ${[...sentBack].map(([why, who]) => `${who.map(refOf).join(", ")} (${why})`).join("; ")}`);

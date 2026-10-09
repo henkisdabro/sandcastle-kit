@@ -129,7 +129,7 @@ test("a first conflict is told as requeued before its second attempt, which carr
   const { endings, told, order } = await play(["2"], {
     land: async () => (++landings === 1 ? { kind: "conflict", files: ["shared.txt"], with: ["1"] } : { kind: "conflict", files: ["other.txt"], with: ["3"] }),
     attempt: async (t, at) => {
-      if (at.n === 2) assert.deepEqual(at.again, { kind: "conflict", with: ["1"] });
+      if (at.n === 2) assert.deepEqual(at.again, { kind: "conflict", with: ["1"], found: "landing" });
       return green(t.id);
     },
   });
@@ -138,14 +138,14 @@ test("a first conflict is told as requeued before its second attempt, which carr
     told.filter((c) => c.kind !== "landing" && c.kind !== "demand").map((c) => c.kind),
     ["requeued", "ended"],
   );
-  assert.deepEqual(told.find((c) => c.kind === "requeued"), { kind: "requeued", id: "2", again: { kind: "conflict", with: ["1"] } });
+  assert.deepEqual(told.find((c) => c.kind === "requeued"), { kind: "requeued", id: "2", again: { kind: "conflict", with: ["1"], found: "landing" } });
   // Both attempts' tickets are named.
   assert.deepEqual(endings.get("2"), {
     kind: "landing",
     green: { issue: "2" },
     landed: { kind: "conflict", files: ["other.txt"], with: ["1", "3"] },
     attempts: 2,
-    again: { kind: "conflict", with: ["1"] },
+    again: { kind: "conflict", with: ["1"], found: "landing" },
   });
 });
 
