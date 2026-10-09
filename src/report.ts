@@ -22,7 +22,7 @@ import { branchFinished, projectWorktrees, sh } from "./sandbox.ts";
 import { readPlanUsages } from "./usage.ts";
 import { LANDING_GATES, rewroteLine } from "./gates.ts";
 import { LANDING_HOLD } from "./ledger.ts";
-import { STRAY_NOTE_START } from "./resolution.ts";
+import { REWRITTEN_NOTE_START, STRAY_NOTE_START } from "./resolution.ts";
 import { isDocPath, isTestPath } from "./touches.ts";
 import { makeTracker, refOf, withOpenList } from "./tracker.ts";
 import { OperatorError } from "./errors.ts";
@@ -74,6 +74,8 @@ export type Facts = {
   earlierHeld?: Record<string, string>;
   /** Tickets whose recorded outcome (any run) is a held conflict resolution: `sandcastle land` lands one, with the gates, where a landing hold is merged by hand. */
   heldResolutions?: string[];
+  /** Tickets whose recorded outcome (any run) is a branch the kit could not re-create on a rewritten base: its own commits are rebuilt on the base by hand, never merged as it stands (its old base is in the branch's history). */
+  heldRewritten?: string[];
   keptWorktrees: { issue: string; path: string }[];
   /**
    * Every other worktree left under `.sandcastle/worktrees/`, from any earlier run: `merged` is `clean`'s own rule for its branch
@@ -443,6 +445,8 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
   // Matched by its own wording (`needs a human: conflict resolution changed ...`, what `heldResolution` records; the files after it vary, so no whole-line compare): a hold in any other
   // words (an older kit's, a protected path's) keeps the hand merge, which `sandcastle land` would refuse or skip the review of.
   const heldResolutions = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(STRAY_NOTE_START)).map(([id]) => id);
+  // Likewise by its own wording (`rewrittenNote`): merged by hand, such a branch would bring back the commits the rewrite removed.
+  const heldRewritten = Object.entries(recorded).filter(([, o]) => o.kind === "held" && o.text?.includes(REWRITTEN_NOTE_START)).map(([id]) => id);
 
   const timingsFile = join(root, ".sandcastle/logs/timings.jsonl");
   const timed = !earlier && existsSync(timingsFile) ? tokensFromTimings(readFileSync(timingsFile, "utf8"), run.startedAt) : undefined;
@@ -473,6 +477,7 @@ const gatherTurn = async (project: Project, run: any, probe: Probe, opened: Open
     standing,
     earlierHeld,
     heldResolutions,
+    heldRewritten,
     keptWorktrees: run.keptWorktrees ?? [],
     earlierKept: earlier ? undefined : earlierKeptWorktrees(project, run, tickets, live),
     gateRewrites: run.gateRewrites,
@@ -820,6 +825,8 @@ const ticketLines = (f: Facts, o: Owed, carried: boolean): string[] => {
       const unmet = t.unmet ? ` - criterion unmet: ${t.unmet}${t.unmet.endsWith("…") ? ` (cut short - full text in the agents' logs, .sandcastle/logs/agent-issue-${id}-*.log)` : ""}` : "";
       // A held conflict resolution is landed with `sandcastle land`, which gates the merge; a hand merge runs no gate.
       const how = f.heldResolutions?.includes(id) ? `land: sandcastle land ${id}` : `merge: git merge --no-ff agent/issue-${id}`;
+      // Its history holds the old base, which a merge or a plain log would show as the branch's own: only the commits since the fork are its work.
+      if (f.heldRewritten?.includes(id)) return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p --no-merges agent/issue-${id} ^${f.base} ^<old ${f.base}>   rebuild: git rebase --onto ${f.base} <old ${f.base}> agent/issue-${id}   (<old ${f.base}> is named above)`];
       return [`- ${name(id)} - ${why}${size}${unmet}`, `  review: git log -p ${f.base}..agent/issue-${id}   ${how}`];
     }),
     ...o.gone.map((id) => `- ${name(id)} - ${f.tickets[id].note ?? "held"} - its branch agent/issue-${id} is gone and no merge of it is on ${f.base}: do the work yourself, or put the ticket back (\`sandcastle requeue <ticket>\`) for a run to redo`),
@@ -884,8 +891,10 @@ const ticketSteps = (f: Facts, o: Owed, carried: boolean): string[] => {
   // The last turn's own comes first in `render`; an earlier turn's has no such place, so it leads its own steps.
   if (carried) next.push(...uncommittedSteps(o));
   const resolutions = o.heldWork.filter((id) => f.heldResolutions?.includes(id));
-  const merges = o.heldWork.length - resolutions.length;
+  const rewritten = o.heldWork.filter((id) => f.heldRewritten?.includes(id));
+  const merges = o.heldWork.length - resolutions.length - rewritten.length;
   if (merges) next.push(`Review and merge the ${merges} held branch(es) (commands above).`);
+  if (rewritten.length) next.push(`Rebuild the ${rewritten.length} held branch(es) on the rewritten ${f.base} (commands above), then \`sandcastle requeue <ticket>\` for a run to review and land ${rewritten.length === 1 ? "it" : "each"}.`);
   if (resolutions.length) next.push(`Check and land the ${resolutions.length} held conflict resolution(s) (commands above): \`sandcastle land <ticket>\` gates the merge.`);
   if (o.gone.length) next.push(`Decide ${list(o.gone)}: the branch is gone and nothing of it is on ${f.base}, so do the work yourself, or \`sandcastle requeue <ticket>\` for a run to redo it.`);
   if (o.handedBack.length) next.push(`Read the agent's comment on ${list(o.handedBack)}: work only a person can do, do it and close the ticket; a question, answer it and requeue: \`sandcastle requeue <ticket> --note "..."\`.`);
@@ -1159,11 +1168,14 @@ export const render = (f: Facts, plain = false): string => {
   // Local state
   const earlier = f.earlierHeld ?? {};
   const isResolution = (b: string) => !!f.heldResolutions?.includes(b.replace(/^agent\/issue-/, ""));
+  const isRewritten = (b: string) => !!f.heldRewritten?.includes(b.replace(/^agent\/issue-/, ""));
   // The landing hold's own text is the generic wording: said once, not again as the reason.
   const earlierWords = (b: string) =>
     isResolution(b)
       ? `its conflict resolution was held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
-      : `held for a human merge in an earlier run${earlier[b] && earlier[b] !== LANDING_HOLD ? `: ${earlier[b]}` : ""}`;
+      : isRewritten(b)
+        ? `held in an earlier run${earlier[b] ? `: ${earlier[b].replace(/^needs a human: /, "")}` : ""}`
+        : `held for a human merge in an earlier run${earlier[b] && earlier[b] !== LANDING_HOLD ? `: ${earlier[b]}` : ""}`;
   section(h("## 📤 Local state", "## Local state"), [
     f.ahead === undefined
       ? `${f.base} has no upstream to compare with.`
@@ -1248,11 +1260,12 @@ export const render = (f: Facts, plain = false): string => {
     );
   }
   // A red base is red for whoever pulls it too.
-  const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules.`) : undefined;
+  const push = f.ahead ? (baseRed ? `Do not push ${f.base} (${f.ahead} commit(s)) until its gates are green.` : `Push ${f.base} (${f.ahead} commit(s)) under this repo's rules before the next run - not after a plain \`git pull --rebase\`, which flattens this run's landing merges into copies (\`--rebase=merges\` keeps them): a branch carried to the next run that merged the old ${f.base} is then re-created from its own commits and reviewed in full.`) : undefined;
   if (push) next.push(push);
   // `sandcastle land` refuses a branch held for a protected path or a large file, and plain `clean` keeps an unmerged branch: the person merges it or deletes it.
-  const heldEarlier = f.standing.filter((b) => b in earlier && !isResolution(b));
+  const heldEarlier = f.standing.filter((b) => b in earlier && !isResolution(b) && !isRewritten(b));
   const resolvedEarlier = f.standing.filter((b) => b in earlier && isResolution(b));
+  const rewrittenEarlier = f.standing.filter((b) => b in earlier && isRewritten(b));
   if (resolvedEarlier.length) {
     const one = resolvedEarlier.length === 1;
     const b = one ? resolvedEarlier[0] : "<branch>";
@@ -1260,6 +1273,15 @@ export const render = (f: Facts, plain = false): string => {
     next.push(
       `Check the resolution on ${resolvedEarlier.join(", ")}, held in an earlier run: \`git log -p ${f.base}..${b}\`; if no other ticket's lines were lost, \`sandcastle land ${n}\` lands ${one ? "it" : "each"} with the gates; ` +
         `if some were, fix the branch first, or \`sandcastle requeue ${n} --note "..."\`.`,
+    );
+  }
+  if (rewrittenEarlier.length) {
+    const one = rewrittenEarlier.length === 1;
+    const b = one ? rewrittenEarlier[0] : "<branch>";
+    const n = one ? rewrittenEarlier[0].replace(/^agent\/issue-/, "") : "<n>";
+    next.push(
+      `Rebuild ${rewrittenEarlier.join(", ")} on the rewritten ${f.base}, held in an earlier run: merged as ${one ? "it stands" : "they stand"}, ${one ? "it" : "each"} would bring back what the rewrite removed. ` +
+        `\`git rebase --onto ${f.base} <old ${f.base}> ${b}\` (the old ${f.base} is named in the hold note), then \`sandcastle requeue ${n}\` for a run to review and land ${one ? "it" : "each"}.`,
     );
   }
   if (heldEarlier.length) {

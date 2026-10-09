@@ -70,7 +70,7 @@ test("a turn the loop continues from: one line for the loop's next turn, then th
   const out = render(turnOne({ next: { level: 3, turn: 2, tickets: ["108", "104", "106"] } }));
   assert.equal(
     body(out, "## 👉 Next step").trim(),
-    "1. Autonomy level 3 runs turn 2 of 3 next for #108, #104, #106; what needs you from this turn is carried into the last turn's summary.\n2. Push main (3 commit(s)) under this repo's rules.",
+    "1. Autonomy level 3 runs turn 2 of 3 next for #108, #104, #106; what needs you from this turn is carried into the last turn's summary.\n2. Push main (3 commit(s)) under this repo's rules before the next run - not after a plain `git pull --rebase`, which flattens this run's landing merges into copies (`--rebase=merges` keeps them): a branch carried to the next run that merged the old main is then re-created from its own commits and reviewed in full.",
   );
 });
 

@@ -11,7 +11,7 @@ import type { Project } from "./config.ts";
 import { type Gate, LANDING, LANDING_GATES } from "./gates.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 import { herdr, herdrJson, IN_HERDR, runsStatus, STATUS_COMMAND, statusPaneRecord } from "./herdr.ts";
-import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh } from "./sandbox.ts";
+import { credentials, credentialSource, KIT, machineSettings, MAX_OUTPUT, sh, staleBaseParents } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { localStamp } from "./stamp.ts";
 import { commandOf } from "./live-runs.ts";
@@ -1287,7 +1287,8 @@ const onlyMergesSince = (root: string, base: string, branch: string, from: strin
  * The recorded green head when branch agent/issue-<id> sits on it, or past it by merge commits
  * only (the kit's base merge, or a conflict resolution a hold left on the branch), and has work
  * not on base; otherwise undefined. Undefined means "run it in full": a missing or doubtful
- * record never skips work, and a branch with a commit of its own since green is new work.
+ * record never skips work, and a branch with a commit of its own since green is new work. So is
+ * a branch that merged a base since rewritten (`staleBaseParents`): its record vouches for commits the base lost.
  */
 export const landOnlyHead = (root: string, base: string, id: string): string | undefined => {
   const branch = `agent/issue-${id}`;
@@ -1295,6 +1296,9 @@ export const landOnlyHead = (root: string, base: string, id: string): string | u
   if (!record?.green || record.branch !== branch) return undefined;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    // A base rewritten under the branch (`staleBaseParents`): the head the gates vouched for holds commits the base no
+    // longer has, so it stands for nothing - at the head itself or past it, which `onlyMergesSince` would not see.
+    if (staleBaseParents(base, branch, root).length) return undefined;
     if (sh("git", ["rev-parse", branch], root) !== record.green && !onlyMergesSince(root, base, branch, record.green)) return undefined;
     // Everything already on base: a reopened ticket, which runs as today.
     return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.green : undefined;
@@ -1316,6 +1320,7 @@ export const reviewedOnlyHead = (root: string, base: string, id: string): string
   if (!record?.reviewed || record.red || record.branch !== branch) return undefined;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    if (staleBaseParents(base, branch, root).length) return undefined;
     if (sh("git", ["rev-parse", branch], root) !== record.reviewed && !onlyMergesSince(root, base, branch, record.reviewed)) return undefined;
     return Number(sh("git", ["rev-list", "--count", `${base}..${branch}`], root)) > 0 ? record.reviewed : undefined;
   } catch {
@@ -1334,6 +1339,7 @@ export const narrowReviewBase = (root: string, base: string, id: string): string
   if (!record?.reviewed || record.branch !== branch) return undefined;
   try {
     sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], root);
+    if (staleBaseParents(base, branch, root).length) return undefined;
     return onlyMergesSince(root, base, branch, record.reviewed) ? record.reviewed : undefined;
   } catch {
     return undefined; // no such branch, not an ancestor, or git failed
