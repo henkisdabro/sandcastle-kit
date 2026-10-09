@@ -9,7 +9,9 @@ their records mid-run. `git worktree add` in the project is refused: to compare
 against `{{TARGET_BRANCH}}`, read it with `git show {{TARGET_BRANCH}}:<path>` or
 `git archive {{TARGET_BRANCH}} | tar -x -C <temp dir>`. A scratch repository to test a
 change, built under the temp dir and not in the project, takes `git -C <absolute path>` for its own
-plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). To test
+plumbing (`update-ref`, `gc`, `prune`, `stash`: the rule above is about the project's `.git`). Create it
+in an earlier command, then use `git -C /literal/absolute/path`: the guard reads the command before it runs,
+so a repository made in the same command, or a path in a variable, is refused. To test
 remote handling give it a bare origin there and use `git fetch`; `git push` is refused everywhere.
 **Never `git stash` in this worktree:** the stash list lives in the shared `.git`, so a pop can apply
 another agent's change. To run a test without your change, `git diff HEAD -- <files> > /tmp/p && git checkout HEAD --

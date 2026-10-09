@@ -132,3 +132,19 @@ for (const command of [`git -C ${scratch} push origin main`, `git -C ${bare} pus
     assert.match(r.stderr, /bare origin.*git fetch/);
   });
 }
+
+// The rule reads the command string before it runs, so a repository the same command creates, or a path in
+// a variable, never resolves: every refusal a scratch repository would have passed says so.
+const HOW = /Create the scratch repository in an earlier command, then use git -C \/literal\/absolute\/path <command> \(no variable, no path created in the same command\)\./;
+for (const command of [
+  "R=$(mktemp -d) && git init -q $R && git -C $R gc",
+  `git -C ${worktree} update-ref -d refs/heads/main`,
+  "git stash",
+  "R=$(mktemp -d) && git init -q $R && git -C $R worktree add $R/wt",
+]) {
+  test(`a refusal says to create the scratch repository first and use a literal path: ${command.replaceAll(root, "<root>")}`, () => {
+    const r = bash(command);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, HOW);
+  });
+}
