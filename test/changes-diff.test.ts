@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runKit } from "./cli-spawn.ts";
 
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.GIT_CEILING_DIRECTORIES = tmpdir();
@@ -150,4 +151,17 @@ test("changes says so when two releases differ in no setting or flag", () => {
   release(dir, "0.1.0", V1);
   release(dir, "0.2.0", V1);
   assert.deepEqual(changesDiffLines(project(), dir, "0.1.0"), ["## Settings and flags, 0.1.0 -> 0.2.0", "", "No config key, environment variable, command or flag was added, removed or changed."]);
+});
+
+test("sandcastle changes prints the settings part after the changelog, a blank line between", () => {
+  // The kit's own checkout: with or without its tags (CI's shallow clone has none) the part has its heading.
+  const cwd = mkdtempSync(join(tmpdir(), "sandcastle-changes-"));
+  git(cwd, "init", "-q");
+  const r = runKit(["changes", "--since", "0.1.0"], { cwd, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() } });
+  assert.equal(r.status, 0, r.stderr);
+  const out = r.stdout.split("\n");
+  const at = out.findIndex((l) => /^## Settings and flags, 0\.1\.0 -> \d+\.\d+\.\d+$/.test(l));
+  assert.ok(at > 1, r.stdout);
+  assert.equal(out[at - 1], "");
+  assert.ok(out.slice(0, at).some((l) => /^## \d+\.\d+\.\d+ - /.test(l)), "the changelog's releases come first");
 });
