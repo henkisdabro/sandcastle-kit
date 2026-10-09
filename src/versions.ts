@@ -211,5 +211,6 @@ export const resolveVersions = async (
   return { claude: claude.version, codex: codex.version, channel: VERSION.test(setting) ? "pinned" : setting, source };
 };
 
-/** The line a run and `sandcastle build` print. */
-export const versionsLine = (v: Versions) => `Claude Code ${v.claude} (${v.channel}) · Codex ${v.codex}`;
+/** The line a run and `sandcastle build` print; a run gives the kit version too (`build` does not). */
+export const versionsLine = (v: Versions, kit?: string) =>
+  `${kit ? `sandcastle-kit ${kit} · ` : ""}Claude Code ${v.claude} (${v.channel}) · Codex ${v.codex}`;
