@@ -286,9 +286,11 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     }
     // Stripped on purpose, so a run starts the ticket without waiting: say so, as the author thinks it waits.
     const read = new Set(refsIn(project, stripCode(t.body ?? "")).map((r) => `${r.kind}:${r.id}`));
+    const inCode = new Map<string, string>();
     for (const r of refsIn(project, t.body ?? "")) {
-      if (!read.has(`${r.kind}:${r.id}`)) lines.push(`${who} mentions "Blocked by ${refLabel(r)}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
+      if (!read.has(`${r.kind}:${r.id}`)) inCode.set(`${r.kind}:${r.id}`, refLabel(r));
     }
+    if (inCode.size) lines.push(`${who} mentions "Blocked by ${[...inCode.values()].join(", ")}" inside code, which a run does not read - write it as plain text if ${who} should wait.`);
     if (LIST_BLOCKERS.test(stripCode(t.body ?? ""))) lines.push(`${who} lists its blockers under a "Blocked by" heading, which is not read: write them on the line itself ("Blocked by #12, #14")`);
     const linear = new Set((project.blockers?.linear ?? []).map((k) => k.toUpperCase()));
     for (const m of stripCode(t.body ?? "").matchAll(new RegExp(`${TRIGGER}([A-Z][A-Z0-9]+)-\\d+`, "gi"))) {
