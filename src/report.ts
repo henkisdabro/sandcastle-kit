@@ -1315,7 +1315,7 @@ export const changelogSince = (project: Project, since?: string): string => {
     const run = parseRecord(text);
     if (run && typeof run.startedAt === "string" && !Number.isNaN(Date.parse(run.startedAt))) runs.set(run.startedAt, run);
   }
-  const landed = new Map<string, { title?: string; lines: string[]; dropped: number }>();
+  const landed = new Map<string, { title?: string; lines: string[]; dropped: number; none: boolean }>();
   for (const run of [...runs.values()].sort((a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!))) {
     if (run.dryRun || (after && Date.parse(run.startedAt!) <= Date.parse(after))) continue;
     for (const [id, t] of Object.entries(readTickets(run))) {
@@ -1323,8 +1323,8 @@ export const changelogSince = (project: Project, since?: string): string => {
       const before = landed.get(id);
       const lines = Array.isArray(t.changelog) ? t.changelog.filter((l): l is string => typeof l === "string") : [];
       // The latest run's lines; an earlier run's stand only while no later one gave any.
-      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0 } : before;
-      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped });
+      const kept = lines.length || !before ? { lines, dropped: t.changelogDropped ?? 0, none: t.changelogNone === true } : before;
+      landed.set(id, { title: t.title ?? before?.title, lines: kept.lines, dropped: kept.dropped, none: kept.none });
     }
   }
   const ids = [...landed.keys()];
@@ -1334,7 +1334,13 @@ export const changelogSince = (project: Project, since?: string): string => {
   for (const id of ids.filter((id) => landed.get(id)!.dropped)) {
     out.push(`A suggested line for ${refOf(id)} was not a changelog line: it is left out, so write that entry from the ticket.`);
   }
-  const bare = ids.filter((id) => !landed.get(id)!.lines.length);
+  // A ticket the agents said needs no entry is not one to write from the ticket.
+  const needNone = ids.filter((id) => !landed.get(id)!.lines.length && landed.get(id)!.none);
+  if (needNone.length) {
+    out.push("No entry needed (the agents said none):");
+    for (const id of needNone) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
+  }
+  const bare = ids.filter((id) => !landed.get(id)!.lines.length && !landed.get(id)!.none);
   if (bare.length) {
     out.push("No suggested line - write from the ticket:");
     for (const id of bare) out.push(`  ${refOf(id)}${landed.get(id)!.title ? ` ${landed.get(id)!.title}` : ""}`);
