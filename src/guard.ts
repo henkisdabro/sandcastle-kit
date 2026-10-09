@@ -9,7 +9,7 @@ import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
 import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
-import { lockWorktree, unlockWorktree } from "./worktree-lock.ts";
+import { unlockWorktree } from "./worktree-lock.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
 // ---------------------------------------------------------------------------
@@ -976,8 +976,9 @@ const worktreesOf = (project: Project, branch: string): string[] => {
  * refuses git there (`worktreeRefusal`), when it is left for `sandcastle clean` to report - and a scratch
  * `sandcastle/*` branch with it. An `agent/*` branch stays: a ticket's run owns it, it may hold work from an earlier
  * run, and the run's fingerprint restores a vanished one. A worktree that existed before the open (one reused for a
- * ticket) is removed only when it holds no uncommitted file, and is locked again when git refuses. Never throws: the
- * open's own error is the one the caller sees.
+ * ticket) is not the open's to remove, and stays as it stands once its container is gone: `git worktree remove`
+ * without `--force` runs `git status` on the host in it, past the `.git` check a close makes first, so a filter
+ * another sandbox planted since would run there. Never throws: the open's own error is the one the caller sees.
  */
 export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>): Promise<T> => {
   let before: string[] = [];
@@ -992,15 +993,9 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
     try {
       for (const path of worktreesOf(project, branch)) {
         removeSandboxContainer(path);
-        if (worktreeRefusal(project)(path)) continue;
-        const reused = before.includes(path);
+        if (before.includes(path) || worktreeRefusal(project)(path)) continue;
         unlockWorktree(path, project.root);
-        try {
-          sh("git", ["worktree", "remove", ...(reused ? [] : ["--force"]), path], project.root);
-        } catch {
-          if (reused) lockWorktree(path, project.root);
-          continue;
-        }
+        sh("git", ["worktree", "remove", "--force", path], project.root);
         if (branch.startsWith("sandcastle/")) sh("git", ["branch", "-D", branch], project.root);
       }
     } catch {

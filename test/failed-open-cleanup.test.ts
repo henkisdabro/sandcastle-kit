@@ -132,10 +132,11 @@ test("a failed open leaves a worktree whose records the guard refuses, after rem
   assert.match(git("branch", "--list", branch), /base-gates-2/);
 });
 
-test("a failed open of a reused worktree with uncommitted work keeps the worktree, locked again", async () => {
+test("a failed open of a reused worktree leaves it as it stands, with no host git status run in it", async () => {
   const { root, git, project } = repo();
   const docker = fakeDocker();
   const path = join(root, ".sandcastle/worktrees/agent-issue-8");
+  const marker = join(root, ".sandcastle/filter-ran");
   git("worktree", "add", "-q", "-b", "agent/issue-8", path);
   writeFileSync(join(path, "work.txt"), "uncommitted\n");
   await withPath(docker.bin, async () => {
@@ -143,14 +144,21 @@ test("a failed open of a reused worktree with uncommitted work keeps the worktre
       openOrAbandon(project, "agent/issue-8", async () => {
         lockWorktree(path, root);
         docker.start("c-reused", path);
+        // Another sandbox plants a filter while this one starts: a `git status` in the worktree (as `git worktree
+        // remove` without --force runs) would run it on the host on the changed tracked file.
+        git("config", "filter.planted.clean", `touch '${marker}'; cat`);
+        writeFileSync(join(root, ".git/info/attributes"), "* filter=planted\n");
+        writeFileSync(join(path, "tracked.txt"), "changed in the sandbox\n");
         throw new Error("timed out");
       }),
       /timed out/,
     );
   });
   assert.deepEqual(docker.running(), []);
+  assert.ok(!existsSync(marker), "no host git status ran in the reused worktree");
   assert.equal(readFileSync(join(path, "work.txt"), "utf8"), "uncommitted\n");
   assert.match(git("worktree", "list", "--porcelain"), /locked/);
+  assert.match(git("branch", "--list", "agent/issue-8"), /agent\/issue-8/);
 });
 
 test("an open that succeeds is returned as it is, with nothing removed", async () => {
