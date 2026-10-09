@@ -445,10 +445,11 @@ export const gateMs = (result: unknown): Record<string, number> | undefined => {
 // default with its absolute "location:" paths) the ids name no file, and the
 // red stays the branch's own.
 const SPEC_FAILED = /^\s*✖ (?!failing tests:|\d+ problems? \()(.+?)(?: \([\d.]+m?s\))?$/;
-// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it. The label
-// is skipped, a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a
-// package, and its "0.004s" would pass for a file.
-const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))[^\s/.]+\s+)?(\S+)/;
+// vitest's workspace projects put a label after FAIL: "|web|" without colour, a bare "web" badge with it; a project
+// named after a scoped package is "@acme/web". The label is skipped,
+// a bare word only when a file follows that is not a duration: Go's "FAIL<TAB>mymod<TAB>0.004s" is a package, and
+// its "0.004s" would pass for a file.
+const FAIL_LINE = /^\s*FAIL\s+(?:\|[^|\s]+\|\s+|(?=(?:@[^\s/]+\/)?[^\s/.]+\s+(?!\d+(?:\.\d+)?m?s(?:\s|$))[^\s/][^\s]*\.[A-Za-z0-9]+(?:\s|$))(?:@[^\s/]+\/)?[^\s/.]+\s+)?(\S+)/;
 const FAILING_TEST_LINE = [
   /^(?:FAILED|ERROR)\s+(\S+)/,
   FAIL_LINE,
