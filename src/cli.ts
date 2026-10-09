@@ -132,7 +132,7 @@ import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, tookLines, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -282,7 +282,7 @@ try {
         }
         sandboxPanes(project);
         // The child checks again for itself; this one refuses before a process starts.
-        assertGitConfigBaseline(project, "sandcastle run", given.acceptGitConfig);
+        const baseline = assertGitConfigBaseline(project, "sandcastle run", given.acceptGitConfig);
         assertCleanBase(project);
         await requireRepoAccess(project);
         const owner = livePid(root);
@@ -294,6 +294,8 @@ try {
         // A detached run has no terminal to ask on: only the opt-in says yes, given here and passed on.
         await confirmApiKey(projectApiKeySpend(project), "This run", { terminal: false });
         const started = await startDetached(root, args.filter((a) => a !== "--detach"), { inHerdr: IN_HERDR, dockerInfo: reading?.text });
+        // The child prints what its start took into its log, which nobody reads at once: this terminal shows it too.
+        if (started.code === 0) for (const line of tookLines(baseline)) console.log(line);
         for (const line of started.lines) console.log(line);
         process.exitCode = started.code;
         break;

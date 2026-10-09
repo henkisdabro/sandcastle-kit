@@ -574,13 +574,17 @@ export const assertGitConfigBaseline = (project: Project, command: string, accep
   );
 };
 
+/** The line a start prints for each change `assertGitConfigBaseline` took as the person's own. */
+export const tookLines = ({ took }: GitConfigStart) => took.map((line) => `Took as your own, since the last run ended cleanly - ${line}`);
+
 /**
  * Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended,
  * and prints a line for each change it took as the person's own.
  */
-export const recordGitConfigStart = (project: Project, { took, ...state }: GitConfigStart) => {
+export const recordGitConfigStart = (project: Project, start: GitConfigStart) => {
+  const { took: _took, ...state } = start;
   writeBaseline(project, { ...state, clean: false });
-  for (const line of took) console.log(`Took as your own, since the last run ended cleanly - ${line}`);
+  for (const line of tookLines(start)) console.log(line);
 };
 
 /**

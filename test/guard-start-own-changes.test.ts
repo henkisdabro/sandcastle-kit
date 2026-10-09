@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "../src/config.ts";
-import { assertGitConfigBaseline, recordGitConfigEnd, recordGitConfigStart } from "../src/guard.ts";
+import { assertGitConfigBaseline, recordGitConfigEnd, recordGitConfigStart, tookLines } from "../src/guard.ts";
 import { quietly } from "./quiet.ts";
 
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)));
@@ -283,4 +283,19 @@ test("the run's end does not record a taken change as clean unless the .git stil
   recordGitConfigEnd(project);
   assert.equal(record(project.root).clean, false);
   assert.match(refusal(project), /did not end cleanly/);
+});
+
+test("a detached start shows what it took on its own terminal, as the child's log does", async () => {
+  const { project, git } = repo();
+  await cleanRun(project);
+  git("remote", "add", "fork", "https://example.invalid/me/project.git");
+  // The parent's check, which records nothing: the lines it prints are the ones the child's start prints.
+  const parent = tookLines(assertGitConfigBaseline(project, "sandcastle run"));
+  assert.equal(parent.length, 1);
+  assert.deepEqual(await start(project), parent);
+  // The parent keeps its check's result and prints those lines once the child is going.
+  const cli = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+  const detach = cli.slice(cli.indexOf("// The child checks again for itself"), cli.indexOf("for (const line of started.lines)"));
+  assert.match(detach, /const baseline = assertGitConfigBaseline\(project, "sandcastle run", given\.acceptGitConfig\);/);
+  assert.match(detach, /if \(started\.code === 0\) for \(const line of tookLines\(baseline\)\) console\.log\(line\);/);
 });
