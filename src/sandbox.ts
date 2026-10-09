@@ -119,28 +119,72 @@ const spellings = (worktree: string) => {
   return paths;
 };
 
-// Asked at every close, while other pipelines run on: a synchronous call would hold all of them for each answer.
-const dockerAsync = (args: string[]) =>
-  new Promise<string>((resolve, reject) =>
-    execFile("docker", args, { encoding: "utf8", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => (error ? reject(Object.assign(error, { stderr })) : resolve(stdout.trim()))),
-  );
+// How long a close's or an open's `docker ps`, `inspect` or `rm` may take before the kit stops waiting, and how long a
+// `docker stop` may take beyond its own grace. A daemon that is busy or hung gives no answer, and a close that waits
+// for one forever hangs every pipeline behind it.
+const DOCKER_ANSWER_MS = 30_000;
 
-/** The running sandbox containers that mount `worktree`, found as `removeSandboxContainer` finds one. Docker not up: none. */
+/**
+ * Docker gave no usable answer to a question about the sandbox's container - it failed, ran out of time, or said
+ * something unreadable - so whether the container still runs is not known. Not "nothing is running": the caller fails.
+ */
+export class DockerAnswerError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "DockerAnswerError";
+  }
+}
+
+// Asked at every close, while other pipelines run on: a synchronous call would hold all of them for each answer. The
+// limit is the kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a hung wrapper's child
+// holds open.
+const dockerAsync = (args: string[], limitMs = DOCKER_ANSWER_MS) =>
+  new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const child = execFile("docker", args, { encoding: "utf8", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      error ? reject(Object.assign(error, { stderr })) : resolve(stdout.trim());
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(Object.assign(new Error(`docker ${args[0]} gave no answer in ${Math.round(limitMs / 1000)} s`), { stderr: "" }));
+    }, limitMs);
+  });
+
+/** What Docker said of a failed call: its error output, else the error's own message. */
+const saidOf = (e: unknown) => {
+  const { stderr, message } = e as { stderr?: string; message?: string };
+  return String(stderr ?? "").trim() || String(message ?? e);
+};
+
+/**
+ * The running sandbox containers that mount `worktree`, found as `removeSandboxContainer` finds one. Throws a
+ * `DockerAnswerError` when Docker does not answer `ps` (it failed, took too long, or listed something that is not an id)
+ * or `inspect` of a listed container: a busy, restarting or hung daemon is not "nothing is running". Only a container
+ * Docker says is gone meanwhile is skipped.
+ */
 const runningContainersOf = async (worktree: string): Promise<string[]> => {
   const paths = spellings(worktree);
   let ids: string[];
   try {
     ids = (await dockerAsync(["ps", "-q", "--filter", "name=^sandcastle-"])).split("\n").filter(Boolean);
-  } catch {
-    return []; // Docker not up: nothing of ours can be running
+  } catch (e) {
+    throw new DockerAnswerError(`docker ps: ${saidOf(e)}`, { cause: e });
   }
+  const unreadable = ids.find((id) => /\s/.test(id));
+  if (unreadable) throw new DockerAnswerError(`docker ps: unreadable output (${JSON.stringify(unreadable.slice(0, 80))})`);
   const found: string[] = [];
   for (const id of ids) {
     try {
       const mounts = (await dockerAsync(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"])).split("\n");
       if (mounts.some((m) => paths.has(m))) found.push(id);
-    } catch {
-      /* gone meanwhile */
+    } catch (e) {
+      if (/no such (container|object)/i.test(saidOf(e))) continue; // gone meanwhile
+      throw new DockerAnswerError(`docker inspect ${id}: ${saidOf(e)}`, { cause: e });
     }
   }
   return found;
@@ -156,16 +200,17 @@ const STOP_GRACE_SECONDS = 3;
  * gate started - could otherwise write the shared `.git` after the check passed and before Sandcastle's close runs
  * `git status` on the host, and the kit's unlock of the worktree in between tells it when. Sandcastle's close then
  * stops the stopped container again, which Docker accepts. Returns each container still running after Docker refused
- * its stop, with what Docker said: none when every stop worked, the container is gone, or Docker is not up.
+ * its stop (or gave no answer to it in time), with what Docker said: none when every stop worked or the container is
+ * gone. Throws a `DockerAnswerError` when Docker cannot say what runs (`runningContainersOf`), which is no answer that
+ * nothing does.
  */
 export const stopSandboxContainer = async (worktree: string): Promise<{ id: string; said: string }[]> => {
   const refused: { id: string; said: string }[] = [];
   for (const id of await runningContainersOf(worktree)) {
     try {
-      await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id]);
+      await dockerAsync(["stop", "-t", String(STOP_GRACE_SECONDS), id], STOP_GRACE_SECONDS * 1000 + DOCKER_ANSWER_MS);
     } catch (e) {
-      const { stderr, message } = e as { stderr?: string; message: string };
-      refused.push({ id, said: String(stderr ?? "").trim() || message });
+      refused.push({ id, said: saidOf(e) });
     }
   }
   if (!refused.length) return [];
@@ -173,6 +218,10 @@ export const stopSandboxContainer = async (worktree: string): Promise<{ id: stri
   const running = new Set(await runningContainersOf(worktree));
   return refused.filter((r) => running.has(r.id));
 };
+
+// The removal after a failed check runs on the failure path, where a hung daemon must not hold the run's stop.
+const dockerSync = (args: string[]) =>
+  execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: MAX_OUTPUT, timeout: DOCKER_ANSWER_MS, killSignal: "SIGKILL" }).trim();
 
 /**
  * Removes the container of the sandbox whose worktree is `worktree`, without Sandcastle's close: that close runs
@@ -185,16 +234,16 @@ export const removeSandboxContainer = (worktree: string): string[] => {
   const paths = spellings(worktree);
   let ids: string[];
   try {
-    ids = sh("docker", ["ps", "-aq", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
+    ids = dockerSync(["ps", "-aq", "--filter", "name=^sandcastle-"]).split("\n").filter(Boolean);
   } catch {
     return [];
   }
   const removed: string[] = [];
   for (const id of ids) {
     try {
-      const mounts = sh("docker", ["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
+      const mounts = dockerSync(["inspect", id, "--format", "{{range .Mounts}}{{.Source}}\n{{end}}"]).split("\n");
       if (!mounts.some((m) => paths.has(m))) continue;
-      sh("docker", ["rm", "-f", id]);
+      dockerSync(["rm", "-f", id]);
       removed.push(id);
     } catch {
       /* gone meanwhile */
