@@ -313,9 +313,10 @@ const harness = (o: { act?: (root: string, wt: string) => void; earlier?: (root:
   };
   const project = { root, name: "fixture", baseBranch: "main", gates: [{ name: "test", command: "run-tests" }], generated: [], setup: [], implement: {}, review: {}, repair: {} } as unknown as Project;
   const host = createHostGit(project, gitFingerprint(project));
-  // The checks before a close, at the pipeline's end and at a pause, put among the `docker` calls.
+  // The checks before a close, at the pipeline's end and at a pause, put among the `docker` calls. The one before each
+  // open is marked apart: no close waits on it (test/guard-before-open.test.ts holds it).
   const { check, settle } = host;
-  host.check = (when) => (mark("check"), check(when));
+  host.check = (when) => (mark(/^before (re)?opening /.test(when) ? "open-check" : "check"), check(when));
   host.settle = (branch, when) => (mark("check"), settle(branch, when));
   const tampered = new Map<string, unknown>();
   const pipeline = createPipeline({

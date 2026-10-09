@@ -76,8 +76,8 @@ export const pinHostGitConfig = (root: string) => {
 // `core.fsmonitor` command runs on the host's next `git status`), the files in
 // `.git/info/`, plant a hook in `.git/hooks/` (it runs on the operator's next
 // checkout or commit, long after the run's own hooks-off environment is gone),
-// or move the base branch. Fingerprinted at start and checked
-// before every sandbox closes and before landing; any change stops the run before
+// or move the base branch. Fingerprinted at start and checked before every
+// sandbox opens, before every sandbox closes and before landing; any change stops the run before
 // the host runs another git command in the repo. A sandbox's own worktree record
 // is held to what git writes instead (below, `assertWorktreeRecords`).
 // ---------------------------------------------------------------------------
