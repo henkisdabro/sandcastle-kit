@@ -14,7 +14,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -55,13 +55,13 @@ const GREEN: GateRun = { gates: [{ name: "test", pass: true }], failures: [] };
 const LANDED = ["a.txt", "b.txt", "c.txt"];
 
 /**
- * A project in a temp repo whose `main` has three commits more than the point ticket 7's branch was cut at, and
+ * A project in a temp repo whose `main` has three commits (and a tracked `local.env`, with `ignored`) more than the point ticket 7's branch was cut at, and
  * the worktree an earlier run left at `.sandcastle/worktrees/agent-issue-7` on that branch (0 ahead, 3 behind).
  * `dirty` leaves a file in it. `viaLink` gives the project its root as a symlink to the repo, as a project under
  * macOS's `/tmp` is (git records the real path of a worktree). `opened` is what the sandbox saw as it opened: the
  * branch's tip and the files the worktree held.
  */
-const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}) => {
+const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean; ignored?: boolean } = {}) => {
   const real = join(TMP, `repo${n++}`);
   mkdirSync(real);
   git(real, "init", "-q", "-b", "main");
@@ -69,8 +69,15 @@ const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}
   git(real, "config", "user.email", "operator@example.com");
   git(real, "config", "commit.gpgsign", "false");
   commit(real, "start.txt", "start\n", "start");
+  if (o.ignored) commit(real, ".gitignore", "local.env\n", "ignore local.env");
   git(real, "branch", BRANCH, "main");
   for (const f of LANDED) commit(real, f, `${f}\n`, `landed ${f}`);
+  // The base starts tracking a path the worktree will hold as an ignored file.
+  if (o.ignored) {
+    write(real, "local.env", "from the base\n");
+    git(real, "add", "-f", "local.env");
+    git(real, "commit", "-q", "-m", "track local.env");
+  }
   const oldTip = git(real, "rev-parse", BRANCH);
   const mainTip = git(real, "rev-parse", "main");
 
@@ -84,6 +91,7 @@ const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}
   git(real, "worktree", "add", "-q", kept, BRANCH);
   if (o.dirty === "untracked") write(kept, "wip.txt", "unsaved\n");
   if (o.dirty === "modified") write(kept, "start.txt", "start, edited\n");
+  if (o.ignored) write(kept, "local.env", "mine, kept out of git\n");
 
   const prompts = Object.fromEntries(
     ["implement", "review", "repair", "rereview", "remerge", "resolve"].map((name) => {
@@ -93,7 +101,7 @@ const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}
     }),
   ) as Ctx["prompts"];
   const events: string[] = [];
-  const opened: { tip?: string; files: string[]; edited: boolean }[] = [];
+  const opened: { tip?: string; files: string[]; edited: boolean; localEnv?: string }[] = [];
 
   const open = async (branch: string): Promise<Box> => {
     const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: real }).status === 0;
@@ -108,6 +116,7 @@ const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}
     opened.push({
       tip: exists ? git(real, "rev-parse", `refs/heads/${branch}`) : undefined,
       files: [...LANDED, "wip.txt"].filter((f) => existsSync(join(path, f))),
+      localEnv: existsSync(join(path, "local.env")) ? readFileSync(join(path, "local.env"), "utf8") : undefined,
       edited: existsSync(join(path, "start.txt")) && git(path, "status", "--porcelain", "--", "start.txt") !== "",
     });
     return {
@@ -184,6 +193,7 @@ const harness = (o: { dirty?: "untracked" | "modified"; viaLink?: boolean } = {}
 };
 
 const behind = `#7: ${BRANCH} had no commits ahead of main and was 3 commit(s) behind it`;
+const behindIgnored = `#7: ${BRANCH} had no commits ahead of main and was 4 commit(s) behind it`;
 
 test("a clean worktree a killed run left is moved to the base's tip with its branch, before the sandbox opens", async () => {
   const h = harness();
@@ -233,4 +243,14 @@ test("a worktree with an edited tracked file is left as it is, and the edit is s
   assert.deepEqual(h.opened[0].files, []);
   assert.ok(h.opened[0].edited, "the uncommitted edit survived");
   assert.ok(lines.some((l) => l.startsWith(`${behind}, but could not be cut again from main's tip (`)), lines.join("\n"));
+});
+
+test("an ignored file in a kept worktree that the base now tracks survives: the worktree is not cut again, and the line says so", async () => {
+  const h = harness({ ignored: true });
+  assert.equal(git(h.kept, "status", "--porcelain"), "", "the kit's clean check does not see the ignored file");
+  const { lines } = await h.attempt();
+  assert.equal(h.opened[0].tip, h.oldTip, "the branch stays where it was");
+  assert.equal(h.opened[0].localEnv, "mine, kept out of git\n", "the ignored file was not overwritten");
+  assert.ok(lines.some((l) => l.startsWith(`${behindIgnored}, but could not be cut again from main's tip (`)), lines.join("\n"));
+  assert.ok(!lines.some((l) => l.includes("in its kept worktree.")), lines.join("\n"));
 });

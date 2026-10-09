@@ -1458,7 +1458,9 @@ and the kit narrows what can cross it:
   signing are off, and every filter, merge or diff driver, pager, editor and signing program
   configured when the run starts keeps that value, through git's command-scope config. A value a
   sandbox writes into `.git/config` mid-run is never the one the host's git runs.
-- 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/`, `.git/hooks/` and the base
+- 🧬 **`.git` fingerprint.** `.git/config`, `.git/HEAD`, `.git/info/` (except `info/refs` and
+  `info/exclude`: ignore patterns and a transport index run nothing, and your own tools, Claude Code
+  among them, rewrite them while a run is live), `.git/hooks/` and the base
   branch are fingerprinted; if a sandbox changes them, the run stops before the host runs another
   git command there, naming the file. A hook planted there would otherwise run on your next
   checkout or commit. While tickets land during the run, the base may move only by the kit's own

@@ -92,6 +92,11 @@ This continues SKILL.md: run its "Before every action" first.
    and status pane ids. `.sandcastle/logs/run-output.log` is the run's own output; the status
    view's bottom shows its last lines while the run is live.
 
+   Watching the run from a Claude Code session in the same checkout is safe: its own writes to
+   `.git/info/exclude` (a `/loop` tick or a scheduled wake-up adds its runtime block there) are not
+   watched by the guard. A commit, pull or merge on the base branch is another matter: use another
+   worktree for that until the run ends.
+
    For a user who wants the run in their own terminal, give them the attached command to run
    there (`sandcastle run`, plus `sandcastle status` in a second terminal); started from a
    person's terminal alone in a Herdr tab it adopts that tab.

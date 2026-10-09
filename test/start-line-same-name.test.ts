@@ -41,6 +41,14 @@ test("one live run named like this run is named with its folder", () => {
   assert.match(startLines(split, [run({ pid: 7 })], true, "site")[0], /^site \(pid 7\) is live /);
 });
 
+test("a live run in a folder of this run's own name is named with its pid", () => {
+  const [line] = startLines(split, [run({ root: join("b", "site"), pid: 4242 })], true, "site", join("a", "site"));
+  assert.match(line, /^site \(pid 4242\) is live \(2 slots, demand 3\): /);
+  assert.match(line, /as site \(pid 4242\)'s tickets finish$/);
+  assert.match(startLines(split, [run({ root: join("b", "site-review"), pid: 4242 })], true, "site", join("a", "site"))[0], /^site \(site-review\) is live /);
+  assert.match(startLines(split, [run({ project: "webshop", root: join("b", "site"), pid: 9 })], true, "site", join("a", "site"))[0], /^webshop is live /);
+});
+
 test("a name nothing shares is printed as it was", () => {
   const [line] = startLines(split, [run({ project: "webshop", root: join("work", "webshop"), pid: 7 }), run({ root: join("work", "site"), pid: 8 })], true, "other");
   assert.match(line, /^webshop is live \(2 slots, demand 3\) and site is live \(2 slots, demand 3\): /);
@@ -58,5 +66,5 @@ test("a run predating shares is named the same way", () => {
 test("burndown() hands startLines each run's root and pid and this run's own name", () => {
   const src = readFileSync(join(import.meta.dirname, "..", "src", "burndown.ts"), "utf8");
   assert.match(src, /root: found\?\.root, pid: m\.pid/);
-  assert.match(src, /\}\), !DRY_RUN, project\.name\)\) console\.log\(line\)/);
+  assert.match(src, /\}\), !DRY_RUN, project\.name, project\.root\)\) console\.log\(line\)/);
 });

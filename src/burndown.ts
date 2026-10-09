@@ -1174,8 +1174,9 @@ export const createPipeline = (ctx: PipelineContext) => {
    * worktree as it stands - the worktree a run killed before its sandboxes closed leaves. Such a worktree under
    * `.sandcastle/worktrees/` with nothing uncommitted is moved with its branch (a fast-forward: none ahead, so git
    * refuses rather than lose anything), keeping its installed dependencies; one with uncommitted or untracked
-   * files, or a person's own elsewhere, is left where it is. A sandbox wrote that worktree's records, so they are held
-   * to git's own before the host runs git in it (`checkRecords`): a changed one stops the run instead.
+   * files, or a person's own elsewhere, is left where it is; so is one holding an ignored file the base now tracks.
+   * A sandbox wrote that worktree's records, so they are held to git's own before the host runs git in it
+   * (`checkRecords`): a changed one stops the run instead.
    */
   const cutFromBase = (issue: string, branch: string) => {
     const cut = () => {
@@ -1195,7 +1196,8 @@ export const createPipeline = (ctx: PipelineContext) => {
         // are held to git's own first, and a failure stops the run.
         if (kept) checkRecords(issue, kept, `before moving ${branch} in ${keptPath(project.root, kept)}`);
         if (kept && worktreeIsClean(project, kept)) {
-          sh("git", ["-C", kept, "merge", "--ff-only", `refs/heads/${base}`], project.root);
+          // worktreeIsClean leaves ignored files out; --no-overwrite-ignore makes git refuse, not overwrite, one the base now tracks.
+          sh("git", ["-C", kept, "merge", "--ff-only", "--no-overwrite-ignore", `refs/heads/${base}`], project.root);
           console.log(`${was} - cut again from ${base}'s tip in its kept worktree.`);
         } else {
           // No worktree holds it, or one that is not clean or not the kit's does: git moves the branch, or refuses to.
@@ -2277,7 +2279,7 @@ export const burndown = async (project: Project, turn?: { settings: ResolvedSett
     const found = recordOfRun(m.pid);
     const name = m.project || found?.record.orchestrator;
     return { project: name, root: found?.root, pid: m.pid, registered: m.registered, held: m.held, demand: m.demand, wait: found && name ? firstSlotWait({ root: found.root, name } as Project, found.record) : undefined };
-  }), !DRY_RUN, project.name)) console.log(line);
+  }), !DRY_RUN, project.name, project.root)) console.log(line);
   // Carried branches, read before any agent touches them: dearer than fresh tickets, so the estimate and the timings say so.
   const carriedAtStart = new Set(candidates.filter((i) => isCarried(project.root, project.baseBranch, i.id)).map((i) => i.id));
   // Sandboxes at once: the estimate's divisor, and the status view's guess at when landing starts. A dry run keeps no slot for landing.

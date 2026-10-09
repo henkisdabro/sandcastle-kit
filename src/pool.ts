@@ -535,16 +535,18 @@ const approx = (seconds: number) => {
  * A project name is the config's `name`, the same in every checkout of one repository, so a run whose
  * name another listed run (or this run, `self`) also has is named `site (site-review)`, with the last
  * component of its root, or `site (pid 4242)` where the root is unknown or another such run's folder
- * has the same last component. A name nothing shares is printed as it is.
+ * (or this run's, `selfRoot`) has the same last component. A name nothing shares is printed as it is.
  */
-export const startLines = (split: { share: number; free: number }, others: Neighbour[], landing = true, self?: string): string[] => {
+export const startLines = (split: { share: number; free: number }, others: Neighbour[], landing = true, self?: string, selfRoot?: string): string[] => {
   const shared = (n: Neighbour) => !!n.project && (n.project === self || others.some((o) => o !== n && o.project === n.project));
   const folder = (n: Neighbour) => (n.root ? basename(n.root) : undefined);
+  // A neighbour in `/b/site` seen from `/a/site` is not told apart from this run by its folder.
+  const selfDir = selfRoot ? basename(selfRoot) : undefined;
   const name = (n: Neighbour) => {
     if (!n.project) return "another project";
     if (!shared(n)) return n.project;
     const dir = folder(n);
-    if (dir && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
+    if (dir && !(n.project === self && dir === selfDir) && !others.some((o) => o !== n && shared(o) && o.project === n.project && folder(o) === dir)) return `${n.project} (${dir})`;
     return n.pid === undefined ? n.project : `${n.project} (pid ${n.pid})`;
   };
   const lines: string[] = [];
