@@ -1516,7 +1516,12 @@ and the kit narrows what can cross it:
   sandbox changes them, the run stops before the host runs another git command there, naming the
   file. A hook planted there would otherwise run on your next checkout or commit. `.git/modules/`
   (the git directories of submodules) is fingerprinted too, since a config a sandbox adds there would
-  run on a `git status` that looks into a submodule. While tickets land during the run, the base may move only by the kit's own
+  run on a `git status` that looks into a submodule. The records of worktrees you made by hand beside
+  a run (`.git/worktrees/<name>/`: `commondir`, `gitdir` and `config.worktree`, present or absent, and
+  their content) are watched as they stand at the start: one that changes stops the run, naming it, since
+  your next git command in that worktree would read config no check has seen. A record added mid-run
+  passes only as `git worktree add` writes it (`commondir` is `../..`, no `config.worktree`), and one
+  removed passes (`git worktree remove`). The kit's own sandbox records keep their checks below. While tickets land during the run, the base may move only by the kit's own
   writes: a merge holding exactly the gated tree, or a ticket file's commit. Any other movement
   stops the run. The guard cannot tell a person's commit on the base from a sandbox's, so a commit,
   pull or merge there mid-run stops it: use another worktree until the run ends (the start line
