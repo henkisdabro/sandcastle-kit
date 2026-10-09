@@ -464,6 +464,7 @@ export const recordGitConfigEnd = (project: Project) => {
 
 // Names, subjects and paths are the sandbox's to choose: shown without
 // control characters, so a planted subject cannot rewrite the terminal.
+// oxlint-disable-next-line no-control-regex -- matching control characters is the point: it strips them
 const clean = (t: string) => t.replace(/[\x00-\x1f\x7f]/g, "");
 
 // ---------------------------------------------------------------------------

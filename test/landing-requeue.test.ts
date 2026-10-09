@@ -172,7 +172,7 @@ const newLedger = (record: ReturnType<typeof recordRun>, onTell?: (c: Change) =>
     // The one comment the ticket gets after the schedule, in the ledger's words.
     comment: (id: string) => ledger.entries.get(id)?.said.tracker?.text,
     // "2: requeued after conflict with #1", for each "tried again in this run" line.
-    sentBack: () => said.flatMap((line) => (/; it is tried again in this run\.$/.test(line) ? [line.replace("; it is tried again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
+    sentBack: () => said.flatMap((line) => (line.endsWith("; it is tried again in this run.") ? [line.replace("; it is tried again in this run.", "").replace(/^#(\d+): /, "$1: ")] : [])),
   };
 };
 

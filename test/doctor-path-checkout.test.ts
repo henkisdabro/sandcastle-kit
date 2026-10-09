@@ -44,7 +44,7 @@ test("another kit checkout on PATH is an info line naming both, not a FIX", () =
   const { root, link } = onPath({ "package.json": '{ "name": "sandcastle-kit" }\n', "src/cli.ts": "" });
   const out = doctor(link);
   assert.doesNotMatch(out, fix);
-  const line = out.split("\n").find((l) => /^info `sandcastle` on PATH runs another kit checkout/.test(l)) ?? "";
+  const line = out.split("\n").find((l) => l.startsWith("info `sandcastle` on PATH runs another kit checkout")) ?? "";
   assert.ok(line.includes(root), line);
   assert.ok(line.includes(realpathSync(KIT)), line);
   assert.match(line, /`\.\/bin\/sandcastle` runs this checkout/);

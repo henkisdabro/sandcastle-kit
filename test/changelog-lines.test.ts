@@ -15,7 +15,7 @@ import type { Project } from "../src/config.ts";
 // Importing run.ts must not read the real user config or take real cache slots.
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
-const { addChangelog, changelogOf, changelogRead, CHANGELOG_MAX } = await import("../src/burndown.ts");
+const { changelogOf, changelogRead, CHANGELOG_MAX } = await import("../src/burndown.ts");
 const { loadProject } = await import("../src/config.ts");
 const { renderPrompts } = await import("../src/run.ts");
 const { makeTracker } = await import("../src/tracker.ts");

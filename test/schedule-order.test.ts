@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperatorError } from "../src/errors.ts";
 import type { Landed } from "../src/landing.ts";
-import { type Attempted, type Change, createSchedule, type Ending, type StopCause, type TicketFiles } from "../src/schedule.ts";
+import { type Attempted, type Change, createSchedule, type StopCause, type TicketFiles } from "../src/schedule.ts";
 
 type T = { id: string };
 type G = { issue: string; carried?: boolean };

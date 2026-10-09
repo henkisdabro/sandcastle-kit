@@ -206,6 +206,7 @@ const createFileHold = <T extends { id: string }>(filesOf: (ticket: T) => Ticket
       reread();
       const freed: { ticket: T; shares: FileShare[] }[] = [];
       const waits: { id: string; wait: FileWait }[] = [];
+      // oxlint-disable-next-line no-useless-spread -- `place` splices `parked`, so the loop walks a copy or it skips tickets
       for (const t of [...parked]) {
         const r = place(t);
         if ("shares" in r) freed.push({ ticket: t, shares: r.shares });

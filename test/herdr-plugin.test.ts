@@ -33,7 +33,7 @@ writeFileSync(join(bin, "herdr"), FAKE);
 chmodSync(join(bin, "herdr"), 0o755);
 process.env.PATH = `${bin}${delimiter}${process.env.PATH}`;
 process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "sandcastle-plugin-cache-"));
-const { configBlock, configConflicts, configure, contextProject, herdrConfigPath, liveRuns, logOf, PLUGIN_DIR, PLUGIN_ID, runsLine, withBlock, withoutBlock } =
+const { configBlock, configConflicts, configure, contextProject, herdrConfigPath, logOf, PLUGIN_DIR, PLUGIN_ID, runsLine, withBlock, withoutBlock } =
   await import("../src/herdr-plugin.ts");
 
 const APPLIED = '{"result":{"type":"config_reload","status":"applied","diagnostics":[]}}';

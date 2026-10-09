@@ -362,7 +362,7 @@ test("gc.auto is 0 in the environment of every host git", async () => {
   const root = makeRepo({ 1: { "a.txt": "a\n" } });
   disableHostGitGc();
   disableHostGitGc();
-  const env = Object.entries(process.env).filter(([k]) => /^GIT_CONFIG_KEY_/.test(k));
+  const env = Object.entries(process.env).filter(([k]) => k.startsWith("GIT_CONFIG_KEY_"));
   assert.equal(env.filter(([, v]) => v === "gc.auto").length, 1, "set once, however many turns of a run ask");
   // The same process environment every sh() call passes to git: the landing merge and the sandbox's host-side git.
   assert.equal(git(root, "config", "--show-origin", "--get", "gc.auto"), "command line:\t0");

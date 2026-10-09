@@ -637,11 +637,11 @@ export const watchUsage = ({
     scan();
     if ((!pending.size && !changed.size) || (!final && now() - lastWrite < interval - TICK_SLACK_MS)) return;
     try {
-      for (const [provider, reading] of [...pending]) {
+      for (const [provider, reading] of pending) {
         write(reading);
         pending.delete(provider);
       }
-      for (const issue of [...changed]) {
+      for (const issue of changed) {
         tokens?.write(issue, live(issue));
         changed.delete(issue);
       }

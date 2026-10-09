@@ -10,7 +10,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { startNode } from "./cli-spawn.ts";
-import { cleanup, heldBy, mine, other, pool, registrations, setHeld, slots, steady, tix, ticket, until } from "./pool-sim.ts";
+import { cleanup, heldBy, mine, other, pool, registrations, setHeld, steady, tix, until } from "./pool-sim.ts";
 
 const { joinPool, members, parseCapArgs, setCap, setDemand, splitShares, standing } = pool;
 

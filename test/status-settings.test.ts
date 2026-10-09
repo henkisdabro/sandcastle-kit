@@ -54,7 +54,7 @@ const frame = (cols: number, next?: string): string[] => {
   return lines;
 };
 /** The settings row's text between the bars, trimmed, or undefined when the view draws none. */
-const row = (lines: string[]) => lines.find((l) => /^│ settings /.test(l))?.replace(/^│ /, "").replace(/ *│$/, "");
+const row = (lines: string[]) => lines.find((l) => l.startsWith("│ settings "))?.replace(/^│ /, "").replace(/ *│$/, "");
 
 const group = { autonomy: 3, turn: 2, cap: 3 };
 

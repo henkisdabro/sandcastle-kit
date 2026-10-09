@@ -79,7 +79,7 @@ const withFetch = async (status: number, body: () => Promise<void>) => {
   const real = globalThis.fetch;
   const sent: string[] = [];
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    sent.push(String((init?.headers as Record<string, string>).Authorization));
+    sent.push(String((init?.headers as Record<string, string> | undefined)?.Authorization));
     return new Response(JSON.stringify({ five_hour: { utilization: 42 } }), { status });
   }) as typeof fetch;
   try {

@@ -20,8 +20,8 @@ const steps = [...audit.matchAll(/^(\d+)\. \*\*([^\n]*)/gm)].map((m) => ({
   at: m.index ?? 0,
   head: m[2] ?? "",
 }));
-const clusterStep = steps.find((s) => /^Cluster findings/.test(s.head));
-const listStep = steps.find((s) => /^Show the filing list/.test(s.head));
+const clusterStep = steps.find((s) => s.head.startsWith("Cluster findings"));
+const listStep = steps.find((s) => s.head.startsWith("Show the filing list"));
 const body = (i: number) => {
   const next = steps.find((s) => s.n === i + 1);
   return audit.slice(steps.find((s) => s.n === i)?.at ?? 0, next?.at ?? audit.length).replace(/\s+/g, " ");

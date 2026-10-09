@@ -35,7 +35,7 @@ const run = (project: Project) => {
 
 const refusal = (project: Project) => {
   let said = "";
-  assert.throws(() => assertGitConfigBaseline(project, "sandcastle run"), (e: Error) => ((said = e.message), /^NOT STARTED: /.test(said)));
+  assert.throws(() => assertGitConfigBaseline(project, "sandcastle run"), (e: Error) => ((said = e.message), said.startsWith("NOT STARTED: ")));
   return said;
 };
 

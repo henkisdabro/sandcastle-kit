@@ -80,7 +80,7 @@ test("slots: a recycled pid is not a used slot, a process of the kit is", () => 
     writeFileSync(join(slots, "sandboxes-1.lock"), `${process.pid} token b\n`);
     writeFileSync(join(slots, "gates-0.lock"), `${deadPid()} token c\n`);
     assert.match(usage(), /^sandboxes 1\/\d+ · gates 0\/\d+$/);
-    const shell = spawnSync("bash", ["-c", `eval "\$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh)"; load_pool; echo "$USED_sandboxes $USED_gates"`], {
+    const shell = spawnSync("bash", ["-c", `eval "$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p;/^load_pool() {/,/^}/p' status.sh)"; load_pool; echo "$USED_sandboxes $USED_gates"`], {
       cwd: join(import.meta.dirname, ".."),
       env: { ...process.env, XDG_CACHE_HOME: cache },
       encoding: "utf8",
@@ -97,7 +97,7 @@ test("status.sh slot_alive: ps that cannot answer keeps a live owner", () => {
   writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "ps"), 0o755);
   const run = (pid: number) =>
-    spawnSync("bash", ["-c", `eval "\$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p' status.sh)"; slot_alive ${pid}`], {
+    spawnSync("bash", ["-c", `eval "$(sed -n '/^RUN_COMMAND=/p;/^slot_alive() {/,/^}/p' status.sh)"; slot_alive ${pid}`], {
       cwd: join(import.meta.dirname, ".."),
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
       stdio: ["ignore", "pipe", "pipe"],

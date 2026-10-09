@@ -10,11 +10,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { runKit } from "./cli-spawn.ts";
 import { kitLikeProcess } from "./kit-process.ts";
 
-const kit = fileURLToPath(new URL("..", import.meta.url));
 const cache = mkdtempSync(join(tmpdir(), "sandcastle-cap-cache-"));
 const config = mkdtempSync(join(tmpdir(), "sandcastle-cap-cfg-"));
 const runs = join(cache, "sandcastle-kit", "slots", "runs");

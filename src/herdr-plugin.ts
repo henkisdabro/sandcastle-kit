@@ -489,6 +489,7 @@ const RUNNING = new Set(["implement", "resolve", "review", "cross-review", "gate
 
 // Titles, notes and logs are written by agents and trackers: a control sequence in one must not
 // drive the terminal the card is drawn on.
+// oxlint-disable-next-line no-control-regex -- matching escape sequences and control characters is the point: it strips them
 const printable = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 
 const duration = (ms: number) => {

@@ -20,7 +20,6 @@ const { loadProject } = await import("../src/config.ts");
 const kit = fileURLToPath(new URL("..", import.meta.url));
 const dockerfile = readFileSync(join(kit, "docker/base.Dockerfile"), "utf8");
 const arg = (name: string) => dockerfile.match(new RegExp(`^ARG ${name}=(\\S+)`, "m"))![1];
-const cacheFile = join(cache, "sandcastle-kit", "versions.json");
 
 // A fetcher that answers each URL from a table and records what it was asked.
 const fake = (claude: Record<string, string>, codex = "0.200.0") => {

@@ -56,7 +56,7 @@ const frame = (cols: number, next?: string): string[] => {
 };
 // The settings row and the lines it wrapped onto, which carry no label: up to the cell's border.
 const settingsLines = (lines: string[]) => {
-  const at = lines.findIndex((l) => /^│ settings /.test(l));
+  const at = lines.findIndex((l) => l.startsWith("│ settings "));
   if (at < 0) return [];
   const end = lines.findIndex((l, i) => i > at && !/^│ {11}\S/.test(l));
   return lines.slice(at, end < 0 ? undefined : end);

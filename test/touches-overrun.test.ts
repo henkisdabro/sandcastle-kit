@@ -135,7 +135,7 @@ test("landing still merges, records the overrun and says it in the close comment
 
 test("a declared change lands with no overrun and no extra line", async () => {
   const root = makeRepo({ "src/a.ts": "a2\n" });
-  const { ctx, comments, states, outcome } = harness(root, "Touches: src/a.ts");
+  const { ctx, comments, outcome } = harness(root, "Touches: src/a.ts");
   const landed = await landOne(ctx, outcome);
   assert.deepEqual(landed, { kind: "merged" });
   assert.equal(describe({ kind: "landing", green: outcome, landed, attempts: 1 }, { base: "main", gateNames: "test" }).record?.overrun, undefined);

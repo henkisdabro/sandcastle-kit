@@ -23,7 +23,7 @@ const { AGENT_COMMITTER, sandboxConfig } = await import("../src/sandbox.ts");
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-git-identity-")));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/.test(k)));
+const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
 const repo = join(tmp, "repo");
 mkdirSync(repo);
 execFileSync("git", ["init", "-q", "-b", "main", repo]);
