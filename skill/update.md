@@ -30,10 +30,24 @@ apply it once the user agrees.
      when the run ends. It is code that runs inside Claude Code with the user's permissions (the
      README's "The Claude Code mod" says what it reads), so show them doctor's command and run it
      once they agree.
-2. **What changed.** From the project's root, `sandcastle doctor` lists the **Upgrading** notes
-   in the kit's `CHANGELOG.md` that this project has not had since its last update (or says it has
-   no record, if it was never updated this way: then read the notes of every release since it was
-   set up). Read those notes in full: they name what an existing project may act on.
+2. **What's new.** From the project's root, run `sandcastle changes` (read-only, no model calls): the
+   CHANGELOG entries of every release since this project's last recorded update, up to the kit's
+   own, each cut to its bold lead. With no record it prints only the current release's entries and
+   says so: ask which release the project was set up with and run `sandcastle changes --since
+   <release>`. `sandcastle doctor` also lists the **Upgrading** notes the project has not had.
+   Sort the entries into three tiers and tell the user in this order, leaving out a tier with
+   nothing in it:
+   1. **Must act.** The **Upgrading** notes, in full from the kit's `CHANGELOG.md` (`sandcastle
+      changes` and doctor print only each note's bold lead): they name what an existing project
+      has to do. The steps below carry them out, each as a proposal.
+   2. **Decisions.** A new setting, or a new default that changes what a run does or spends, that
+      the user may want to change (an `Added` or `Changed` entry; the Upgrading notes name some).
+      Ask about them one by one, each with a recommendation and why, through the harness's question
+      tool (`AskUserQuestion` in Claude Code) where it has one. Never apply one unasked, and ask
+      about a choice once: a project config field is edited only in step 3.2, after the user's
+      yes, and autonomy comes up in step 3.10.
+   3. **Good to know.** Every other entry, one line each: what it does for the user, in plain
+      words. No question, no action.
 3. **The project** (from its root, if it has `.sandcastle/config.ts`; otherwise skip to 5):
    Every `sandcastle gates` below refuses while a run of the project is live (it never waits): run
    `sandcastle status 0` first, and if a run is live, wait for it with `sandcastle wait` (or
@@ -53,8 +67,8 @@ apply it once the user agrees.
       never built (`sandcastle build` says "Not built").
    2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
-      changes what a run does or spends (the Upgrading notes list them) and ask whether to set it
-      explicitly. Edit only the fields the user agrees to, one by one.
+      changes what a run does or spends (step 2's decisions and Upgrading notes list them) and ask
+      whether to set it explicitly. Edit only the fields the user agrees to, one by one.
    3. **Gates.** Check they still match what CI runs; CI drifts. Run `sandcastle queue`: it names
       the tracker and queue label the kit chose (`docs/agents/` can change either). If that is not
       where this project's tickets live (a repo that moved to `.scratch/` files, or back), set
