@@ -293,14 +293,19 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     const who = refOf(t.id);
     const refs = refsOf(project, tracker, t);
     waits.set(t.id, refs.filter((r) => r.kind === "ticket" || r.kind === "github").map((r) => r.id).filter((id) => queued.some((q) => q.id === id)));
-    for (const b of await Promise.all(refs.map(resolve))) {
+    // A GitHub native edge the body does not name has no line to remove: it is removed on GitHub.
+    const fromBody = parseRefs(project, t.body ?? "");
+    const resolved = await Promise.all(refs.map(resolve));
+    for (const [i, b] of resolved.entries()) {
       const name = refLabel(b);
       const why = whyOf(b);
-      if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. Remove the line, or reopen ${name}.`);
+      const native = tracker.kind === "github" && !fromBody.some((r) => r.kind === refs[i].kind && r.id === refs[i].id);
+      const removeIt = native ? `remove ${who}'s "blocked by" relationship on GitHub` : "remove the line";
+      if (why === "not-planned") lines.push(`${who} waits for ${name}, which was closed as not planned - it will never start. ${native ? "Remove the relationship on GitHub" : "Remove the line"}, or reopen ${name}.`);
       else if (why === "merged-by-hand") lines.push(`${who} waits for ${name}, which is merged locally and closes on push - it starts once ${name} is closed.`);
       else if (why === "merged-partly") lines.push(`${who} waits for ${name}, which is merged by hand but only partly done, so it stays open - it starts once ${name} is closed.`);
       else if (why === "held") lines.push(`${who} waits for ${name}, which is held for a human - it starts once ${name} is closed.`);
-      else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or remove the line.`);
+      else if (why === "unqueued") lines.push(`${who} waits for ${name}, which is open but not queued - queue ${name} or ${removeIt}.`);
       if (b.state !== "unreadable") continue;
       lines.push(
         b.kind === "ticket"
@@ -356,7 +361,7 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
     const cycle = walk(start);
     if (cycle) {
       cycle.forEach((id) => seen.add(id));
-      lines.push(`${cycle.map(refOf).join(", ")} wait for each other - none of them can ever start. Remove one "Blocked by" line.`);
+      lines.push(`${cycle.map(refOf).join(", ")} wait for each other - none of them can ever start. Remove one "Blocked by" line${tracker.kind === "github" ? ' (or "blocked by" relationship on GitHub)' : ""}.`);
     }
   }
   return lines;

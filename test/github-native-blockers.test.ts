@@ -81,7 +81,7 @@ test("a queued ticket natively blocked by an open issue that is not queued waits
   const queued = tracker.queued(false);
   const open = await openOnQueue(project, tracker, queued);
   assert.deepEqual(open.get("5")?.map((b) => [b.kind, b.id, b.state]), [["github", "7", "open"]]);
-  assert.deepEqual(await blockerProblems(project, tracker, queued), ["#5 waits for #7, which is open but not queued - queue #7 or remove the line."]);
+  assert.deepEqual(await blockerProblems(project, tracker, queued), ['#5 waits for #7, which is open but not queued - queue #7 or remove #5\'s "blocked by" relationship on GitHub.']);
 });
 
 test("a native blocker the body also names is one blocker", async () => {
@@ -97,7 +97,7 @@ test("two queued tickets natively blocked by each other wait for each other", as
   const b = issue(6, "", [{ number: 5, state: "OPEN" }]);
   setup([a, b]);
   const tracker = makeTracker(project);
-  assert.deepEqual(await blockerProblems(project, tracker, tracker.queued(false)), ["#5, #6 wait for each other - none of them can ever start. Remove one \"Blocked by\" line."]);
+  assert.deepEqual(await blockerProblems(project, tracker, tracker.queued(false)), ["#5, #6 wait for each other - none of them can ever start. Remove one \"Blocked by\" line (or \"blocked by\" relationship on GitHub)."]);
 });
 
 test("a closed native blocker holds nothing back, one closed as not planned never lets the ticket start", async () => {
