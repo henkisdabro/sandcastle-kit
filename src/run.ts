@@ -95,16 +95,17 @@ export const namedTicketsFromEnv = (env: NodeJS.ProcessEnv = process.env): { lis
   return list ? { list } : {};
 };
 
-const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N] [--detach] [--api-key]";
+const RUN_USAGE = "Usage: sandcastle run [TICKET ...] [--dry] [--concurrency N] [--detach] [--api-key] [--accept-git-config]";
 
-// `detach` and `apiKey` are only present when asked for, so the common result keeps its shape.
-export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean; concurrency?: number; detach?: true; apiKey?: true } => {
-  const out: { issues?: string[]; dry: boolean; concurrency?: number; detach?: true; apiKey?: true } = { dry: false };
+// `detach`, `apiKey` and `acceptGitConfig` are only present when asked for, so the common result keeps its shape.
+export const parseRunArgs = (args: string[]): { issues?: string[]; dry: boolean; concurrency?: number; detach?: true; apiKey?: true; acceptGitConfig?: true } => {
+  const out: { issues?: string[]; dry: boolean; concurrency?: number; detach?: true; apiKey?: true; acceptGitConfig?: true } = { dry: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--dry") out.dry = true;
     else if (arg === "--detach") out.detach = true;
     else if (arg === "--api-key") out.apiKey = true;
+    else if (arg === "--accept-git-config") out.acceptGitConfig = true;
     else if (arg === "--concurrency") {
       const n = args[++i];
       if (n === undefined || !/^[1-9]\d*$/.test(n)) throw new OperatorError(`--concurrency needs a whole number of 1 or more. ${RUN_USAGE}`);
