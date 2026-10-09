@@ -137,7 +137,7 @@ const play = async () => {
 test("a base move found at a landing prints the STOPPED line once, while the run is still going", async () => {
   const { printed, events } = await play();
   assert.equal(printed.length, 1, printed.join("\n"));
-  assert.match(printed[0], /^STOPPED landing: main moved while sandboxes ran \([0-9a-f]{7} by Operator Example, .*: quick fix; changes shared\.txt\) - the run finishes what is in flight and lands nothing more\.$/);
+  assert.match(printed[0], /^STOPPED landing: main moved while sandboxes ran - the run finishes what is in flight and lands nothing more; the closing summary says what to check\.$/);
   // Before any ticket's ending that the stop caused, and long before the run returned.
   assert.equal(events.filter((e) => e === "STOPPED line").length, 1);
   assert.ok(events.indexOf("STOPPED line") < events.indexOf("ended 1"), events.join(" | "));

@@ -151,7 +151,7 @@ import { doctor, requireRepoAccess } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
 import { HELP, helpFor, wantsHelp } from "./help.ts";
 import { herdrCommand } from "./herdr-plugin.ts";
-import { nearest, OperatorError } from "./errors.ts";
+import { nearest, OperatorError, wasReported } from "./errors.ts";
 import { init } from "./init.ts";
 import { setup } from "./setup.ts";
 import { realReaders, sizeLines } from "./size.ts";
@@ -774,10 +774,13 @@ try {
   // A full disk is the operator's to fix, wherever the write was; its stack trace says nothing more.
   const full = (error as NodeJS.ErrnoException)?.code === "ENOSPC";
   if (!(error instanceof OperatorError) && !full) throw error;
-  console.error(
-    full
-      ? `\nThe disk is full: writing ${(error as NodeJS.ErrnoException).path ?? "a file"} failed. Free some space (\`sandcastle clean\` removes finished worktrees; \`docker system df\` shows what Docker holds), then try again.`
-      : `\n${(error as Error).message}`,
-  );
+  // A stopped run's summary printed its message already (`reportedError`).
+  if (!wasReported(error)) {
+    console.error(
+      full
+        ? `\nThe disk is full: writing ${(error as NodeJS.ErrnoException).path ?? "a file"} failed. Free some space (\`sandcastle clean\` removes finished worktrees; \`docker system df\` shows what Docker holds), then try again.`
+        : `\n${(error as Error).message}`,
+    );
+  }
   process.exitCode = 1;
 }

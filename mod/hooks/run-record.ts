@@ -309,6 +309,10 @@ export type RunRecord = {
   tokens?: string;
   /** Why the run stopped before the end of its queue. */
   stopped?: string;
+  /** The stop's cause in a few words (`main moved while sandboxes ran`), beside `stopped`: the summary words its next step by it. */
+  stoppedWhat?: string;
+  /** Why the agents' follow-ups were not written to the tracker, once for the set: each one's `failed` carries the same text. */
+  followUpsWithheld?: string;
   /** How a person ended the run: "sandcastle stop", "Ctrl-C", or the signal's name. Absent for a crash, a kill -9 and a run that ended by itself. */
   stoppedBy?: string;
   baseGates?: unknown;
