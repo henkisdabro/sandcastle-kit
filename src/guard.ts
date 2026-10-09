@@ -7,7 +7,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Project } from "./config.ts";
 import { releaseLock, takeLock } from "./pool.ts";
-import { removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
+import { DockerAnswerError, removeSandboxContainer, sh, stopSandboxContainer } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 import { expandTouches, parseTouches } from "./touches.ts";
 
@@ -109,16 +109,19 @@ const AGENT_BRANCH = /^agent\/issue-/;
  * `packed-refs`, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD`): a symlink is its target, a directory a marker, a file its hash.
  */
 const MODULE_DATA = new Set(["objects", "refs", "logs", "index", "packed-refs", "HEAD", "FETCH_HEAD", "ORIG_HEAD"]);
-const moduleFiles = (modules: string, hashOf: (f: string) => string): Record<string, string> => {
+const moduleFiles = (modules: string, hashOf: (f: string) => string) => treeFiles(modules, hashOf, MODULE_DATA);
+
+/** Every file and directory under `top`, keyed by path, as `moduleFiles` keeps them; `data` names what a git directory's own data is (none: everything). */
+const treeFiles = (top: string, hashOf: (f: string) => string, data: ReadonlySet<string> = new Set()): Record<string, string> => {
   const found: Record<string, string> = {};
-  const top = lstatSync(modules, { throwIfNoEntry: false });
-  if (!top) return found;
+  const at = lstatSync(top, { throwIfNoEntry: false });
+  if (!at) return found;
   // `container`: a directory of modules, whose entries are module names (a module may be named `objects`), not a git
   // directory's own, whose data names are left out.
   const visit = (dir: string, container: boolean) => {
     found[dir] = "directory";
     for (const name of readdirSync(dir).sort()) {
-      if (!container && MODULE_DATA.has(name)) continue;
+      if (!container && data.has(name)) continue;
       const path = join(dir, name);
       const info = lstatSync(path);
       if (info.isSymbolicLink()) found[path] = `link ${readlinkSync(path)}`;
@@ -126,8 +129,8 @@ const moduleFiles = (modules: string, hashOf: (f: string) => string): Record<str
       else found[path] = hashOf(path);
     }
   };
-  if (top.isDirectory()) visit(modules, true);
-  else found[modules] = top.isSymbolicLink() ? `link ${readlinkSync(modules)}` : hashOf(modules);
+  if (at.isDirectory()) visit(top, true);
+  else found[top] = at.isSymbolicLink() ? `link ${readlinkSync(top)}` : hashOf(top);
   return found;
 };
 
@@ -281,46 +284,74 @@ const configChange = (project: Project, before: Fingerprint["config"]["entries"]
 };
 
 // ---------------------------------------------------------------------------
-// The start baseline. The pins and the fingerprint both take the shared `.git/config` as they find it
-// when a run starts, so whatever a sandbox wrote there in a run that was killed before any check (Ctrl-C
-// at the wrong moment, a crash, a machine asleep) would be that run's baseline and never reported.
-// The program-running part of the config - the keys that make git run something, and `info/attributes`,
-// which maps paths to them - is therefore recorded when a run starts and again when it ends cleanly, in
-// the project's gitignored `.sandcastle/.run/`, and compared before anything is pinned: a difference
-// from the previous run's record is a refusal, until a person says it is theirs.
+// The start baseline. The pins and the fingerprint both take the shared `.git` as they find it when a
+// run starts, so whatever a sandbox wrote there in a run that was killed before any check (Ctrl-C at the
+// wrong moment, a crash, a machine asleep) would be that run's baseline and never reported. What makes
+// git run a program or reach the network - those keys of `.git/config` and of the main worktree's
+// `.git/config.worktree`, `info/attributes`, which maps paths to drivers, the hooks, which the kit's git
+// ignores but the operator's next commit runs, and `modules/`, whose configs a git that looks into a
+// submodule reads - is therefore recorded when a run starts and again when it ends cleanly, in the
+// project's gitignored `.sandcastle/.run/`, and compared before anything is pinned: a difference from the
+// previous run's record is a refusal, until a person says it is theirs.
 // ---------------------------------------------------------------------------
 
-// Every key that runs a program or loads more config. All of `filter.*` (its `required` decides whether
-// a failing filter stops git), the other drivers and commands, and every `include` key.
-const PROGRAM_KEYS = /^(filter\..+|merge\..+\.driver|diff\..+\.(textconv|command)|core\.(fsmonitor|hookspath|sshcommand)|include.*)$/i;
+// Every key that runs a program, loads more config or decides where and how git connects. All of
+// `filter.*` (its `required` decides whether a failing filter stops git), every key `pinHostGitConfig`
+// pins (a value planted in a killed run would be pinned as the run's own, not refused), the other drivers
+// and commands, every `include` key; what a host `git fetch` reads (Sandcastle fetches in a kept worktree
+// it reuses): a remote's URLs, programs and proxy, URL rewrites, credentials, the protocols allowed, the
+// proxies and the CAs an HTTPS fetch trusts; the signature checks, which run `gpg.program`; and every
+// `extensions.*`. Not `branch.*` nor `remote.*.fetch`: a person's own work in another worktree changes
+// them, and they run nothing.
+const PROGRAM_KEYS = new RegExp(
+  `${COMMAND_KEYS}|^(filter\\..+|merge\\..+\\.driver|diff\\..+\\.(textconv|command)|core\\.(fsmonitor|hookspath|sshcommand|gitproxy)|include.*` +
+    "|remote\\..+\\.(url|pushurl|uploadpack|receivepack|proxy)|url\\..+\\.(insteadof|pushinsteadof)|credential\\..+|protocol\\..+" +
+    "|http\\.(.+\\.)?(proxy|sslcainfo|sslcapath)|merge\\.verifysignatures|log\\.showsignature|extensions\\..+)$",
+  "i",
+);
 
-type ProgramConfig = { entries: string[]; attributes: string };
-type BaselineRecord = ProgramConfig & { clean: boolean };
+// `entries` and `worktreeEntries`: those keys of `.git/config` and of `.git/config.worktree` (none when it
+// is absent), `key\nvalue`, sorted. `attributes`: the hash of `info/attributes` ("" when absent). `files`:
+// every file and directory under `hooks/` and `modules/` (`treeFiles`), by its path in the `.git` directory.
+type ProgramState = { entries: string[]; worktreeEntries: string[]; attributes: string; files: Record<string, string> };
+type BaselineRecord = ProgramState & { clean: boolean };
 
 const baselineFile = (project: Project) => join(project.root, ".sandcastle", ".run", "git-config-baseline.json");
 
-/** The shared `.git/config`'s program-running entries (`key\nvalue`, sorted) and the hash of `info/attributes` ("" when absent). */
-const programConfig = (project: Project): ProgramConfig => {
+const programState = (project: Project): ProgramState => {
   const dir = commonDir(project.root);
-  let listed: string[];
-  try {
-    // `--file`: only this file, not the user's or the system's, which a sandbox cannot write.
-    listed = existsSync(join(dir, "config")) ? sh("git", ["config", "--file", join(dir, "config"), "-z", "--list"], project.root).split("\0").filter(Boolean) : [];
-  } catch (error) {
-    throw new OperatorError(`NOT STARTED: git cannot read ${relative(realpathSync(project.root), join(dir, "config"))} as config, so the program-running keys a sandbox may have planted there cannot be checked. Inspect it before running any other git command there.`, { cause: error });
-  }
+  const entries = (path: string) => {
+    if (!existsSync(path)) return [];
+    try {
+      // `--file`: only this file, not the user's or the system's, which a sandbox cannot write.
+      const listed = sh("git", ["config", "--file", path, "-z", "--list"], project.root).split("\0").filter(Boolean);
+      return listed.filter((e) => PROGRAM_KEYS.test(e.split("\n")[0])).sort();
+    } catch (error) {
+      throw new OperatorError(`NOT STARTED: git cannot read ${relative(realpathSync(project.root), path)} as config, so the program-running keys a sandbox may have planted there cannot be checked. Inspect it before running any other git command there.`, { cause: error });
+    }
+  };
+  const hashOf = (f: string) => createHash("sha256").update(existsSync(f) ? readFileSync(f) : "").digest("hex");
+  const files: Record<string, string> = {};
+  for (const [path, hash] of Object.entries({ ...treeFiles(join(dir, "hooks"), hashOf), ...moduleFiles(join(dir, "modules"), hashOf) })) files[relative(dir, path)] = hash;
   const attributes = join(dir, "info", "attributes");
   return {
-    entries: listed.filter((e) => PROGRAM_KEYS.test(e.split("\n")[0])).sort(),
-    attributes: existsSync(attributes) ? createHash("sha256").update(readFileSync(attributes)).digest("hex") : "",
+    entries: entries(join(dir, "config")),
+    worktreeEntries: entries(join(dir, "config.worktree")),
+    attributes: existsSync(attributes) ? hashOf(attributes) : "",
+    files,
   };
 };
+
+const strings = (value: unknown) => Array.isArray(value) && value.every((e) => typeof e === "string");
 
 const readBaseline = (project: Project): BaselineRecord | undefined => {
   try {
     const record = JSON.parse(readFileSync(baselineFile(project), "utf8"));
-    if (Array.isArray(record.entries) && record.entries.every((e: unknown) => typeof e === "string") && typeof record.attributes === "string") {
-      return { entries: record.entries, attributes: record.attributes, clean: record.clean === true };
+    const files = record.files;
+    // A record an earlier kit wrote holds fewer keys and no files, so it fails here and is read as none: compared
+    // with today's state it would name every remote's URL and every sample hook as added.
+    if (strings(record.entries) && strings(record.worktreeEntries) && typeof record.attributes === "string" && files && typeof files === "object" && strings(Object.values(files))) {
+      return { entries: record.entries, worktreeEntries: record.worktreeEntries, attributes: record.attributes, files, clean: record.clean === true };
     }
   } catch {
     // No record, or one that cannot be read: the first run under this kit, as far as it can tell.
@@ -333,44 +364,72 @@ const writeBaseline = (project: Project, record: BaselineRecord) => {
   writeFileSync(baselineFile(project), `${JSON.stringify(record, null, 2)}\n`);
 };
 
+/** What differs between a record and the present state, as the refusal says it: one part per place, none when nothing does. */
+const differences = (project: Project, was: ProgramState, now: ProgramState) => {
+  const config = configChange(project, was.entries, now.entries).words;
+  const worktree = configChange(project, was.worktreeEntries, now.worktreeEntries).words;
+  const word = (inWas: boolean, inNow: boolean) => (!inWas ? "added" : !inNow ? "removed" : "changed");
+  const files = changedFiles(was.files, now.files).map((f) => `${clean(f)} ${word(f in was.files, f in now.files)}`);
+  if (was.attributes !== now.attributes) files.unshift(`info/attributes ${word(!!was.attributes, !!now.attributes)}`);
+  return {
+    config,
+    worktree,
+    files,
+    parts: [
+      ...(config.length ? [`In .git/config: ${config.join("; ")}.`] : []),
+      ...(worktree.length ? [`In .git/config.worktree: ${worktree.join("; ")}.`] : []),
+      ...(files.length ? [`Under .git/: ${files.join(", ")}.`] : []),
+    ],
+  };
+};
+
 /**
- * Before a run, `land` or `gates` pins anything: holds the shared `.git/config`'s program-running keys
- * and `info/attributes` to what the previous run recorded. A difference throws an `OperatorError` that
- * names each added, changed or removed key (no value for a key that runs a program, as the `.git` stop
- * says it) and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's
- * own. No record (the first run under this kit) is no difference. A previous run that never ended
- * cleanly says so in the refusal, since a sandbox may have written the difference. Writes nothing:
- * `recordGitConfigStart` does, once the run holds its lock. Returns the state it read.
+ * Before a run, `land` or `gates` pins anything: holds what the start baseline records (above) to what the
+ * previous run recorded. A difference throws an `OperatorError` that names each added, changed or removed
+ * key (no value for a key that runs a program or carries credentials, as the `.git` stop says it) and file,
+ * and how to go on: remove it, or `<command> --accept-git-config` when it is the operator's own. No record
+ * (the first run under this kit) is no difference. A previous run that never ended cleanly says so in the
+ * refusal, since a sandbox may have written the difference. Writes nothing: `recordGitConfigStart` does,
+ * once the run holds its lock. Returns the state it read.
  */
-export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramConfig => {
-  const now = programConfig(project);
+export const assertGitConfigBaseline = (project: Project, command: string, accept = false): ProgramState => {
+  const now = programState(project);
   const was = readBaseline(project);
   if (!was || accept) return now;
-  const { words } = configChange(project, was.entries, now.entries);
-  if (was.attributes !== now.attributes) words.push(`info/attributes ${!was.attributes ? "added" : !now.attributes ? "removed" : "changed"}`);
-  if (!words.length) return now;
+  const { config, worktree, files, parts } = differences(project, was, now);
+  if (!parts.length) return now;
   const root = project.root;
+  const inspect = [
+    ...(config.length ? [`\`git -C ${root} config --local --list\``] : []),
+    ...(worktree.length ? [".git/config.worktree"] : []),
+    ...(files.length ? ["the files it names"] : []),
+  ];
+  const remove = [
+    ...(config.length ? [`a key in .git/config with \`git -C ${root} config --local --unset-all <key>\``] : []),
+    ...(worktree.length ? [`a key in .git/config.worktree with \`git -C ${root} config --file .git/config.worktree --unset-all <key>\``] : []),
+    ...(files.length ? ["a file by deleting it"] : []),
+  ];
+  const listed = (items: string[]) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0]);
   throw new OperatorError(
-    `NOT STARTED: the shared .git/config holds program-running keys that differ from the ones the last run left: ${words.join("; ")}. ` +
+    `NOT STARTED: the shared .git differs from what the last run left, in what makes git run a program or reach the network. ${parts.join(" ")} ` +
       `${was.clean ? "Something wrote them between the runs." : "The last run did not end cleanly (it was killed, or stopped), so a sandbox may have written them."} ` +
-      `Inspect \`git -C ${root} config --local --list\` and .git/info/attributes. Remove what is not yours (\`git -C ${root} config --local --unset-all <key>\`), ` +
+      `Inspect ${listed(inspect)} before running any other git command there. Remove what is not yours (${remove.join(", ")}), ` +
       `or, if it is your own, start again with \`${command} --accept-git-config\`, which records the present state as the new baseline.`,
   );
 };
 
 /** Under the run lock: records what `assertGitConfigBaseline` read as the baseline of this run, not yet cleanly ended. */
-export const recordGitConfigStart = (project: Project, state: ProgramConfig) => writeBaseline(project, { ...state, clean: false });
+export const recordGitConfigStart = (project: Project, state: ProgramState) => writeBaseline(project, { ...state, clean: false });
 
 /**
- * At a run's clean end: marks the record clean when the config still holds what the run started
- * with. A key a sandbox wrote after the last check stays different from the record, so the next start
- * refuses it: the end never records a state it did not check.
+ * At a run's clean end: marks the record clean when the `.git` still holds what the run started
+ * with. A key or a hook a sandbox wrote after the last check stays different from the record, so the
+ * next start refuses it: the end never records a state it did not check.
  */
 export const recordGitConfigEnd = (project: Project) => {
   const was = readBaseline(project);
   if (!was) return;
-  const now = programConfig(project);
-  if (now.attributes === was.attributes && now.entries.length === was.entries.length && now.entries.every((e, i) => e === was.entries[i])) writeBaseline(project, { ...was, clean: true });
+  if (!differences(project, was, programState(project)).parts.length) writeBaseline(project, { ...was, clean: true });
 };
 
 // Names, subjects and paths are the sandbox's to choose: shown without
@@ -796,17 +855,43 @@ export const assertWorktreeRecords = (project: Project, path: string, when: stri
 };
 
 /**
+ * For `cleanProject`: why git must not run in the worktree at `path`, or undefined when it may - the stop
+ * `assertWorktreeRecords` would throw, said without its "STOPPED <when>: " lead. A directory already gone has nothing
+ * for a host git to read.
+ */
+export const worktreeRefusal = (project: Project) => (path: string): string | undefined => {
+  if (!existsSync(path)) return undefined;
+  try {
+    assertWorktreeRecords(project, path, "in sandcastle clean");
+  } catch (error) {
+    if (!(error instanceof GuardStop)) throw error;
+    return error.message.replace(/^STOPPED in sandcastle clean: /, "");
+  }
+  return undefined;
+};
+
+/**
  * The check before a sandbox closes. Sandcastle's close stops the container, then runs `git status` on the host in its
  * worktree with this process's environment, so a filter planted in the shared `.git/config` (the pins hold only the
  * drivers configured at the start) or in config a changed record names would run there. The container is stopped
- * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop
- * fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
+ * first (`stopSandboxContainer`), so nothing the sandbox left running writes after the check; one Docker cannot stop,
+ * or gives no answer about in time (30 s; the stop's grace plus 30 s), fails it. `check` is the site's `.git` check; the worktree's records and any repository nested in it follow. On a failure the container is removed
  * here, without that close - the caller must not call it - the worktree is left as it stands for a person, and the
  * error is thrown.
  */
 export const checkBeforeClose = async (project: Project, worktree: string, when: string, check: () => unknown): Promise<void> => {
   try {
-    const [running] = await stopSandboxContainer(worktree);
+    const [running] = await stopSandboxContainer(worktree).catch((e) => {
+      if (!(e instanceof DockerAnswerError)) throw e;
+      const name = clean(basename(worktree));
+      const said = clean(e.message).slice(0, 200);
+      throw new GuardStop(
+        `STOPPED ${when}: Docker did not say whether the container of ${name} is stopped (${said}), so a process left running there could still write the shared .git after the check. ` +
+          `Make sure no container of it runs (docker ps, docker rm -f), then inspect .git/config, .git/info/ and .git/worktrees/${name} before running any git command in ${clean(worktree)}.`,
+        { what: "Docker gave no answer on a sandbox's container", detail: `(${name}: ${said})` },
+        { cause: e },
+      );
+    });
     if (running) {
       const name = clean(basename(worktree));
       const said = clean(running.said).slice(0, 200);

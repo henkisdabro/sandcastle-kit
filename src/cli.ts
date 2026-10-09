@@ -15,11 +15,11 @@
 //                    (not with autonomy level 1, which asks a question a detached run cannot);
 //                    a run that would spend ANTHROPIC_API_KEY asks first, and without a
 //                    terminal needs --api-key (or SANDCASTLE_API_KEY=1), which is the yes;
-//                    a run, `land` or `gates` first holds the shared .git/config's program-running
-//                    keys (every filter.*, merge.*.driver, diff.*.textconv and .command,
-//                    core.fsmonitor, core.hooksPath, core.sshCommand, include*) and info/attributes
-//                    to what the previous run recorded, and refuses a difference, naming each key
-//                    (a sandbox of a killed run may have planted it): remove it, or if it is yours
+//                    a run, `land` or `gates` first holds what makes git run a program or reach
+//                    the network in the shared .git (those keys of .git/config and config.worktree,
+//                    info/attributes, hooks/ and modules/) to what the previous run recorded,
+//                    and refuses a difference, naming each key and file (a sandbox of a killed
+//                    run may have planted it): remove it, or if it is yours
 //                    --accept-git-config records the present state as the new baseline
 //   wait [seconds]   block while the project's run is live, then print its closing summary
 //                    and exit with the run's exit code; with a timeout, exit 124 and leave
@@ -91,10 +91,12 @@
 //   init             scaffold .sandcastle/ with gates guessed from the stack, then the lean check
 //   updated          record that this project has acted on the kit's upgrading notes (the
 //                    update action's last step); doctor and run then stop listing them
-//   clean [--all]    remove exited sandbox containers, the kit's dangling images, leftover
+//   clean [--all] [--accept-git-config]
+//                    remove exited sandbox containers, the kit's dangling images, leftover
 //                    sandbox worktrees and finished agent branches, drop the backup copy
 //                    of a branch that is gone or merged, and list unmerged ones;
-//                    --all deletes those too, without asking
+//                    --all deletes those too, without asking; a worktree a sandbox
+//                    tampered with is left, named, and the exit code is 1
 //   --version        the kit version: the release, and in a clone past it, the commit
 //   herdr configure [--remove]
 //                    link the kit's Herdr plugin and add its sidebar rows, tab bar entry
@@ -118,7 +120,7 @@ import { loadProject, type Project } from "./config.ts";
 import { livePid, pauseRun, recordedExitCode, resumeRun, startDetached, waitForRun } from "./detach.ts";
 import { landTicket, sandboxOpener } from "./land.ts";
 import { hooksThatRanClean, requireGreenBase } from "./gates.ts";
-import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
+import { assertGitConfigBaseline, assertGitUnchanged, disableHostGitHooks, gitFingerprint, lockRun, pinHostGitConfig, recordGitConfigEnd, recordGitConfigStart, worktreeRefusal, protectedForTicket, protectedWarning, pruneBackup } from "./guard.ts";
 import { apply as leanApply, checkHooks, measure as leanMeasure, plan as leanPlan, report as leanReport, reportHookCheck, writePlan } from "./lean.ts";
 import { lintQueue } from "./lint.ts";
 import { limit, parseCapArgs, setCap, standing, standingLine } from "./pool.ts";
@@ -709,9 +711,13 @@ try {
       // live run's own worktrees must survive, so this takes the run lock.
       disableHostGitHooks();
       const project = await loadProject(root);
+      // Clean runs host git over whatever a killed run's sandbox left: what was planted in the config is refused, not pinned.
+      const baseline = assertGitConfigBaseline(project, "sandcastle clean", args.includes("--accept-git-config"));
       pinHostGitConfig(project.root);
       lockRun(project);
-      const { containers, images, worktrees, deleted, kept } = cleanProject(project, args.includes("--all"));
+      recordGitConfigStart(project, baseline);
+      const { containers, images, worktrees, deleted, kept, left } = cleanProject(project, args.includes("--all"), worktreeRefusal(project));
+      recordGitConfigEnd(project);
       // After the branches above went: a merged branch's backup entry is dropped with it, and with
       // --all an unmerged one's too, as its work was let go with the branch.
       const backups = pruneBackup(project, { goneToo: args.includes("--all") });
@@ -725,7 +731,11 @@ try {
         const standing = kept.map((k) => `${k.branch} (${k.ahead} commit(s) not on ${project.baseBranch})`);
         console.log(`\nUnmerged, kept:\n  ${standing.join("\n  ")}\n\`sandcastle clean --all\` deletes them too - their work is lost.`);
       }
-      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length) console.log("Nothing to clean.");
+      if (left.length) {
+        console.log(`\nLeft as they are, git was not run in them:\n${left.map((l) => `  ${l.path}: ${l.reason}`).join("\n")}`);
+        process.exitCode = 1;
+      }
+      if (!containers.length && !images.length && !worktrees.length && !deleted.length && !backups.length && !kept.length && !left.length) console.log("Nothing to clean.");
       break;
     }
     default:

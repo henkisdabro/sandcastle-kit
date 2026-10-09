@@ -3,9 +3,10 @@
 // view - lives in this kit and is shared.
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configureModels, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
@@ -16,6 +17,58 @@ import { isClaudeSetting } from "./versions.ts";
 export const DEFAULT_CONCURRENCY = 4;
 
 export type Mount = { hostPath: string; sandboxPath: string; readonly?: boolean };
+
+/** A `mounts` entry the loader refused; doctor tells it from other config errors to print it as a FIX. */
+export class MountRefused extends OperatorError {}
+
+// The path as Sandcastle will mount it (`~` expanded, a relative path from the working directory),
+// with symlinks resolved on the longest part that exists, so a link into the project is no way around.
+const resolvedMountPath = (hostPath: string, from: string): string => {
+  const expanded = hostPath === "~" ? homedir() : /^~[\\/]/.test(hostPath) ? join(homedir(), hostPath.slice(2)) : hostPath;
+  const absolute = resolve(from, expanded);
+  const tail: string[] = [];
+  for (let dir = absolute; ; dir = dirname(dir)) {
+    try {
+      return join(realpathSync(dir), ...tail.reverse());
+    } catch {
+      if (dirname(dir) === dir) return absolute;
+      tail.push(basename(dir));
+    }
+  }
+};
+
+// `..` as a whole segment, not a prefix: a project named `..app` is still inside its parent.
+const within = (inner: string, outer: string) => {
+  const rel = relative(outer, inner);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+};
+
+/**
+ * Why a project mount may not be mounted, or undefined. A sandbox that could write the project root,
+ * `.sandcastle/` or the shared `.git` could rewrite the run's own state: the start baseline, the
+ * branch backup, the run lock. So a host path that equals or contains one of them, or lies inside
+ * `.sandcastle/` or `.git`, is refused; anywhere else under the root (a cache directory) is fine.
+ */
+export const mountProblem = (root: string, mount: Mount): string | undefined => {
+  const realRoot = resolvedMountPath(root, root);
+  let gitDir: string | undefined;
+  try {
+    gitDir = resolvedMountPath(execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(), root);
+  } catch {
+    // Not a git repository (or no git): the root's own `.git` is the one a sandbox would see.
+    gitDir = join(realRoot, ".git");
+  }
+  const guarded: [string, string][] = [["the project root", realRoot], [".sandcastle/", join(realRoot, ".sandcastle")], ["the shared .git", gitDir]];
+  // Sandcastle resolves a relative path from the working directory, the kit's usual one is the root.
+  for (const from of new Set([process.cwd(), root])) {
+    const host = resolvedMountPath(mount.hostPath, from);
+    for (const [what, path] of guarded) {
+      if (within(path, host)) return `mounts ${JSON.stringify(mount.hostPath)} -> ${JSON.stringify(mount.sandboxPath)}: ${host === path ? "is" : "contains"} ${what} (${path}), which a sandbox must not be able to write.`;
+      if (what !== "the project root" && within(host, path)) return `mounts ${JSON.stringify(mount.hostPath)} -> ${JSON.stringify(mount.sandboxPath)}: lies inside ${what} (${path}), which a sandbox must not be able to write.`;
+    }
+  }
+  return undefined;
+};
 
 export type HookTest = { name: string; tool: string; input: Record<string, unknown>; expect: "block" | "allow" };
 
@@ -283,6 +336,10 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     throw new OperatorError(`${CONFIG_PATH} must export default an object with \`name\` and at least one gate in \`gates\`.`);
   }
   checkShape(config);
+  for (const m of config.mounts ?? []) {
+    const problem = mountProblem(root, m);
+    if (problem) throw new MountRefused(`${CONFIG_PATH}: ${problem}`);
+  }
   if (config.land !== undefined && config.land !== "merge" && config.land !== "squash") {
     throw new OperatorError(`${CONFIG_PATH}: land must be "merge" or "squash", not ${JSON.stringify(config.land)}.`);
   }

@@ -47,7 +47,7 @@ const nestWithFilter = (wt: string, git: ReturnType<typeof sandbox>["git"], mark
 };
 
 const withDocker = async <T>(fn: () => Promise<T>) => {
-  const docker = dockerStub();
+  const docker = dockerStub(true);
   const path = process.env.PATH;
   process.env.PATH = docker.first(path);
   try {
