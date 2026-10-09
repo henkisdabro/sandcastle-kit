@@ -222,7 +222,8 @@ This continues SKILL.md: run its "Before every action" first.
       each still blocked, what it waits for and whether that blocker is itself held or red; and
       after a run that ended early, the tickets it cut short (with the phase each was in) and the
       ones it never started - all still queued.
-   6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees,
+   6. `## 📤 Local state` - commits ahead of the upstream, branches left standing, kept worktrees (this run's, and
+      every one earlier runs left, counted with their disk use from 1 GB),
       and the push that fits the repo's own shipping rules (read its AGENTS.md or CONTRIBUTING).
       Say plainly that Sandcastle pushed nothing.
    7. `## 👉 Next step` - **one** recommended action and why, then the short list after it, then
