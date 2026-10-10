@@ -335,9 +335,10 @@ export type RunRecord = {
    * `dockerfiles`: the Dockerfiles the run's merges changed, which that image therefore lacks - absent when none.
    * `gatedTree`: a red verify's tree is exactly one a fast-forward landing's ticket gates passed - the ticket's ref; the red is the sandbox's, not the merge's.
    * `cleanTree`: the same for a landing merged and gated in a landing sandbox, a clean one - the red is a flaky or order-dependent test.
+   * `likelyLoad`: a red verify (run twice) whose failures are all test timeouts, or whose red gate ran several times its recorded time - the machine's load, not the merge or the sandbox.
    * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it and `kind` where they ran.
    */
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string } } | null;
   keptWorktrees?: { issue: string; path: string }[];
   /** Tracked files a gate rewrote and the kit put back, by path, once each. */
   gateRewrites?: string[];

@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, likelyLoad, rerunRedVerify, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -2908,11 +2908,13 @@ export const burndown = async (
   const hookCheck = await timed("", "hook check", () => checkHooks(project, image, lean, hooksThatRanClean(project, image, planFile)));
   reportHookCheck(hookCheck, lean.hooks.length);
   if (hookCheck.failures.length) throw new OperatorError("A kept hook cannot run in the image - no sandbox started.");
+  // The base gates' times when they ran, the verify's fallback record for a gate far slower than it was (`likelyLoad`).
+  let baseGateMs: Record<string, number> | undefined;
   if (process.env.SKIP_BASE_GATES === "1") console.log(`SKIP_BASE_GATES=1: the gates on ${base} are not checked first.`);
   else {
     try {
       // Checked against the start's reading before its sandbox opens; closed behind a reading of its own (`gateBase`).
-      await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when)));
+      baseGateMs = gateMs(await timed("", "base gates", () => requireGreenBase(gateProject, image, planFile, true, runId, undefined, (when) => assertGitUnchanged(project, atStart, when))));
     } catch (error) {
       // The closing summary names the red gates from the record; the stage stays "base gates".
       if (error instanceof BaseRedError) run.update({ baseGates: error.baseGates });
@@ -3054,6 +3056,8 @@ export const burndown = async (
 
   const slotWanted = { n: 0 };
   const landed = new Map<string, { files: string[]; commit: string; clean?: true }>();
+  // Each landing's gate times, the record a red verify of the tree it gated is judged by (`likelyLoad`).
+  const landingGateMs = new Map<string, Record<string, number>>();
   const ctx: LandContext = {
     project,
     tracker,
@@ -3068,8 +3072,12 @@ export const burndown = async (
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: (box, id) =>
-      timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
+    gate: async (box, id) => {
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true));
+      const times = gateMs(result);
+      if (times) landingGateMs.set(id, times);
+      return result;
+    },
     landed,
     slotWanted,
     // The heartbeat says the wait as a wait; the landing's time counts from the slot, as a gates step's from its first gate.
@@ -3478,6 +3486,7 @@ export const burndown = async (
   let verifyFailingTests: ReturnType<typeof verifyFailing> | undefined;
   let verifyTreeOf: string | undefined;
   let verifyCleanTreeOf: string | undefined;
+  let verifyLoad = false;
   const verifyDue = verifyPlan(gateProject, image, planFile, merged.length, regenerated);
   if (verifyDue.due) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
@@ -3490,7 +3499,8 @@ export const burndown = async (
     if (!verifySkipped) {
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
-      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive)).finally(() => setDemand(0));
+      // Red once is run again, the second result kept: a load flake beside other runs' suites is not a red base.
+      gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
     }
     verify = gated.gates;
     const verifyRed = verifyFailing(gated.failures);
@@ -3502,6 +3512,9 @@ export const burndown = async (
       // A tree a landing sandbox gated was green in a clean sandbox already: no sandbox difference, a flaky test.
       if (same && landed.get(same)?.clean) verifyCleanTreeOf = ref(same);
       else if (same) verifyTreeOf = ref(same);
+      // Timeouts alone, or a gate far slower than it was: the run was loaded, whatever tree it gated. Judged against the
+      // gates of the landing that gated this tree, else the run's base gates.
+      verifyLoad = likelyLoad(gated.failures, gated.gates, { ...baseGateMs, ...(same && landed.get(same)?.clean ? landingGateMs.get(same) : undefined) });
     }
     // A red merged base said "do not push" with nothing to read: its full output is in the verify log (`verifyBase`
     // streamed it as the gates ran). A skipped verify ran nothing: a log an earlier run left would read as this one's.
@@ -3550,7 +3563,7 @@ export const burndown = async (
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(verifyLoad ? { likelyLoad: true } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     ...(gateRewrites.size ? { gateRewrites: [...gateRewrites] } : {}),
     dryRunCheck,
