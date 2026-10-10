@@ -170,6 +170,11 @@ Declining is not skipping: every step still runs its check, and only the asking 
        no longer puts `~/.local/bin` on `PATH` either: a `RUN` step that calls a tool an earlier
        step installed there (`uv`, `pipx`) by its bare name fails the same way; propose its full
        path, `/home/agent/.local/bin/<tool>`. Then `sandcastle build` and `sandcastle gates`.
+   18. **Kept built-in tools.** Every `tool:` entry in the project's `lean.keep` must be a known
+       name the managed settings do not deny: `sandcastle lean` (or any command that loads the
+       config) refuses one that is not, naming the nearest tool. Fix the entry it names. A project
+       that keeps skills, commands or MCP servers needs no change: it gets Skill or ToolSearch on
+       its own.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

@@ -81,11 +81,12 @@ configureModels();
 // left out on purpose: Linux native builds of Claude Code drop them and give Bash embedded `bfs` and `ugrep`.
 export const BASE_TOOLS = ["Bash", "Read", "Edit", "Write", "TaskStop"];
 
-/** The tools a pass loads: the base set, Skill for a kept skill or command, ToolSearch for a kept MCP server (its tools are deferred). */
+/** The tools a pass loads: the base set, Skill for a kept skill or command, ToolSearch for a kept MCP server (its tools are deferred), then each `tool:<Name>` entry. */
 export const toolsFor = (keep: readonly string[]): string[] => {
   const tools = [...BASE_TOOLS];
   if (keep.some((id) => id.startsWith("skill:") || id.startsWith("command:"))) tools.push("Skill");
   if (keep.some((id) => id.startsWith("mcp:"))) tools.push("ToolSearch");
+  for (const id of keep) if (id.startsWith("tool:") && !tools.includes(id.slice("tool:".length))) tools.push(id.slice("tool:".length));
   return tools;
 };
 

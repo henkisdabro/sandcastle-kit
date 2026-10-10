@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { pathToFileURL } from "node:url";
 import { configureModels, configureTools, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
+import { CLAUDE_CODE_TOOLS, managedDenied, nearestTool } from "./claude-tools.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { isClaudeSetting } from "./versions.ts";
 
@@ -269,6 +270,13 @@ const checkShape = (config: ProjectConfig) => {
   }
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);
+  for (const entry of config.lean?.keep ?? []) {
+    if (!entry.startsWith("tool:")) continue;
+    const name = entry.slice("tool:".length);
+    // Denied before misspelt: a denied name is a real tool, so the spelling is not what to fix.
+    if (managedDenied().includes(name)) refuse(`\`lean.keep\` entry \`${entry}\`: the managed settings deny ${name} in every sandbox, so it could never be used.`);
+    if (!CLAUDE_CODE_TOOLS.includes(name)) refuse(`\`lean.keep\` entry \`${entry}\` names no built-in Claude Code tool, and Claude Code would ignore it silently - did you mean \`tool:${nearestTool(name)}\`?`);
+  }
   if (config.concurrency !== undefined && !isCount(config.concurrency, 1)) refuse(`\`concurrency\` must be a whole number of 1 or more, not ${JSON.stringify(config.concurrency)}.`);
   if (config.cpus !== undefined && config.cpus !== false && !(typeof config.cpus === "number" && Number.isFinite(config.cpus) && config.cpus >= 0.01)) {
     // docker's own range is 0.01 up to the VM's CPUs: below it `docker run --cpus` is refused, and no sandbox starts.

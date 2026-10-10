@@ -45,7 +45,9 @@ This continues SKILL.md: run its "Before every action" first.
    command, MCP server and plugin the repo would load into each sandbox agent, with its per-turn
    token cost. All of it is hidden unless `lean.keep` names it. Keep an item only when a run
    literally needs it - `rules.md` tells agents to use that skill, or a gate depends on that MCP
-   server - with a comment saying why. The usual answer is `keep: []`.
+   server - with a comment saying why. The usual answer is `keep: []`. Keep a built-in Claude Code
+   tool with `tool:<Name>` only when a class of ticket needs it (`tool:WebSearch` for research
+   tickets; `tool:Agent` almost never), since every kept tool is paid on every turn.
    - If `CLAUDE.md` or `AGENTS.md` sends agents to a skill you hide, add a line to `rules.md`
      saying it is absent and what to do instead.
    - When the lean check lists a hidden item or a dropped hook as named by a kept file, open that

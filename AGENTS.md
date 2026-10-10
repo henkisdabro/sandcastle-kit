@@ -63,6 +63,7 @@ read a module's section there before changing it.
 | `src/lint.ts` | `lintQueue()`: the queue's shape for `sandcastle queue --lint`; read-only advice |
 | `src/agents.ts` | Models, effort, review fallback, Codex cross-review (and the readout its command prints for the plan usage row) |
 | `src/sandbox.ts` | Credentials (and token policy), images (hash tags, pruning), sandbox mounts and hooks, `ownCommits` and `staleBaseParents` (the old base a rewrite left in a carried branch's history), the CPU limit by kind of sandbox (`sandboxCpus`: a ticket's, or gate-only); `KIT`, the kit's own directory |
+| `src/claude-tools.ts` | The kit's one list of Claude Code's built-in tool names (`CLAUDE_CODE_TOOLS`), `managedDenied()` (the managed settings' deny list) and `nearestTool`: what `config.ts` checks a `lean.keep` `tool:<Name>` entry against |
 | `src/gates.ts` | Gate runs, and the green-base check before any agent starts (`sandcastle gates`) |
 | `src/lean.ts` | Lean inventory and plan, per-worktree strip, hook check, token measurement; `hooksPathOutside`: a `core.hooksPath` no sandbox has (absolute or outside the project), which doctor, `lean` and the base check (`hooksPathWarning`, `src/gates.ts`) flag |
 | `src/detach.ts` | `sandcastle run --detach` (output to `.sandcastle/logs/run-output.log`), `wait`, `stop`, and `pause` and `resume` (the pause's control file, `.sandcastle/.run/paused`, which names the run it was asked of and, for a pause the run took for its plan's usage, the cause and the time it resumes at) |
