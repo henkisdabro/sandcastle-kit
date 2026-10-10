@@ -7,7 +7,7 @@
 import type { Project } from "./config.ts";
 import { blockerProblems, blockerResolver, openBlockers, refLabel, refsOf } from "./blockers.ts";
 import { protectedAmong, protectedWarning } from "./guard.ts";
-import { expandTouches, isGlob, missingTouches, parseTouches, unmergeableFiles } from "./touches.ts";
+import { expandTouches, isGlob, missingTouches, namedAsNew, parseTouches, unmergeableFiles } from "./touches.ts";
 import { refOf, type Tracker } from "./tracker.ts";
 
 /** A ticket declaring more files than this is likely to meet others at landing. */
@@ -28,6 +28,20 @@ const blockerWaits = (project: Project, tracker: Tracker, queued: Queued[]) => {
     waits.set(t.id, [...new Set(on)]);
   }
   return waits;
+};
+
+/** Every queued ticket `id` waits on, directly or through the chain; a cycle is cut where it closes. */
+const waitsOnAll = (id: string, waits: Map<string, string[]>): string[] => {
+  const seen = new Set<string>();
+  const walk = (at: string) => {
+    for (const dep of waits.get(at) ?? []) {
+      if (dep === id || seen.has(dep)) continue;
+      seen.add(dep);
+      walk(dep);
+    }
+  };
+  walk(id);
+  return [...seen];
 };
 
 /** The longest chain, as tickets in the order they must run. A cycle is cut where it closes (the problems section names it). */
@@ -92,10 +106,12 @@ export const lintQueue = async (project: Project, tracker: Tracker, queued: Queu
 
   // A plain path no file matches is kept by expandTouches (it may be a new file) and an empty glob is dropped: neither shows above.
   for (const t of queued) {
-    const absent = missingTouches(project.root, project.baseBranch, t.body ?? "");
+    // A file an earlier ticket in this one's chain creates is not new to this ticket, so it cannot call it new.
+    const earlier = waitsOnAll(t.id, waits).map((id) => queued.find((q) => q.id === id)?.body ?? "");
+    const absent = missingTouches(project.root, project.baseBranch, t.body ?? "").filter((p) => isGlob(p) || !earlier.some((b) => namedAsNew(b, p.replace(/\/$/, ""))));
     const paths = absent.filter((p) => !isGlob(p));
     const globs = absent.filter(isGlob);
-    if (paths.length) problems.push(`${refOf(t.id)} names paths not on ${project.baseBranch}: ${paths.join(", ")} - new files (say so under ## Fix) or typos?`);
+    if (paths.length) problems.push(`${refOf(t.id)} names paths not on ${project.baseBranch}: ${paths.join(", ")} - new files (call each one new in the ticket's prose, e.g. under ## Fix) or typos?`);
     // Saying "new" changes nothing for a glob: it orders nothing until files exist.
     if (globs.length) problems.push(`${refOf(t.id)}'s Touches globs match no file on ${project.baseBranch}: ${globs.join(", ")} - a glob orders nothing until files exist: name the new files themselves (and call them new under ## Fix), or fix the glob`);
   }
