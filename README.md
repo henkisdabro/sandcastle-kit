@@ -303,7 +303,11 @@ Then edit, in this order:
    checks every kept hook. Keep nothing unless a run needs it; drop only host-only hooks.
    It also lists the project's `permissions.ask` rules (in the tracked `.claude/settings.json`),
    which sandboxes refuse - nobody there can answer - so a command matching one fails;
-   `sandcastle doctor` warns of them too.
+   `sandcastle doctor` warns of them too. After the repo's items it lists the built-in tools
+   each pass gets (`keep  tool  Bash` and the rest of the allow-list, no token count): every other
+   built-in tool is hidden from every pass. `sandcastle lean --measure` probes with the same
+   `--tools` list and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` as a pass, so its two numbers differ only
+   by the repo's items.
 
 ```bash
 sandcastle build             # base image, then the project layer

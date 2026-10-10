@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix, relative } from "node:path";
-import { IMPL_MODEL } from "./agents.ts";
+import { IMPL_MODEL, toolsFor } from "./agents.ts";
 import type { Project } from "./config.ts";
 import { dockerRunTimeout } from "./errors.ts";
 import { credentials, sh } from "./sandbox.ts";
@@ -313,15 +313,16 @@ export const report = (project: Project, p: Plan) => {
     i.id.length > 90 ? i.id.slice(0, 87) + "..." : i.id,
     i.tokens === undefined ? (i.kind === "mcp" ? "tool schemas" : "-") : `~${i.tokens}`,
   ]);
+  // Printed only: the built-in tools are not Items of the plan, so hide, write and the plan file never see them.
+  const toolRows = toolsFor(project.lean.keep ?? []).map((name) => ["keep", "tool", name, "-"]);
   const hiddenTokens = p.items.filter((i) => !i.kept).reduce((n, i) => n + (i.tokens ?? 0), 0);
   const hiddenMcp = p.items.filter((i) => !i.kept && i.kind === "mcp").length;
   console.log(`Lean check for ${project.name} - what a sandbox agent would load from the repo:\n`);
-  if (rows.length) {
-    const w = [0, 1, 2].map((c) => Math.max(...rows.map((r) => r[c].length)));
-    for (const r of rows) console.log(`  ${r[0].padEnd(w[0])}  ${r[1].padEnd(w[1])}  ${r[2].padEnd(w[2])}  ${r[3]}`);
-  } else {
-    console.log("  nothing - no project skills, agents, commands, MCP servers or plugins");
-  }
+  if (!rows.length) console.log("  nothing - no project skills, agents, commands, MCP servers or plugins");
+  const shown = [...rows, ...toolRows];
+  const w = [0, 1, 2].map((c) => Math.max(...shown.map((r) => r[c].length)));
+  for (const r of shown) console.log(`  ${r[0].padEnd(w[0])}  ${r[1].padEnd(w[1])}  ${r[2].padEnd(w[2])}  ${r[3]}`);
+  console.log("  Claude Code's other built-in tools are hidden from every pass (--tools); keep one with tool:<Name> in lean.keep.");
   const instr = instructionsTokens(project.root);
   console.log(
     `\n  Hidden: ~${hiddenTokens} tokens of descriptions${hiddenMcp ? ` and ${hiddenMcp} MCP server(s)' tool schemas` : ""}, per agent turn.` +
@@ -535,18 +536,26 @@ export const reportHookCheck = (r: { failures: string[]; warnings: string[] }, h
 // from a checkout as it is and from one with the plan applied.
 // ---------------------------------------------------------------------------
 
+/**
+ * The `docker run` arguments of one probe: the claude command of a real pass, with its tool allow-list
+ * and auto memory off, so the two probes differ only by the repo's items.
+ */
+export const probeArgs = (project: Project, image: string, dir: string, env: Record<string, string>): string[] => [
+  "run", "--rm", ...Object.keys(env).flatMap((k) => ["-e", k]),
+  "-e", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+  "-v", `${dir}:/home/agent/workspace`, "-w", "/home/agent/workspace",
+  "--entrypoint", "/home/agent/.local/bin/claude", image,
+  "--print", "--dangerously-skip-permissions", "--model", IMPL_MODEL, "--effort", "low",
+  "--tools", toolsFor(project.lean.keep ?? []).join(","),
+  "--output-format", "json", "-p", "Reply OK",
+];
+
 const probe = (project: Project, image: string, dir: string) => {
   const env = credentials(project);
   const out = execFileSync(
     "docker",
-    [
-      "run", "--rm", ...Object.keys(env).flatMap((k) => ["-e", k]),
-      "-v", `${dir}:/home/agent/workspace`, "-w", "/home/agent/workspace",
-      "--entrypoint", "/home/agent/.local/bin/claude", image,
-      "--print", "--dangerously-skip-permissions", "--model", IMPL_MODEL, "--effort", "low",
-      "--output-format", "json", "-p", "Reply OK",
-    ],
-    { encoding: "utf8", env: { ...process.env, ...env }, timeout: 300_000, stdio: ["ignore", "pipe", "pipe"] },
+    probeArgs(project, image, dir, env),
+    { encoding: "utf8", env: { ...process.env, ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }, timeout: 300_000, stdio: ["ignore", "pipe", "pipe"] },
   );
   const u = JSON.parse(out).usage ?? {};
   return (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
@@ -563,7 +572,7 @@ export const measure = (project: Project, image: string, p: Plan) => {
     for (const [path, content] of Object.entries(p.write)) writeFileSync(join(tree, path), content);
     const after = probe(project, image, tree);
     console.log(
-      `\n  Measured (${IMPL_MODEL}, one "Reply OK" turn): ${before} input tokens as the repo is, ` +
+      `\n  Measured (${IMPL_MODEL}, one "Reply OK" turn, with the pass's tool allow-list): ${before} input tokens as the repo is, ` +
         `${after} lean - ${before - after} fewer on every agent turn.`,
     );
   } finally {
