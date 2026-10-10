@@ -63,7 +63,8 @@ This continues SKILL.md: run its "Before every action" first.
      something half-done in this repo` means a lock file or an unfinished merge that `git status`
      does not show. Check that no git process is running (`ps`), then remove the lock or run
      `git merge --abort`, as the message says for each file - after telling the user, since it is their repo.
-     A landing that cannot undo its own merge stops a run with the same files named.
+     A landing that cannot undo its own merge, or whose fast-forward meets a lock that stays,
+     stops a run with the same files named.
    - **The machine.** `sandcastle status 0`'s machine line: other projects' runs share the limits.
      When it shows another run live (its slots in use), say that the start prints a line on how
      the machine is split - the other run's slots and demand, this run's share and a rough wait
