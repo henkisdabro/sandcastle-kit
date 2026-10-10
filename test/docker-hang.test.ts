@@ -13,6 +13,10 @@ import type { Project } from "../src/config.ts";
 import { OperatorError } from "../src/errors.ts";
 import { reapOrphans, removeExitedSandboxes } from "../src/sandbox.ts";
 
+// One limit for every docker call a function makes. An answering call's `sh` start on a loaded shard must stay
+// well inside it, so that only the hung command reaches it and the error names that command, not an earlier `ps`.
+const LIMIT_MS = 2000;
+
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "sandcastle-dockerhang-")));
 
 // A docker that answers `ps` with one container id, and hangs on whichever command is named in `hangOn`.
@@ -48,18 +52,18 @@ const withDocker = <T>(bin: string, root: string, fn: () => T): T => {
   }
 };
 
-const hung = /docker did not answer `docker (ps|inspect|rm)` within 0\.3 s/;
+const hung = new RegExp(`docker did not answer \`docker (ps|inspect|rm)\` within ${LIMIT_MS / 1000} s`);
 
 for (const command of ["ps", "inspect", "rm"]) {
   test(`a hung docker ${command} is named by the reap of a killed run's sandboxes, not waited for`, () => {
     const root = tmp();
     const project = { root, name: "demo" } as Project;
-    assert.throws(() => withDocker(fakeDocker(command), root, () => reapOrphans(project, 300)), (e) => e instanceof OperatorError && hung.test(e.message) && e.message.includes(command));
+    assert.throws(() => withDocker(fakeDocker(command), root, () => reapOrphans(project, LIMIT_MS)), (e) => e instanceof OperatorError && hung.test(e.message) && e.message.includes(command));
   });
 
   test(`a hung docker ${command} is named by the removal of exited sandboxes, not waited for`, () => {
     const root = tmp();
     const project = { root, name: "demo" } as Project;
-    assert.throws(() => withDocker(fakeDocker(command), root, () => removeExitedSandboxes(project, 300)), (e) => e instanceof OperatorError && hung.test(e.message) && e.message.includes(command));
+    assert.throws(() => withDocker(fakeDocker(command), root, () => removeExitedSandboxes(project, LIMIT_MS)), (e) => e instanceof OperatorError && hung.test(e.message) && e.message.includes(command));
   });
 }
