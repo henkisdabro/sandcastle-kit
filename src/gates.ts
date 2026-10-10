@@ -845,12 +845,7 @@ export class BaseRedError extends OperatorError {
   }
 }
 
-/**
- * Writes each red gate's full output to `log` (base gates, and the gates on the merged base at the
- * end of a run), or removes it when every gate passed: a log left by an earlier red run would read
- * as this run's result. Returns whether it wrote one.
- */
-/** Where a red verify (the gates on the merged base at the end of a run) leaves its output. */
+/** Where the verify (the gates on the merged base at the end of a run) streams its output (`verifyBase`). */
 export const VERIFY_LOG = ".sandcastle/logs/verify-gates.log";
 
 /**
@@ -869,6 +864,10 @@ export const changedDockerfiles = (project: Pick<Project, "root" | "dockerfile">
   }
 };
 
+/**
+ * Writes each red gate's full output to `log` (the base gates), or removes it when every gate passed: a log
+ * left by an earlier red run would read as this run's result. Returns whether it wrote one.
+ */
 export const writeGateLog = (log: string, header: string, failures: GateRun["failures"], extra = ""): boolean => {
   if (!failures.length && !extra) {
     rmSync(log, { force: true });
