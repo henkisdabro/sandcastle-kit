@@ -9,7 +9,11 @@ import { GROUPS, type Group, isTicketState, type RunRecord, sessionId, WORDS } f
 export type Ticket = { state?: string; note?: string; title?: string; order?: number };
 
 /** The run record as the mod reads it: the fields it shows, and tickets whose state is not yet trusted. */
-export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & { tickets?: Record<string, Ticket> };
+export type Run = Pick<RunRecord, "orchestrator" | "pid" | "session" | "startedAt" | "finishedAt" | "exitCode" | "stage" | "tokens"> & {
+  /** The record's `settings.keepWarm` when it is a boolean; absent for an older kit's record, which reads as on (keep-warm.ts). */
+  keepWarm?: boolean;
+  tickets?: Record<string, Ticket>;
+};
 
 // The status view's sand palette, as hex: a mod's Text takes no 256-colour index. Dry sand at
 // the castle's top, wet sand at its base.
@@ -96,6 +100,11 @@ export const endPrompt = (root: string, run: Run): string => {
   return `The sandcastle run in ${root}${named ? ` (${named})` : ""} ${endedHow(run)}. Close that run now: read run.md in the sandcastle skill's directory and follow it.`;
 };
 
+const settingOf = (settings: unknown, key: string): boolean | undefined => {
+  const value = settings && typeof settings === "object" ? (settings as Record<string, unknown>)[key] : undefined;
+  return typeof value === "boolean" ? value : undefined;
+};
+
 /** A half-written or foreign file reads as no record. */
 export const parse = (raw: string): Run | undefined => {
   let r: Record<string, unknown>;
@@ -116,6 +125,7 @@ export const parse = (raw: string): Run | undefined => {
     exitCode: whole(r.exitCode),
     stage: text(r.stage, 40),
     tokens: text(r.tokens, 40),
+    keepWarm: settingOf(r.settings, "keepWarm"),
     tickets: Object.fromEntries(
       // A ticket file's id is a whole slug: cut short, two tickets of one feature would share a key.
       tickets.slice(0, MAX_TICKETS).map(([id, t]) => [text(id, 100) ?? "?", { state: text(t?.state, 24), note: text(t?.note, 100), title: text(t?.title, 100), order: whole(t?.order) }]),

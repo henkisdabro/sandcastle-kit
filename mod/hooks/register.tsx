@@ -7,14 +7,16 @@
 // process is alive. Once the session has used the sandcastle skill it also follows a run this
 // session started in another directory: every run records the id of the Claude Code session
 // that started it, and lists itself in a machine-wide directory while it lives. It writes
-// nothing, opens no pane and calls no model, and it does nothing at all in a project with no
-// `.sandcastle/` until the skill is used.
+// nothing, opens no pane and calls no model but for one thing: while a run this session started is
+// live, it refreshes the session's prompt cache (keep-warm.ts). It does nothing at all in a
+// project with no `.sandcastle/` until the skill is used.
 
 import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
+import { activity, afterTurn, keepWarm, parseWarmth, settle, type Warmth } from "./keep-warm.ts";
 import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
@@ -24,6 +26,10 @@ const castle = atom({ plugin: "sandcastle", key: "castle" } as const, HELD);
 const MARK_ICON = "♜";
 /** The idle mark's line the band draws between runs, in sand; null for none. */
 const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
+/** The cache refresh's row the band draws under the castle; null for none. */
+const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
+/** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
+const warmth = atom({ plugin: "sandcastle", key: "warmth" } as const, { misses: 0 } as Warmth);
 
 const RECORD = ".sandcastle/logs/run.json";
 // What makes a project set up: `sandcastle init` writes it.
@@ -37,7 +43,7 @@ const IDLE_MS = 15000;
 const BAND_MARGIN = 4;
 
 const NOTE =
-  "\n\n---\nThe sandcastle mod is loaded in this Claude Code session. When a run this session started ends, in this project or any other directory, the mod submits a prompt that says so: skip `sandcastle wait` in step 3 of the run action, and close the run (run.md) when that prompt arrives.";
+  "\n\n---\nThe sandcastle mod is loaded in this Claude Code session. When a run this session started ends, in this project or any other directory, the mod submits a prompt that says so: skip `sandcastle wait` in step 3 of the run action, and close the run (run.md) when that prompt arrives. The mod also keeps this session's prompt cache warm while the run is live, so skip the skill's keep-warm tick.";
 
 // Module variables on purpose: a reload starts the watch over, and the first look at the
 // record rebuilds all of it but `armed` and each project's `since`, which `$.store` keeps.
@@ -86,6 +92,14 @@ let kitBin: string | undefined;
 /** The last round drew the idle mark (no needs-you text, no live run of the root): a choice made now redraws it at once. */
 let idling = false;
 let drawn = "";
+/** The cache refresh's timer while a run of this session is live; undefined otherwise. */
+let warmTimer: { cancel: () => void } | undefined;
+/** The run the refresh looks after: this session's newest live one. */
+let warmRun: Run | undefined;
+/** A refresh request is under way: one at a time, and a tick that finds it waits for the next. */
+let refreshing = false;
+/** The cache refresh's row the band was last told to draw. */
+let warmed: string | null = null;
 /** null: nothing pinned or cleared since this load, so the first call always reaches Claude Code. */
 let pinned: string | undefined | null = null;
 
@@ -411,6 +425,62 @@ async function choose($: EngineInterface, root: string, args: string): Promise<s
   return action === "report" ? markReport(input) : `${done[action]}\n${markReport(input)}`;
 }
 
+const REFRESH_PROMPT = "Reply with the single word: ok";
+
+/**
+ * One tick of the cache refresh: builds the rule's input, sends the request when it says so, keeps
+ * what it found in `$.state` and redraws the row. A request that is not answered is a miss, logged.
+ * Nothing here throws into the timer: a failed read leaves the row as it was.
+ */
+async function warm($: EngineInterface) {
+  const run = warmRun;
+  if (!run || refreshing) return;
+  try {
+    const now = await $.clock.now();
+    let memory = parseWarmth(await read($, warmth));
+    // Another run starts the count of misses over; the turn that ended last still counts.
+    if (memory.run !== run.startedAt) memory = { misses: 0, ...(memory.turnEnd === undefined ? {} : { turnEnd: memory.turnEnd }), ...(run.startedAt === undefined ? {} : { run: run.startedAt }) };
+    const usage = await $.session.usage();
+    // The run's start is the floor: the turn that started it ended about then, and a reload forgets the later ones.
+    const input = (m: Warmth) => ({ enabled: run.keepWarm, live: true, lastActivity: activity(m, Date.parse(run.startedAt ?? "")), last: m.last, misses: m.misses, rateLimits: usage.rateLimits, now });
+    let verdict = keepWarm(input(memory));
+    if (verdict.refresh) {
+      refreshing = true;
+      try {
+        const result = await $.model.fork({ prompt: REFRESH_PROMPT });
+        if (!result.isAnswered) $.ui.log(`sandcastle: the cache refresh was not answered (${result.reason}); counted as a miss`);
+        memory = settle(memory, result, usage.context.tokens ?? 0, await $.clock.now());
+        verdict = keepWarm(input(memory));
+      } finally {
+        refreshing = false;
+      }
+    }
+    await update($, warmth, () => memory);
+    await shine($, verdict.band ?? null);
+  } catch {
+    // A usage or request that failed is tried again at the next tick.
+  }
+}
+
+async function shine($: EngineInterface, line: string | null) {
+  if (line === warmed) return;
+  warmed = line;
+  await update($, warmLine, () => line);
+}
+
+/** Starts the refresh's timer while `run` is live and stops it when none is; the tick itself decides whether to send. */
+function keepCacheOf($: EngineInterface, run: Run | undefined) {
+  warmRun = run;
+  if (run && !warmTimer) {
+    warmTimer = $.clock.every(60_000, () => void warm($));
+    void warm($);
+  } else if (!run && warmTimer) {
+    warmTimer.cancel();
+    warmTimer = undefined;
+    void shine($, null);
+  }
+}
+
 /** One round: every watched project once; true while a run is alive. The newest live run is the one drawn. */
 async function round($: EngineInterface, root: string): Promise<boolean> {
   await adopt($, root);
@@ -431,6 +501,8 @@ async function round($: EngineInterface, root: string): Promise<boolean> {
   // mark above them would read as a second, stale queue. Last, so after the end notice: the mark
   // returns once the run is over.
   idling = !now.length && !shown && adopted;
+  // The refresh looks after a run this session started or follows (or its root's, when it records no session and this one closes it).
+  keepCacheOf($, live.filter((run) => armed && (ours(run) || !run.session)).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0]);
   pin($, now.length ? `${now.join(", ")} - /sandcastle-status` : undefined);
   await place($, idling ? await mark($, root) : undefined);
   await draw($, shown);
@@ -520,6 +592,11 @@ export const register: Register = (on) => {
       skillTurn = false;
       trigger = "skill";
     }
+    // The main thread's turn used the cache; a subagent's has its own.
+    if (e.agentId === undefined) {
+      const at = await $.clock.now();
+      await update($, warmth, (m) => afterTurn(parseWarmth(m), at));
+    }
     return out;
   });
 
@@ -548,7 +625,8 @@ export const register: Register = (on) => {
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const now = await read($, view);
     const line = await read($, markLine);
-    if ((now === null && line === null) || e.props.hasSurvey) return next(e);
+    const cache = await read($, warmLine);
+    if ((now === null && line === null && cache === null) || e.props.hasSurvey) return next(e);
     const frame = CASTLE_FRAMES[await read($, castle)] ?? CASTLE_FRAMES[HELD];
     const { Box, Text } = $.ui.resolve(e);
     return (
@@ -579,6 +657,7 @@ export const register: Register = (on) => {
                 ))}
               </Box>
             ))}
+        {cache === null ? null : <Text color={SAND.name}>{cache}</Text>}
         {await next(e)}
       </Box>
     );
