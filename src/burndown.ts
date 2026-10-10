@@ -702,8 +702,8 @@ const placesThisRun: Places = new Map();
 /**
  * Files each follow-up as a new ticket for triage through the project's tracker (`create`), its body
  * naming the source ticket and phase, a title already filed in this run once. A follow-up naming the
- * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, or naming no place and
- * sharing three significant words of its title with one, is not filed:
+ * same place as one already filed for the same source ticket (`placeSeat`), whatever its title, or sharing three
+ * significant words of its title with one when either of the two names no place, is not filed:
  * its evidence is a comment on that issue (`places` holds the issue of each place) and it is not
  * returned, unless the comment fails. A dry run files nothing and returns them unfiled, for the summary to list.
  * `write` is how a tracker write is made (the host's git mutex in a run: a ticket file is a commit on
