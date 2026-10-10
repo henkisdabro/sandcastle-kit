@@ -140,9 +140,36 @@ This continues SKILL.md: run its "Before every action" first.
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
    when the user asks (pause.md), and `sandcastle wait` keeps waiting through a pause.
+
+   **Keep the session's prompt cache warm, only without the mod.** A session that sits silent
+   through a long run loses its prompt cache (an hour, or 5 minutes on overage), and its closing
+   turn then re-reads the whole conversation uncached. The mod's refresh prevents that and adds
+   nothing to the conversation, so it is preferred whenever it is loaded. Schedule the tick below
+   only when **all** of these hold: the mod's note in SKILL.md does not say the mod keeps the
+   cache warm (the note says to skip the skill's keep-warm tick when it does); the run record's
+   `settings.keepWarm` is not `false` (a record with no such key reads as on; read it with
+   `node`, as the tick does, never with a JSON tool that may not be installed); and the harness can
+   schedule a recurring prompt in this session (Claude Code: the `loop` skill, `/loop`, as a
+   self-paced wake-up of 55 minutes, since cron cannot express 55m). A harness with no scheduler
+   skips the tick: say so to the user once, and carry on with `sandcastle wait`.
+
+   The tick runs every 55 minutes, with a fixed prompt: run this one command in the project root
+   and post its one line, nothing else - no status table, no log or tracker reads.
+
+   ```
+   node -e 'const r=JSON.parse(require("fs").readFileSync(".sandcastle/logs/run.json","utf8"));const c={};for(const t of Object.values(r.tickets))c[t.state]=(c[t.state]||0)+1;console.log(r.stage+" · "+Object.entries(c).sort().map(([k,v])=>k+" "+v).join(", "))'
+   ```
+
+   Its output reads like `running · implement 1, landing 1, merged 15, queued 5, review 1`
+   (`node` is always there: the kit runs on it). A tick that finds the run ended (the stage reads
+   `report`, or the record is gone) stops the loop and goes on to step 4. A paused run keeps its
+   ticks, since it is still live. Each tick adds a few hundred tokens to the conversation, which is
+   why the mod's refresh wins.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
    summary" below before writing it.
+
+   Start by stopping the keep-warm loop of step 3, if you scheduled one.
 
    The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git

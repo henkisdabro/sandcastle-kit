@@ -44,6 +44,9 @@ how to resume.
      from its next phase in the same run, with one closing summary at the end. The run stays
      live while paused, so no new `sandcastle run` can start in the project, and `sandcastle wait`
      keeps waiting.
+     A keep-warm tick that run.md's step 3 scheduled (a recurring prompt every 55 minutes) keeps
+     running through the pause, as the mod's cache refresh does: the cache lapses just as well
+     while the run is held.
    - **Leave the run's branches alone.** The pause frees the machine, not the repository: a commit,
      merge or pull on the base branch or an `agent/*` branch in this checkout stops the run at its
      next landing, or as its next sandbox opens (the resume's, at the latest). Work done meanwhile
