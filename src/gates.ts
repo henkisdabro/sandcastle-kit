@@ -137,7 +137,7 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         progress.gate?.(i, g.name);
         if (log) appendFileSync(log, `\n$ ${g.command}   # gate ${i + 1}/${project.gates.length}: ${g.name}, ${localStamp()}\n`);
         const since = Date.now();
-        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, line + "\n") } : undefined);
+        const r = await execGate(sandbox, g.command, log ? { onLine: (line) => appendFileSync(log, stripVTControlCharacters(line) + "\n") } : undefined);
         const ms = Date.now() - since;
         const timedOut = r.exitCode === 124;
         const timeout = `timed out after ${GATE_TIMEOUT_SECONDS / 60} min`;
@@ -145,12 +145,16 @@ export const runGates = (project: Project, sandbox: Parameters<typeof execGate>[
         // from `onLine` has none of it - and a test runner prints its failures there. Not `2>&1` on the command:
         // the failure output's order would change for logged gates only, and `redOnBase` compares failure keys
         // between a branch and the base.
-        if (log && r.stderr) appendFileSync(log, `# stderr of ${g.name} (at most its last 64 KiB):\n${r.stderr.endsWith("\n") ? r.stderr : r.stderr + "\n"}`);
+        if (log && r.stderr) {
+          const stderr = stripVTControlCharacters(r.stderr);
+          appendFileSync(log, `# stderr of ${g.name} (at most its last 64 KiB):\n${stderr.endsWith("\n") ? stderr : stderr + "\n"}`);
+        }
         if (log) appendFileSync(log, `# ${g.name} ${r.exitCode === 0 ? "green" : timedOut ? `RED (${timeout})` : `RED (exit ${r.exitCode})`} in ${seconds(ms)}\n`);
         gates.push({ name: g.name, pass: r.exitCode === 0, ms, ...(timedOut ? { timedOut } : {}) });
         if (r.exitCode === 0) continue;
         // Without the colour codes a test runner prints into a pipe (vitest does, with no TTY and no TERM): the repair
-        // prompt, `failureKey` and `failingTests` read plain text. The gates log, written as the gate ran, keeps them.
+        // prompt, `failureKey` and `failingTests` read plain text. The gates log is stripped as it is written, too: a
+        // `grep "Test Files"` over colour-coded lines misses or garbles them.
         const output = clip(
           stripVTControlCharacters([...(timedOut ? [`The gate ${timeout} and was stopped; its output so far:`] : []), r.stdout, r.stderr].filter(Boolean).join("\n")).trim(),
         );
@@ -337,7 +341,8 @@ export const gitHooksLine = (g: GitHooks) =>
 // `check` is the `.git` check of the run around it (`HostGit.check`), made before the sandbox opens and before it closes.
 // `beforeOpen` is the one made before it opens, when that is another (the base gates at a run's start, below).
 // `exclusive` is the run's host git mutex (`HostGit.exclusive`), which the sandbox's worktree add and its clean-up run in (`openOrAbandon`).
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown, beforeOpen = check, exclusive?: Exclusive) => {
+// `log` is where the gates stream their output, a ticket gates log's layout (`runGates`' `progress.log`).
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown, beforeOpen = check, exclusive?: Exclusive, log?: string) => {
   // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
   // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
   const asked = Date.now();
@@ -371,7 +376,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
       // landing after the caller read the tip is in here, and the run is that commit's, not the one asked about.
       const head = (await sandbox.exec("git rev-parse HEAD")).stdout.trim() || undefined;
       // The base and verify gates end a run's wait for them; the mid-run check (`ownSlot` false) is a ticket's, run in its slot.
-      const run: GateRun = withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, undefined, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
+      const run: GateRun = withGates ? await runGates(project, sandbox, `${project.name} ${label}`, true, { log }, ownSlot) : { gates: [], failure: undefined, failures: [], waitMs: 0 };
       // Red on the base, whoever asked: a green record of it (a landing's, the verify's) would have the next
       // turn skip the check on a base known to be red - a flaky test passes once and fails the next time.
       if (run.failures.length || run.gates.some((g) => !g.pass)) noteBaseResult(project.root, "", false);
@@ -814,7 +819,16 @@ export const verifyPlan = (project: Project, image: string, planFile: string, me
  * turn's skip, red removes a record that would skip a base known to be red.
  */
 export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown, exclusive?: Exclusive) => {
-  const gated = await gateBase(project, image, planFile, "verify", false, runId, true, true, check, undefined, exclusive);
+  // Streamed as a ticket's gates log is, unclipped: the test summary sits at the end of a runner's stdout, where a
+  // clipped excerpt cuts, and the per-gate times and the slot wait are what tell a load-made red. This run's log
+  // replaces an earlier one, which would read as this run's result.
+  const log = join(project.root, VERIFY_LOG);
+  rmSync(log, { force: true });
+  mkdirSync(dirname(log), { recursive: true });
+  // The section header `markLog` (src/run.ts) writes, which this file cannot import: run.ts imports it.
+  appendFileSync(log, `\n# gates on the merged ${project.baseBranch} at ${sh("git", ["rev-parse", "--short", project.baseBranch], project.root)} - run ${runId ?? "none"}, ${localStamp()}\n`);
+  const gated = await gateBase(project, image, planFile, "verify", false, runId, true, true, check, undefined, exclusive, log);
+  appendFileSync(log, `# verify: ${gateLine(gated.gates)}\n`);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
   if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify", "verify");
