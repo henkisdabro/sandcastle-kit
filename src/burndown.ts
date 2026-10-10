@@ -24,14 +24,14 @@
 // machine-wide limits in pool.ts.
 
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { format } from "node:util";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -3485,9 +3485,10 @@ export const burndown = async (
       if (same && landed.get(same)?.clean) verifyCleanTreeOf = ref(same);
       else if (same) verifyTreeOf = ref(same);
     }
-    // A red merged base said "do not push" with nothing to read: its output goes where the base gates' does.
-    const at = sh("git", ["rev-parse", "--short", base], project.root);
-    if (writeGateLog(join(project.root, VERIFY_LOG), `# gates on the merged ${base} at ${at}, ${new Date().toISOString()}: ${gateLine(verify)}`, gated.failures)) {
+    // A red merged base said "do not push" with nothing to read: its full output is in the verify log (`verifyBase`
+    // streamed it as the gates ran). A skipped verify ran nothing: a log an earlier run left would read as this one's.
+    if (verifySkipped) rmSync(join(project.root, VERIFY_LOG), { force: true });
+    if (gated.failures.length) {
       // The last lines are often an assertion dump and the package manager's exit: the failing tests' names come first.
       if (verifyRed.tests.length) console.log(`\n--- verify failing tests: ${verifyRed.tests.join(", ")}${verifyRed.more ? ", and more" : ""}`);
       for (const f of gated.failures) console.log(`\n--- verify ${f.name} (exit ${f.exitCode}), last lines:\n${f.output.split("\n").slice(-15).join("\n")}`);
