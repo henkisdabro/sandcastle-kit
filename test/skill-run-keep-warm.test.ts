@@ -61,6 +61,15 @@ test("step 4 starts by stopping the loop, and a tick that finds the run ended go
   assert.match(step3, /A paused run keeps its ticks/);
 });
 
+// Every turn ends on `report` (burndown.ts), and the autonomy loop may then ask or start another turn:
+// a tick that read `report` as the end would stop the loop and close a run still going.
+test("a tick reads the end from `sandcastle wait`, never from the stage `report` alone", () => {
+  const ended = step3.match(/finds the run ended \(([^)]*)\)/)?.[1] ?? "";
+  assert.match(ended, /`sandcastle wait` .*reported back/);
+  assert.doesNotMatch(ended, /`report`/);
+  assert.match(step3, /stage `report` alone is no end/);
+});
+
 test("pause.md says a paused run keeps its keep-warm tick", () => {
   assert.match(flat(pause), /keep-warm tick .* keeps running through the pause/);
 });

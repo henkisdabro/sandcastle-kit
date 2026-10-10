@@ -161,10 +161,12 @@ This continues SKILL.md: run its "Before every action" first.
    ```
 
    Its output reads like `running · implement 1, landing 1, merged 15, queued 5, review 1`
-   (`node` is always there: the kit runs on it). A tick that finds the run ended (the stage reads
-   `report`, or the record is gone) stops the loop and goes on to step 4. A paused run keeps its
-   ticks, since it is still live. Each tick adds a few hundred tokens to the conversation, which is
-   why the mod's refresh wins.
+   (`node` is always there: the kit runs on it). A tick that finds the run ended (the
+   `sandcastle wait` above has reported back with anything but 124, or the record is gone) stops
+   the loop and goes on to step 4. The stage `report` alone is no end: every turn ends on it, and
+   at autonomy level 1 or above the run may still ask to run again or start the next turn. A
+   paused run keeps its ticks, since it is still live. Each tick adds a few hundred tokens to the
+   conversation, which is why the mod's refresh wins.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
    summary" below before writing it.
