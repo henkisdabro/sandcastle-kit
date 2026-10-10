@@ -26,6 +26,7 @@
 import { createSandbox, type Sandbox } from "@ai-hero/sandcastle";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { format } from "node:util";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL, crossReview, implAgent, implementNote, type Override, reviewWithFallback, ticketOverride } from "./agents.ts";
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
@@ -41,7 +42,7 @@ import { isTicketState, type PlanUsage, type RunRecord, type TicketRecord, type 
 import { estimateSlots, joinPool, leaseSlot, limit, myShare, otherRuns, recordOfRun, setDemand, type SlotLease, splitAtStart, startLines, usage, type WaitReason } from "./pool.ts";
 import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
-  createLoadMeter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
+  createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
 import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, strayChanges, strayNote } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
@@ -1134,11 +1135,19 @@ export const createHoldRecord = (o: {
     write(run);
   };
   // One line per file, not per pair: the pairs of a wide run number in the dozens. The pairs go to the log.
+  // A release says only the file lines not said yet this run: the start's block was repeated at every release.
+  const said = new Set<string>();
   const sayShares = (pairs: { id: string; share: FileShare }[]) => {
     const lines = fileShareSummary(o.ref, pairs);
     if (!lines.length) return;
-    o.say("  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
-    for (const line of lines) o.say(`    ${line}`);
+    const fresh = lines.filter((line) => !said.has(line));
+    if (fresh.length) {
+      o.say(said.size ? "  more tickets that share files:" : "  tickets that share files; if they conflict at landing, the later one is sent back once and its merge resolved:");
+      for (const line of fresh) {
+        said.add(line);
+        o.say(`    ${line}`);
+      }
+    }
     for (const { id, share } of pairs) o.log?.(fileShareLine(o.ref, id, share));
   };
   return {
@@ -2946,6 +2955,12 @@ export const burndown = async (
   // A run is silent for as long as its agents are, which for a review can be
   // half an hour. One line every five minutes says it is alive and where, and says when the run
   // has waited for a sandbox slot longer than a typical issue takes: a stall nobody sees otherwise.
+  // Sandcastle prints a `tail -f` line for every pass; a ticket keeps its first. Put back where the heartbeat stops.
+  const consoleLog = console.log;
+  const tailFilter = createTailFilter();
+  console.log = (...args: unknown[]) => {
+    if (tailFilter(format(...args))) consoleLog(...args);
+  };
   const heartbeat = setInterval(() => {
     const line = heartbeatLine({
       now: Date.now(),
@@ -3363,12 +3378,14 @@ export const burndown = async (
     .run({ workers, concurrency: CONCURRENCY, slot: (wanted) => sandboxSlot("next ticket", () => !wanted()), landingWaits: () => slotWanted.n > 0, attempt, ...landings, tell, pause: { read: () => (usagePause ? usagePause.source.read() : readPause(project.root, process.pid)) } })
     .catch((error: unknown) => {
       clearInterval(heartbeat);
+      console.log = consoleLog;
       usageWatch?.stop();
       // A write the host git refused is a safety stop as it happens; a `.git` change the scheduler's own state
       // would have named is lost with its rejection, and the writer's check refuses such a write by itself.
       return stopLanding(error, host.failed !== undefined);
     });
   clearInterval(heartbeat);
+  console.log = consoleLog;
   // A run whose last ticket landed while it was paused goes on to its verify and summary: not paused any more, and awake.
   await pausing.end();
   // The last reading is in the record before the closing summary reads it.

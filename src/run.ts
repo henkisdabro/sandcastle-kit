@@ -5,6 +5,7 @@ import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from "nod
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants as osConstants, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { IterationUsage, LoggingOption } from "@ai-hero/sandcastle";
 import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL } from "./agents.ts";
 import type { Project } from "./config.ts";
@@ -378,6 +379,22 @@ export const gatesLog = (project: Project, id: string) => join(project.root, `.s
 /** The log Sandcastle writes for branch `agent/issue-<id>` and run name `name`; it mirrors Sandcastle's own filename sanitising. */
 export const agentLog = (project: Project, id: string, name: string) =>
   join(project.root, ".sandcastle/logs", `agent-issue-${id}-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}.log`);
+
+/**
+ * Sandcastle prints `  tail -f <log>` for every agent pass with file logging: a ticket's implement, review and repair
+ * passes each print one, 143 lines in a 66-ticket run. The filter lets a ticket's first through and drops its later ones
+ * (a line with its ANSI styling removed, `agent-issue-<id>-<pass>-<id>.log`); every other line passes.
+ */
+export const createTailFilter = (): ((line: string) => boolean) => {
+  const seen = new Set<string>();
+  return (line) => {
+    const id = stripVTControlCharacters(line).match(/^ {2}tail -f (?:\S*\/)?agent-issue-(.+)-[^/]+-\1\.log$/)?.[1];
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  };
+};
 
 /** The sidecar that keeps an agent pass's raw stream beside its readable log. */
 export const rawLog = (log: string) => log.replace(/\.log$/, ".jsonl");
