@@ -110,6 +110,13 @@ export type ProjectConfig = {
    */
   herdr?: { panes?: "none" | "all" };
   /**
+   * Whether the session that started the run keeps its prompt cache warm while the run is live.
+   * Default true; `false` here turns it off for this project, and `"keepWarm": false` in the
+   * personal `config.json` turns it off everywhere. A refresh request reads the cached
+   * conversation at about 0.1x the input price, where a cold restart re-reads it at the full price.
+   */
+  keepWarm?: boolean;
+  /**
    * Plan usage, in percent (1 to 100), at which a run pauses itself: when the 5-hour or the weekly window of a
    * provider the run uses reaches it, or an agent hits the limit anyway, the run takes the soft pause of
    * `sandcastle pause` and resumes by itself a minute after that window's reset. Unset: no pause, and a
@@ -202,8 +209,8 @@ export type ProjectConfig = {
   repair?: { attempts?: number; maxIterations?: number; idleTimeoutSeconds?: number };
 };
 
-export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause">> &
-  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause"> & { root: string; tracker: Resolved };
+export type Project = Required<Omit<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "tracker" | "autonomy" | "claudeCode" | "herdr" | "pnpmStore" | "changelog" | "cpus" | "usagePause" | "keepWarm">> &
+  Pick<ProjectConfig, "dockerfile" | "rules" | "protectedPaths" | "blockers" | "autonomy" | "claudeCode" | "herdr" | "changelog" | "cpus" | "usagePause" | "keepWarm"> & { root: string; tracker: Resolved };
 
 export const CONFIG_PATH = ".sandcastle/config.ts";
 
@@ -232,7 +239,7 @@ export const hostPnpmStore = (root: string): string | undefined => {
 
 // Every key a config may hold, and those of its nested objects. An unknown one - a typo such as
 // `concurency` - was ignored without a word, and the run went on with the default.
-const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
+const KEYS = ["name", "baseBranch", "tracker", "label", "concurrency", "cpus", "herdr", "autonomy", "usagePause", "keepWarm", "claudeCode", "dockerfile", "mounts", "setup", "pnpmStore", "lean", "gates",
   "hookTests", "protectedPaths", "land", "generated", "blockers", "rules", "changelog", "implement", "review", "repair"];
 const NESTED: Record<string, string[]> = {
   lean: ["keep", "dropHooks"],
@@ -293,6 +300,7 @@ const checkShape = (config: ProjectConfig) => {
     refuse(`\`cpus\` must be a number of 0.01 or more (CPUs per sandbox) or false (no limit), not ${JSON.stringify(config.cpus)}.`);
   }
   if (config.changelog !== undefined && typeof config.changelog !== "boolean") refuse(`\`changelog\` must be true or false, not ${JSON.stringify(config.changelog)}.`);
+  if (config.keepWarm !== undefined && typeof config.keepWarm !== "boolean") refuse(`\`keepWarm\` must be true or false, not ${JSON.stringify(config.keepWarm)}.`);
   if (config.autonomy !== undefined && ![0, 1, 2, 3, "drain"].includes(config.autonomy)) refuse(`\`autonomy\` must be 0, 1, 2, 3 or "drain", not ${JSON.stringify(config.autonomy)}.`);
   if (config.usagePause !== undefined && !(typeof config.usagePause === "number" && config.usagePause >= 1 && config.usagePause <= 100)) {
     refuse(`\`usagePause\` must be a number from 1 to 100 (the percent of a plan window at which a run pauses), not ${JSON.stringify(config.usagePause)}.`);
