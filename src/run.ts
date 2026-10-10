@@ -677,25 +677,37 @@ let current: ((code: number | undefined) => void) | undefined;
 let exitHooked = false;
 
 /**
- * The ticket slots a run could use, averaged over its time: the share moves as other runs begin and end, so the figure
- * taken at the start prices later estimates as the wrong load. `sample` tells the slots from now on; `mean` is the
- * time-weighted mean up to now, rounded to a whole number of at least 1 (a half rounds up), as `load.concurrency` is read.
+ * The ticket slots a run could use, averaged over the time its tickets work at full demand: the share moves as other
+ * runs begin and end, so the figure taken at the start prices later estimates as the wrong load. `sample` tells the
+ * slots from now on, and whether the time from now counts (`counted`, true unless said): the base gates and the tail
+ * where the last tickets finish are bound by demand, not by the share, so their duration is left out of the mean (not
+ * carried as a low sample). `mean` is the time-weighted mean of the counted time up to now, rounded to a whole number of
+ * at least 1 (a half rounds up), as `load.concurrency` is read; with no counted time yet, the start's slots.
  */
 export const createLoadMeter = (slots: number, now: () => number = Date.now) => {
-  const began = now();
-  let at = began;
+  let at = now();
   let current = slots;
+  let counting = true;
   let area = 0;
-  return {
-    sample(n: number) {
-      const t = now();
+  let span = 0;
+  const settle = (t: number) => {
+    if (counting) {
       area += current * (t - at);
-      at = t;
+      span += t - at;
+    }
+    at = t;
+  };
+  return {
+    sample(n: number, counted = true) {
+      settle(now());
       current = n;
+      counting = counted;
     },
     mean() {
       const t = now();
-      return Math.max(1, Math.round(t > began ? (area + current * (t - at)) / (t - began) : current));
+      const open = counting ? t - at : 0;
+      const total = span + open;
+      return Math.max(1, Math.round(total > 0 ? (area + current * open) / total : slots));
     },
   };
 };
