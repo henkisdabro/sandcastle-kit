@@ -65,8 +65,8 @@ test("the resolver reads nothing but its arguments", () => {
 });
 
 test("the settings group carries the level, the turn and the cap; level 1 has no cap", () => {
-  const rest = { crossReview: OFF, repair: 1, concurrency: { asked: 4, effective: 4 }, usageGuard: false };
-  const also = { crossReview: false, repair: 1, concurrency: 4, asked: 4, usageGuard: false };
+  const rest = { crossReview: OFF, repair: 1, concurrency: { asked: 4, effective: 4 }, usageGuard: false, keepWarm: true };
+  const also = { crossReview: false, repair: 1, concurrency: 4, asked: 4, usageGuard: false, keepWarm: true };
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 0 }, 1), { autonomy: 0, turn: 1, cap: 1, ...also });
   assert.deepEqual(settingsGroup({ ...rest, autonomy: 3 }, 2), { autonomy: 3, turn: 2, cap: 3, ...also });
   assert.deepEqual(settingsGroup({ ...rest, autonomy: "drain" }, 7), { autonomy: "drain", turn: 7, cap: 20, ...also });
@@ -81,10 +81,10 @@ test("a written record carries its settings, and a later turn's record its own t
   const read = () => JSON.parse(readFileSync(file, "utf8")) as RunRecord;
   const settings = resolveSettings({ env: { AUTONOMY_LEVEL: "3" }, project: {}, machine: {} });
   recordRun(project, { settings: settingsGroup(settings, 1) });
-  assert.deepEqual(read().settings, { autonomy: 3, turn: 1, cap: 3, repair: 1, concurrency: 4, asked: 4, crossReview: false, usageGuard: false });
+  assert.deepEqual(read().settings, { autonomy: 3, turn: 1, cap: 3, repair: 1, concurrency: 4, asked: 4, crossReview: false, usageGuard: false, keepWarm: true });
   // The next turn writes a fresh record: the level is the run's, the turn its own.
   recordRun(project, { settings: settingsGroup(settings, 2) });
-  assert.deepEqual(read().settings, { autonomy: 3, turn: 2, cap: 3, repair: 1, concurrency: 4, asked: 4, crossReview: false, usageGuard: false });
+  assert.deepEqual(read().settings, { autonomy: 3, turn: 2, cap: 3, repair: 1, concurrency: 4, asked: 4, crossReview: false, usageGuard: false, keepWarm: true });
 });
 
 test("the settings group carries the usage pause only when it is on", () => {

@@ -472,6 +472,9 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
       // The mod reads this one and never reports it, so a typo would leave the mark on without a word.
       const idleMark = machineSettings().idleMark;
       if (idleMark !== undefined && typeof idleMark !== "boolean") return `"idleMark" in ${settingsFile} is ${JSON.stringify(idleMark)}, not true or false.`;
+      // The session's keep-warm reads this one too, and a typo would leave it on without a word.
+      const keepWarm = machineSettings().keepWarm;
+      if (keepWarm !== undefined && typeof keepWarm !== "boolean") return `"keepWarm" in ${settingsFile} is ${JSON.stringify(keepWarm)}, not true or false.`;
       // The status view falls back on a bad value without a word, so this is the one place it is said.
       return herdrSettingProblem(machineSettings().herdr, settingsFile);
     } catch (error) {
@@ -488,6 +491,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
         ? `Unset it (\`unset ${settingsName}\`) or set it to a whole number of 1 or more.`
         : settingsProblem?.startsWith('"idleMark"')
           ? `Set it to \`false\` to turn the Claude Code mod's idle mark off, or delete the line to show it.`
+          : settingsProblem?.startsWith('"keepWarm"')
+          ? `Set it to \`false\` to stop the session keeping its prompt cache warm during a run, or delete the line to keep it on.`
           : settingsProblem?.startsWith('"herdr')
           ? `Set it to \`{"clickHint": "auto"}\` (or "ctrl" or "cmd"), or delete it to sense the terminal.`
           : `Fix the file, or delete it to use the defaults: \`rm ${shellQuote(settingsFile)}\`.`),

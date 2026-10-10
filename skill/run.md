@@ -140,9 +140,38 @@ This continues SKILL.md: run its "Before every action" first.
    (the user needs the machine or their plan allowance), `sandcastle pause` stops new tickets and
    agent passes at the next safe juncture and `sandcastle resume` carries on in the same run; only
    when the user asks (pause.md), and `sandcastle wait` keeps waiting through a pause.
+
+   **Keep the session's prompt cache warm, only without the mod.** A session that sits silent
+   through a long run loses its prompt cache (an hour, or 5 minutes on overage), and its closing
+   turn then re-reads the whole conversation uncached. The mod's refresh prevents that and adds
+   nothing to the conversation, so it is preferred whenever it is loaded. Schedule the tick below
+   only when **all** of these hold: the mod's note in SKILL.md does not say the mod keeps the
+   cache warm (the note says to skip the skill's keep-warm tick when it does); the run record's
+   `settings.keepWarm` is not `false` (a record with no such key reads as on; read it with
+   `node`, as the tick does, never with a JSON tool that may not be installed); and the harness can
+   schedule a recurring prompt in this session (Claude Code: the `loop` skill, `/loop`, as a
+   self-paced wake-up of 55 minutes, since cron cannot express 55m). A harness with no scheduler
+   skips the tick: say so to the user once, and carry on with `sandcastle wait`.
+
+   The tick runs every 55 minutes, with a fixed prompt: run this one command in the project root
+   and post its one line, nothing else - no status table, no log or tracker reads.
+
+   ```
+   node -e 'const r=JSON.parse(require("fs").readFileSync(".sandcastle/logs/run.json","utf8"));const c={};for(const t of Object.values(r.tickets))c[t.state]=(c[t.state]||0)+1;console.log(r.stage+" · "+Object.entries(c).sort().map(([k,v])=>k+" "+v).join(", "))'
+   ```
+
+   Its output reads like `running · implement 1, landing 1, merged 15, queued 5, review 1`
+   (`node` is always there: the kit runs on it). A tick that finds the run ended (the
+   `sandcastle wait` above has reported back with anything but 124, or the record is gone) stops
+   the loop and goes on to step 4. The stage `report` alone is no end: every turn ends on it, and
+   at autonomy level 1 or above the run may still ask to run again or start the next turn. A
+   paused run keeps its ticks, since it is still live. Each tick adds a few hundred tokens to the
+   conversation, which is why the mod's refresh wins.
 4. **Close the run - required, even mid-way through another request.** Relaying the report is not
    the job; a **hand-back** the user can act on is. Read "How landing reads" and "Reading the
    summary" below before writing it.
+
+   Start by stopping the keep-warm loop of step 3, if you scheduled one.
 
    The run ends with a closing summary (`## 🏁 Run finished` down to `## 👉 Next step`);
    `sandcastle report` prints it again at any time, with the blockers re-read and the local git
@@ -181,6 +210,7 @@ This continues SKILL.md: run its "Before every action" first.
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
       ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent; if it says `RED twice, likely load`, the failures were only test timeouts or a gate far slower than recorded, so `sandcastle gates` on a quiet machine is the check: say which, and still do not push.
+      If it reads `NOT re-gated: the verify could not open its sandbox`, the merged base is ungated (a worktree or container start timed out): run `sandcastle gates`, and do not push until it is green.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)

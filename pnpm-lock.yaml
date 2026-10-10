@@ -162,13 +162,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@ai-hero/sandcastle@0.12.0': 7219fcf19827606e124fd5d88b8d5cd0439e5f698d6b1e228180de2321970a72
+
 importers:
 
   .:
     dependencies:
       '@ai-hero/sandcastle':
         specifier: 0.12.0
-        version: 0.12.0
+        version: 0.12.0(patch_hash=7219fcf19827606e124fd5d88b8d5cd0439e5f698d6b1e228180de2321970a72)
     devDependencies:
       '@types/node':
         specifier: ^24.19.1
@@ -482,7 +485,7 @@ packages:
 
 snapshots:
 
-  '@ai-hero/sandcastle@0.12.0':
+  '@ai-hero/sandcastle@0.12.0(patch_hash=7219fcf19827606e124fd5d88b8d5cd0439e5f698d6b1e228180de2321970a72)':
     dependencies:
       '@clack/prompts': 1.8.1
 

@@ -56,7 +56,7 @@ import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
-import { OperatorError, reportedError } from "./errors.ts";
+import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
@@ -478,16 +478,24 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // for ("left alone, as the ticket asked"). And prose about a gap already dealt with: "Gap fixed.", "were rightly left
 // alone", "each unfixed case" of a test, "the branch had opened this gap" and remaining things that are "different
 // rules that still apply". Narrowly: "every unfixed caller still reads the old key" and "the remaining issues that
-// still apply ... are not fixed" are real gaps, and a negation matches the whole sentence.
+// still apply ... are not fixed" are real gaps, and a negation matches its clause (`isGap` splits a sentence at a contrast).
 const GAP_NEGATED =
   /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b|\b(?:rightly|correctly|properly|deliberately|intentionally)\s+left\s+(?:alone|as\s+is|unfixed)\b|\bgaps?\s+(?:is\s+|was\s+|now\s+|has\s+been\s+)?(?:fixed|closed|addressed)\b|\b(?:each|every)\s+unfixed\s+(?:case|run|test)s?\b(?![^.]*\bstill\b)|\bhad\s+(?:opened|introduced|created|caused)\s+(?:this|the|that|a)\s+gap\b|\bremaining\s+(?:\w+\s+){0,3}?(?:are|is)\s+(?:different|other|separate|unrelated)\b/i;
 // A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
 // all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" and "I have not yet fixed it" are no fix.
 const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+(?:(?:yet|fully|really|actually|properly)\s+)?)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+// A contrast ends a clause: a negation in one ("I fixed the gap in src, but the same gap remains in skill/run.md")
+// must not hide a gap named in the other. A semicolon ends one too.
+const CONTRAST = /;|,?\s+but\s+/i;
 const isGap = (sentence: string): boolean => {
-  if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
-  const fixed = GAP_FIXED.exec(sentence);
-  return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
+  const clauses = sentence.split(CONTRAST);
+  // A fix reports the gaps before it ("found a gap, but fixed it"), so only the clauses from the last fix on count.
+  const fix = clauses.findLastIndex((c) => GAP_FIXED.test(c));
+  return clauses.slice(Math.max(fix, 0)).some((clause) => {
+    if (!GAP_WORDS.test(clause) || GAP_NEGATED.test(clause)) return false;
+    const fixed = GAP_FIXED.exec(clause);
+    return !fixed || isGap(clause.slice(fixed.index + fixed[0].length));
+  });
 };
 // A line that is a heading, not a sentence: a Markdown heading, or a short bold label ("**Checked and left as
 // is**"). It would otherwise join the paragraph under it and be quoted with it.
@@ -1600,7 +1608,7 @@ export const createPipeline = (ctx: PipelineContext) => {
 
     // Sandcastle's open runs host git in the project: `git worktree add`, whose checkout writes every file through the
     // filters `.git/config` names, or in a kit worktree it reuses (one that holds the branch or sits at its path)
-    // `git status`, `git fetch` and `git merge --ff-only`. The pins hold only the filters configured at the start, so a
+    // `git status` (its origin refresh is patched out, #711). The pins hold only the filters configured at the start, so a
     // filter another sandbox planted since the last check would run on the host. A reused worktree - one kept from an
     // earlier run, or from before a pause - has its records held to git's own, then the run's `.git` check comes, the
     // last thing before every open, the first and a resume's. A failure stops the run before the sandbox opens.
@@ -3505,6 +3513,7 @@ export const burndown = async (
   let verifyTreeOf: string | undefined;
   let verifyCleanTreeOf: string | undefined;
   let verifyLoad = false;
+  let verifyNotRun: string | undefined;
   const verifyDue = verifyPlan(gateProject, image, planFile, merged.length, regenerated);
   if (verifyDue.due) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
@@ -3518,7 +3527,16 @@ export const burndown = async (
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
       // Red once is run again, the second result kept: a load flake beside other runs' suites is not a red base.
-      gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+      try {
+        gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+      } catch (error) {
+        // A guard's refusal still stops the run. A sandbox that would not open (Sandcastle's worktree timeout behind a
+        // hung fetch, a slow container start) left the merged base ungated: the summary must still print and say so,
+        // where the error used to escape and end the run with a stack trace and no summary.
+        if (error instanceof OperatorError && !(error instanceof SlowStartError)) throw error;
+        verifyNotRun = errorLine(error);
+        console.log(`verify could not run: ${verifyNotRun}`);
+      }
     }
     verify = gated.gates;
     const verifyRed = verifyFailing(gated.failures);
@@ -3581,7 +3599,7 @@ export const burndown = async (
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(verifyLoad ? { likelyLoad: true } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verifyNotRun ? { green: false, line: "not run", image, notRun: verifyNotRun } : verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(verifyLoad ? { likelyLoad: true } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     ...(gateRewrites.size ? { gateRewrites: [...gateRewrites] } : {}),
     dryRunCheck,

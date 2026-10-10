@@ -9,6 +9,86 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Added
+
+- **The Claude Code mod keeps the run's session prompt cache warm** while a run that session
+  started is live: after 55 minutes of silence it sends a tool-less refresh at about a tenth of the
+  input price, so the turn that closes the run does not re-read the whole conversation uncached. A
+  5-minute cache (overage, or a refresh that found the cache lapsed) is left alone. Without the mod,
+  the skill schedules a 55-minute one-line status tick where the harness can. The **`keepWarm`**
+  setting turns both off (`keepWarm: false` in `.sandcastle/config.ts`, `"keepWarm": false` in the
+  personal `config.json`); the run record's settings carry it, and doctor flags a value that is not
+  true or false.
+- **`pnpm test:related <files...>`** runs the test files that mention a changed file's path,
+  basename (with its extension) or exported names, through the same hermetic runner as `test:file`.
+- **`lean.keep` takes `tool:<Name>`** to give sandbox passes another of Claude Code's built-in tools,
+  checked against the known names and the managed deny list.
+- **Doctor and `sandcastle lean` warn of a project Claude Code older than 2.1.295**, whose tool
+  allow-list misses tools that register after launch.
+
+### Changed
+
+- **Sandbox passes load only the built-in tools they use** (Bash, Read, Edit, Write and TaskStop,
+  plus Skill and ToolSearch when `lean.keep` keeps skills, commands or MCP servers) and run with
+  auto memory off, about halving the fixed prompt prefix. `sandcastle lean` lists each pass's tools,
+  and `lean --measure` probes with the same tools and environment as a pass.
+- **A conflict resolution may change a file git merged cleanly when it says why**: a `<stray>` line
+  naming the file sends it to the narrow review (shown the reason) and the gates instead of holding
+  it for a person. A changed file the resolver did not name still holds the ticket.
+- **`verify-gates.log` streams like a ticket's gates log**: each gate's full output, per-gate times
+  and the gates-slot wait, kept when green too. Gates logs have ANSI sequences stripped.
+- **A project `name` of `base` or `agents`** (any case), which would give its image the kit's own
+  repository, is refused when the config loads, with the fix named; `sandcastle init` in such a
+  directory writes `base-project` or `agents-project`.
+- **run-output.log is shorter**: the "tickets that share files" block once, then only what a
+  release adds, and one `tail -f` line per ticket instead of one per agent pass.
+- **`/sandcastle update` updates projects that need an image rebuild one at a time**: builds are
+  serialised machine-wide, and parallel updates pushed container starts past the 120 s limit.
+
+### Fixed
+
+- **A verify whose sandbox would not open no longer ends the run without its summary.** A worktree
+  or container start that timed out at the end-of-run verify escaped as an uncaught error with a
+  stack trace; the summary now prints and says the merged base is not re-gated and not to push until
+  `sandcastle gates` is green, and the run exits 1. (#716)
+- **Opening a sandbox no longer refreshes a reused worktree from origin.** Sandcastle ran
+  `git fetch origin <branch>` on the host for each kept worktree; over an SSH remote whose agent was
+  locked it hung past Sandcastle's 30 s worktree timeout and failed the landing or ticket. The kit now
+  patches that refresh out (`patches/@ai-hero__sandcastle@0.12.0.patch`). (#711)
+- **Sandbox opens and their clean-up run under landing's host-git lock**, so two opens, or an open
+  beside a landing, no longer collide on a git ref lock. A short-lived `index.lock` after a failed
+  landing merge is re-checked for a few seconds before landing stops, and one that stays stops
+  landing once, naming the file, instead of failing each later ticket the same way.
+- **A red end-of-run verify is run once more** before the base is declared red, so a load flake no
+  longer stops a drain; red only through test timeouts or a far slower gate reads "likely load".
+- **A ticket's red gate no longer waits for a base gates run** when the green-base record holds the
+  base's tip, so its repair starts at once (a base-red run that does happen is a `base-red` line in
+  timings.jsonl).
+- **Landing waits are shorter and read right**: a conflicted ticket's resolve waits only for the
+  tickets ahead of it when its wait began; a landing's sandbox slot goes straight to the run's next
+  queued landing; the heartbeat says `waiting for a sandbox slot` and counts landing time from the
+  slot.
+- **A native GitHub "blocked by" edge to another repository's issue** is waited on as
+  `owner/repo#N`, read from that repository, not as this repository's issue of the same number.
+- **The reviewer-gap detector** no longer lists prose about fixed gaps as unfiled, and reads a
+  negation per clause (split at "but" or a semicolon), so "fixed it in src, but the same gap remains
+  in skill/run.md" is filed.
+- **Follow-ups**: one a ticket's second session words differently becomes a comment on the first
+  session's issue, not a duplicate; closed issues earlier runs filed are no longer match targets.
+- **`sandcastle queue --lint`** counts "new" anywhere in a file's sentence, and no longer flags a
+  `Touches:` path that a ticket it waits on creates.
+- **A run's recorded `load.concurrency`** averages only the time its tickets work at full demand.
+
+### Upgrading
+
+- **Keeping the cache warm is on by default** and spends a little allowance (a refresh reads the
+  cached conversation at about 0.1x the input price). To opt out, set `"keepWarm": false` in
+  `~/.config/sandcastle-kit/config.json` or `keepWarm: false` in a project's `.sandcastle/config.ts`.
+- **A project named `base` or `agents`** in `.sandcastle/config.ts` (any case) is now refused: rename
+  it, which means one image rebuild.
+- **A project whose tickets need another built-in tool** (WebSearch, say) keeps it with
+  `tool:<Name>` in `lean.keep`.
+
 ## [0.13.0] - 2026-10-10
 
 ### Added

@@ -47,16 +47,16 @@ const problems = async (tickets: Record<string, string>) => {
   return blockerProblems(project, tracker, queued);
 };
 
-test("a Touches glob matching nothing gets glob advice, not 'say so under ## Fix'", async () => {
+test("a Touches glob matching nothing gets glob advice, not the new-file hint", async () => {
   const text = await lint({ "01-a.md": ticket("A", "Touches: src/app.ts, lib/**/*.ts") });
   assert.match(text, /shop-01's Touches globs match no file on main: lib\/\*\*\/\*\.ts - a glob orders nothing until files exist: name the new files themselves/);
   assert.ok(!/names paths not on main/.test(text), text);
-  assert.ok(!/say so under ## Fix\) or typos/.test(text), text);
+  assert.ok(!/call each one new in the ticket's prose/.test(text), text);
 });
 
 test("a plain missing path keeps its line, beside a glob's own", async () => {
   const text = await lint({ "01-a.md": ticket("A", "Touches: test/new.test.ts, lib/*.ts") });
-  assert.match(text, /shop-01 names paths not on main: test\/new\.test\.ts - new files \(say so under ## Fix\) or typos\?/);
+  assert.match(text, /shop-01 names paths not on main: test\/new\.test\.ts - new files \(call each one new in the ticket's prose, e\.g\. under ## Fix\) or typos\?/);
   assert.match(text, /Touches globs match no file on main: lib\/\*\.ts - /);
 });
 

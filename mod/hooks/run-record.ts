@@ -222,6 +222,8 @@ export type RunSettings = {
   usageReading?: "unavailable";
   /** The plan usage in percent at which the run pauses itself (`USAGE_PAUSE`); only when it is on. */
   usagePause?: number;
+  /** The session that started the run keeps its prompt cache warm while the run is live; absent in records from older kits, read as true. */
+  keepWarm?: boolean;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
   apiKey?: boolean;
 };
@@ -337,8 +339,9 @@ export type RunRecord = {
    * `cleanTree`: the same for a landing merged and gated in a landing sandbox, a clean one - the red is a flaky or order-dependent test.
    * `likelyLoad`: a red verify (run twice) whose failures are all test timeouts, or whose red gate ran several times its recorded time - the machine's load, not the merge or the sandbox.
    * `skipped`: the verify did not run, as the green-base record already named the merged tip: `by` is whose gates proved it and `kind` where they ran.
+   * `notRun`: the verify could not open its sandbox (a worktree or container start that timed out): the error's line. `green` is false, so the run exits 1 and nothing is pushed on an ungated base.
    */
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string }; notRun?: string } | null;
   keptWorktrees?: { issue: string; path: string }[];
   /** Tracked files a gate rewrote and the kit put back, by path, once each. */
   gateRewrites?: string[];

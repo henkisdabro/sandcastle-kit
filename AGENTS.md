@@ -93,7 +93,7 @@ read a module's section there before changing it.
 | `test/hermetic-env.ts` | Preloaded into every test file by `pnpm test`, `test:shard`, `test:file`, `test:related`, `test:weights` and `test/run-shards.sh` (`--import ./test/hermetic-env.ts`, beside `no-stray.ts`): `TMPDIR` is the realpath of `os.tmpdir()`, the running node's directory leads `PATH` and a no-op `docker` (`exit 0`: lists nothing, stops nothing) follows it - a test never reaches the machine's real Docker, and one that needs its own puts it ahead (`test/docker-stub.ts`) - and `HERDR_*`, `TMUX*`, `SANDCASTLE_*` (not `SANDCASTLE_TEST_*`) and the settings and credential names `src/` reads are removed; a test that needs one sets it itself; no git identity is inherited (`GIT_CONFIG_GLOBAL` an empty file, `GIT_CONFIG_NOSYSTEM=1`, `user.useConfigOnly=true`), so a fixture repo sets its own, and git's background maintenance is off (`maintenance.auto=false`: its detached process holds a lock in `.git/objects`). `test/hermetic-env.test.ts` fails when `src/` reads a name that is neither scrubbed (`SCRUBBED`) nor on its keep list |
 | `test/no-stray.ts` | Preloaded into every test file by `pnpm test`, `test:shard`, `test:file`, `test:related`, `test:weights` and `test/run-shards.sh` (`--import ./test/no-stray.ts`): a test file that writes to stdout or stderr outside `quietly` (`test/quiet.ts`) fails, so a green gate log has only reporter lines (`test/no-stray.test.ts` holds that) |
 | `test/shard.ts` | CI's shards: the test files of `TEST_SHARD=i/n`, packed by measured weight (`pnpm test:shard`); a file it has no weight for still runs |
-| `test/related.ts` | `pnpm test:related <files...>`: the `test/*.test.ts` files that mention a given path (repo-relative, or its basename without extension) or any name that file exports, printed and then run through the runner `test:file` uses; no match says so and exits 0 - a final check beside the typecheck when a change touches text other tests pin (`test/related.test.ts`) |
+| `test/related.ts` | `pnpm test:related <files...>`: the `test/*.test.ts` files that mention a given path (repo-relative, or its basename with the extension: `run.ts`, never the bare word `run`) or any name that file exports, printed and then run through the runner `test:file` uses; no match says so and exits 0 - a final check beside the typecheck when a change touches text other tests pin (`test/related.test.ts`) |
 | `test/weights-reporter.ts` | The reporter behind `pnpm test:weights`: sums each file's top-level `test:pass` and `test:fail` durations from a `--test-concurrency=1` run and prints a ready-to-paste `WEIGHTS` block for `test/shard.ts` (files at 2.5 s or more) |
 | `test/status.test.sh` | The status view against a made-up repo and run records |
 | `test/*.test.ts` | One file per behaviour, named after it (`ls test/` first: a test file a ticket names may not exist). The `skill*` tests read the skill files and this table's `skill/` row |
@@ -108,7 +108,8 @@ read a module's section there before changing it.
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
-`@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in
+`@ai-hero/sandcastle` is a dependency, not vendored, with a pnpm patch (`patches/`; why, in
+`docs/architecture.md` -> "patched dependency"). Its behaviour is in
 `node_modules/@ai-hero/sandcastle/dist` - read the source there when unsure.
 
 ## Verifying a change

@@ -1231,10 +1231,19 @@ all of it. The mod:
 - keeps small entries per project in its own store: which session closes the run and the last run
   it has accounted for, the cached ready count, and your `/sandcastle-mark` choices (hidden, and
   the ids of a dismissal);
+- while a run this session started (or follows) is live, once a minute checks how long the session
+  has been silent and, after 55 minutes, sends one cache refresh: a tool-less request over the
+  conversation (`$.model.fork`, not Claude Code's `/fork` command), which adds nothing to it and
+  reads it from the prompt cache at about a tenth of the input price, so the turn that closes the
+  run does not re-read it all uncached. It reads the plan's usage windows (`$.session.usage`) to
+  skip the refresh when the cache is the 5-minute kind (a window at 100%, or a refresh that found
+  the cache already lapsed: warming that costs more than one cold restart, and a second such miss
+  in a run stops it for the run), and draws one row under the castle (like `cache warm · refresh
+  in 12m`). `keepWarm: false` in the project config or your personal settings turns it off;
 - submits one prompt when a run ends.
 
 It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no
-file, calls no model and changes neither git nor the tracker. The record is a file in the
+file, calls no model except that cache refresh and changes neither git nor the tracker. The record is a file in the
 repository, so the mod trusts none of it: text from it is cut to one short line with control and
 invisible characters removed, and the prompt it submits carries nothing from the record but
 numbers: the exit code, the pid and the start time as `HH:MM`, each left out when it is not a
@@ -1244,7 +1253,7 @@ running it:
 
 ```
 ❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, turn.complete, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
-❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
+❯ ./register.tsx calls: $.clock.after, $.clock.every, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.model.fork, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.session.usage, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.log, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 
 A test in the kit fails when either list changes, so a new call cannot arrive unnoticed.
@@ -1305,6 +1314,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `cpus` | the VM's CPUs ÷ concurrency, ÷ `maxGates` for gate-only sandboxes | CPUs each sandbox container may use (`docker run --cpus`), so agents' own test runs - which `maxGates` does not limit - cannot starve each other and the gates beside them. Unset, from the container runtime's CPUs (`docker info`'s NCPU), each at least 2 and never more than the VM has: a **ticket's sandbox** (an agent works in it, and its gates run in it) gets them divided by the run's effective concurrency; a **gate-only sandbox** - a landing, the base and verify gates, `sandcastle gates` and `sandcastle land` - gets them divided by `maxGates`, since landings go one at a time and set the run's end (6 on a 12-CPU VM with `maxGates` 2, where a ticket's gets 2 at concurrency 5). A number sets the limit for both kinds (cut to the VM's CPUs, which `docker run` would otherwise refuse; at least 0.01, which `docker run` accepts), `false` sets none. The limit is a CPU time quota, not pinned cores: Node 24's `os.availableParallelism()` returns it, but `nproc`, `os.cpus()` and Python's `os.cpu_count()` still count the VM's CPUs, so give a runner sized from them a worker count in its gate command (`pytest -n <N>`, `make -j<N>`; see [Concurrency](#-concurrency)). The run's start lines say which applies (`Sandbox CPUs: 2 each, 6 for landing and base gates`) |
 | `herdr` | `{ panes: "none" }` | Inside Herdr, `{ panes: "none" \| "all" }`: whether a run opens a pane per sandbox. `"none"`: the run's tab holds the status view alone and the run is one agent on it. `"all"`: a pane per concurrent sandbox. `SANDBOX_PANES` overrides it for one run. See [Works best in Herdr](#-works-best-in-herdr) |
 | `usagePause` | unset | Plan usage in percent (1 to 100) at which a run pauses itself and resumes after the window's reset; `USAGE_PAUSE` overrides it for one run. Unset: no pause, and a limit an agent hits stops the queue as before. See [Pausing a run](#-pausing-a-run) |
+| `keepWarm` | `true` | Whether the session that started the run keeps its prompt cache warm while the run is live. `false` turns it off for this project; `"keepWarm": false` in your [personal settings](#personal-settings) turns it off everywhere, and beats a project's `true`. Keeping warm costs a little allowance: a refresh request reads the cached conversation at about 0.1x the input price, and it saves the cold restart that re-reads the whole conversation at the full price. The run record's `settings.keepWarm` carries the value (a record from an older kit reads as `true`) |
 | `autonomy` | `0` | Turns one `sandcastle run` may take. `0`: one. `1`: after each turn, list the re-runnable tickets and ask before running again - no cap, since every turn needs your yes (with no terminal, nothing re-runs). `2`: one automatic re-run. `3`: up to two. Re-runnable: tickets that ended in a merge conflict, tickets whose blockers have now landed, tickets that merged partly done and are still queued (unless the agent's note says the remainder needs a person), and green branches whose landing did not happen (a sandbox that would not open, a branch that moved); a re-run takes only those, never the rest of the queue. `"drain"`: as many turns as it takes until the queue is drained or a stop condition holds (no progress, the same ticket conflicting, left partly done or failing to land twice running, a red base, a usage limit), at most 20. See [After a run](#-after-a-run) |
 | `claudeCode` | `"stable"` | Which Claude Code the sandbox image installs: `"stable"` or `"latest"` (Claude Code's release channels, resolved on the host) or an exact version such as `"2.1.285"` to pin. `CLAUDE_CODE_VERSION` overrides it for one command. See [The image's agent versions](#-the-images-agent-versions) |
 | `dockerfile` | none | Project layer on the base image; starts `ARG BASE=sandcastle-base:latest` / `FROM ${BASE}`. Claude Code and Codex are copied in after it, so a step of the layer cannot run `claude` or `codex` (the base has neither) |
@@ -1382,9 +1392,10 @@ naming the file, and every run asks before it bills API credits ([Run](#-run)). 
 | `keepAwake` | `true` | `false` lets the machine sleep during runs ([Sleep](#-sleep)) |
 | `herdr.clickHint` | `"auto"` | `"ctrl"` or `"cmd"`: the key the status view's hint names for a click on a ticket, in place of the one sensed from your terminal (`"auto"`); `SANDCASTLE_CLICK_HINT` overrides it ([The Herdr plugin](#the-herdr-plugin)). `herdr` holds no other key |
 | `idleMark` | `true` | `false` turns off the idle mark the Claude Code mod draws between runs, in every project ([The Claude Code mod](#-the-claude-code-mod)) |
+| `keepWarm` | `true` | `false` stops the session that started a run keeping its prompt cache warm while the run is live, in every project, and beats a project's `keepWarm: true`. A refresh request reads the cached conversation at about 0.1x the input price; a cold restart re-reads it at the full price, so leave it on unless you would rather not spend the allowance |
 | `notify` | none | A command run when a run ends, Ctrl-C and a closed pane included, as a list of arguments, not a shell string: `["notify-send", "Sandcastle"]`, or `["sh", "-c", "notify-send Sandcastle \"$SANDCASTLE_SUMMARY\""]` for a shell. It gets `SANDCASTLE_NAME`, `SANDCASTLE_SUMMARY` (for example `run finished - 3 merged, 1 need you, 2 need fixing, of 6`) and `SANDCASTLE_EXIT`, and ten seconds; if it fails, the run's result stands. A malformed value stops a run before it starts |
 
-A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
+A key not in this table is refused, naming the nearest real one, as the project config does. `sandcastle doctor` reports a `config.json` that is not valid JSON, holds an unknown key, holds a bad limit, has an `idleMark` or a `keepWarm` that is not `true` or `false`, or a `herdr` that is not `{"clickHint": "auto" | "ctrl" | "cmd"}`; the status view then shows the hint that names both keys.
 
 ### 🐳 The image's agent versions
 
