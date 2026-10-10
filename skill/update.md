@@ -70,6 +70,11 @@ Declining is not skipping: every step still runs its check, and only the asking 
    1. `sandcastle build` - or `sandcastle build --force` when doctor warns that the base image is
       more than 30 days old (it pulls Debian and Node updates) - then `sandcastle lean`: new
       images, and the hook check against them.
+      When several projects on this machine need a rebuild, update them one at a time, finishing
+      one project's step 3 before starting the next. Image builds are serialised machine-wide, so
+      updating projects in parallel only queues the builds, and the extra opens and gates running
+      beside them load the machine until container starts pass the 120 s limit and gates run slowly
+      enough to turn a base red that CI has green.
       If it refuses the config instead (`unknown key`, `must be ...`: a typo or a wrong type that
       older versions ignored), fix the key it names - it suggests the nearest real one - and run
       it again. A layer step that fails with `claude: not found` or `codex: not found` is step 17's.
