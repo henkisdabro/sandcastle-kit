@@ -70,7 +70,9 @@ state.
   (`PipelineContext.regate`, below), and a repair starts from the landing gate's output only if it is red again; on a moved base
   the gates run first. A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
-  is queued to land and no ticket still in its pipeline has touched the files it conflicted on,
+  is queued to land and no ticket still in its pipeline has touched the files it conflicted on
+  (the tickets ahead of it when the wait begins, and only those: one that starts later is not
+  waited for, so the wait cannot outlast a queue that keeps starting tickets),
   then merges the base and resolves once (each landing ahead of it would have conflicted the resolve
   again; the wait holds no sandbox slot and no pipeline worker - the worker that takes the ticket
   hands it to the wait and goes back to the queue, and the ticket is pushed again, first in line,
@@ -78,7 +80,7 @@ state.
   parks it as at the start; the run says `resolve waits` once the list has held for `RESOLVE_SETTLE_MS`
   (the log line once, a later change only the record's note; a ticket still in its pipeline is worded
   "lands or leaves the run", a queued branch "has landed") and `resolve starts` for a wait it said,
-  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`, `test/schedule-resolve-settle.test.ts`). A second conflict is still final, unless it names a ticket
+  `test/schedule-resolve-wait.test.ts`, `test/schedule-resolve-worker.test.ts`, `test/schedule-resolve-settle.test.ts`, `test/schedule-resolve-snapshot.test.ts`). A second conflict is still final, unless it names a ticket
   that landed after the resolve began (the resolve's merge could not hold it): that one sends the
   ticket back again, with the same wait, and each such requeue needs a new landing, so it ends.
 - **Release of dependants.** The tickets held for a blocker that starts in this run: when one lands
