@@ -214,3 +214,32 @@ export const resolveVersions = async (
 /** The line a run and `sandcastle build` print; a run gives the kit version too (`build` does not). */
 export const versionsLine = (v: Versions, kit?: string) =>
   `${kit ? `sandcastle-kit ${kit} · ` : ""}Claude Code ${v.claude} (${v.channel}) · Codex ${v.codex}`;
+
+/**
+ * The first Claude Code that applies `--tools` to every built-in tool. Its changelog for that release:
+ * "Fixed `--tools` and `--restricted` not applying to built-in tools that register after launch".
+ * Older, a pass's allow-list leaves such tools loaded; the managed deny list still holds, so an older
+ * version is a warning and not a refusal.
+ */
+export const TOOLS_FLOOR = "2.1.295";
+
+const parts = (v: string) => {
+  const [core, pre] = v.split(/-(.*)/s);
+  return { nums: core.split(".").map(Number), pre };
+};
+
+/** Numeric comparison of major, minor and patch; a pre-release (`-beta.1`) counts as below its release. */
+export const belowToolsFloor = (version: string): boolean => {
+  const v = parts(version);
+  const f = parts(TOOLS_FLOOR);
+  for (let i = 0; i < 3; i++) {
+    if (v.nums[i] !== f.nums[i]) return v.nums[i] < f.nums[i];
+  }
+  return v.pre !== undefined;
+};
+
+/** The warning `sandcastle doctor` and `sandcastle lean` print for a Claude Code below the floor, one wording; undefined at or above it. */
+export const toolsFloorLine = (version: string): string | undefined =>
+  belowToolsFloor(version)
+    ? `Claude Code ${version} applies the passes' tool allow-list only to the tools present at launch; tools that register later stay loaded until ${TOOLS_FLOOR}.\n       -> Raise or remove the \`claudeCode\` pin in .sandcastle/config.ts, or, when the version came from the Dockerfile's fallback, check the network.`
+    : undefined;
