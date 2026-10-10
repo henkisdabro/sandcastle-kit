@@ -1600,7 +1600,7 @@ export const createPipeline = (ctx: PipelineContext) => {
 
     // Sandcastle's open runs host git in the project: `git worktree add`, whose checkout writes every file through the
     // filters `.git/config` names, or in a kit worktree it reuses (one that holds the branch or sits at its path)
-    // `git status`, `git fetch` and `git merge --ff-only`. The pins hold only the filters configured at the start, so a
+    // `git status` (its origin refresh is patched out, #711). The pins hold only the filters configured at the start, so a
     // filter another sandbox planted since the last check would run on the host. A reused worktree - one kept from an
     // earlier run, or from before a pause - has its records held to git's own, then the run's `.git` check comes, the
     // last thing before every open, the first and a resume's. A failure stops the run before the sandbox opens.

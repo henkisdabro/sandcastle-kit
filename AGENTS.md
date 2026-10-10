@@ -108,7 +108,8 @@ read a module's section there before changing it.
 | `site/` | The project website on GitHub Pages: static HTML, CSS and plain scripts, no build step |
 | `CHANGELOG.md` | Keep a Changelog; each release's **Upgrading** notes are what `/sandcastle update` acts on |
 
-`@ai-hero/sandcastle` is a dependency, not vendored. Its behaviour is in
+`@ai-hero/sandcastle` is a dependency, not vendored, with a pnpm patch (`patches/`; why, in
+`docs/architecture.md` -> "patched dependency"). Its behaviour is in
 `node_modules/@ai-hero/sandcastle/dist` - read the source there when unsure.
 
 ## Verifying a change
