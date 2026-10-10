@@ -79,8 +79,9 @@ test("every field the status view reads from the run record is a run record fiel
   }
   assert.ok(RUN_FIELDS.includes("tickets") && TICKET_FIELDS.includes("state") && WAITING_FIELDS.includes("on"), "the schema's fields were found");
   // The settings group's own fields: the row reads each of them, and each is one the record holds.
-  assert.deepEqual(SETTINGS_FIELDS, ["autonomy", "turn", "cap", "repair", "concurrency", "asked", "crossReview", "crossReviewModel", "crossReviewEffort", "usageGuard", "usageStop", "usageReading", "usagePause", "apiKey"], "the settings group's fields were found");
-  for (const field of SETTINGS_FIELDS) assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
+  assert.deepEqual(SETTINGS_FIELDS, ["autonomy", "turn", "cap", "repair", "concurrency", "asked", "crossReview", "crossReviewModel", "crossReviewEffort", "usageGuard", "usageStop", "usageReading", "usagePause", "keepWarm", "apiKey"], "the settings group's fields were found");
+  // `keepWarm` is for the mod and the skill, which read it from the record; the view draws nothing for it.
+  for (const field of SETTINGS_FIELDS.filter((f) => f !== "keepWarm")) assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
   // The plan's usage: the row reads each of its fields, and each is one the record holds.
   assert.deepEqual(USAGE_FIELDS, ["provider", "windows", "at"], "the usage group's fields were found");
   for (const field of USAGE_FIELDS) assert.ok(read.has(field), `the harvest finds status.sh reading .${field}`);
