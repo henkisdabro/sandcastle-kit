@@ -1,2 +1,8 @@
 allowBuilds:
   esbuild: true
+# Sandcastle's worktree create reuses the worktree the kit adds under the host-git mutex and then runs
+# a host `git fetch origin <branch>` plus a fast-forward outside it, with a 30 s limit: an origin that
+# does not answer fails every open. The patch skips that refresh. Remove it once upstream has an option
+# to skip the origin refresh. See issue #711 of this repository.
+patchedDependencies:
+  '@ai-hero/sandcastle@0.12.0': patches/@ai-hero__sandcastle@0.12.0.patch

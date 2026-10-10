@@ -1,0 +1,13 @@
+diff --git a/dist/chunk-VOG34SRF.js b/dist/chunk-VOG34SRF.js
+index 93f24d139b795c284915a10c34d82f2fa769eab0..52e7f4e874567251a6bec401c03588ebd17d1860 100644
+--- a/dist/chunk-VOG34SRF.js
++++ b/dist/chunk-VOG34SRF.js
+@@ -25295,7 +25295,7 @@ var create = (repoDir, opts) => Effect_exports.gen(function* () {
+             `Reusing worktree at ${collision.path} (branch '${branch}') \u2014 worktree has uncommitted changes`
+           );
+         } else {
+-          yield* fastForwardFromOrigin(collision.path, branch);
++          // sandcastle-kit patch (#711): the reused worktree was just created from the local branch; never refresh it from origin
+         }
+         return { path: normalize(collision.path), branch };
+       }
