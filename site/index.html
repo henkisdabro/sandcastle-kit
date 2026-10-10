@@ -46,7 +46,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://henkisdabro.github.io/sandcastle-kit/#app",
         "name": "sandcastle-kit",
-        "softwareVersion": "0.13.0",
+        "softwareVersion": "0.14.0",
         "description": "An opinionated issue-burndown kit built on Sandcastle: unattended Claude Code agents implement, review, gate and merge GitHub issues or Markdown tickets in Docker sandboxes, locally, with nothing pushed.",
         "url": "https://henkisdabro.github.io/sandcastle-kit/",
         "applicationCategory": "DeveloperApplication",
@@ -76,7 +76,7 @@
           { "@type": "Question", "name": "Does it push to GitHub?", "acceptedAnswer": { "@type": "Answer", "text": "No. Green branches merge into your local base branch. A completed ticket is closed with a comment; a partly-done ticket stays open with the unmet criterion named. Agents' follow-ups are filed for triage. You push when you are happy with what landed." } },
           { "@type": "Question", "name": "What about my own work in that repository?", "acceptedAnswer": { "@type": "Answer", "text": "A run refuses to start on a dirty tree or off the base branch, and it merges into that checkout while it runs. A commit, pull or merge on the base branch mid-run stops the run, and the start line says so. Leave the checkout alone until the run ends, and do your own work in another clone or worktree. You can set an upstream for your own branch in another worktree, including with git push -u or gh pr create. Other changes to the shared git config stop the run, and the stop names the changed keys. If the previous run ended cleanly, the next run accepts a remote or a hook manager's hooks you added in between." } },
           { "@type": "Question", "name": "What if a branch is green but wrong?", "acceptedAnswer": { "@type": "Answer", "text": "Then it is in your local branch and nowhere else. A second agent reads every branch against its ticket before your gates run, and the report lists what merged, so you read before you push. Behaviour that no test covers has only that review between it and your branch." } },
-          { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict, or a resolution that drops lines git had merged, is left for you." } },
+          { "@type": "Question", "name": "What happens on a merge conflict?", "acceptedAnswer": { "@type": "Answer", "text": "If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict is left for you, and so is a resolution that edits a file git had merged cleanly without naming the file and its reason." } },
           { "@type": "Question", "name": "Can the text of a ticket make an agent do something else?", "acceptedAnswer": { "@type": "Answer", "text": "It can try. The sandbox holds a token that only reaches issues, the kit runs your gates itself, and a branch that changes CI, hooks, install scripts or a path you protect waits for you whatever the ticket said." } },
           { "@type": "Question", "name": "Can a run go all night?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. A run keeps the machine awake while work is in flight (caffeinate on macOS, systemd-inhibit on Linux). Closing a MacBook's lid still sleeps it unless it is on power with an external display. A paused run lets the machine sleep once its passes finish. A ticket whose blocker lands starts in the same run, and autonomy: \"drain\" keeps taking turns until the queue is drained or something stops it. Partly-done tickets are retried unless the remainder needs a person's decision; a drain stops after the same ticket is left partly done twice." } },
           { "@type": "Question", "name": "Do I need Matt Pocock's skills?", "acceptedAnswer": { "@type": "Answer", "text": "No, but they help. His /to-tickets and /triage are a good way to write tickets an unattended agent can finish, and the kit reads the tracker and labels his setup skill records." } },
@@ -470,7 +470,7 @@
           <div class="bound">
             <h3>Spends less</h3>
             <ul>
-              <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, and never your plugins or Claude Code's own bundled skills: each one costs context on every turn.</li>
+              <li><b>Lean sandboxes.</b> Sandbox agents load only the skills, subagents, commands and MCP servers you keep, five of Claude Code's built-in tools plus any you keep, and never your plugins or Claude Code's own bundled skills: each one costs context on every turn.</li>
               <li><b>A failed gate gets one retry.</b> The kit runs a failed gate once more, with no model call, before asking an agent to repair it, so a busy machine does not cost a repair.</li>
               <li><b>Picks up where it stopped.</b> A ticket sent back builds on its old branch, and a branch that was already green costs only the gates.</li>
               <li><b>Conflicts before review.</b> A branch that conflicts with the base skips review and gates and goes back to resolve. The host also checks for conflicts before landing.</li>
@@ -519,7 +519,7 @@
         <div class="seat" id="claude-code">
           <h3>In Claude Code</h3>
           <img src="img/mod.gif" width="1440" height="472" loading="lazy" alt="A Claude Code session with a band above the prompt: the castle, then sandcastle, my-app, implementing, and counts of tickets working, ready and merged.">
-          <p>An optional <a href="https://code.claude.com/docs/en/plugins/mods/overview">mod</a> (a Claude Code plugin, in early access) shows the run above the prompt of the session that started it, and names the tickets that need you.</p>
+          <p>An optional <a href="https://code.claude.com/docs/en/plugins/mods/overview">mod</a> (a Claude Code plugin, in early access) shows the run above the prompt of the session that started it, names the tickets that need you, and during a long run spends a little allowance refreshing that session's prompt cache, so the turn that closes the run costs less.</p>
           <details class="more">
             <summary>The detail</summary>
             <div class="bounds">
@@ -693,7 +693,7 @@
       </details>
       <details>
         <summary>What happens on a merge conflict?</summary>
-        <p>If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict, or a resolution that drops lines git had merged, is left for you.</p>
+        <p>If a branch conflicts with the base, it gets one more try in the same run. A conflict found during ticket work skips review and gates; one found at landing is caught on the host, before a sandbox starts. A second conflict is left for you, and so is a resolution that edits a file git had merged cleanly without naming the file and its reason.</p>
       </details>
       <details>
         <summary>Can the text of a ticket make an agent do something else?</summary>
@@ -722,7 +722,7 @@
   <footer class="foot">
     <p class="foot-credit">Built by <a href="https://www.henriksoderlund.com/?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=footer-author-link" rel="author">Henrik Söderlund</a></p>
     <p><a href="https://www.henriksoderlund.com/expertise?utm_source=sandcastle-kit&amp;utm_medium=referral&amp;utm_campaign=oss-sandcastle-kit&amp;utm_content=more-work-link#showcase-projects">More AI and automation work →</a></p>
-    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.13.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
+    <p class="foot-links"><a href="https://github.com/henkisdabro/sandcastle-kit">GitHub</a> <a href="https://github.com/henkisdabro/sandcastle-kit/releases/latest"><span data-version>v0.14.0</span></a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/henkisdabro/sandcastle-kit/blob/main/LICENSE">MIT licence</a></p>
   </footer>
 
   <script src="js/status.js" defer></script>
