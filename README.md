@@ -1231,10 +1231,19 @@ all of it. The mod:
 - keeps small entries per project in its own store: which session closes the run and the last run
   it has accounted for, the cached ready count, and your `/sandcastle-mark` choices (hidden, and
   the ids of a dismissal);
+- while a run this session started (or follows) is live, once a minute checks how long the session
+  has been silent and, after 55 minutes, sends one cache refresh: a tool-less request over the
+  conversation (`$.model.fork`, not Claude Code's `/fork` command), which adds nothing to it and
+  reads it from the prompt cache at about a tenth of the input price, so the turn that closes the
+  run does not re-read it all uncached. It reads the plan's usage windows (`$.session.usage`) to
+  skip the refresh when the cache is the 5-minute kind (a window at 100%, or a refresh that found
+  the cache already lapsed: warming that costs more than one cold restart, and a second such miss
+  in a run stops it for the run), and draws one row under the castle (like `cache warm · refresh
+  in 12m`). `keepWarm: false` in the project config or your personal settings turns it off;
 - submits one prompt when a run ends.
 
 It makes no network request of its own (the kit's `queue` read above reaches the tracker), writes no
-file, calls no model and changes neither git nor the tracker. The record is a file in the
+file, calls no model except that cache refresh and changes neither git nor the tracker. The record is a file in the
 repository, so the mod trusts none of it: text from it is cut to one short line with control and
 invisible characters removed, and the prompt it submits carries nothing from the record but
 numbers: the exit code, the pid and the start time as `HH:MM`, each left out when it is not a
@@ -1244,7 +1253,7 @@ running it:
 
 ```
 ❯ ./register.tsx hooks: session.start, classic.SessionStart{source=clear|resume|fork}, skill.prompt{skill=sandcastle}, turn.complete, command.run{command=sandcastle-status}, command.run{command=sandcastle-mark}, ui.render{component=AbovePrompt}
-❯ ./register.tsx calls: $.clock.after, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.resolve, $.ui.status, $.ui.toast
+❯ ./register.tsx calls: $.clock.after, $.clock.every, $.clock.now, $.command.register, $.fs.exists, $.fs.read, $.fs.stat, $.model.fork, $.process.run, $.prompt.submit, $.session.id, $.session.root, $.session.usage, $.state.get, $.state.set, $.store.get, $.store.set, $.ui.log, $.ui.resolve, $.ui.status, $.ui.toast
 ```
 
 A test in the kit fails when either list changes, so a new call cannot arrive unnoticed.
