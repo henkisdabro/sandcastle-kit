@@ -193,9 +193,45 @@ export const strayChanges = (root: string, { ours, theirs, resolved, generated =
 /** How a `strayNote` begins: the closing summary tells a held conflict resolution from any other hold by the outcome text `needs a human: <note>` containing it. */
 export const STRAY_NOTE_START = "conflict resolution changed";
 
-/** The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it. */
-export const strayNote = (stray: string[]): string =>
-  `${STRAY_NOTE_START} ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost`;
+/** A cleanly merged file the resolver said it had to change, and why (its `<stray path="...">reason</stray>` line). */
+export type NamedStray = { path: string; why: string };
+
+/**
+ * `stray` (`strayChanges`) split by what the resolver said of it: `named` are the paths it gave a reason for, with the
+ * reason, `unnamed` the rest. A tag naming a path that is not stray, or with no reason, counts for nothing: only a
+ * reason for a file the check found lets a change to a clean file go on to the review and the gates.
+ */
+export const splitStrays = (stray: string[], said: NamedStray[]): { named: NamedStray[]; unnamed: string[] } => {
+  const why = new Map(said.filter((s) => s.why).map((s) => [s.path.trim().replace(/^\.\//, ""), s.why]));
+  return {
+    named: stray.flatMap((path) => (why.has(path) ? [{ path, why: why.get(path)! }] : [])),
+    unnamed: stray.filter((path) => !why.has(path)),
+  };
+};
+
+/**
+ * What the narrow review of a resolution is shown of the clean files the resolver named (`MERGE_STRAYS`): the files and
+ * its reasons, with the ask to hold each change to what the merge needs. Empty when there are none, so the prompt
+ * carries no heading over nothing. It names the diff against the base's side because the combined diff above shows no
+ * line the resolution dropped from that side - the very loss the hold guarded against.
+ */
+export const namedStraysView = (named: NamedStray[]): string =>
+  named.length
+    ? "# Files the resolver changed that merged cleanly\n\nThe resolver changed these files, which git merged without a conflict and the base had changed, " +
+      "and gave the reason for each. The combined diff above does not show a line the resolution dropped from the base's side, " +
+      "so read each file's diff against that side, `git diff <merge>^2 <merge> -- <file>` with `<merge>` the merge commit above. " +
+      "Each change must be only what the merge needs (a test or a call adapted to the other side's code), and no line another " +
+      "ticket landed in the file may be lost:\n\n" +
+      `${named.map((n) => `- \`${n.path}\` - ${n.why}`).join("\n")}\n\n`
+    : "";
+
+/**
+ * The note on a ticket held for a resolution that changed more than the conflict: the run record and the tracker comment share it.
+ * `stray` are the paths the resolver gave no reason for; `named` those it did, which the note lists apart so a person sees every change.
+ */
+export const strayNote = (stray: string[], named: string[] = []): string =>
+  `${STRAY_NOTE_START} ${stray.join(", ")}, which merged cleanly - check no other ticket's lines were lost` +
+  (named.length ? ` (it also gave a reason for ${named.join(", ")})` : "");
 
 /** How the note on a branch held for a rewritten base begins: the closing summary tells it from any other hold by the outcome text `needs a human: <note>` containing it. */
 export const REWRITTEN_NOTE_START = "base rewritten under the branch";

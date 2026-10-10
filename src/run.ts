@@ -556,7 +556,8 @@ const AFTER_MERGE =
   "a hurried resolution gets wrong: one side's change dropped, both sides kept where only one belongs, a block " +
   "duplicated, a call or import left pointing at code the other side renamed or removed. The rest of the branch was " +
   "reviewed already: leave it alone unless the merge broke it.\n\n" +
-  "!`git log -p --cc --first-parent {{REVIEW_BASE}}..HEAD --format='%h %s%n%b'`\n\n";
+  "!`git log -p --cc --first-parent {{REVIEW_BASE}}..HEAD --format='%h %s%n%b'`\n\n" +
+  "{{MERGE_STRAYS}}";
 
 // What `changelog: true` adds to the implement and review prompts. The tag's dots are the
 // placeholder the orchestrator ignores if an agent echoes it back (see `changelogOf`).
@@ -638,7 +639,7 @@ export const renderPrompts = (project: Project, tracker: Tracker, dryRun = false
     // What is named already from the ticket, so no pass names it again: every kind that gives `<followup>` lines (not the resolver).
     if (kind !== "resolve") allowed.add("FOLLOWUPS_NAMED");
     if (kind === "rereview") allowed.add("REPAIR_BASE");
-    if (kind === "remerge") allowed.add("REVIEW_BASE");
+    if (kind === "remerge") for (const k of ["REVIEW_BASE", "MERGE_STRAYS"]) allowed.add(k);
     const unknown = [...text.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]).filter((n) => !allowed.has(n));
     if (unknown.length) {
       throw new Error(`The ${kind} prompt has placeholders Sandcastle cannot fill: ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(", ")} - from ${project.rules ?? "the kit template"}.`);
