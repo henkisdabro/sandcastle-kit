@@ -43,8 +43,9 @@ export const CLOCK = red("FAIL  test/clock.test.ts > rolls over at midnight\n1 f
  * A project in a temp repo with every port faked; `gateOf` says what each ticket's gate run returns, in order.
  * `baseRun` is what the base's gate run returns, or a function of the repo's root that gives it (and may land
  * a commit on the base first, as another ticket's landing would); the run says the base commit it gated.
+ * `recordedGreen` is the green-base record's answer for the base's tip; without it the pipeline is given no record.
  */
-export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((root: string) => GateRun) = CLOCK) => {
+export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((root: string) => GateRun) = CLOCK, recordedGreen?: () => boolean) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -124,6 +125,7 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
       await new Promise((resolve) => setTimeout(resolve, 20));
       return { ...result, head };
     },
+    ...(recordedGreen ? { baseRecordedGreen: recordedGreen } : {}),
     baseWentRed: (tests) => toldRed.push(tests),
     timed: async (_issue, _phase, fn) => fn(),
     run: { ticket: () => {} },

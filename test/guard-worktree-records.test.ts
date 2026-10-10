@@ -655,7 +655,7 @@ test("a container Docker refuses to stop is never checked past: the run stops, t
 // burndown() needs Docker; its wiring is held here instead.
 test("a run's mid-run base check and its verify close their gate sandboxes behind the run's own .git check, and `sandcastle gates` behind its own", () => {
   const burndown = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(burndown, /baseGate: \(\) => gateBase\(gateProject, image, planFile, "base-red", false, runId, false, true, \(when\) => host\.check\(when\), undefined, host\.exclusive\)/);
+  assert.match(burndown, /baseGate: \(id\) =>[^]*?gateBase\(gateProject, image, planFile, "base-red", false, runId, false, true, \(when\) => host\.check\(when\), undefined, host\.exclusive\)/);
   assert.match(burndown, /verifyBase\(gateProject, image, planFile, runId, \(when\) => host\.check\(when\), host\.exclusive\)/);
   const cli = readFileSync(join(import.meta.dirname, "../src/cli.ts"), "utf8");
   assert.match(cli, /requireGreenBase\(gateOnly\(project\), .*, \(when\) => assertGitUnchanged\(project, fingerprint, when, true\)\)/);
