@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parse } from "../mod/hooks/run-state.ts";
-import { activity, afterTurn, INTERVAL_MS, keepWarm, parseWarmth, settle } from "../mod/hooks/keep-warm.ts";
+import { activity, afterTurn, INTERVAL_MS, keepWarm, parseWarmth, settle, withLaterTurn } from "../mod/hooks/keep-warm.ts";
 
 const MIN = 60 * 1000;
 const T0 = 1_800_000_000_000;
@@ -128,4 +128,13 @@ test("the run record's keepWarm setting is read as a boolean, and anything else 
   assert.equal(keepWarmOf({ keepWarm: false }), false);
   assert.equal(keepWarmOf({ keepWarm: true }), true);
   for (const settings of [{}, { keepWarm: "false" }, { keepWarm: 0 }, null, "x", undefined]) assert.equal(keepWarmOf(settings), undefined, JSON.stringify(settings));
+});
+
+test("a refresh writes back a main-thread turn that ended while its request was out", () => {
+  const before = { misses: 0, turnEnd: T0 };
+  const refreshed = { ...before, last: { at: T0 + 55 * MIN, cacheRead: 90_000, contextTokens: 100_000 } };
+  // The turn ended during the request: its end is kept, and so is the refresh it did not miss.
+  assert.deepEqual(withLaterTurn(refreshed, { misses: 0, turnEnd: T0 + 55 * MIN + 1000 }), { ...refreshed, turnEnd: T0 + 55 * MIN + 1000 });
+  // No turn since: the refresh's facts go in as they are.
+  assert.deepEqual(withLaterTurn(refreshed, before), refreshed);
 });

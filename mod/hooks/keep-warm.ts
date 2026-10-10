@@ -109,6 +109,13 @@ export const afterTurn = (kept: Warmth, at: number): Warmth => {
   return { ...rest, turnEnd: at, ...(last !== undefined && !missed(last) ? { last } : {}) };
 };
 
+/**
+ * What a refresh writes back: its own facts, and a main-thread turn that ended while its request was out (`stored`,
+ * the state as it is now). Written as read before the request, that turn's end would be lost.
+ */
+export const withLaterTurn = (kept: Warmth, stored: Warmth): Warmth =>
+  stored.turnEnd !== undefined && stored.turnEnd > (kept.turnEnd ?? -Infinity) ? afterTurn(kept, stored.turnEnd) : kept;
+
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /** A stored value as `Warmth`; anything else reads as nothing remembered. */

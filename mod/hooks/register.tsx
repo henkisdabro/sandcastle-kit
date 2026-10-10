@@ -16,7 +16,7 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
-import { activity, afterTurn, keepWarm, parseWarmth, settle, type Warmth } from "./keep-warm.ts";
+import { activity, afterTurn, keepWarm, parseWarmth, settle, withLaterTurn, type Warmth } from "./keep-warm.ts";
 import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
@@ -455,7 +455,7 @@ async function warm($: EngineInterface) {
         refreshing = false;
       }
     }
-    await update($, warmth, () => memory);
+    await update($, warmth, (m) => withLaterTurn(memory, parseWarmth(m)));
     await shine($, verdict.band ?? null);
   } catch {
     // A usage or request that failed is tried again at the next tick.
