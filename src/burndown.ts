@@ -478,16 +478,24 @@ const GAP_WORDS = /\b(?:left\s+(?:alone|unfixed|as\s+is|undone)|remains?|remaini
 // for ("left alone, as the ticket asked"). And prose about a gap already dealt with: "Gap fixed.", "were rightly left
 // alone", "each unfixed case" of a test, "the branch had opened this gap" and remaining things that are "different
 // rules that still apply". Narrowly: "every unfixed caller still reads the old key" and "the remaining issues that
-// still apply ... are not fixed" are real gaps, and a negation matches the whole sentence.
+// still apply ... are not fixed" are real gaps, and a negation matches its clause (`isGap` splits a sentence at a contrast).
 const GAP_NEGATED =
   /\b(?:nothing|none|no|neither|without|zero)\b(?:\s+\w+){0,3}?\s+(?:remains?|remaining|gaps?)\b|\bremains?\s+(?:unchanged|unaffected|untouched|green|correct|valid|intact|passing|accurate|true|compatible|in\s+place|the\s+same|as\s+(?:is|before|it\s+was))\b|\b(?:no|nothing|none)\b[^.]*\bleft\s+(?:alone|unfixed)\b|\b(?:every|each|all(?:\s+the)?)\s+(?:\d+\s+)?remaining\b|\bremaining\s+(?:\w+\s+){0,3}?(?:pass(?:es|ed)?|(?:is|are)\s+(?:met|green|fine|done)|hold)\b|\b(?:covers?|covered|clos(?:es|ed|e)|fill(?:s|ed)?|fix(?:es|ed)?|address(?:es|ed)?)\s+(?:the|this|that|a)\s+gap\b|\bremaining\b.*,\s*which\s+(?:is|are)\s+(?:correct|fine|expected|intended|deliberate|ok(?:ay)?)\b|\bleft\s+alone,?\s+as\s+the\s+(?:ticket|issue|brief)\s+(?:asked|said|says|required?|requires|specified|wanted|directed|instructed)\b|\b(?:rightly|correctly|properly|deliberately|intentionally)\s+left\s+(?:alone|as\s+is|unfixed)\b|\bgaps?\s+(?:is\s+|was\s+|now\s+|has\s+been\s+)?(?:fixed|closed|addressed)\b|\b(?:each|every)\s+unfixed\s+(?:case|run|test)s?\b(?![^.]*\bstill\b)|\bhad\s+(?:opened|introduced|created|caused)\s+(?:this|the|that|a)\s+gap\b|\bremaining\s+(?:\w+\s+){0,3}?(?:are|is)\s+(?:different|other|separate|unrelated)\b/i;
 // A gap reported with its fix ("found one gap ... and fixed both"). It says nothing of what follows it: in "I fixed
 // all the typos; one gap remains in the README" the gap is after the fix, and "I have not fixed it" and "I have not yet fixed it" are no fix.
 const GAP_FIXED = /\bfound\b.*\band\s+fixed\b|(?<!(?:\bnot|\bnever|n't)\s+(?:(?:yet|fully|really|actually|properly)\s+)?)\bfixed\s+(?:both|all|each|it|them|these|those)\b/i;
+// A contrast ends a clause: a negation in one ("I fixed the gap in src, but the same gap remains in skill/run.md")
+// must not hide a gap named in the other. A semicolon ends one too.
+const CONTRAST = /;|,?\s+but\s+/i;
 const isGap = (sentence: string): boolean => {
-  if (!GAP_WORDS.test(sentence) || GAP_NEGATED.test(sentence)) return false;
-  const fixed = GAP_FIXED.exec(sentence);
-  return !fixed || isGap(sentence.slice(fixed.index + fixed[0].length));
+  const clauses = sentence.split(CONTRAST);
+  // A fix reports the gaps before it ("found a gap, but fixed it"), so only the clauses from the last fix on count.
+  const fix = clauses.findLastIndex((c) => GAP_FIXED.test(c));
+  return clauses.slice(Math.max(fix, 0)).some((clause) => {
+    if (!GAP_WORDS.test(clause) || GAP_NEGATED.test(clause)) return false;
+    const fixed = GAP_FIXED.exec(clause);
+    return !fixed || isGap(clause.slice(fixed.index + fixed[0].length));
+  });
 };
 // A line that is a heading, not a sentence: a Markdown heading, or a short bold label ("**Checked and left as
 // is**"). It would otherwise join the paragraph under it and be quoted with it.
