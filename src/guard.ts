@@ -1280,6 +1280,39 @@ const worktreesOf = (project: Project, branch: string): string[] => {
   return found;
 };
 
+/** Runs host git one at a time with the run's other host git writes (`HostGit.exclusive`). */
+export type Exclusive = <T>(fn: () => T | Promise<T>) => Promise<T>;
+
+/**
+ * Creates the worktree Sandcastle's `createSandbox` would, at the path it uses (`.sandcastle/worktrees/<branch with
+ * "/" as "-">`) and with the flags it passes, unless one is there for the branch or the path already: Sandcastle then
+ * finds it and reuses it, so its own `git worktree add` never runs. The add writes a ref and the worktree's records
+ * in the shared `.git`, as a landing does: two of them, or one beside a landing, can collide on a ref lock, and
+ * Sandcastle's own call has no way to wait for the other.
+ */
+const addWorktree = (project: Project, branch: string): void => {
+  const dir = join(project.root, ".sandcastle/worktrees");
+  const path = join(dir, branch.replace(/\//g, "-"));
+  const slash = (p: string) => p.replace(/\\/g, "/");
+  const taken = sh("git", ["worktree", "list", "--porcelain"], project.root)
+    .split("\n\n")
+    .some((entry) => {
+      const lines = entry.split("\n");
+      return lines.includes(`branch refs/heads/${branch}`) || lines.some((l) => l.startsWith("worktree ") && slash(l.slice("worktree ".length).trim()) === slash(path));
+    });
+  // Sandcastle's own words for a branch checked out elsewhere, or a worktree in the way, are the ones the caller sees.
+  if (taken) return;
+  mkdirSync(dir, { recursive: true });
+  const flags = ["-c", "branch.autoSetupMerge=false", "-c", "push.autoSetupRemote=false"];
+  let exists = true;
+  try {
+    sh("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], project.root);
+  } catch {
+    exists = false;
+  }
+  sh("git", [...flags, "worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path, project.baseBranch])], project.root);
+};
+
 /**
  * Opens a sandbox (Sandcastle's `createSandbox`, passed as `open`) and, when the open fails, removes what it left. A
  * start that runs out of time (a loaded machine) throws with no handle to close: the container keeps running, the
@@ -1291,8 +1324,12 @@ const worktreesOf = (project: Project, branch: string): string[] => {
  * ticket) is not the open's to remove, and stays as it stands once its container is gone: `git worktree remove`
  * without `--force` runs `git status` on the host in it, past the `.git` check a close makes first, so a filter
  * another sandbox planted since would run there. Never throws from the clean-up: the open's own error is the one the caller sees, a container-start timeout as an `OperatorError` that names the cause and the fix.
+ *
+ * `exclusive` is the run's host git mutex (`HostGit.exclusive`; a caller with no other host git at the same moment
+ * passes none). The worktree add and the clean-up's `git worktree remove` and `git branch -D` run inside it, so no
+ * landing's ref write meets them; the container start does not, or a landing would wait behind a start of up to 120 s.
  */
-export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>): Promise<T> => {
+export const openOrAbandon = async <T>(project: Project, branch: string, open: () => Promise<T>, exclusive: Exclusive = (fn) => Promise.resolve().then(fn)): Promise<T> => {
   let before: string[] = [];
   try {
     before = worktreesOf(project, branch);
@@ -1300,16 +1337,19 @@ export const openOrAbandon = async <T>(project: Project, branch: string, open: (
     /* the open will say what is wrong with the repository */
   }
   try {
+    await exclusive(() => addWorktree(project, branch));
     return await open();
   } catch (error) {
     try {
-      for (const path of worktreesOf(project, branch)) {
-        removeSandboxContainer(path);
-        if (before.includes(path) || worktreeRefusal(project)(path)) continue;
-        unlockWorktree(path, project.root);
-        sh("git", ["worktree", "remove", "--force", path], project.root);
-        if (branch.startsWith("sandcastle/")) sh("git", ["branch", "-D", branch], project.root);
-      }
+      await exclusive(() => {
+        for (const path of worktreesOf(project, branch)) {
+          removeSandboxContainer(path);
+          if (before.includes(path) || worktreeRefusal(project)(path)) continue;
+          unlockWorktree(path, project.root);
+          sh("git", ["worktree", "remove", "--force", path], project.root);
+          if (branch.startsWith("sandcastle/")) sh("git", ["branch", "-D", branch], project.root);
+        }
+      });
     } catch {
       /* what is left, `sandcastle clean` removes */
     }

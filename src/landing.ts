@@ -218,6 +218,10 @@ export const trackerMade =
     return undefined;
   };
 
+/** After a failed landing merge, how often and how long apart the landing looks again at an `index.lock` before it stops the run. */
+const LOCK_RECHECKS = 3;
+const LOCK_RECHECK_MS = 1000;
+
 export const createHostGit = (project: Project, expected: Fingerprint): HostGit => {
   let tail: Promise<unknown> = Promise.resolve();
   const exclusive = <T>(fn: () => T | Promise<T>): Promise<T> => {
@@ -340,6 +344,8 @@ export type LandContext = {
   landed: Map<string, { files: string[]; commit: string; clean?: true }>;
   /** Landings waiting for a sandbox slot: while any wait, pipelines start no new sandbox (`slotTurn`). */
   slotWanted?: { n: number };
+  /** How long a landing waits before it looks again at an `index.lock` it found after a failed merge (`LOCK_RECHECK_MS`); a test shortens it. */
+  lockRecheckMs?: number;
   /** `git --version`'s output, injected by a test to simulate a git older than 2.38 (the conflict precheck then does not run). */
   gitVersion?: string;
   /** Each ticket's red landing gate, written as it goes red: what its requeue reads (`repairFromRed`). */
@@ -499,24 +505,33 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       // its wording varies by version, so the reason comes from the working tree. A branch
       // that holds the base cannot conflict: this is a dirty index, a full disk. Both are host
       // git calls (`git status` can run an fsmonitor), so they are a write: checked first.
-      const { dirty, left } = await host.write(() => {
-        try {
-          abortLanding(root, project.land);
-        } catch {
-          // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
-        }
-        let left: { file: string; what: string }[] = [];
-        try {
-          left = gitLeftovers(root);
-        } catch {
-          left = [];
-        }
-        try {
-          return { dirty: dirtyFiles(root), left };
-        } catch {
-          return { dirty: [], left };
-        }
-      });
+      const look = () =>
+        host.write(() => {
+          try {
+            abortLanding(root, project.land);
+          } catch {
+            // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
+          }
+          let left: { file: string; what: string }[] = [];
+          try {
+            left = gitLeftovers(root);
+          } catch {
+            left = [];
+          }
+          try {
+            return { dirty: dirtyFiles(root), left };
+          } catch {
+            return { dirty: [], left };
+          }
+        });
+      let seen = await look();
+      // A lock that is there for a moment (another git process, an editor's status refresh) is gone after a short
+      // wait, with the merge abort it blocked: look again, outside the mutex while waiting, before stopping every landing.
+      for (let i = 0; i < LOCK_RECHECKS && seen.left.some((l) => l.file.endsWith("index.lock")); i++) {
+        await new Promise((r) => setTimeout(r, ctx.lockRecheckMs ?? LOCK_RECHECK_MS));
+        seen = await look();
+      }
+      const { dirty, left } = seen;
       // A landing that cannot undo its own merge leaves the repo half-merged: every landing after it would
       // fail on that, as a fault of its own branch. The run stops here, naming the first cause.
       if (left.length > 0) {

@@ -3015,7 +3015,7 @@ export const burndown = async (
     reports,
     run,
     dryRun: DRY_RUN,
-    opener: sandboxOpener(gateProject, image, planFile),
+    opener: sandboxOpener(gateProject, image, planFile, host.exclusive),
     greenBase: (commit, by, kind) => noteGreenCommit(gateProject, image, planFile, commit, by, kind),
     runId,
     withdrawal,
@@ -3078,10 +3078,10 @@ export const burndown = async (
     testRedGate: TEST_RED_GATE,
     prompts,
     overrides,
-    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) })),
+    open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
     gate: (box, id) => runGates(box, id),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
-    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when)),
+    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
@@ -3431,7 +3431,7 @@ export const burndown = async (
     if (!verifySkipped) {
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
-      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when))).finally(() => setDemand(0));
+      gated = await timed("", "verify", () => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive)).finally(() => setDemand(0));
     }
     verify = gated.gates;
     const verifyRed = verifyFailing(gated.failures);
