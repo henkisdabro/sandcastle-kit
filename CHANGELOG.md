@@ -9,6 +9,75 @@ reads them; by hand, pull the kit and follow [Updating](docs/INSTALL.md#-updatin
 
 ## [Unreleased]
 
+### Upgrading
+
+- **A project named `base` or `agents`** (any case) in `.sandcastle/config.ts` must be renamed: the
+  config is now refused, since its image would share the kit's own repository. The new name costs
+  one image rebuild.
+- **Sandbox passes get only the built-in tools they use.** A project whose tickets need another
+  one (WebSearch, say) keeps it with `tool:<Name>` in `lean.keep`; nothing else to do.
+
+### Added
+
+- **`pnpm test:related <files...>`** finds the test files that mention a changed file's path,
+  basename or exported names, and runs them with the same hermetic runner as `test:file`; with no
+  match it says so and exits 0. The kit's own rules name it as the implementer's final check.
+- **`tool:<Name>` in `lean.keep`** gives sandbox passes another of Claude Code's built-in tools,
+  checked against the known names and the managed deny list.
+- **`sandcastle doctor` and `sandcastle lean` warn below Claude Code 2.1.295**, where the tool
+  allow-list misses tools that register after launch.
+
+### Changed
+
+- **Sandbox passes load only Bash, Read, Edit, Write and TaskStop** of Claude Code's built-in
+  tools (plus Skill and ToolSearch when `lean.keep` keeps skills, commands or MCP servers), with
+  auto memory off: about half the fixed prompt prefix. `sandcastle lean` lists each pass's tools,
+  and `lean --measure` probes with the same tools and environment as a pass.
+- **A conflict resolution that names its stray edits is no longer held for a person.** A resolver
+  that had to change a file git merged cleanly names it and why in a `<stray>` line; the narrow
+  review is shown the reason and the gates run. An unnamed changed file still holds the ticket,
+  and the note lists it.
+- **`verify-gates.log` streams like a ticket's gates log**: each gate's full output, unclipped, its
+  time and the gates-slot wait, kept when green too. Gates logs have ANSI control sequences
+  stripped, so `grep "Test Files"` finds the summary.
+- **`run-output.log` is shorter**: the "tickets that share files" block once, then only what a
+  release adds, and one `tail -f` line per ticket instead of one per agent pass.
+- **`/sandcastle update` says to update projects that need an image rebuild one at a time**: image
+  builds are serialised machine-wide, so parallel updates only queue them and can push container
+  starts past the 120 s limit.
+
+### Fixed
+
+- **A red end-of-run verify is run once more** before the run declares the base red, so a load
+  flake no longer stops a drain. Still red only through test timeouts, or with a gate at three
+  times its recorded time, the closing summary says "likely load" and asks for a re-run on a quiet
+  machine, not to look at git identity.
+- **Sandbox opens and their clean-up run under landing's git lock**, so they no longer collide with
+  a landing on a ref lock; a short-lived `index.lock` after a failed landing merge is re-checked
+  for a few seconds before all landing stops. One that stays stops landing once and names the
+  file, instead of costing every later ticket a sandbox and a gate run.
+- **A conflicted ticket's resolve waits only for the tickets ahead of it when its wait began**, so
+  tickets that start later no longer stretch the wait out for an hour or more.
+- **A green branch queued behind a landing gets that landing's sandbox slot**, handed straight on,
+  instead of waiting for a slot another run took.
+- **A red gate no longer waits for a gates run on a base already recorded green**, so its repair
+  starts at once; a base-red run that does happen is timed as `base-red` in `timings.jsonl`.
+- **A run's recorded `load.concurrency` averages only the time its tickets work at full demand**,
+  so the one-slot base gates and the finishing tail no longer pull it down beside another run.
+- **A native GitHub "blocked by" edge to another repository** is waited on as `owner/repo#N`, read
+  from that repository, instead of as this repository's issue of the same number; one gh cannot
+  read counts as open.
+- **Follow-ups**: one a ticket's second session words differently is a comment on the first
+  session's issue when the titles share three significant words and only one names a file; and
+  issues earlier runs filed that are now closed are no longer match targets.
+- **The reviewer-gap detector** no longer lists prose about fixed gaps ("Gap fixed.", "rightly left
+  alone", "had opened this gap") as a gap.
+- **The heartbeat no longer counts a landing's wait for a sandbox slot as landing time**: it says
+  `waiting for a sandbox slot`, and times the landing from the slot.
+- **Flaky tests under load**: `test/lock.test.ts`'s racers no longer meet at a wall-clock instant a
+  slow one can miss, and `test/docker-hang.test.ts` no longer names the wrong docker command on a
+  slow machine.
+
 ## [0.13.0] - 2026-10-10
 
 ### Added
