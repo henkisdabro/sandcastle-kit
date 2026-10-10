@@ -329,6 +329,8 @@ export type LandContext = {
   greenBase?: (commit: string, by: string, kind: ProofKind) => void;
   /** The run's start time, which a landing sandbox's peak memory is filed under. */
   runId?: string;
+  /** The heartbeat's: told when a landing starts waiting for a machine-wide sandbox slot and when it has one, so the wait is not counted as landing time. */
+  slotWait?: (issue: string, state: "waiting" | "taken") => void;
   /** The tracker's word since the run began: closed, taken out of the queue, sent to a human. */
   withdrawal: (id: string) => { held: boolean; reason: string } | undefined;
   /** Where every write to the host's git goes. */
@@ -591,11 +593,21 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       const asked = Date.now();
       wanted.n++;
       try {
+        ctx.slotWait?.(o.issue, "waiting");
+      } catch {
+        // The heartbeat's line is not worth a landing.
+      }
+      try {
         // Priority: `slotTurn` holds back only the pipelines that have not asked the pool yet, and the pool
         // serves the run's other waits in the order they began, so a landing would wait out every ticket already waiting.
         result = await withSlot("sandboxes", `${project.name} ${ref(o.issue)} land`, () => {
           wanted.n--;
           waiting = false;
+          try {
+            ctx.slotWait?.(o.issue, "taken");
+          } catch {
+            // As above.
+          }
           at?.slotWaited?.(Date.now() - asked);
           return landInSandbox(
             project,
