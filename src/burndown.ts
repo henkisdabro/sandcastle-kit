@@ -2704,7 +2704,7 @@ export const burndown = async (
   // And the machine pool's: the live runs split its sandbox slots by what each one wants. One slot
   // until the scheduler tells its own demand, for the base gates that come first.
   joinPool(project.name, CONCURRENCY, 1);
-  // The ticket slots the run could use, over its time: the record keeps their mean, not the start's share, which moves.
+  // The ticket slots the run could use, over the time its tickets work at full demand: the record keeps their mean, not the start's share, which moves.
   const load = createLoadMeter(slots);
   run.finishWith(() => {
     const concurrency = load.mean();
@@ -2720,7 +2720,9 @@ export const burndown = async (
     if (!mine) return;
     // As at the start: beside another run a share keeps a slot for landing; alone, the machine limit and the workers bound it.
     // At every look, not only on a change: another run beginning or ending moves that with this run's share unchanged.
-    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN));
+    // Counted only while the run asks for all the slots its startable tickets can use: the base gates (one slot) and the tail
+    // where the last tickets finish are bound by demand, and would pull the figure down to what the run asked for, not what it ran at.
+    load.sample(estimateSlots(workers, otherRuns().length ? { share: mine.share } : undefined, !DRY_RUN), mine.demand >= Math.min(CONCURRENCY, issues.length));
     if (mine.demand === shown.demand && mine.share === shown.share && mine.cap === shown.cap) return;
     // `cap` is set by `sandcastle cap` from outside: a lifted one is written as absent, which drops it from the record.
     shown = { demand: mine.demand, share: mine.share, cap: mine.cap };
