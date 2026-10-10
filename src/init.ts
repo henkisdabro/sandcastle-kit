@@ -9,7 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { CONFIG_PATH } from "./config.ts";
+import { CONFIG_PATH, kitOwnName } from "./config.ts";
 import { KIT } from "./sandbox.ts";
 import { OperatorError } from "./errors.ts";
 
@@ -154,7 +154,9 @@ export const init = (root: string) => {
       stack.block
     : FALLBACK;
   // Docker image names are lowercase [a-z0-9._-].
-  const name = basename(root).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "") || "my-project";
+  const derived = basename(root).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "") || "my-project";
+  // A directory named like the kit's own image (`base`, `agents`) would write a name the config check refuses.
+  const name = kitOwnName(derived) ? `${derived}-project` : derived;
   // A repo whose base is not main would otherwise refuse its first run with "expected main".
   const base = detectBaseBranch(root);
   let config = readFileSync(join(KIT, "templates/config.ts"), "utf8")
