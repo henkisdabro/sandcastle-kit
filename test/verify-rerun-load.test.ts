@@ -64,6 +64,25 @@ test("a failure that is not a timeout keeps it from reading as load, even beside
   assert.equal(likelyLoad([], [{ name: "test", pass: true }]), false);
 });
 
+// Each runner prints a failure's error twice (node:test in its "failing tests:" summary, vitest under the test and in
+// "Failed Tests"), so one timeout beside one assertion has as many timeout lines as failing tests.
+const nodeSpec = (second: string) =>
+  `▶ suite\n  ✖ slow (30002ms)\n    'test timed out after 30000ms'\n  ✖ other (1.2ms)\n    ${second}\n✖ suite (30004ms)\n✖ failing tests:\n\ntest at test/a.test.ts:3:3\n✖ slow (30002ms)\n  'test timed out after 30000ms'\n\ntest at test/a.test.ts:9:3\n✖ other (1.2ms)\n  ${second}\n`;
+const vitest = (second: string) =>
+  ` ❯ test/a.test.ts (2 tests | 2 failed) 30010ms\n   × slow 30005ms\n     → Test timed out in 30000ms.\n   × other 3ms\n     → ${second}\n\n⎯⎯ Failed Tests 2 ⎯⎯\n\n FAIL  test/a.test.ts > slow\nError: Test timed out in 30000ms.\n⎯⎯[1/2]⎯\n\n FAIL  test/a.test.ts > other\n${second}\n⎯⎯[2/2]⎯\n`;
+const jest = (second: string) =>
+  `FAIL test/a.test.ts (35.1 s)\n  a\n    ✕ slow (5003 ms)\n    ✕ other (2 ms)\n\n  ● a › slow\n\n    thrown: "Exceeded timeout of 5000 ms for a test.\n\n  ● a › other\n\n    ${second}\n`;
+
+test("one timeout beside a real failure is not load, though each runner prints the timeout twice", () => {
+  const gates = [{ name: "test", pass: false }];
+  for (const output of [nodeSpec, vitest, jest]) {
+    assert.equal(likelyLoad([red(output("AssertionError: expected 1 to be 2"))], gates), false);
+  }
+  assert.equal(likelyLoad([red(nodeSpec("'test timed out after 30000ms'"))], gates), true);
+  assert.equal(likelyLoad([red(vitest("Error: Test timed out in 30000ms."))], gates), true);
+  assert.equal(likelyLoad([red(jest('thrown: "Exceeded timeout of 5000 ms for a test.'))], gates), true);
+});
+
 test("a red gate that ran three times its recorded time reads as load; twice does not", () => {
   const failures = [red("FAIL  a.test.ts > b\nAssertionError: expected 1 to be 2")];
   assert.equal(likelyLoad(failures, [{ name: "test", pass: false, ms: 81_000 }], { test: 18_000 }), true);

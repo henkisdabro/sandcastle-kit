@@ -510,18 +510,34 @@ const TEST_TIMEOUT = /Test timed out in \d|Exceeded timeout of \d|test timed out
 /** A gate that ran this many times its recorded time was slowed by load, not changed by the merge (`likelyLoad`). */
 export const LOAD_FACTOR = 3;
 
+// jest's "● suite › name" heads each failing test's error under the file's one FAIL line.
+const JEST_TEST = /^\s*● (?!Console$)/;
+
 /**
- * Whether a red verify is likely the machine's load: every failure is a test timeout (each gate's output holds a
- * timeout line for every failing test it names, and at least one), or a red gate ran `LOAD_FACTOR` times its
- * recorded time. `recorded` is the gates' ms from the landing that gated this tree, else the run's base gates; a
- * gate with no record is judged by its timeouts only.
+ * Whether every failing test a gate's output names failed by timing out: each one's own lines, from its failing-test
+ * line to the next, hold a timeout line. Counting timeout lines against tests read one timeout beside an assertion
+ * as all timeouts, as node:test's spec reporter and vitest print each failure's error twice (node:test's "failing
+ * tests:" summary, vitest's arrow under the test and its "Failed Tests"). Only node:test's summary is read when it
+ * is there: its body also names the parents of a failed test, whose error is no timeout. jest's tests are its "●"
+ * lines, not the file's FAIL line above them. Output that names no test counts on any timeout line.
+ */
+const onlyTimeouts = (output: string) => {
+  const lines = stripVTControlCharacters(output).split("\n").map((line) => line.replace(/\r$/, ""));
+  const summary = lines.findIndex((line) => SPEC_SUMMARY.test(line));
+  const read = summary >= 0 ? lines.slice(summary + 1) : lines;
+  const head = read.some((line) => JEST_TEST.test(line)) ? (line: string) => JEST_TEST.test(line) : namesFailingTest;
+  const starts = read.flatMap((line, i) => (head(line) ? [i] : []));
+  if (!starts.length) return read.some((line) => TEST_TIMEOUT.test(line));
+  return starts.every((start, k) => read.slice(start, starts[k + 1] ?? read.length).some((line) => TEST_TIMEOUT.test(line)));
+};
+
+/**
+ * Whether a red verify is likely the machine's load: every failure is a test timeout (`onlyTimeouts`, for every red
+ * gate), or a red gate ran `LOAD_FACTOR` times its recorded time. `recorded` is the gates' ms from the landing that
+ * gated this tree, else the run's base gates; a gate with no record is judged by its timeouts only.
  */
 export const likelyLoad = (failures: GateRun["failures"], gates: Gate[], recorded: Record<string, number> = {}): boolean => {
-  const timeouts = failures.length > 0 && failures.every((f) => {
-    const output = stripVTControlCharacters(f.output);
-    const seen = output.split("\n").filter((line) => TEST_TIMEOUT.test(line)).length;
-    return seen > 0 && seen >= failingTests(output, Infinity).length;
-  });
+  const timeouts = failures.length > 0 && failures.every((f) => onlyTimeouts(f.output));
   const red = new Set([...failures.map((f) => f.name), ...gates.filter((g) => !g.pass).map((g) => g.name)]);
   const slow = gates.some((g) => red.has(g.name) && typeof g.ms === "number" && typeof recorded[g.name] === "number" && recorded[g.name] > 0 && g.ms >= LOAD_FACTOR * recorded[g.name]);
   return timeouts || slow;
