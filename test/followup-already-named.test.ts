@@ -275,6 +275,6 @@ test("filedBefore reads the filed follow-ups of the tickets asked for, and none 
 test("burndown() gives the follow-up book the earlier filings of the tickets it runs, and the passes fill the section", () => {
   // burndown() needs Docker, so no test drives it: its wiring of the helpers tested above is held by its source.
   const src = readFileSync(join(import.meta.dirname, "../src/burndown.ts"), "utf8");
-  assert.match(src, /earlier: filedBefore\(project\.root, new Set\(candidates\.map\(\(c\) => c\.id\)\)\)/);
+  assert.match(src, /earlier: filedBefore\(project\.root, new Set\(candidates\.map\(\(c\) => c\.id\)\), \(id\) => tracker\.isClosed\(id\)\)/);
   assert.match(src, /FOLLOWUPS_NAMED: alreadyNamedView\(ctx\.followUps\?\.namedFrom\?\.\(issue\.id\) \?\? \[\], ref\)/);
 });
