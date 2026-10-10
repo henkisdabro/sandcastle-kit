@@ -123,17 +123,24 @@ export const expandTouches = (root: string, ref: string, patterns: string[]): st
   return out;
 };
 
-/** How far from a path the word "new" may stand, on its line, for the ticket to be saying the path is new. */
-const NEW_WITHIN = 40;
+/** Where a sentence ends on a line: `. `, `; `, `? `, `! ` or the end of the line. A dot inside a path does not end one. */
+const SENTENCE_END = /[.;?!](?:\s+|$)/g;
 
-/** Whether `body`, outside its `Touches:` lines, names `path` with the word "new" beside it on the same line. */
-const namedAsNew = (body: string, path: string): boolean => {
+/**
+ * Whether `body`, outside its `Touches:` lines, names `path` in a sentence that says "new": a list
+ * of new files in one sentence calls each of them new. The path itself is left out, and so is any
+ * other path in the sentence: `src/new-ui.ts` does not call itself, or its neighbours, new.
+ */
+export const namedAsNew = (body: string, path: string): boolean => {
   const prose = body.split("\n").filter((l) => !/^[ \t]*touches:/i.test(l));
   for (const line of prose) {
+    const ends = [...line.matchAll(SENTENCE_END)].map((m) => ({ from: m.index, to: m.index + m[0].length }));
     for (let at = line.indexOf(path); at >= 0; at = line.indexOf(path, at + 1)) {
-      // The path itself is left out of the window: `src/new-ui.ts` does not call itself new.
-      const near = `${line.slice(Math.max(0, at - NEW_WITHIN), at)} ${line.slice(at + path.length, at + path.length + NEW_WITHIN)}`;
-      if (/\bnew\b/i.test(near)) return true;
+      const after = at + path.length;
+      const start = Math.max(0, ...ends.filter((e) => e.to <= at).map((e) => e.to));
+      const end = Math.min(line.length, ...ends.filter((e) => e.from >= after).map((e) => e.from));
+      const sentence = `${line.slice(start, at)} ${line.slice(after, end)}`.replace(/\S*\/\S*/g, " ");
+      if (/\bnew\b/i.test(sentence)) return true;
     }
   }
   return false;
@@ -143,8 +150,8 @@ const namedAsNew = (body: string, path: string): boolean => {
  * The `Touches:` entries of `body` that name nothing at `ref`: a plain path with no file or
  * directory there, and a glob matching no file. `expandTouches` keeps the first (a new file can
  * still overlap) and drops the second, so neither shows in a queue's listing; this says them, for
- * `queue --lint` to ask "a new file, or a typo?". A plain path the body names elsewhere beside the
- * word "new" (the ticket says it is a new file) is left out. `[]` when `ref` has no tree to read.
+ * `queue --lint` to ask "a new file, or a typo?". A plain path the body names elsewhere in a sentence
+ * with the word "new" (the ticket says it is a new file) is left out. `[]` when `ref` has no tree to read.
  */
 export const missingTouches = (root: string, ref: string, body: string): string[] => {
   const r = git(root, ["ls-tree", "-r", "--name-only", "-z", ref]);
