@@ -31,7 +31,10 @@ refuses the quoting like the command.
 
 - **Keep both sides' intent.** `{{TARGET_BRANCH}}`'s side is merged work, not yours to undo.
 - **Change nothing beyond resolving the merge.** No refactor, no new behaviour, nothing the ticket
-  did not already do.
+  did not already do. The one exception is a file git merged *without* a conflict that the merge
+  itself breaks: a test the base just added that pins the sentence this branch replaced, a call that
+  needs the field this branch added to a code path the base added. Change such a file only as far as
+  the merge needs, never to take one side whole, and name it (see "Finishing").
 - **Make every change inside the merge commit and commit nothing else.** Resolve the files, run the
   typecheck gate and the tests that cover them (see "Gates"), `git add` the files, then
   `git commit --no-edit`.
@@ -64,6 +67,15 @@ where `<check>` tests a file or a port, never `pgrep -f`. A bare `sleep` is bloc
 available here.
 
 # Finishing
+
+For each file git merged without a conflict that you changed, put one line of its own in your final
+message, with the path as it appears in `git status` and the reason in a sentence:
+
+<stray path="test/example.test.ts">the base's new assertion pinned the old sentence this branch replaces</stray>
+
+The kit compares your merge with git's own and holds the ticket for a person if it finds a changed
+file you did not name here. A named file goes on to the review and the gates, where the reviewer is
+shown your reason. Write no such line when you changed only the conflicted files.
 
 If the merge is resolved, the typecheck gate and the covering tests pass and the merge is committed, output
 `<promise>COMPLETE</promise>`.

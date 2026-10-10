@@ -44,7 +44,7 @@ import {
   addTokens, agentLogging, archiveFinishedLogs, assertCleanBase, baseIsTheRunsLine, forgetHead, gatesLog, holdAwake, keepAwake, landOnlyHead, limitResets, logExpansionFailure, logSaysLimit, markLog, narrowReviewBase, NO_TOKENS, openStatusPane, preflight, readHeads, recordHead, relabelContextWindow, releaseAwake, reviewedOnlyHead,
   createLoadMeter, createTailFilter, namedTicketsFromEnv, recordRun, renderPrompts, runTokens, type Tokens, tokenBrief, estimate, isCarried, isRemainder, tokenLine, typicalTimes, firstSlotWait, usedArgs, logOwner, implChangelogView, liveTokenWriter,
 } from "./run.ts";
-import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, strayChanges, strayNote } from "./resolution.ts";
+import { mergeCheckGap, mergeTree, rebuildOnBase, resetMergeCheckGap, mergeTreeSupported, noteMissingObjects, rewrittenNote, splitStrays, namedStraysView, strayChanges, strayNote, type NamedStray } from "./resolution.ts";
 import { kitVersion } from "./upgrading.ts";
 import { resolveVersions, versionsLine } from "./versions.ts";
 import { cpusLine, credentials, ensureImage, errorLine, machineSettings, ownCommits, ownRange, projectApiKeySpend, sandboxConfig, sandboxCpus, sh, staleBaseParents } from "./sandbox.ts";
@@ -323,6 +323,14 @@ export const unmetOf = (text: string): string | undefined => {
   const byPerson = /(^|\s)who\s*=\s*(["']?)person\2(\s|$)/i.test(last.attrs);
   return cutAtWord(byPerson && !said.startsWith(PERSON_MARK) ? PERSON_MARK + said : said, UNGATED_MAX);
 };
+// The resolver's `<stray path="...">reason</stray>` lines: each cleanly merged file it had to change, and why. Read like
+// every own-line tag, so a tag named in prose or code is no claim; a line with no path or no reason names nothing.
+export const strayNamesOf = (text: string): NamedStray[] =>
+  ownLineMatches(text, "stray", true).flatMap((m) => {
+    const path = m.attrs.match(/(?:^|\s)path\s*=\s*(["'])(.+?)\1/)?.[2]?.trim();
+    const why = m.text.replace(/\s+/g, " ").trim();
+    return path && why && why !== "..." ? [{ path, why: cutAtWord(why, 300) }] : [];
+  });
 // What a full review is shown of the implementer's `<unmet>` line: its words are dropped from the ticket's
 // leftovers once a full review ran (`left`), so the reviewer must finish the criterion or restate it, or it is lost.
 // Empty when the implementer gave none, so the prompt carries no heading over nothing.
@@ -1856,9 +1864,13 @@ export const createPipeline = (ctx: PipelineContext) => {
       // on the same sandbox. A resolver that leaves the merge in progress could
       // not resolve it without changing what the ticket does, so the full
       // implementer takes the branch, as it does for any carried branch.
+      // The cleanly merged files the resolver said it had to change, and why (`strayNamesOf`).
+      let resolverSaid: NamedStray[] = [];
+      // The stray changes among them that `strayChanges` found, which the narrow review is shown.
+      let namedStrays: NamedStray[] = [];
       if (landOnly && mergeConflicted) {
         await juncture("resolve");
-        await timed(issue.id, "resolve", () => {
+        const resolver = await timed(issue.id, "resolve", () => {
           const logging = agentLogging(project, issue.id, `resolve-${issue.id}`, runId);
           return pass({
             name: `resolve-${issue.id}`,
@@ -1876,6 +1888,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           if (hitLimit(project.root, issue.id)) throw error;
           console.log(`${ref(issue.id)}: the resolver failed (${String(error).slice(0, 120)}).`);
         });
+        resolverSaid = strayNamesOf(resolver?.stdout ?? "");
         if ((await sandbox.exec("git rev-parse -q --verify MERGE_HEAD")).exitCode === 0) {
           console.log(`${ref(issue.id)}: the merge is still unresolved - the full implement and review run.`);
           landOnly = false;
@@ -1885,8 +1898,12 @@ export const createPipeline = (ctx: PipelineContext) => {
         // A resolution may touch only what git could not merge itself: a change to another path
         // the base had changed can drop another ticket's landed lines with every gate green.
         const stray = strayChanges(project.root, { ours: greenHead, theirs: baseTip, resolved: sh("git", ["rev-parse", branch], project.root), generated: project.generated });
-        if (stray?.length) {
-          const why = strayNote(stray);
+        // A change the resolver named, with its reason, goes on to the narrow review (which is shown it) and the gates;
+        // one it did not name is held, as before.
+        const { named, unnamed } = splitStrays(stray ?? [], resolverSaid);
+        namedStrays = named;
+        if (unnamed.length) {
+          const why = strayNote(unnamed, named.map((n) => n.path));
           // No `files` on the record: the report reads them as a protected-path hold ("changes X") and would hide this note.
           console.log(`${ref(issue.id)}: the ${why} - held for a human.`);
           notes.push({ issue: issue.id, kind: "hold", text: `Sandcastle held this: ${why}.` });
@@ -1899,6 +1916,7 @@ export const createPipeline = (ctx: PipelineContext) => {
             gates: readHeads(project.root)[issue.id]?.gates ?? [],
           });
         }
+        if (named.length) console.log(`${ref(issue.id)}: the resolver changed ${named.map((n) => n.path).join(", ")}, which merged cleanly, and said why - the review and the gates see it.`);
       }
       // Review passes run on the same warm sandbox and branch. Their commits
       // ride the same gates as the implementer's, so a review that breaks the
@@ -1916,7 +1934,7 @@ export const createPipeline = (ctx: PipelineContext) => {
       // The narrow review, as after a repair: only what is new since `since`, which
       // is a base merge and its conflict resolution. No cross-review. A review that
       // throws behaves as the full one does.
-      const narrowReview = async (since: string, note: string) => {
+      const narrowReview = async (since: string, note: string, strays: NamedStray[] = []) => {
         await juncture("review");
         let narrowModel: string | undefined;
         return timed(
@@ -1925,7 +1943,7 @@ export const createPipeline = (ctx: PipelineContext) => {
           () => {
             return reviewWithFallback(ref(issue.id), (agent, model) => {
               narrowModel = model;
-              return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since })(agent);
+              return reviewRun(`review-${issue.id}`, prompts.remerge, { ...promptArgs, REVIEW_BASE: since, MERGE_STRAYS: namedStraysView(strays) })(agent);
             });
           },
           note,
@@ -1986,7 +2004,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         // resolution. A clean land-only merge of the base needs no review.
         console.log(`${ref(issue.id)}: ${mergeConflicted ? "conflict resolved" : "merge carried from an earlier run"} - reviewing the resolution only.`);
         const beforeResolved = ownNow();
-        const resolved = await narrowReview(greenHead, "after conflict resolution");
+        const resolved = await narrowReview(greenHead, "after conflict resolution", namedStrays);
         noteHead(issue.id, branch, { reviewed: sh("git", ["rev-parse", branch], project.root) });
         reviewCommits += ownNow() - beforeResolved;
         noteChangelog(resolved.stdout, true);
