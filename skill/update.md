@@ -175,6 +175,10 @@ Declining is not skipping: every step still runs its check, and only the asking 
        config) refuses one that is not, naming the nearest tool. Fix the entry it names. A project
        that keeps skills, commands or MCP servers needs no change: it gets Skill or ToolSearch on
        its own.
+   19. **Project name.** A `name` in `.sandcastle/config.ts` that is `base` or `agents`, in any
+       case, would give the project's image the repository of one of the kit's own images, so
+       every command refuses the config and names the fix. Propose a new name, then
+       `sandcastle build`: the new name builds the image once under its own repository.
 4. **Record and commit.** Run `sandcastle updated` in the project, so doctor and runs stop
    listing these notes (it writes only `.sandcastle/.run/`, gitignored). Add `--declined
    <key>[,<key>...]` with the keys of the proposals the user declined this time (`sandcastle updated

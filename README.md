@@ -1296,7 +1296,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `name` | required | Names the project image (`sandcastle-<name>`) and the status view |
+| `name` | required | Names the project image (`sandcastle-<name>`) and the status view; `base` and `agents` (any case) are refused, as the kit's own images use those repositories |
 | `gates` | required | `[{ name, command }]`, run in order, stopping at the first red |
 | `baseBranch` | `"main"` | Branch agents start from and green work merges into |
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
