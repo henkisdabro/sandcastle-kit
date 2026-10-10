@@ -38,7 +38,7 @@ const lint = async (tickets: Record<string, string>) => {
 
 test("a Touches path that is not on the base branch is listed under problems", async () => {
   const text = await lint({ "01-a.md": ticket("A", "src/app.ts, test/pool.test.ts") });
-  assert.match(text, /problems:\n\s+shop-01 names paths not on main: test\/pool\.test\.ts - new files \(say so under ## Fix\) or typos\?/);
+  assert.match(text, /problems:\n\s+shop-01 names paths not on main: test\/pool\.test\.ts - new files \(call each one new in the ticket's prose, e\.g\. under ## Fix\) or typos\?/);
   assert.ok(!/not on main: src\/app\.ts/.test(text), text);
 });
 

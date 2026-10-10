@@ -14,7 +14,7 @@ import { parseUsagePause, parseUsageStop } from "./usage.ts";
 export type SettingsSources = {
   env: Record<string, string | undefined>;
   /** The project's `.sandcastle/config.ts`, as far as settings are concerned. */
-  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown };
+  project: { autonomy?: unknown; concurrency?: unknown; repair?: { attempts?: unknown }; usagePause?: unknown; keepWarm?: unknown };
   /** The personal `config.json`: the machine-wide sandbox cap that clamps concurrency. */
   machine: Record<string, unknown>;
   /** Whether the credentials files put `ANTHROPIC_API_KEY` in the sandboxes (`projectApiKeySpend`); read by the caller, so this stays pure. */
@@ -37,6 +37,8 @@ export type ResolvedSettings = {
   usageStop?: number;
   /** The plan usage in percent at which the run pauses itself and resumes after the window's reset (`USAGE_PAUSE`, or the project's `usagePause`); absent when it is off. In the settings group too, so a summary never reads as if nothing watched the plan. */
   usagePause?: number;
+  /** Whether the session that started the run keeps its prompt cache warm while the run is live: false when the machine settings say `false`, else the project's value, else true. */
+  keepWarm: boolean;
   /** True when the sandboxes spend an API key, billing API credits; absent otherwise. */
   apiKey?: true;
 };
@@ -56,6 +58,8 @@ export const resolveSettings = ({ env, project, machine, apiKey = false }: Setti
     usageGuard,
     ...(usageGuard ? { usageStop: parseUsageStop(env.USAGE_STOP) } : {}),
     ...(usagePause === undefined ? {} : { usagePause }),
+    // The machine's `false` is a person's off switch for every project, so it beats the project's `true`.
+    keepWarm: machine.keepWarm === false ? false : project.keepWarm !== false,
     ...(apiKey ? { apiKey: true as const } : {}),
   };
 };
@@ -80,6 +84,8 @@ export const settingsGroup = (settings: ResolvedSettings, turn: number, noReadin
     ...(settings.usageStop === undefined ? {} : { usageStop: settings.usageStop }),
     ...(settings.usageGuard && noReading ? { usageReading: "unavailable" as const } : {}),
     ...(settings.usagePause === undefined ? {} : { usagePause: settings.usagePause }),
+    // Always, true or false, so a reader never has to guess a default.
+    keepWarm: settings.keepWarm,
     // Only when it does: a subscription run's record and view stay as they were.
     ...(settings.apiKey ? { apiKey: true } : {}),
   };
