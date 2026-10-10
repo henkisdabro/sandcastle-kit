@@ -136,5 +136,10 @@ test("a point the reviewer left alone and named is still a gap", async () => {
     "The helpers were left alone, but the same gap remains in docs/INSTALL.md.",
     "This branch has opened a gap in the Linux path that I did not fix.",
     "The remaining heredoc mentions are wrong.",
-  ]) assert.equal(await gapOfReview(`${gap}\n`), gap);
+    // The fixed-gap phrasings are narrow: an unfixed thing that is no test case, and a remaining thing that still
+    // applies and is not fixed, are gaps.
+    "Every unfixed caller still reads the old key.",
+    "Each unfixed case still prints the old text.",
+    "The remaining issues that still apply to the Linux path are not fixed.",
+  ])assert.equal(await gapOfReview(`${gap}\n`), gap);
 });
