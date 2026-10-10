@@ -249,6 +249,9 @@ export const projectRepo = (project: { name: string }) => `sandcastle-${project.
 /** The kit's own image repositories (`baseImage`, `agentsImage` in src/sandbox.ts): a project's layer must not share one. */
 const KIT_REPOS = ["sandcastle-base", "sandcastle-agents"];
 
+/** Whether a project named `name` would get one of the kit's own image repositories. */
+export const kitOwnName = (name: string): boolean => KIT_REPOS.includes(projectRepo({ name }));
+
 const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const isCount = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min;
 
@@ -275,7 +278,7 @@ const checkShape = (config: ProjectConfig) => {
     if (c[key] !== undefined && (typeof c[key] !== "string" || !c[key])) refuse(`\`${key}\` must be a non-empty string, not ${JSON.stringify(c[key])}.`);
   }
   // Same repository as the kit's own, and the project's prune and use stamps would mix with the kit's.
-  if (typeof config.name === "string" && KIT_REPOS.includes(projectRepo(config))) {
+  if (typeof config.name === "string" && kitOwnName(config.name)) {
     refuse(`\`name\` ${JSON.stringify(config.name)} would give the project's image the repository \`${projectRepo(config)}\`, which is the kit's own - rename \`name\` in ${CONFIG_PATH}.`);
   }
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
