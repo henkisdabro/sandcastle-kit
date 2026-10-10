@@ -575,12 +575,26 @@ export const writeLandingLine = (
 };
 
 /**
+ * The phase of the timings line for the gate run on the base's tip that a ticket's red asked for (`redOnBase`). Apart
+ * from `gates`, a ticket's own passes: it is the run's check of the base, which a ticket waits on.
+ */
+export const BASE_RED = "base-red";
+
+/**
  * Runs a landing gate and appends its timings line (`LANDING_GATES`, the slot wait out of `ms` as in
  * `stepTimes`) to `timings`, whether it came back red or threw. Not the run's `timed`: that writes the
  * ticket's state, and a ticket landing already holds the landing stage `landOne` wrote.
  */
-export const timedLandingGate = async <T>(
+export const timedLandingGate = <T>(
   timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
+): Promise<T> => timedGate(LANDING_GATES, timings, who, fn);
+
+/**
+ * `timedLandingGate` for any phase: a gate run that is no state of its ticket (the landing's, the base check a red
+ * gate asks for - `BASE_RED`) still leaves its line, so the time it took is on record.
+ */
+export const timedGate = async <T>(
+  phase: string, timings: string, who: { run: string; project: string; issue: string; carried?: boolean }, fn: () => Promise<T>,
 ): Promise<T> => {
   const since = Date.now();
   let result: T | undefined;
@@ -595,7 +609,7 @@ export const timedLandingGate = async <T>(
     const peakMib = done ? peakOf(result) : undefined;
     const pressure = done ? pressureFields(pressureOf(result)) : {};
     const line = {
-      ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase: LANDING_GATES, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
+      ts: new Date().toISOString(), run: who.run, project: who.project, issue: who.issue, phase, ...stepTimes(Date.now() - since, result), ok: done && !red?.length,
       ...(who.carried ? { carried: true } : {}),
       ...(gateTimes ? { gates: gateTimes } : {}),
       ...(peakMib ? { peakMib } : {}),
@@ -795,6 +809,14 @@ export const greenProofOfBase = (project: Project, image: string, planFile: stri
     return undefined;
   }
 };
+
+/**
+ * Whether the green-base record holds the base's tip on this image and plan, whatever its kind: the gates passed on
+ * this commit already (a landing's, the base check's, a fast-forwarded ticket's own), so a gate run on it again would
+ * answer the same. The key is the record's own test, as the base check's is (`baseCacheHit`).
+ */
+export const baseRecordedGreen = (project: Project, image: string, planFile: string): boolean =>
+  baseCacheHit(project.root, baseKey(project, image, planFile, sh("git", ["rev-parse", project.baseBranch], project.root)));
 
 /**
  * What the end-of-run verify does: `due` when at least one ticket merged (or a merge regenerated files), and

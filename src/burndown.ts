@@ -31,7 +31,7 @@ import { CROSS_REVIEW, CROSS_REVIEW_MODEL, IMPL_MODEL, MODELS_LINE, REVIEW_MODEL
 import { red, runApiKeyLine } from "./api-key.ts";
 import { PERSON_MARK } from "./autonomy.ts";
 import type { Project } from "./config.ts";
-import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedLandingGate, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
+import { BaseRedError, changedDockerfiles, FAILING_TESTS_SHOWN, type Gate, type GateRun, failingTestFile, failingTests, failureKey, gateBase, gateLine, gateMs, gateRed, requireGreenBase, hooksThatRanClean, stepTimes, timedGate, timedLandingGate, baseRecordedGreen, BASE_RED, withQueued, writeLandingLine, rewroteLine, runGates as gatesIn, noteGreenCommit, type ProofKind, verifyPlan, verifyBase, verifyFailing, VERIFY_LOG, writeGateLog } from "./gates.ts";
 import { blockedNote, blockerProblems, blockerResolver, blockerTicket, commentBlockLine, commentOnlyBlocks, openBlockers, openBlockersNow, refLabel, type Blocker } from "./blockers.ts";
 import { assertGitConfigBaseline, assertGitUnchanged, assertWorktreeRecords, checkBeforeClose, disableHostGitGc, disableHostGitHooks, gitFingerprint, GuardStop, guardWords, holdAndReap, largeFiles, openOrAbandon, pinHostGitConfig, protectedChanges, protectedPlanLines, pruneBackup, recordGitConfigStart } from "./guard.ts";
 import { checkHooks, hiddenReferences, reportHookCheck, unmatched, unmatchedLines, writePlan } from "./lean.ts";
@@ -1282,8 +1282,13 @@ export type PipelineContext = {
    * given none repairs at once.
    */
   regate?: (box: PipelineBox, id: string, from: string) => Promise<GateRun>;
-  /** Every gate on the base's tip, in a sandbox of its own (`gateBase`): what a failure no branch caused is checked against. */
-  baseGate: () => Promise<GateRun>;
+  /** Every gate on the base's tip, in a sandbox of its own (`gateBase`): what a failure no branch caused is checked against. `issue` is the ticket whose red asked. */
+  baseGate: (issue: string) => Promise<GateRun>;
+  /**
+   * Whether the green-base record holds the base's tip now: the gates passed on it already, so a red is not the base's
+   * and no run is made to find out. A pipeline given none runs the base gates as it did.
+   */
+  baseRecordedGreen?: () => boolean;
   /** Tests found red on the base mid-run, told once each: the run record keeps them for the closing summary. */
   baseWentRed: (tests: string[]) => void;
   timed: Timed;
@@ -1374,7 +1379,7 @@ const worktreeIsClean = (project: Project, path: string) => {
 
 /** One ticket's pipeline: implement, review, gate with repair, in its own sandbox. */
 export const createPipeline = (ctx: PipelineContext) => {
-  const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
+  const { project, tracker, runId, dryRun, repair, testRedGate, prompts, overrides, open, gate, baseGate, baseRecordedGreen, baseWentRed, timed, run, view, host, requeuedAs, results, reds, reports, notes, took, keptWorktrees, tampered } = ctx;
   const fixes = ctx.fixes ?? createFixBoard();
   const waited = ctx.waited ?? new Map<string, number>();
   const landed = ctx.landed ?? new Map<string, { files: string[]; commit: string }>();
@@ -1494,7 +1499,7 @@ export const createPipeline = (ctx: PipelineContext) => {
    * a file where the base has a different one red prints the same id, so that red is the base's only when the
    * gate failed the same way on both (`failureKey`).
    */
-  const redOnBase = async (failure: { name: string; output: string }, branch: string): Promise<string[] | undefined> => {
+  const redOnBase = async (failure: { name: string; output: string }, branch: string, issueId: string): Promise<string[] | undefined> => {
     const tests = failingTests(failure.output);
     if (!tests.length || tests.length >= FAILING_TESTS_SHOWN) return undefined;
     const files = tests.map(failingTestFile);
@@ -1504,8 +1509,11 @@ export const createPipeline = (ctx: PipelineContext) => {
     if (files.some((f) => changed.has(f!))) return undefined;
     const tip = sh("git", ["rev-parse", base], project.root);
     let running = baseRuns.get(tip);
+    // A tip the landing gates (or the base check) passed has no red of its own to find: waiting for the machine's
+    // one gates slot to learn that put the repair back by minutes. A run already made for it keeps its answer.
+    if (!running && baseRecordedGreen?.()) return undefined;
     if (!running) {
-      const asked = baseGate();
+      const asked = baseGate(issueId);
       running = asked;
       baseRuns.set(tip, asked);
       asked.then(
@@ -2204,7 +2212,7 @@ export const createPipeline = (ctx: PipelineContext) => {
         red = gated.failure
       ) {
         const failure = red;
-        const onBase = await redOnBase(failure, branch).catch((error) => {
+        const onBase = await redOnBase(failure, branch, issue.id).catch((error) => {
           if (error instanceof GuardStop) tampered.set(issue.id, error);
           throw error;
         });
@@ -3120,7 +3128,15 @@ export const burndown = async (
     open: (branch) => openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: base, ...sandboxConfig(project, image, planFile) }), host.exclusive),
     gate: (box, id) => runGates(box, id),
     regate: (box, id, from) => runGates(box, id, undefined, false, from),
-    baseGate: () => gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
+    baseGate: (id) =>
+      timedGate(BASE_RED, timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () =>
+        gateBase(gateProject, image, planFile, "base-red", false, runId, false, true, (when) => host.check(when), undefined, host.exclusive),
+      ).then((r) => {
+        // The wait for the gates slot is inside the ticket's time but not its usual time, as a gates step's is.
+        if (r.waitMs) waited.set(id, (waited.get(id) ?? 0) + r.waitMs);
+        return r;
+      }),
+    baseRecordedGreen: () => baseRecordedGreen(gateProject, image, planFile),
     baseWentRed: (tests) => {
       baseRed.push(...tests);
       run.update({ baseRed: [...baseRed] });
