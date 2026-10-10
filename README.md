@@ -1422,6 +1422,13 @@ changes are marked skip-worktree, so an agent can never commit them. `lean.keep`
 back. `sandcastle lean` (and every run) warns when a hidden item is named by a file the sandbox
 keeps - a test that reads a skill file, say, would fail on every branch until the item is kept. On a real project this saved ~2,500 input tokens per agent turn.
 
+**Tools and memory.** Each Claude pass is also started with an allow-list of Claude Code's built-in
+tools (`--tools`): Bash, Read, Edit, Write and TaskStop, plus Skill when `lean.keep` keeps a skill or
+command and ToolSearch when it keeps an MCP server (MCP tools load through it). Every tool's schema is
+paid on every turn, and passes were never seen to need the others; together with auto memory, which is off
+in sandboxes (a sandbox's memory directory dies with its container), it about halves the fixed prompt
+prefix of a pass.
+
 **Hooks are the opposite: kept.** They cost no context and are how a repo enforces its rules -
 guards, linters, test gates, audit logs. `lean.dropHooks` removes host-only conveniences (a token
 compressor, a preview server, a notification), never a guard. Before any sandbox starts, every
