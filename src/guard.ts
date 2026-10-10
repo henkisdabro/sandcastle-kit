@@ -2,6 +2,7 @@
 // Sandcastle bind-mounts the repo's whole `.git` into every container, so
 // what a sandbox writes can reach the host in three ways. Each is closed here.
 
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -1283,14 +1284,21 @@ const worktreesOf = (project: Project, branch: string): string[] => {
 /** Runs host git one at a time with the run's other host git writes (`HostGit.exclusive`). */
 export type Exclusive = <T>(fn: () => T | Promise<T>) => Promise<T>;
 
+/** Sandcastle's own limit on making a sandbox's worktree (`WORKTREE_TIMEOUT_MS`), which the kit's add now meets in its place. */
+const WORKTREE_ADD_MS = 30_000;
+
 /**
  * Creates the worktree Sandcastle's `createSandbox` would, at the path it uses (`.sandcastle/worktrees/<branch with
  * "/" as "-">`) and with the flags it passes, unless one is there for the branch or the path already: Sandcastle then
  * finds it and reuses it, so its own `git worktree add` never runs. The add writes a ref and the worktree's records
  * in the shared `.git`, as a landing does: two of them, or one beside a landing, can collide on a ref lock, and
  * Sandcastle's own call has no way to wait for the other.
+ *
+ * The add checks out every file through the filters `.git/config` names (an LFS download, say), so it runs as
+ * Sandcastle's did: asynchronously, or every other pipeline would wait for the checkout, and within `limitMs`, or an
+ * add that never ends would hold the host-git mutex, and with it every landing, for good. Exported for its test.
  */
-const addWorktree = (project: Project, branch: string): void => {
+export const addWorktree = async (project: Project, branch: string, limitMs = WORKTREE_ADD_MS): Promise<void> => {
   const dir = join(project.root, ".sandcastle/worktrees");
   const path = join(dir, branch.replace(/\//g, "-"));
   const slash = (p: string) => p.replace(/\\/g, "/");
@@ -1310,7 +1318,25 @@ const addWorktree = (project: Project, branch: string): void => {
   } catch {
     exists = false;
   }
-  sh("git", [...flags, "worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path, project.baseBranch])], project.root);
+  const args = [...flags, "worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path, project.baseBranch])];
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    // The limit is the kit's own timer, not `execFile`'s: that one waits for the pipes to close, which a filter git started holds open.
+    const child = execFile("git", args, { cwd: project.root, encoding: "utf8" }, (error, _stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(Object.assign(error, { stderr }));
+      else resolve();
+    });
+    child.stdin?.end();
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(Object.assign(new Error(`git worktree add ${path} did not finish in ${Math.round(limitMs / 1000)} s`), { stderr: "" }));
+    }, limitMs);
+  });
 };
 
 /**
