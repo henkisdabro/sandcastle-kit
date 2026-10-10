@@ -944,6 +944,9 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const resolveSaid = new Map<string, string>();
       // The list a resolve wait last saw, and when it last changed: said once it has held for RESOLVE_SETTLE_MS.
       const resolveSeen = new Map<string, { key: string; at: number }>();
+      // The tickets a resolve wait began with (`ahead` reads it, up to the attempt that follows the wait): a ticket that starts
+      // after the wait began lands on a base the resolve merges anyway, and waiting for it could outlast the queue.
+      const resolveHolders = new Map<string, Set<string>>();
       // How long each sent-back ticket's resolve waited, from the end of that wait to the attempt that follows it.
       const resolveWaited = new Map<string, number>();
       const clock = work.now ?? Date.now;
@@ -1261,15 +1264,25 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
       const ahead = (t: T): { queued: string[]; running: string[] } => {
         const touched = hold?.touched();
         if (!touched) return { queued: [], running: [] };
+        const holders = resolveHolders.get(t.id);
         const hit = (id: string, files: Set<string>) => (touched.get(id) ?? []).some((f) => files.has(f));
         const conflict = new Set(conflicted.get(t.id));
         const mine = new Set([...(touched.get(t.id) ?? []), ...conflict]);
+        // Once a wait has begun, only the tickets it began with count: those that started since are not waited for.
+        const counts = (id: string) => id !== t.id && (!holders || holders.has(id));
         return {
-          queued: [...greens].filter((id) => id !== t.id && hit(id, mine)),
-          running: [...running].filter((id) => id !== t.id && !greens.has(id) && !resolving.has(id) && hit(id, conflict)),
+          queued: [...greens].filter((id) => counts(id) && hit(id, mine)),
+          running: [...running].filter((id) => counts(id) && !greens.has(id) && !resolving.has(id) && hit(id, conflict)),
         };
       };
       const aheadOf = (t: T) => Object.values(ahead(t)).flat();
+      // Who a resolve wait begins with: every other ticket queued to land or in its pipeline that touches its files. One at
+      // work on a file it did not conflict on counts once its branch is queued, so it is kept here before it does.
+      const holdersOf = (t: T) => {
+        const touched = hold?.touched();
+        const mine = new Set([...(touched?.get(t.id) ?? []), ...(conflicted.get(t.id) ?? [])]);
+        return new Set([...greens, ...running].filter((id) => id !== t.id && (touched?.get(id) ?? []).some((f) => mine.has(f))));
+      };
       // Returns when none is ahead of the ticket's resolve, or the run starts nothing; a pause parks it as at the start.
       // The time it waited for the tickets ahead is the result (a pause's parked time is no part of it).
       const resolveTurn = async (t: T): Promise<number> => {
@@ -1280,6 +1293,7 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
               await waitParked(t.id, "start");
               continue;
             }
+            if (!resolveHolders.has(t.id)) resolveHolders.set(t.id, holdersOf(t));
             const { queued, running: inPipeline } = ahead(t);
             const before = [...queued, ...inPipeline];
             if (!before.length) break;
@@ -1336,6 +1350,8 @@ export const createSchedule = <T extends { id: string }, G extends Green, O = un
         const resolves = n >= 2 && first.get(t.id)?.kind === "conflict";
         // Something is ahead of its resolve (checked again here: a landing may have queued since it was pushed): wait off the worker.
         if (resolves && !stop.startsNothing && aheadOf(t).length) return waitToResolve(t);
+        // The wait is over: a later one (a third attempt) takes its own holders.
+        resolveHolders.delete(t.id);
         const slot = held.slot;
         held.slot = undefined;
         working++;
