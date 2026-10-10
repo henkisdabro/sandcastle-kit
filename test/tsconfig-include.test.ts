@@ -1,4 +1,5 @@
-// tsc must see every test file: a hand-picked include let type errors pile up in the ones left out.
+// tsc must see every test file, and the evals that drive the kit: a hand-picked include let type errors
+// pile up in the ones left out.
 // `mod/` stays out because its `claude-code` imports resolve only inside Claude Code.
 //
 //   pnpm test:file test/tsconfig-include.test.ts
@@ -10,6 +11,6 @@ import { test } from "node:test";
 
 const tsconfig = JSON.parse(readFileSync(join(import.meta.dirname, "..", "tsconfig.json"), "utf8"));
 
-test("tsconfig includes all of src and test, and not mod", () => {
-  assert.deepEqual(tsconfig.include, ["src", "test"]);
+test("tsconfig includes all of src, test and evals, and not mod", () => {
+  assert.deepEqual(tsconfig.include, ["src", "test", "evals"]);
 });
