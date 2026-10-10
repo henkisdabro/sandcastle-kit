@@ -80,6 +80,11 @@ Declining is not skipping: every step still runs its check, and only the asking 
       build` and `sandcastle gates` again. If the project had no Dockerfile until now, also add
       `dockerfile: ".sandcastle/Dockerfile"` to `.sandcastle/config.ts`: without the key the file is
       never built (`sandcastle build` says "Not built").
+      When several projects on this machine need a rebuild, update them one at a time, finishing
+      one project's step 3 before starting the next. Image builds are serialised machine-wide, so
+      updating projects in parallel only queues the builds, and the extra opens and gates running
+      beside them load the machine until container starts pass the 120 s limit and gates run slowly
+      enough to turn a base red that CI has green.
    2. **Config.** Compare `.sandcastle/config.ts` with the README's Configuration table. A field
       it leaves out takes the kit's default, so nothing breaks - but name every new default that
       changes what a run does or spends (step 2's decisions and Upgrading notes list them) and ask
