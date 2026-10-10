@@ -491,6 +491,41 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
   };
   const before = tip();
   let regenerated: { files: string[]; regen: string[] } | undefined;
+  // What a host git write that failed left behind, looked at again while an `index.lock` is there. A lock that is
+  // there for a moment (another git process, an editor's status refresh) is gone after a short wait, with the merge
+  // abort it blocked: look again, outside the mutex while waiting, before stopping every landing. Each look is a host
+  // git call (`git status` can run an fsmonitor), so it is a write: checked first. `inPlace`: a merge was begun on the
+  // host and is aborted; a fast-forward that failed began none, and its dirty files are no cause worth reading.
+  const afterFailedWrite = async (inPlace: boolean) => {
+    const look = () =>
+      host.write(() => {
+        if (inPlace) {
+          try {
+            abortLanding(root, project.land);
+          } catch {
+            // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
+          }
+        }
+        let left: { file: string; what: string }[] = [];
+        try {
+          left = gitLeftovers(root);
+        } catch {
+          left = [];
+        }
+        if (!inPlace) return { dirty: [] as string[], left };
+        try {
+          return { dirty: dirtyFiles(root), left };
+        } catch {
+          return { dirty: [] as string[], left };
+        }
+      });
+    let seen = await look();
+    for (let i = 0; i < LOCK_RECHECKS && seen.left.some((l) => l.file.endsWith("index.lock")); i++) {
+      await new Promise((r) => setTimeout(r, ctx.lockRecheckMs ?? LOCK_RECHECK_MS));
+      seen = await look();
+    }
+    return seen;
+  };
   // A branch that holds the base's tip merges to exactly its own tree, which its gates ran. Any
   // other merge makes a tree no gate has seen, so it is made and gated in a sandbox, and the base
   // moves only when that is green.
@@ -505,33 +540,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
       // its wording varies by version, so the reason comes from the working tree. A branch
       // that holds the base cannot conflict: this is a dirty index, a full disk. Both are host
       // git calls (`git status` can run an fsmonitor), so they are a write: checked first.
-      const look = () =>
-        host.write(() => {
-          try {
-            abortLanding(root, project.land);
-          } catch {
-            // Nothing to abort, or the abort itself was refused (a stale index.lock): `left` tells which.
-          }
-          let left: { file: string; what: string }[] = [];
-          try {
-            left = gitLeftovers(root);
-          } catch {
-            left = [];
-          }
-          try {
-            return { dirty: dirtyFiles(root), left };
-          } catch {
-            return { dirty: [], left };
-          }
-        });
-      let seen = await look();
-      // A lock that is there for a moment (another git process, an editor's status refresh) is gone after a short
-      // wait, with the merge abort it blocked: look again, outside the mutex while waiting, before stopping every landing.
-      for (let i = 0; i < LOCK_RECHECKS && seen.left.some((l) => l.file.endsWith("index.lock")); i++) {
-        await new Promise((r) => setTimeout(r, ctx.lockRecheckMs ?? LOCK_RECHECK_MS));
-        seen = await look();
-      }
-      const { dirty, left } = seen;
+      const { dirty, left } = await afterFailedWrite(true);
       // A landing that cannot undo its own merge leaves the repo half-merged: every landing after it would
       // fail on that, as a fault of its own branch. The run stops here, naming the first cause.
       if (left.length > 0) {
@@ -602,6 +611,24 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
     } catch (error) {
       // The .git check stops the run, as before landing. A sandbox that was slow to start costs this ticket only.
       if (error instanceof OperatorError && !(error instanceof SlowStartError)) throw new LandingStop(error.message, guardWords(error), { cause: error });
+      // The fast-forward on the host can fail on a lock another process holds: after a short wait that is gone and
+      // costs this ticket only, but one that stays would fail every later landing the same way, each after its own
+      // sandbox and gate run. It stops the run once, as the in-place landing's does.
+      let left: { file: string; what: string }[] = [];
+      try {
+        ({ left } = await afterFailedWrite(false));
+      } catch (checked) {
+        // A refused write (the `.git` check) is the stop; anything else reads as no leftover, and the landing's own error stands.
+        if (checked instanceof LandingStop) throw checked;
+      }
+      if (left.length > 0) {
+        throw new LandingStop(
+          `${ref(o.issue)} could not land in a sandbox (${errorLine(error)}) and git in ${root} has ${left.map((l) => `${l.file} (${l.what})`).join(", ")}. ` +
+            `Nothing more lands. ${leftoverSteps(left)}`,
+          { what: `${ref(o.issue)} could not land: git has leftovers`, detail: left.map((l) => l.file).join(", ") },
+          { cause: error },
+        );
+      }
       const reason = `could not land it in a sandbox: ${errorLine(error)}`;
       console.log(`${ref(o.issue)}: ${reason}.`);
       return { kind: "not-landed", reason };
