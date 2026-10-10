@@ -38,6 +38,8 @@
 // its share wants one, and never loses one it holds. A run with slots and no registration is from an
 // older kit: it is counted as wanting its concurrency (its run record's), or the slots it holds.
 // A run that starts beside others says how the pool is split (`startLines`), and its estimate divides by its share.
+// A landing's slot is handed on, not freed, when the run has another landing queued behind it (`withSlot`'s `onward`,
+// `handOff`): the freed slot would go to the longest wait across runs, and the queued landing would wait for another run.
 // Beside another run, a run's ticket pipelines (`keep`) leave the last slot of its share, at 2 or more, to its
 // landings (`keptForLanding`).
 // The gates pool has no shares.
@@ -606,6 +608,53 @@ const keptForLanding = (ms: Member[]) => {
   return keeping >= me.share - 1;
 };
 
+/**
+ * The sandbox slot a landing handed on instead of freeing (`withSlot`'s `onward`): the run has another landing queued
+ * behind it, and a freed slot goes to the longest wait across runs, which is not this run's landing, still to ask.
+ * The lock stays ours (counted in `held`, so it is released at exit) until a priority wait of this run takes it, the run
+ * drops it (`dropHandOff`) or HANDOFF_MS pass, so a landing that never asks (a conflict found on the host, a stop) holds
+ * a slot for no longer than that.
+ */
+type HandOff = { id: number; file: string; mine: string; timer: ReturnType<typeof setTimeout> };
+let handOff: HandOff | undefined;
+let handOffs = 0;
+export const HANDOFF_MS = 60_000;
+
+const parkSlot = (file: string, mine: string) => {
+  const id = ++handOffs;
+  const timer = setTimeout(() => dropHandOff(id), HANDOFF_MS);
+  timer.unref();
+  handOff = { id, file, mine, timer };
+};
+
+/** Frees the slot handed on, if it is still the one numbered `id` (`handOffId`'s): a later hand-off is not this one's to drop. */
+export const dropHandOff = (id: number | undefined) => {
+  if (!handOff || handOff.id !== id) return;
+  const { file, mine, timer } = handOff;
+  handOff = undefined;
+  clearTimeout(timer);
+  held.delete(file);
+  releaseLock(file, mine);
+};
+
+/** The number of the slot handed on now, if one is. */
+export const handOffId = () => handOff?.id;
+
+/** The slot handed on becomes the lease of the wait `label`, its lock's label rewritten to say what holds it now. */
+const takeHandOff = (label: string): { file: string; mine: string } | undefined => {
+  if (!handOff) return undefined;
+  const { file, timer } = handOff;
+  handOff = undefined;
+  clearTimeout(timer);
+  const mine = `${process.pid} ${randomUUID()} run=${RUN_ID} ${label}\n`;
+  // The lock is live and ours, so nobody takes it over meanwhile; renamed in, so a reader never sees it half-written.
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, mine);
+  renameSync(tmp, file);
+  held.set(file, mine);
+  return { file, mine };
+};
+
 let sequence = 0;
 // Written whole, then renamed in: a reader never sees an entry half-written.
 const writeWait = (wait: OwnWait) => {
@@ -685,7 +734,7 @@ export type SlotLease = { release(): void };
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs?: number, giveUp?: undefined, priority?: boolean, keep?: boolean): Promise<SlotLease>;
 export function leaseSlot(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number | undefined, giveUp: () => boolean, priority?: boolean, keep?: boolean): Promise<SlotLease | undefined>;
 export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReason) => void, pollMs = 5000, giveUp?: () => boolean, priority = false, keep = false): Promise<SlotLease | undefined> {
-  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, keep, (lease) => lease);
+  return takeSlot(pool, label, onWait, pollMs, giveUp, priority, keep, undefined, (lease) => lease);
 }
 
 /**
@@ -693,7 +742,7 @@ export function leaseSlot(pool: PoolName, label: string, onWait?: (why: WaitReas
  * on a free slot `withSlot`'s `fn` starts before the call returns, with no microtask between, as it did
  * before there were leases (a test holds the slot and queues behind it in one go, and relies on it).
  */
-async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, keep: boolean, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
+async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitReason) => void) | undefined, pollMs: number, giveUp: (() => boolean) | undefined, priority: boolean, keep: boolean, onward: (() => boolean) | undefined, use: (lease: SlotLease) => T): Promise<Awaited<T> | undefined> {
   const wait = beginWait(pool, label, priority);
   let slot: ReturnType<typeof tryAcquire>;
   try {
@@ -704,6 +753,11 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       const seen: Seen = new Map();
       const ms = pool === "sandboxes" ? members(pool, seen) : [];
       yielded = undefined;
+      // The slot the run's previous landing handed on is already this run's: no share, queue or other run's wait applies to it.
+      if (priority && pool === "sandboxes" && handOff) {
+        slot = takeHandOff(label);
+        return undefined;
+      }
       if (overShare(pool, ms, seen)) return "share";
       // Out of the waits directory while kept: another run below its share would otherwise leave a free slot to
       // this older wait, which cannot take it, and both would wait until one of this run's tickets ended.
@@ -754,6 +808,14 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
       if (released) return;
       released = true;
       if (keep) keeping--;
+      // Handed on instead of freed: see `handOff`. Only one at a time; a second one frees as usual.
+      let onwards = false;
+      try {
+        onwards = pool === "sandboxes" && !handOff && !!onward?.();
+      } catch {
+        /* a question about the queue is not worth a slot's release */
+      }
+      if (onwards) return parkSlot(taken.file, taken.mine);
       held.delete(taken.file);
       releaseLock(taken.file, taken.mine);
     },
@@ -761,8 +823,8 @@ async function takeSlot<T>(pool: PoolName, label: string, onWait: ((why: WaitRea
 }
 
 /** Waits for a slot, runs `fn`, frees the slot. */
-export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false, keep = false): Promise<T> =>
-  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, keep, async (lease) => {
+export const withSlot = async <T>(pool: PoolName, label: string, fn: () => Promise<T>, onWait?: (why: WaitReason) => void, pollMs = 5000, priority = false, keep = false, onward?: () => boolean): Promise<T> =>
+  (await takeSlot(pool, label, onWait, pollMs, undefined, priority, keep, onward, async (lease) => {
     try {
       return await fn();
     } finally {

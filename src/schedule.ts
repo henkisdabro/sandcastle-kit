@@ -441,7 +441,7 @@ export type HostPort = {
 /** What the landing worker needs of a run: the landing itself (`landOne`), and the check before it. */
 export type LandPorts<G extends Green> = {
   /** Lands one green branch. A refused write or a failed `.git` check throws an `OperatorError`; anything else is the port's own to turn into a `Landed`. */
-  land(green: G): Promise<Landed>;
+  land(green: G, behind?: () => number): Promise<Landed>;
   host: HostPort;
 };
 
@@ -482,7 +482,8 @@ export const createLanding = <G extends Green>(
           // The check waits its turn on the host git, behind a pipeline's own check: a safety stop
           // that arrived meanwhile lands this one no more than the ones queued behind it.
           if (stop.landsNothing) return on.stopped(g);
-          landed = await ports.land(g);
+          // `behind`: the greens queued after this one, which its sandbox slot is handed to rather than freed (`withSlot`'s `onward`).
+          landed = await ports.land(g, () => queue.size);
         } catch (error) {
           if (error instanceof OperatorError) {
             // A refused write is the host's failure, which the stop state reads live; any other is a `.git` check.
