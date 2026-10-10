@@ -651,13 +651,14 @@ const WORDS_SHARED = 2;
 const WORDS_SHARED_NO_PLACE = 3;
 // Per source ticket: the same place named for another ticket is a different finding. Two findings are one when any
 // place of one matches a place of the other: at one line, when either names it in its title; otherwise (or with no
-// line on one side) their titles must overlap. Two findings that name no place are one when their titles overlap by more.
+// line on one side) their titles must overlap. Two findings that name no place, or only one of which names one, are one
+// when their titles overlap by more: the same gap is worded twice, one wording citing the file and the other not.
 const sameFinding = (a: Seat, b: Seat): boolean => {
   if (a.from !== b.from) return false;
   // The same title from the same ticket is the same finding, however few words it has: how an earlier run's filing is met.
   if (a.key === b.key) return true;
   const shared = [...a.words].filter((w) => b.words.has(w)).length;
-  if (!a.spots.length || !b.spots.length) return !a.spots.length && !b.spots.length && shared >= WORDS_SHARED_NO_PLACE;
+  if (!a.spots.length || !b.spots.length) return shared >= WORDS_SHARED_NO_PLACE;
   const overlap = shared >= WORDS_SHARED;
   return a.spots.some((x) =>
     b.spots.some((y) => {
@@ -672,8 +673,11 @@ export type Places = Map<string, { id: string; seat: Seat }[]>;
 // A seat is kept under each file it names (a path-less one under none), so a finding meets those of any of its files;
 // and under its title, so an earlier run's filing, placed by its title alone, meets the same title whatever its evidence names.
 const placesKeys = (s: Seat) => [...(s.spots.length ? s.spots.map((p) => `${s.from}\0${p.path}`) : [`${s.from}\0`]), `${s.from}\0\0${s.key}`];
+// A seat that names a file also meets the path-less ones, and a path-less seat meets those of every file: `sameFinding`
+// matches the two on their titles alone, so the buckets (one per file) would otherwise never be compared.
 const placeOf = (places: Places, seat: Seat) => {
-  for (const key of placesKeys(seat)) {
+  const keys = seat.spots.length ? [...placesKeys(seat), `${seat.from}\0`] : [...places.keys()].filter((k) => k.startsWith(`${seat.from}\0`));
+  for (const key of keys) {
     const found = places.get(key)?.find((p) => sameFinding(p.seat, seat));
     if (found) return found;
   }
@@ -905,19 +909,26 @@ export const runTicketsView = (
 /**
  * The follow-ups earlier runs filed (an issue id on the entry), from the project's `logs/history.jsonl`, read as
  * `changelogSince` reads it: a line that does not parse is skipped, and so is a dry run's. Only the tickets in `from`
- * when given. A ticket's follow-up filed in two runs (one the earlier missed) is listed twice.
+ * when given. A ticket's follow-up filed in two runs (one the earlier missed) is listed twice. An issue that is closed
+ * (`isClosed`; one it cannot tell stays) is left out: a new problem in the same file is not a comment on a closed issue.
  */
-export const filedBefore = (root: string, from?: ReadonlySet<string>): FiledFollowUp[] => {
+export const filedBefore = (root: string, from?: ReadonlySet<string>, isClosed?: (id: string) => boolean | undefined): FiledFollowUp[] => {
   const file = join(root, ".sandcastle/logs/history.jsonl");
   if (!existsSync(file)) return [];
   const out: FiledFollowUp[] = [];
+  const closed = new Map<string, boolean>();
+  const gone = (id: string) => {
+    if (!isClosed) return false;
+    if (!closed.has(id)) closed.set(id, isClosed(id) === true);
+    return closed.get(id)!;
+  };
   for (const text of readFileSync(file, "utf8").split("\n")) {
     if (!text.includes('"followUps"')) continue;
     try {
       const run = JSON.parse(text);
       if (!Array.isArray(run?.followUps) || run.dryRun) continue;
       for (const f of run.followUps) {
-        if (typeof f?.title === "string" && typeof f.from === "string" && typeof f.phase === "string" && (typeof f.id === "string" || typeof f.id === "number") && (!from || from.has(f.from))) {
+        if (typeof f?.title === "string" && typeof f.from === "string" && typeof f.phase === "string" && (typeof f.id === "string" || typeof f.id === "number") && (!from || from.has(f.from)) && !gone(String(f.id))) {
           out.push({ title: f.title, from: f.from, phase: f.phase, id: String(f.id) });
         }
       }
@@ -3012,7 +3023,7 @@ export const burndown = async (
     places: placesThisRun,
     exists: onBase(project.root, project.baseBranch),
     named: namedOnBase(project.root, project.baseBranch),
-    earlier: filedBefore(project.root, new Set(candidates.map((c) => c.id))),
+    earlier: filedBefore(project.root, new Set(candidates.map((c) => c.id)), (id) => tracker.isClosed(id)),
   });
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
