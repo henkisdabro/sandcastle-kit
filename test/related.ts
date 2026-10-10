@@ -1,5 +1,5 @@
 // Prints the test files that cover a change: every test/*.test.ts that mentions any given file -
-// by its repo-relative path, or its basename without the extension - or any name that file
+// by its repo-relative path, or its basename with the extension (`run.ts`) - or any name that file
 // exports. `pnpm test:related <files...>` runs what this prints through the same runner as
 // `test:file`. A test file given as an argument is itself in the list.
 //
@@ -9,10 +9,11 @@
 // generous direction: a name that is also an ordinary word picks up a test too many, which costs
 // seconds, where a test too few is the failure this exists to prevent (a test that pins source text
 // or wording fails in the ticket's gate, not in the file the agent ran). `-` counts as part of a
-// word, so `land` does not match `land-command`.
+// word, so `land` does not match `land-command`. The basename keeps its extension because the bare
+// stem is prose: `run` or `status` alone matches most of the suite, where `run.ts` names the file.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, extname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -48,8 +49,8 @@ for (const arg of files) {
   const path = inside ? rel : arg;
   if (/^test\/[^/]+\.test\.ts$/.test(path) && existsSync(abs)) given.add(path);
   terms.push(standalone(path));
-  const stem = basename(path, extname(path));
-  if (stem) terms.push(standalone(stem));
+  const name = basename(path);
+  if (name) terms.push(standalone(name));
   if (existsSync(abs) && /\.[cm]?[jt]sx?$/.test(path)) {
     for (const name of exportedNames(readFileSync(abs, "utf8"))) terms.push(standalone(name));
   }

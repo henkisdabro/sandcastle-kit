@@ -9,6 +9,7 @@ export default {
   // land: "merge",                         // or "squash": one commit per ticket on the base branch
   // autonomy: 0,                           // 1 asks to re-run conflicted and unblocked tickets; 2 or 3 re-run them
   // autonomy: "drain",                     // runs turns until the queue is drained or a stop condition holds (20 at most)
+  // keepWarm: true,                        // false: the session that started the run stops keeping its prompt cache warm
 
   // Claude Code in the sandbox image follows its "stable" release channel. "latest" follows the
   // faster one; an exact version pins it if a release misbehaves (CLAUDE_CODE_VERSION in the

@@ -222,6 +222,8 @@ export type RunSettings = {
   usageReading?: "unavailable";
   /** The plan usage in percent at which the run pauses itself (`USAGE_PAUSE`); only when it is on. */
   usagePause?: number;
+  /** The session that started the run keeps its prompt cache warm while the run is live; absent in records from older kits, read as true. */
+  keepWarm?: boolean;
   /** True when the sandboxes spend `ANTHROPIC_API_KEY`, billing API credits; absent otherwise. */
   apiKey?: boolean;
 };
