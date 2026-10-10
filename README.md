@@ -1671,7 +1671,10 @@ the sandbox's own.
 
 When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
-freed one does not take it back from another run that was already waiting. Within one run, a
+freed one does not take it back from another run that was already waiting. The one exception is a
+landing's sandbox slot while another of the run's green branches is queued to land: it goes straight
+to that next landing (and back to the pool if that landing does not use it within a minute), so the
+queued branch does not wait behind another run's ticket. Within one run, a
 landing's gates (and the base and verify gates) take a freed gate slot before the run's ticket
 gates, since the one landing worker sets the run's end, and a landing still goes before its next
 ticket for a sandbox slot. A wait or a slot left by a run that was killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The

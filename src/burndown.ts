@@ -3316,10 +3316,10 @@ export const burndown = async (
   const landingPorts = landingWork(ctx);
   const landings: typeof landingPorts = {
     ...landingPorts,
-    land: async (o) => {
+    land: async (o, behind) => {
       landing.set(o.issue, { since: Date.now() });
       try {
-        return await landingPorts.land(o);
+        return await landingPorts.land(o, behind);
       } finally {
         landing.delete(o.issue);
       }
