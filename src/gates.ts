@@ -504,6 +504,29 @@ export const verifyFailing = (failures: GateRun["failures"]) => {
   return { tests: all.slice(0, FAILING_TESTS_SHOWN), more: all.length > FAILING_TESTS_SHOWN };
 };
 
+// A test runner's own timeout wording: vitest's "Test timed out in 30000ms", jest's "Exceeded timeout of 5000 ms for a
+// test", node:test's "test timed out after 30000ms". Nothing else counts: a gate's own timeout (exit 124) is a hang.
+const TEST_TIMEOUT = /Test timed out in \d|Exceeded timeout of \d|test timed out after \d/i;
+/** A gate that ran this many times its recorded time was slowed by load, not changed by the merge (`likelyLoad`). */
+export const LOAD_FACTOR = 3;
+
+/**
+ * Whether a red verify is likely the machine's load: every failure is a test timeout (each gate's output holds a
+ * timeout line for every failing test it names, and at least one), or a red gate ran `LOAD_FACTOR` times its
+ * recorded time. `recorded` is the gates' ms from the landing that gated this tree, else the run's base gates; a
+ * gate with no record is judged by its timeouts only.
+ */
+export const likelyLoad = (failures: GateRun["failures"], gates: Gate[], recorded: Record<string, number> = {}): boolean => {
+  const timeouts = failures.length > 0 && failures.every((f) => {
+    const output = stripVTControlCharacters(f.output);
+    const seen = output.split("\n").filter((line) => TEST_TIMEOUT.test(line)).length;
+    return seen > 0 && seen >= failingTests(output, Infinity).length;
+  });
+  const red = new Set([...failures.map((f) => f.name), ...gates.filter((g) => !g.pass).map((g) => g.name)]);
+  const slow = gates.some((g) => red.has(g.name) && typeof g.ms === "number" && typeof recorded[g.name] === "number" && recorded[g.name] > 0 && g.ms >= LOAD_FACTOR * recorded[g.name]);
+  return timeouts || slow;
+};
+
 /**
  * The file a failing test's id names, or undefined when it names none. pytest's "path::test",
  * vitest's and jest's "FAIL path" and node:test's summary "path::name" do; node:test's bare "name",
@@ -820,6 +843,20 @@ export const verifyBase = async (project: Project, image: string, planFile: stri
   if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify", "verify");
   else noteBaseResult(project.root, "", false);
   return gated;
+};
+
+/**
+ * The end-of-run verify, run again once when it is red and the second result kept, as a ticket's first red gate and a
+ * landing's are: a test that timed out beside other runs' suites would otherwise stop the drain and tell the operator
+ * not to push. The second run takes its own gates slot, so the first has freed its own before it starts.
+ */
+export const rerunRedVerify = async <R extends { gates: Gate[]; failures: GateRun["failures"] }>(run: () => Promise<R>, say: (line: string) => void): Promise<R> => {
+  const first = await run();
+  if (!first.failures.length && first.gates.every((g) => g.pass)) return first;
+  say(`verify red (${gateLine(first.gates)}) - re-running it once`);
+  const second = await run();
+  say(!second.failures.length && second.gates.every((g) => g.pass) ? "verify red, then green on a re-run - a flake" : "verify red again on the re-run");
+  return second;
 };
 
 /** Red on the base before any agent ran. Carries each gate's verdict so the run record, and the closing summary, can name the red ones. */
