@@ -1108,13 +1108,13 @@ export const assertGitUnchanged = (project: Project, before: Fingerprint, when: 
 
 // ---------------------------------------------------------------------------
 // The worktree records, and the check before a sandbox closes. A sandbox works in a linked worktree of the shared
-// `.git`: the worktree's `.git` file names its record, `<common>/worktrees/<name>`, and the record's `commondir`
-// names the directory whose config git reads (and `config.worktree` beside it, under `extensions.worktreeConfig`).
-// The sandbox can write all three, and the host runs git in that worktree: Sandcastle's close (`git status`, then
-// `git worktree remove`), Sandcastle's reuse of a kept worktree as the next sandbox opens (`git status`,
-// `git fetch`, `git merge --ff-only`), and the pipeline's cut of a stale branch in a kept worktree. A record that
-// names another common directory, or carries a `config.worktree`, has that git read config no check has seen, and a
-// filter there runs on the host, past the pins. A kept worktree can be an earlier run's, whose change a fingerprint
+// `.git`: the worktree's `.git` file names its record, `<common>/worktrees/<name>`, and the record's `commondir` names
+// the directory whose config git reads (and `config.worktree` beside it, under `extensions.worktreeConfig`). The
+// sandbox can write all three, and the host runs git in that worktree: Sandcastle's close (`git status`, then
+// `git worktree remove`), Sandcastle's reuse of a kept worktree as the next sandbox opens (`git status`; its `git fetch` and
+// `git merge --ff-only` are patched out, #711), and the pipeline's cut of a stale branch in a kept worktree. A record
+// that names another common directory, or carries a `config.worktree`, has that git read config no check has seen, and
+// a filter there runs on the host, past the pins. A kept worktree can be an earlier run's, whose change a fingerprint
 // taken at this run's start would take as its baseline, so a record is held to what git itself writes, not compared
 // with a reading.
 // ---------------------------------------------------------------------------
