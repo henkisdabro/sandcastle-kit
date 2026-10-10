@@ -3025,6 +3025,16 @@ export const burndown = async (
       timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true)),
     landed,
     slotWanted,
+    // The heartbeat says the wait as a wait; the landing's time counts from the slot, as a gates step's from its first gate.
+    slotWait: (issue, state) => {
+      const step = landing.get(issue);
+      if (!step) return;
+      if (state === "waiting") step.phase = "waiting for a sandbox slot";
+      else {
+        delete step.phase;
+        step.since = Date.now();
+      }
+    },
     reds,
     timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };

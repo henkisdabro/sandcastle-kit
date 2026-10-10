@@ -623,7 +623,7 @@ slot kept for landing (from a share of 2; a dry run keeps none), not the machine
 **While it runs.** The status view opens first, before the slow checks, and its run cell names the
 stage the run is in. Inside Herdr the run lays it out itself (below), and does not start if it
 cannot; elsewhere run `sandcastle status` in a second terminal. The run prints a heartbeat line
-every five minutes while anything is in flight - tickets working (a gates step says when it waits for a gates slot, and counts its time from the first gate), landings, and sent-back tickets waiting to resolve a conflict; it also says when the run has waited for a sandbox slot longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
+every five minutes while anything is in flight - tickets working (a gates step says when it waits for a gates slot, and counts its time from the first gate; a landing says when it waits for a sandbox slot, and counts its time from the slot), landings, and sent-back tickets waiting to resolve a conflict; it also says when the run has waited for a sandbox slot longer than a typical issue takes (the wait is the run's, not a ticket's: a pipeline takes its slot first, then the ticket first in line) - and the status view flags a sandbox whose log has been quiet
 for ten. Each agent pass writes a readable log and its raw stream - every tool call and result - in
 `.sandcastle/logs/` (see [What a run leaves behind](#-what-a-run-leaves-behind)). With
 `USAGE_CHECK=1` the run also reads the plan's usage after preflight and before each ticket, with
