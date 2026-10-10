@@ -15,7 +15,7 @@ export type Refresh = { at: number; cacheRead: number; contextTokens: number };
 export type PlanWindow = { percentUsed: number };
 
 /** What the session remembers across looks; it lives in `$.state`, since a reload restarts module variables. */
-export type Kept = {
+export type Warmth = {
   /** The run these facts are about (its `startedAt`): another run starts them over, so misses are counted per run. */
   run?: string;
   /** The last refresh, until a main-thread turn ends after a miss: that turn clears the miss. */
@@ -88,7 +88,7 @@ export const keepWarm = (input: KeepWarmInput): KeepWarmVerdict => {
 };
 
 /** The most recent thing that kept the cache warm: a main-thread turn, a refresh, or the run's start. */
-export const activity = (kept: Kept, floor?: number): number | undefined => {
+export const activity = (kept: Warmth, floor?: number): number | undefined => {
   const times = [kept.turnEnd, kept.last?.at, floor].filter((t): t is number => typeof t === "number" && Number.isFinite(t));
   return times.length === 0 ? undefined : Math.max(...times);
 };
@@ -97,22 +97,22 @@ export const activity = (kept: Kept, floor?: number): number | undefined => {
  * What a refresh found. `result` is `$.model.fork`'s: an answered one carries the request's usage;
  * one that is not (`api-error`, `aborted`) is a miss, since nothing says the cache held.
  */
-export const settle = (kept: Kept, result: { isAnswered: boolean; usage?: { cache_read_input_tokens?: number } }, contextTokens: number, at: number): Kept => {
+export const settle = (kept: Warmth, result: { isAnswered: boolean; usage?: { cache_read_input_tokens?: number } }, contextTokens: number, at: number): Warmth => {
   const cacheRead = result.isAnswered ? Math.max(0, result.usage?.cache_read_input_tokens ?? 0) : 0;
   const last: Refresh = { at, cacheRead, contextTokens: result.isAnswered ? contextTokens : Math.max(contextTokens, 1) };
   return { ...kept, last, misses: kept.misses + (missed(last) ? 1 : 0) };
 };
 
 /** A main-thread turn ended: the cache was just used, and a miss before it is cleared (one more try at 55 minutes). */
-export const afterTurn = (kept: Kept, at: number): Kept => {
+export const afterTurn = (kept: Warmth, at: number): Warmth => {
   const { last, ...rest } = kept;
   return { ...rest, turnEnd: at, ...(last !== undefined && !missed(last) ? { last } : {}) };
 };
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** A stored value as `Kept`; anything else reads as nothing remembered. */
-export const parseKept = (value: unknown): Kept => {
+/** A stored value as `Warmth`; anything else reads as nothing remembered. */
+export const parseWarmth = (value: unknown): Warmth => {
   if (typeof value !== "object" || value === null) return { misses: 0 };
   const { run, last, misses, turnEnd } = value as Record<string, unknown>;
   const l = typeof last === "object" && last !== null ? (last as Record<string, unknown>) : undefined;

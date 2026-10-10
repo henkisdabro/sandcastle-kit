@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parse } from "../mod/hooks/run-state.ts";
-import { activity, afterTurn, INTERVAL_MS, keepWarm, parseKept, settle } from "../mod/hooks/keep-warm.ts";
+import { activity, afterTurn, INTERVAL_MS, keepWarm, parseWarmth, settle } from "../mod/hooks/keep-warm.ts";
 
 const MIN = 60 * 1000;
 const T0 = 1_800_000_000_000;
@@ -115,11 +115,11 @@ test("the last activity is the latest of a turn's end, a refresh and the run's s
   assert.equal(activity({ misses: 0 }, Number.NaN), undefined);
 });
 
-test("parseKept reads what $.state holds and nothing else", () => {
+test("parseWarmth reads what $.state holds and nothing else", () => {
   const kept = { run: "r", misses: 1, turnEnd: 5, last: { at: 1, cacheRead: 2, contextTokens: 3 } };
-  assert.deepEqual(parseKept(kept), kept);
+  assert.deepEqual(parseWarmth(kept), kept);
   for (const junk of [undefined, null, 4, "x", [], { misses: "1", last: { at: "1" }, turnEnd: Infinity }]) {
-    assert.deepEqual(parseKept(junk), { misses: 0 }, JSON.stringify(junk));
+    assert.deepEqual(parseWarmth(junk), { misses: 0 }, JSON.stringify(junk));
   }
 });
 

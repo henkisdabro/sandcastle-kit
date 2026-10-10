@@ -16,7 +16,7 @@ import type { EngineInterface, Register } from "claude-code";
 
 import { band, building, CASTLE_FRAMES, endedHow, endPrompt, followable, HELD, line, needing, parse, parseRegistry, REGISTRY_SCRIPT, rows, type Run, SAND, startedBy, summarise } from "./run-state.ts";
 import { kitRunning } from "./run-live.ts";
-import { activity, afterTurn, type Kept, keepWarm, parseKept, settle } from "./keep-warm.ts";
+import { activity, afterTurn, keepWarm, parseWarmth, settle, type Warmth } from "./keep-warm.ts";
 import { afterRead, type Choice, choiceAfter, dismissalEnded, due, MARK_USAGE, machineSwitch, markAction, markReport, markText, type MarkInput, parseChoice, parseEntry, readyIds, SETTINGS_SCRIPT, type Trigger } from "./idle.ts";
 
 const view = atom({ plugin: "sandcastle", key: "view" } as const, null);
@@ -29,7 +29,7 @@ const markLine = atom({ plugin: "sandcastle", key: "mark" } as const, null);
 /** The cache refresh's row the band draws under the castle; null for none. */
 const warmLine = atom({ plugin: "sandcastle", key: "warm" } as const, null);
 /** What the cache refresh remembers; `$.state`, because a reload restarts module variables and not state. */
-const kept = atom({ plugin: "sandcastle", key: "kept" } as const, { misses: 0 } as Kept);
+const warmth = atom({ plugin: "sandcastle", key: "warmth" } as const, { misses: 0 } as Warmth);
 
 const RECORD = ".sandcastle/logs/run.json";
 // What makes a project set up: `sandcastle init` writes it.
@@ -437,12 +437,12 @@ async function warm($: EngineInterface) {
   if (!run || refreshing) return;
   try {
     const now = await $.clock.now();
-    let memory = parseKept(await read($, kept));
+    let memory = parseWarmth(await read($, warmth));
     // Another run starts the count of misses over; the turn that ended last still counts.
     if (memory.run !== run.startedAt) memory = { misses: 0, ...(memory.turnEnd === undefined ? {} : { turnEnd: memory.turnEnd }), ...(run.startedAt === undefined ? {} : { run: run.startedAt }) };
     const usage = await $.session.usage();
     // The run's start is the floor: the turn that started it ended about then, and a reload forgets the later ones.
-    const input = (m: Kept) => ({ enabled: run.keepWarm, live: true, lastActivity: activity(m, Date.parse(run.startedAt ?? "")), last: m.last, misses: m.misses, rateLimits: usage.rateLimits, now });
+    const input = (m: Warmth) => ({ enabled: run.keepWarm, live: true, lastActivity: activity(m, Date.parse(run.startedAt ?? "")), last: m.last, misses: m.misses, rateLimits: usage.rateLimits, now });
     let verdict = keepWarm(input(memory));
     if (verdict.refresh) {
       refreshing = true;
@@ -455,7 +455,7 @@ async function warm($: EngineInterface) {
         refreshing = false;
       }
     }
-    await update($, kept, () => memory);
+    await update($, warmth, () => memory);
     await shine($, verdict.band ?? null);
   } catch {
     // A usage or request that failed is tried again at the next tick.
@@ -595,7 +595,7 @@ export const register: Register = (on) => {
     // The main thread's turn used the cache; a subagent's has its own.
     if (e.agentId === undefined) {
       const at = await $.clock.now();
-      await update($, kept, (m) => afterTurn(parseKept(m), at));
+      await update($, warmth, (m) => afterTurn(parseWarmth(m), at));
     }
     return out;
   });
