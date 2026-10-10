@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -59,29 +59,75 @@ test("eight processes racing one stale lock: exactly one takes it", async () => 
   const file = join(dir, "race.lock");
   writeFileSync(file, `${deadPid()} old-token killed run\n`);
   const pool = join(import.meta.dirname, "../src/pool.ts");
-  // All start at the same instant, and stay alive until every one has
-  // answered: a winner that exits early is a dead pid, fairly taken over.
+  // The racers meet at files, not at a clock instant: a racer whose node starts
+  // slowly under load is waited for, never late. Each writes ready-<n> once
+  // takeLock is imported and waits for `go`; after answering it waits for `done`,
+  // so a winner never exits early (a dead pid is fairly taken over).
+  const barrier = mkdtempSync(join(tmpdir(), "sandcastle-barrier-"));
+  const LIMIT_MS = 60_000;
   // Each looks like the kit to `ps` (its script holds the kit's entry, as a
   // run's command line does): any other owner's lock is a recycled pid's.
-  const at = Date.now() + 3000;
   const script =
     `globalThis.entry = ${JSON.stringify(RUN_COMMAND)};` + // survives the transform, which drops a comment
+    `import { existsSync, writeFileSync } from "node:fs";` +
     `const { takeLock } = await import(${JSON.stringify(pool)});` +
-    `while (Date.now() < ${at}) {}` +
+    `const nap = new Int32Array(new SharedArrayBuffer(4));` +
+    `const waitFor = (name) => {` +
+    `  const from = performance.now();` +
+    `  while (!existsSync(${JSON.stringify(barrier)} + "/" + name)) {` +
+    `    if (performance.now() - from > ${LIMIT_MS}) { console.error("gave up waiting for " + name); process.exit(1); }` +
+    `    Atomics.wait(nap, 0, 0, 5);` +
+    `  }` +
+    `};` +
+    `writeFileSync(${JSON.stringify(barrier)} + "/ready-" + process.argv.at(-1), "");` +
+    `waitFor("go");` +
     `console.log(takeLock(${JSON.stringify(file)}, "racer").mine ? "won" : "lost");` +
-    `await new Promise((r) => setTimeout(r, 3000));`;
-  const racers = Array.from(
-    { length: 8 },
-    () =>
-      new Promise<string>((resolve, reject) => {
-        const child = startNode(["--input-type=module", "-e", script], { env: process.env });
+    `waitFor("done");`;
+  const children = Array.from({ length: 8 }, (_, n) =>
+    startNode(["--input-type=module", "-e", script, String(n)], { env: process.env, timeoutMs: LIMIT_MS * 2 }),
+  );
+  let early = ""; // a racer that ends before `done` is written has failed
+  const answers = children.map(
+    (child) =>
+      new Promise<string>((resolve) => {
         let out = "";
-        child.stdout!.on("data", (d) => (out += d));
         child.stderr!.on("data", (d) => (out += d));
-        child.on("exit", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(out))));
+        child.stdout!.on("data", (d) => {
+          out += d;
+          if (out.includes("\n")) resolve(out.split("\n")[0]!);
+        });
+        child.on("exit", (code) => {
+          if (!existsSync(join(barrier, "done"))) early ||= `a racer ended with ${code} before the others had answered: ${out.trim()}`;
+          resolve(out.trim());
+        });
       }),
   );
-  const said = await Promise.all(racers);
-  assert.equal(said.filter((s) => s === "won").length, 1, said.join(", "));
-  assert.equal(said.filter((s) => s === "lost").length, 7, said.join(", "));
+  const exits = children.map((child) => new Promise<number | null>((resolve) => child.on("exit", resolve)));
+  // Polls (async, 10 ms) until `ready` is true; fails naming `what` and `count`.
+  const until = async (ready: () => boolean, what: string, count: () => number) => {
+    const from = performance.now();
+    while (!ready()) {
+      assert.equal(early, "", early);
+      assert.ok(performance.now() - from < LIMIT_MS, `${what}: ${count()} of 8 arrived in ${LIMIT_MS / 1000}s`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  try {
+    const arrived = () => readdirSync(barrier).filter((f) => f.startsWith("ready-")).length;
+    await until(() => arrived() === 8, "racers ready", arrived);
+    writeFileSync(join(barrier, "go"), "");
+    let answered = 0;
+    answers.forEach((a) => a.then(() => answered++));
+    await until(() => answered === 8, "racers answered", () => answered);
+    assert.equal(early, "", early);
+    writeFileSync(join(barrier, "done"), "");
+    const codes = await Promise.all(exits);
+    const said = await Promise.all(answers);
+    assert.deepEqual(codes, Array(8).fill(0), said.join(", "));
+    assert.equal(said.filter((s) => s === "won").length, 1, said.join(", "));
+    assert.equal(said.filter((s) => s === "lost").length, 7, said.join(", "));
+  } finally {
+    writeFileSync(join(barrier, "done"), ""); // lets a racer still waiting end by itself
+    for (const child of children) child.kill("SIGKILL");
+  }
 });
