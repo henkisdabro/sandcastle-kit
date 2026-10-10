@@ -180,7 +180,7 @@ This continues SKILL.md: run its "Before every action" first.
 
    1. `## 🏁 Run finished` - times, attempted, merged, need you, not started, blocked (left out at 0), tokens, and whether the
       merged base re-gated green, and on which image (or that it was green at that commit already, with the
-      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent: say which, and still do not push.
+      ticket or check whose gates proved it, so the end-of-run gates were not run again). If it is **RED TOGETHER**, say so first and plainly: do not push. If the line instead says it is red on the tree a ticket's own gates passed, the sandbox differs (git identity, environment), not the merge; if it says the tree's landing gates passed in a clean sandbox, a test is likely flaky or order-dependent; if it says `RED twice, likely load`, the failures were only test timeouts or a gate far slower than recorded, so `sandcastle gates` on a quiet machine is the check: say which, and still do not push.
       If the line says the re-gate ran on the run's starting image because a merged ticket changed a
       Dockerfile, relay that: the new image is untested until it is rebuilt and `sandcastle gates` is green.
       A `Memory pressure: high` line (a sandbox's `full` memory pressure reached 5% during a gate pass)
@@ -280,7 +280,7 @@ In the status view, a landing ticket holds no sandbox slot, and the run cell's e
   the base; a held branch that is gone with no such subject is listed with no merge command.
   A `stopped` ticket landed afterwards with `sandcastle land <n>` reads the same way, as "stopped,
   merged by hand".
-  A held conflict resolution (it changed files git had merged cleanly) is checked for lost lines
+  A held conflict resolution (it changed files git had merged cleanly, and gave no reason for them) is checked for lost lines
   (`git log -p`) and landed with `sandcastle land <n>`, which gates the merge - not merged by hand,
   which runs no gate - or fixed on the branch, or requeued with a note; the summary lists it with
   `land:` where the other held branches have `merge:`, in this run and in later ones.

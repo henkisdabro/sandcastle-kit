@@ -243,6 +243,12 @@ const NESTED: Record<string, string[]> = {
   herdr: ["panes"],
 };
 
+/** The repository of a project's layer; its final image is `<repo>-run`. */
+export const projectRepo = (project: { name: string }) => `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
+
+/** The kit's own image repositories (`baseImage`, `agentsImage` in src/sandbox.ts): a project's layer must not share one. */
+const KIT_REPOS = ["sandcastle-base", "sandcastle-agents"];
+
 const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
 const isCount = (v: unknown, min: number) => typeof v === "number" && Number.isInteger(v) && v >= min;
 
@@ -267,6 +273,10 @@ const checkShape = (config: ProjectConfig) => {
   }
   for (const key of ["name", "baseBranch", "label", "dockerfile", "rules"]) {
     if (c[key] !== undefined && (typeof c[key] !== "string" || !c[key])) refuse(`\`${key}\` must be a non-empty string, not ${JSON.stringify(c[key])}.`);
+  }
+  // Same repository as the kit's own, and the project's prune and use stamps would mix with the kit's.
+  if (typeof config.name === "string" && KIT_REPOS.includes(projectRepo(config))) {
+    refuse(`\`name\` ${JSON.stringify(config.name)} would give the project's image the repository \`${projectRepo(config)}\`, which is the kit's own - rename \`name\` in ${CONFIG_PATH}.`);
   }
   for (const key of ["setup", "protectedPaths"]) if (c[key] !== undefined && !isStrings(c[key])) refuse(`\`${key}\` must be a list of strings, such as ["${key === "setup" ? "pnpm install" : ".github/"}"].`);
   for (const key of ["keep", "dropHooks"] as const) if (config.lean?.[key] !== undefined && !isStrings(config.lean[key])) refuse(`\`lean.${key}\` must be a list of strings.`);

@@ -1,6 +1,6 @@
-// A red merged base said "RED TOGETHER - do not push" with no output kept anywhere: the gates on the
-// merged base now leave their failures in .sandcastle/logs/verify-gates.log, as the base gates do
-// in base-gates.log, and a green run removes a log an earlier red run left. Temp dirs only.
+// A red base check leaves its failures in .sandcastle/logs/base-gates.log, and a green one removes a log an
+// earlier red run left. (The verify streams its own log as its gates run: test/verify-log-layout.test.ts.)
+// Temp dirs only.
 //
 //   pnpm test:file test/verify-log.test.ts
 
@@ -15,18 +15,18 @@ process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "sandcastle-test-"));
 const TMP = mkdtempSync(join(tmpdir(), "sandcastle-verify-log-"));
 after(() => rmSync(TMP, { recursive: true, force: true }));
 
-const { VERIFY_LOG, writeGateLog } = await import("../src/gates.ts");
+const { writeGateLog } = await import("../src/gates.ts");
 
-test("a red verify writes each failure's full output under the header, in a logs dir it makes", () => {
-  const log = join(TMP, "a", VERIFY_LOG);
+test("a red base check writes each failure's full output under the header, in a logs dir it makes", () => {
+  const log = join(TMP, "a", "base-gates.log");
   const failures = [{ name: "test", command: "pnpm test", exitCode: 1, output: "line 1\nFAIL: a and b cannot both exist" }];
-  assert.equal(writeGateLog(log, "# gates on the merged main at abc1234: test=FAIL", failures), true);
+  assert.equal(writeGateLog(log, "# gates on main at abc1234: test=FAIL", failures), true);
   const text = readFileSync(log, "utf8");
-  assert.match(text, /^# gates on the merged main at abc1234: test=FAIL\n\n===== test: pnpm test \(exit 1\)\nline 1\nFAIL: a and b cannot both exist\n/);
+  assert.match(text, /^# gates on main at abc1234: test=FAIL\n\n===== test: pnpm test \(exit 1\)\nline 1\nFAIL: a and b cannot both exist\n/);
 });
 
-test("a green verify removes the log an earlier red run left", () => {
-  const log = join(TMP, "b", VERIFY_LOG);
+test("a green base check removes the log an earlier red run left", () => {
+  const log = join(TMP, "b", "base-gates.log");
   writeGateLog(log, "# red", [{ name: "test", command: "t", exitCode: 1, output: "x" }]);
   assert.ok(existsSync(log));
   assert.equal(writeGateLog(log, "# green", []), false);

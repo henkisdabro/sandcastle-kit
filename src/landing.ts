@@ -23,7 +23,7 @@ import { OperatorError, SlowStartError } from "./errors.ts";
 import { type GateRun, type ProofKind, failingTests, namesFailingTest } from "./gates.ts";
 import { assertGitUnchanged, backupBranch, dropBackup, type Fingerprint, GuardStop, largeFiles, protectedChanges, guardWords, tipOf } from "./guard.ts";
 import { type Box, landInSandbox, type Opener, squashBody } from "./land.ts";
-import { withSlot } from "./pool.ts";
+import { dropHandOff, handOffId, withSlot } from "./pool.ts";
 import { mergeTree, mergeTreeSupported, noteMissingObjects } from "./resolution.ts";
 import { regensFor } from "./generated.ts";
 import type { TicketRecord } from "../mod/hooks/run-record.ts";
@@ -413,7 +413,8 @@ export const isAncestor = (root: string, ancestor: string, of: string) => {
 };
 
 /** `at.slotWaited`: told how long the landing waited for its sandbox slot, once it has it. */
-export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void }): Promise<Landed> => {
+/** `at.behind`: how many green branches are queued to land after this one; one or more and its sandbox slot is handed to the next landing, not freed. */
+export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(ms: number): void; behind?(): number }): Promise<Landed> => {
   const { project, tracker, base, gateNames, reports, run, dryRun, opener, withdrawal, host, landed } = ctx;
   const ref = tracker.ref;
   const root = project.root;
@@ -616,7 +617,7 @@ export const landOne = async (ctx: LandContext, o: Landable, at?: { slotWaited?(
             (box) => ctx.gate(box, o.issue),
             host.expected,
           );
-        }, undefined, undefined, true);
+        }, undefined, undefined, true, false, () => (at?.behind?.() ?? 0) > 0);
       } finally {
         if (waiting) wanted.n--;
       }
@@ -778,15 +779,19 @@ export const didMerge = (landed: Landed) => landed.kind === "merged" || landed.k
  * the process while pipelines still ran: no summary, and tickets already landed went unreported.
  */
 export const landingWork = (ctx: LandContext): LandPorts<Waiting> => ({
-  land: async (o) => {
+  land: async (o, behind) => {
     const since = Date.now();
     let slotWaitMs = 0;
     let landed: Landed;
+    // A slot the previous landing handed on that this one did not take (a conflict found on the host, a fast-forward) goes back to the pool.
+    const handed = handOffId();
     try {
-      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms) });
+      landed = await landOne(ctx, o, { slotWaited: (ms) => (slotWaitMs = ms), behind });
     } catch (error) {
       if (error instanceof OperatorError) throw error;
       landed = { kind: "not-landed", reason: errorLine(error) };
+    } finally {
+      dropHandOff(handed);
     }
     // A landing decided without a merge (the ticket taken back, a hold, a moved branch, a dry run) is no landing to time.
     if (!NO_MERGE.has(landed.kind)) {

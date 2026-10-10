@@ -52,7 +52,7 @@ export type Facts = {
   byModel?: Record<string, Tokens>;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
   pressure?: { some: number; full: number; where: string };
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string } } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -1002,6 +1002,8 @@ export const render = (f: Facts, plain = false): string => {
   // The ticket whose gates passed the verified tree (a file in a repository: only a string counts).
   const sameTree = typeof f.verify?.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
   const cleanTree = typeof f.verify?.cleanTree === "string" && f.verify.cleanTree ? f.verify.cleanTree : "";
+  // Red twice under load (`likelyLoad`, `src/gates.ts`): the sandbox's git identity and the merge are no suspect.
+  const loaded = f.verify?.likelyLoad === true;
   const newDockerfiles = Array.isArray(f.verify?.dockerfiles) ? f.verify!.dockerfiles.filter((d): d is string => typeof d === "string" && !!d) : [];
   const startingImage = newDockerfiles.length
     ? ` Merged work changed ${newDockerfiles.join(", ")}, so this ran on the run's starting image - rebuild and run sandcastle gates to check the new one.`
@@ -1034,7 +1036,7 @@ export const render = (f: Facts, plain = false): string => {
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
         ? `Merged ${f.base} re-gated: all ${f.gateCount} gates green${verifyImage}.${startingImage}`
-        : `Merged ${f.base} re-gated: ${sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
+        : `Merged ${f.base} re-gated: ${loaded ? "RED twice, likely load - every failure is a test timeout, or a gate ran several times its recorded time" : sameTree ? `RED in a clean sandbox on the tree ${sameTree}'s own gates passed - the difference is the sandbox, not the merge` : cleanTree ? `RED on the tree ${cleanTree}'s landing gates passed in a clean sandbox - likely a flaky or order-dependent test, not the merge` : "RED TOGETHER"} (${f.verify.line})${verifyFailing}${verifyImage} - do not push ${f.base} until it is fixed. Output: .sandcastle/logs/verify-gates.log${startingImage}`,
   );
   if (f.pressure && f.pressure.full >= PRESSURE_WARN_FULL) {
     out.push(`Memory pressure: high - full ${f.pressure.full}% (some ${f.pressure.some}%) in a sandbox during ${f.pressure.where}, so the sandboxes stalled on memory at once and gates ran slower for it. \`sandcastle size\` shows the VM's memory against the pool; lower maxSandboxes or maxGates, or give the VM more memory.`);
@@ -1263,9 +1265,11 @@ export const render = (f: Facts, plain = false): string => {
     const same = typeof f.verify.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
     const clean = typeof f.verify.cleanTree === "string" && f.verify.cleanTree ? f.verify.cleanTree : "";
     next.push(
-      same
-        ? `Fix ${f.base}: the gates are red in a clean sandbox on the tree ${same}'s own gates passed - look at the sandbox (git identity, environment), not at the tickets meeting. Do not push until they are green.`
-        : clean
+      f.verify.likelyLoad === true
+        ? `Check ${f.base} once the machine is quiet: run \`sandcastle gates\` again. The gates were red twice, but only through test timeouts or a gate far slower than recorded - likely load, not the tickets meeting and not the sandbox. Do not push until they are green.`
+        : same
+          ? `Fix ${f.base}: the gates are red in a clean sandbox on the tree ${same}'s own gates passed - look at the sandbox (git identity, environment), not at the tickets meeting. Do not push until they are green.`
+          : clean
           ? `Fix ${f.base}: the gates are red on the tree ${clean}'s landing gates passed in a clean sandbox - run \`sandcastle gates\` again to see whether a test is flaky or order-dependent. Do not push until they are green.`
           : `Fix ${f.base}: merged together, the gates are red. Do not push until they are green.`,
     );

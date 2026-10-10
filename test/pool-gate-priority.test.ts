@@ -187,5 +187,5 @@ test("the landing, base and verify gates ask for priority and a ticket's gate do
   assert.match(src("burndown.ts"), /gate: \(box, id\) => runGates\(box, id\),/);
   assert.match(src("land.ts"), /runGates\(project, box, `\$\{ref\} land gates`, false, \{ log \}, true\)/);
   // gateBase: the base and verify gates take a sandbox slot of their own; the mid-run check runs in a ticket's.
-  assert.match(src("gates.ts"), /runGates\(project, sandbox, `\$\{project\.name\} \$\{label\}`, true, undefined, ownSlot\)/);
+  assert.match(src("gates.ts"), /runGates\(project, sandbox, `\$\{project\.name\} \$\{label\}`, true, { log }, ownSlot\)/);
 });

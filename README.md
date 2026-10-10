@@ -771,7 +771,7 @@ sandcastle stop                       # SIGINT, as Ctrl-C in its terminal would
   `run.json` as `exitCode`). With a timeout it exits 124 and leaves the run alone, so a harness's
   time cap is met by starting it again. With no run live it prints the last summary at once and
   exits with the recorded code (0 when there is none). A run whose last turn left the merged base
-  red (`RED TOGETHER` in the summary, or red on a tree a ticket's own gates or a landing sandbox passed) exits **1**, at every autonomy level, so a harness does not
+  red (`RED TOGETHER` in the summary, red on a tree a ticket's own gates or a landing sandbox passed, or red twice through likely load) exits **1**, at every autonomy level, so a harness does not
   read success on a base the summary says not to push.
 - **`sandcastle stop`** sends the live run a SIGINT - the same as Ctrl-C attached: it stops its
   sandboxes and records how it ended - and prints `Stopping the run (pid <pid>)`. With no run
@@ -940,7 +940,11 @@ A queued ticket with a branch from an earlier run builds on that branch:
   merge itself (and [`generated`](#-a-gate-for-generated-files) paths). If it also edits a file git
   merged cleanly that the base had changed - typically adapting another ticket's landed code to this
   one - the ticket is held for a person, with those files named in the note, because such an edit can
-  silently drop another ticket's lines while every gate stays green. A file only the ticket's own
+  silently drop another ticket's lines while every gate stays green. The resolver can say why such an
+  edit was needed (a test the base just added that pins a sentence this ticket replaced, say) with
+  one `<stray path="...">reason</stray>` line per file in its final message: a file it named goes on
+  to the review of the resolution, which is shown the reason, and to the gates; any file it did not
+  name still holds the ticket, and the note lists those. A file only the ticket's own
   branch touched, or one the merge commit adds, can hold none of them: it is not a reason to hold, and
   the review of the resolution reads it. Two tickets that both rework one hot file often end
   here. The hold is deliberate; see [Troubleshooting](#-troubleshooting) for what to check.
@@ -968,7 +972,7 @@ Everything lives under the project's `.sandcastle/`, gitignored by `sandcastle i
 | `logs/heads.json`, `logs/outcomes.json` | Each ticket's last reviewed and green head, and a red one since its review (for re-runs), with its gate results, any criterion left undone, changelog lines and check-by-hand note, and each branch's last outcome |
 | `logs/base-gates.log` | The full output of red gates on the base commit |
 | `logs/file-shares.log` | Every pair of tickets that started together sharing a mergeable file, one line each, appended at each start and each mid-run release under a `--- <time>, run pid <pid> ---` line per turn; the screen names each file once |
-| `logs/verify-gates.log` | The full output of red gates on the merged base at the end of a run (`RED TOGETHER`): the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) or one a landing sandbox passed (a flaky or order-dependent test) |
+| `logs/verify-gates.log` | The gates on the merged base at the end of a run, streamed as a ticket's gates log is (each gate's full output with colour codes stripped, `# <gate> green/RED in Ns`, the wait for a gates slot), whether green or red (`RED TOGETHER`); a run that skipped its verify removes an earlier one. On a red: the run prints the failing tests' names above its excerpt, and the summary's re-gated line names them, and says so when the red tree is exactly one a ticket's own gates passed (the sandbox differs, not the merge) or one a landing sandbox passed (a flaky or order-dependent test). A red verify is run once more first, and the log is the second run's; red twice with only test timeouts, or with a gate three times its recorded time, is called likely load |
 | `logs/run-output.log` | A detached run's output; the run before's is moved to `logs/archive/` when the next one starts (kept 14 days) |
 | `backup.git` | A bare copy of each `agent/issue-*` branch whose pipeline ended, from which a branch a sandbox deleted is restored ([Safety model](#-safety-model)). A landing drops a branch's copy; a run's start and `sandcastle clean` drop the copy of a branch whose commits are on the base (merged by hand), and prune the repository once none is left; a deleted unmerged branch keeps its copy, its only one, until `sandcastle clean --all` |
 | `.run/` | The rendered prompts, the lean plan, the green-base record a run skips the base check by (written by that check, by a landing - a merge gated in its sandbox, or a fast-forward of the tree the ticket's own gates passed on - and by the verify, so a drain turn does not gate a commit again, and each names the commit, whose gates proved it and where they ran, so the verify does not run again on a base tip a landing merged in a sandbox, the base check or an earlier verify just proved - never on a fast-forward's, whose gates ran in the ticket's own sandbox; a landing's or the verify's record covers the gates only, so the next base check still runs the hook tests and the git-hook probe, unless the record before it covered both and nothing they read changed in between: a diff touching no hook directory, kept hook script, package manifest, lockfile or protected path), and the update record `kit-updated` |
@@ -1292,7 +1296,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 
 | Field | Default | Meaning |
 |---|---|---|
-| `name` | required | Names the project image (`sandcastle-<name>`) and the status view |
+| `name` | required | Names the project image (`sandcastle-<name>`) and the status view; `base` and `agents` (any case) are refused, as the kit's own images use those repositories |
 | `gates` | required | `[{ name, command }]`, run in order, stopping at the first red |
 | `baseBranch` | `"main"` | Branch agents start from and green work merges into |
 | `tracker` | detected, else `"github"` | `"github"`, `"files"` or `{ type: "files", dir, done }` - see [Trackers](#-trackers-github-or-ticket-files) |
@@ -1667,7 +1671,10 @@ the sandbox's own.
 
 When every slot is taken, a freed slot goes to the run
 that has waited longest, across projects, for sandbox and gate slots alike: a run that has just
-freed one does not take it back from another run that was already waiting. Within one run, a
+freed one does not take it back from another run that was already waiting. The one exception is a
+landing's sandbox slot while another of the run's green branches is queued to land: it goes straight
+to that next landing (and back to the pool if that landing does not use it within a minute), so the
+queued branch does not wait behind another run's ticket. Within one run, a
 landing's gates (and the base and verify gates) take a freed gate slot before the run's ticket
 gates, since the one landing worker sets the run's end, and a landing still goes before its next
 ticket for a sandbox slot. A wait or a slot left by a run that was killed is ignored. The status header shows the pool (`machine: sandboxes 3/6 · gates 1/2`). The
@@ -1810,7 +1817,7 @@ is refused with a reminder to start the runtime, and one that gives no answer wi
 | `warning: ... a comment says blocked by` | A run reads only the body. Move the `Blocked by ...` line there, or ignore it if the message says the comment is stale. |
 | `withdrawn`, `held`, or `not landed: ... moved after its gates passed` | The ticket was closed, unqueued or labelled `ready-for-human` during the run (`withdrawn`, or `held`), or its branch gained a commit after the gates passed. The branch is left standing. |
 | `not landed: working tree dirty: <files>` | The merge into the base branch was refused because of your working tree: a staged change, or a file the branch also changes that is unstaged or untracked. Commit or stash those files, then run again; the branch is left standing and lands then. |
-| `conflict resolution changed <files>, which merged cleanly` | The short resolver prompt of a re-run's base merge edited files git had merged without a conflict and the base had changed, so the kit held the ticket for a person (see [Re-runs](#-re-runs)); nothing was landed. Diff the branch against the base for the named files and check that no line another ticket landed there was lost. If the edits are sound, `sandcastle land <n>` lands the branch; if not, fix it on the branch first, or `sandcastle requeue <n>` with a note to try again. |
+| `conflict resolution changed <files>, which merged cleanly` | The short resolver prompt of a re-run's base merge edited files git had merged without a conflict and the base had changed, and did not name them with a reason (a `<stray>` line), so the kit held the ticket for a person (see [Re-runs](#-re-runs)); nothing was landed. Diff the branch against the base for the named files and check that no line another ticket landed there was lost. If the edits are sound, `sandcastle land <n>` lands the branch; if not, fix it on the branch first, or `sandcastle requeue <n>` with a note to try again. |
 | A branch conflicts at landing | The run sends it back once, in the same run (a branch whose pipeline finds it no longer merges, before its review or its gates, skips them and goes back the same way): once the green branches that share its files have landed, its pipeline merges the base in, resolves the conflict and gates it again. A second conflict leaves it queued (unless a ticket that landed after the resolve began caused it: then it goes back once more): its next run does the same (see [Re-runs](#-re-runs)), and `autonomy` can take that turn within the same `sandcastle run`. If the conflict is in files a build writes, declare them under `generated` and it lands by regenerating them. Or resolve it on the branch yourself and `sandcastle land <n>`. With several unlanded branches, `sandcastle preview` shows which still conflict. |
 | `waits for #N: both change <file> (git cannot merge it)` on a ticket nobody blocks | Its branch or `Touches:` line and #N's both change a lockfile, a `generated` path or a minified blob, which would conflict at landing whatever the order. It starts in the same run, once #N lands or leaves the run. |
 | `usually 5m` in the status view, TIME in red | That step has run over twice its usual time in this project. A slow step, not necessarily a stuck one: read the log it names. |

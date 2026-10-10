@@ -9,7 +9,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { CROSS_REVIEW } from "./agents.ts";
-import type { Project } from "./config.ts";
+import { projectRepo, type Project } from "./config.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { hostIdentityParts, shq } from "./generated.ts";
 import { commandOf, KIT_CACHE } from "./live-runs.ts";
@@ -737,9 +737,6 @@ const prune = (repo: string, keep: string, now = Date.now()) => {
     }
   }
 };
-
-/** The repository of a project's layer; its final image is `<repo>-run`. */
-const projectRepo = (project: Pick<Project, "name">) => `sandcastle-${project.name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`;
 
 // The user ids every image of the kit is built with: they are part of each image's identity.
 const agentIds = () => ({ AGENT_UID: sh("id", ["-u"]), AGENT_GID: sh("id", ["-g"]) });
