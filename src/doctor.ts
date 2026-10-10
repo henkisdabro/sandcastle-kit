@@ -24,7 +24,7 @@ import { kitVersion, upgradeLines } from "./upgrading.ts";
 import { loginLocation, probeOAuth, usageToken, usageWhose } from "./usage.ts";
 import { isPartialClone, PARTIAL_CLONE_GAP } from "./resolution.ts";
 import { runtimeProblemNow } from "./runtime.ts";
-import { resolveVersions } from "./versions.ts";
+import { resolveVersions, toolsFloorLine } from "./versions.ts";
 
 export const run = (cmd: string, args: string[], cwd?: string, timeout?: number) => {
   try {
@@ -575,6 +575,8 @@ export const doctor = async (repoRoot?: string, verify = false, pointToSize = tr
   });
   if (versions) {
     console.log(`info Sandbox images get Claude Code ${versions.claude} (${versions.channel}) and Codex ${versions.codex}`);
+    const floorLine = toolsFloorLine(versions.claude);
+    if (floorLine) console.log(`warn ${floorLine}`);
     if (versions.source !== "network") {
       console.log(`warn Could not reach the release channel; using ${versions.source === "cache" ? "the cached" : "the Dockerfile's default"} versions.\n       -> Fine while runs work. If preflight says a model needs a newer Claude Code, check the network and run \`sandcastle build\`, or pin one with \`claudeCode: "x.y.z"\` in ${CONFIG_PATH}.`);
     }

@@ -154,7 +154,7 @@ import { resolveSettings, settingsGroup } from "./run-settings.ts";
 import { DOCKER_INFO_ENV, readDockerInfo, runtimeProblemNow } from "./runtime.ts";
 import { changesDiffLines, changesLines, kitVersion, markUpdated, recordedRelease, upgradeLines, updatedLine } from "./upgrading.ts";
 import { checkUsageSettings, recordedUsage, resumeClock, usageCommand, usagePauseWords } from "./usage.ts";
-import { resolveVersions, versionsLine } from "./versions.ts";
+import { resolveVersions, toolsFloorLine, versionsLine } from "./versions.ts";
 import { lockWorktree } from "./worktree-lock.ts";
 import { doctor, requireRepoAccess } from "./doctor.ts";
 import { askingInPane, IN_HERDR, sandboxPanes } from "./herdr.ts";
@@ -706,7 +706,10 @@ try {
         await confirmApiKey(projectApiKeySpend(project), "lean --measure");
       }
       leanReport(project, p);
-      const image = await ensureImage(project);
+      const versions = await resolveVersions(project);
+      const floorLine = toolsFloorLine(versions.claude);
+      if (floorLine) console.log(`\n  WARN ${floorLine}`);
+      const image = await ensureImage(project, false, versions);
       // The plan, written only to key the green-base record (`hooksThatRanClean`): the project's own plan file is the
       // one a live run's next sandbox applies, and a preview of an edited config must not change it under that run.
       const planDir = mkdtempSync(join(tmpdir(), "sandcastle-lean-"));
