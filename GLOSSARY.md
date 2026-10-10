@@ -88,6 +88,21 @@ _Avoid_: result, the prose line alone
 The module that turns endings and told changes into the run record's verdicts, outcomes, view
 words and tracker text.
 
+**Snapshot**:
+Everything the status view knows at one moment - the run record, the sandboxes, the branches, the
+queue - from which it draws; a redraw for a new pane size or the clock draws from the last one.
+_Avoid_: state (a ticket's), cache
+
+**Collector**:
+The part of the status view that refreshes one source of the snapshot, on its own schedule and
+within its own deadline, keeping the source's last good reading when a refresh fails.
+_Avoid_: loader, fetcher, poller
+
+**Lane**:
+One labelled section of the status view's header - run, machine, models, settings, plan - shown
+beside the logo while the pane is wide enough, and folded into a summary line when it is not.
+_Avoid_: cell, panel, group (a bucket of ticket states)
+
 ### Sharing the machine
 
 **Machine pool**:
