@@ -212,13 +212,16 @@ export const splitStrays = (stray: string[], said: NamedStray[]): { named: Named
 /**
  * What the narrow review of a resolution is shown of the clean files the resolver named (`MERGE_STRAYS`): the files and
  * its reasons, with the ask to hold each change to what the merge needs. Empty when there are none, so the prompt
- * carries no heading over nothing.
+ * carries no heading over nothing. It names the diff against the base's side because the combined diff above shows no
+ * line the resolution dropped from that side - the very loss the hold guarded against.
  */
 export const namedStraysView = (named: NamedStray[]): string =>
   named.length
     ? "# Files the resolver changed that merged cleanly\n\nThe resolver changed these files, which git merged without a conflict and the base had changed, " +
-      "and gave the reason for each. Check each change against the merge's combined diff: it must be only what the merge needs " +
-      "(a test or a call adapted to the other side's code), and no line another ticket landed in the file may be lost:\n\n" +
+      "and gave the reason for each. The combined diff above does not show a line the resolution dropped from the base's side, " +
+      "so read each file's diff against that side, `git diff <merge>^2 <merge> -- <file>` with `<merge>` the merge commit above. " +
+      "Each change must be only what the merge needs (a test or a call adapted to the other side's code), and no line another " +
+      "ticket landed in the file may be lost:\n\n" +
       `${named.map((n) => `- \`${n.path}\` - ${n.why}`).join("\n")}\n\n`
     : "";
 

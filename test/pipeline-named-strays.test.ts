@@ -224,6 +224,8 @@ test("a cleanly merged file the resolver named goes to the narrow review, shown 
   assert.equal(o.status, "green");
   const shown = h.passes[1].args.MERGE_STRAYS;
   assert.match(shown, /`landed\.txt` - the landed assertion pinned the sentence this ticket replaces/);
+  // The combined diff hides a line the resolution dropped from the base's side: the reviewer is pointed at that side's diff.
+  assert.match(shown, /git diff <merge>\^2 <merge> -- <file>/);
   assert.deepEqual(h.notes, []);
 });
 
