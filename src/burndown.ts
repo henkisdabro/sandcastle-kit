@@ -56,7 +56,7 @@ import { notifyCommand, runNotify } from "./notify.ts";
 import { type ResolvedSettings, resolveSettings, settingsGroup } from "./run-settings.ts";
 import { createPauseHandling, createUsagePause, readCodexAuth, showsCodexUsage, showsPlanUsage, usageLine, usagePauseLine, usageReadingLost, usageStop, type UsageWatch, watchUsage } from "./usage.ts";
 import { lockWorktree, releaseBranchWorktree, unlockAll, unlockWorktree } from "./worktree-lock.ts";
-import { OperatorError, reportedError } from "./errors.ts";
+import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
@@ -3513,6 +3513,7 @@ export const burndown = async (
   let verifyTreeOf: string | undefined;
   let verifyCleanTreeOf: string | undefined;
   let verifyLoad = false;
+  let verifyNotRun: string | undefined;
   const verifyDue = verifyPlan(gateProject, image, planFile, merged.length, regenerated);
   if (verifyDue.due) {
     // Verify is proof that the merged base is green in a clean gate-only sandbox: a landing merged in a sandbox, the base
@@ -3526,7 +3527,16 @@ export const burndown = async (
       // The scheduler told its last demand, 0: the verify's own sandbox is one slot.
       setDemand(1);
       // Red once is run again, the second result kept: a load flake beside other runs' suites is not a red base.
-      gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+      try {
+        gated = await timed("", "verify", () => rerunRedVerify(() => verifyBase(gateProject, image, planFile, runId, (when) => host.check(when), host.exclusive), (line) => console.log(line))).finally(() => setDemand(0));
+      } catch (error) {
+        // A guard's refusal still stops the run. A sandbox that would not open (Sandcastle's worktree timeout behind a
+        // hung fetch, a slow container start) left the merged base ungated: the summary must still print and say so,
+        // where the error used to escape and end the run with a stack trace and no summary.
+        if (error instanceof OperatorError && !(error instanceof SlowStartError)) throw error;
+        verifyNotRun = errorLine(error);
+        console.log(`verify could not run: ${verifyNotRun}`);
+      }
     }
     verify = gated.gates;
     const verifyRed = verifyFailing(gated.failures);
@@ -3589,7 +3599,7 @@ export const burndown = async (
       : `dry run held: ${[...before.keys()].filter((k) => k !== LATEST_ISSUE).length} ticket(s) unchanged in the tracker.`;
   }
   run.update({
-    verify: verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(verifyLoad ? { likelyLoad: true } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
+    verify: verifyNotRun ? { green: false, line: "not run", image, notRun: verifyNotRun } : verify ? { green: verify.every((g) => g.pass), line: gateLine(verify), image, ...(verifyFailingTests?.tests.length ? { failing: verifyFailingTests.tests, ...(verifyFailingTests.more ? { failingMore: true } : {}) } : {}), ...(verifySkipped ? { skipped: verifySkipped } : {}), ...(verifyTreeOf ? { gatedTree: verifyTreeOf } : {}), ...(verifyCleanTreeOf ? { cleanTree: verifyCleanTreeOf } : {}), ...(verifyLoad ? { likelyLoad: true } : {}), ...(newDockerfiles.length ? { dockerfiles: newDockerfiles } : {}) } : null,
     keptWorktrees,
     ...(gateRewrites.size ? { gateRewrites: [...gateRewrites] } : {}),
     dryRunCheck,

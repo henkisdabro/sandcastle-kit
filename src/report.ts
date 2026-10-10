@@ -52,7 +52,7 @@ export type Facts = {
   byModel?: Record<string, Tokens>;
   /** The highest memory pressure (`avg10`, percent) a gate pass of this run read in its sandbox, and the pass; undefined when none was above 0 or recorded. */
   pressure?: { some: number; full: number; where: string };
-  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string } } | null;
+  verify?: { green: boolean; line: string; image?: string; failing?: string[]; failingMore?: boolean; dockerfiles?: string[]; gatedTree?: string; cleanTree?: string; likelyLoad?: boolean; skipped?: { commit: string; by?: string; kind?: string }; notRun?: string } | null;
   gateCount: number;
   tickets: Record<string, TicketRecord>;
   /** This run's outcome kinds by ticket id, from outcomes.json: what tells red together from a red gate, and taken back from held. */
@@ -1032,6 +1032,8 @@ export const render = (f: Facts, plain = false): string => {
       // null: the run ended and chose not to (no merge this run - a ticket closed
       // as merged earlier merges nothing); undefined: it never got there.
       ? `Merged ${f.base} not re-gated (${f.verify === null ? "no branch merged in this run" : f.stopped ? "the stop skipped it" : early ? "the run ended before it got there" : "no result recorded"}).`
+      : typeof f.verify.notRun === "string" && f.verify.notRun
+        ? `Merged ${f.base} NOT re-gated: the verify could not open its sandbox (${f.verify.notRun}) - do not push ${f.base} until \`sandcastle gates\` is green.`
       : f.verify.green && f.verify.skipped
         ? `${verifySkippedLine(f.base, f.verify.skipped, verifyImage)}.${startingImage}`
       : f.verify.green
@@ -1265,7 +1267,9 @@ export const render = (f: Facts, plain = false): string => {
     const same = typeof f.verify.gatedTree === "string" && f.verify.gatedTree ? f.verify.gatedTree : "";
     const clean = typeof f.verify.cleanTree === "string" && f.verify.cleanTree ? f.verify.cleanTree : "";
     next.push(
-      f.verify.likelyLoad === true
+      typeof f.verify.notRun === "string" && f.verify.notRun
+        ? `Gate ${f.base}: the end-of-run verify could not open its sandbox, so the merged base is ungated. Run \`sandcastle gates\` and push only once it is green.`
+        : f.verify.likelyLoad === true
         ? `Check ${f.base} once the machine is quiet: run \`sandcastle gates\` again. The gates were red twice, but only through test timeouts or a gate far slower than recorded - likely load, not the tickets meeting and not the sandbox. Do not push until they are green.`
         : same
           ? `Fix ${f.base}: the gates are red in a clean sandbox on the tree ${same}'s own gates passed - look at the sandbox (git identity, environment), not at the tickets meeting. Do not push until they are green.`
