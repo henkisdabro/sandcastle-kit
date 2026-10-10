@@ -1306,7 +1306,7 @@ always optional. [By hand](docs/INSTALL.md#-updating).
 | `blockers` | none | `{ linear?: string[], files?: { dir, done? } }` - what a ticket may wait for besides a ticket on its own tracker; see [Blockers](#-blockers-github-linear-ticket-files) |
 | `rules` | none | Markdown file added to the implement, review and repair prompts under "Project rules" |
 | `changelog` | `false` | For a project whose rules keep agents out of its changelog: the implement and review prompts ask for each changelog line in a `<changelog>...</changelog>` tag (starting `Added:`, `Changed:` or `Fixed:`, or `Upgrading:` for what an existing project must act on), and the closing summary lists the lines of the tickets that merged under Done, grouped by those words, with the `Upgrading:` lines in a block of their own, for you to write the entries from. A full review is shown the implementer's lines, and one that changes something user-facing restates the branch's whole set (the lines that still hold copied as they are), which replaces the implementer's, so a rewording shows once, while a narrow review (after a repair, a base merge or a conflict resolution) gives lines only for what it changed itself and they are added; and a tag that is no changelog line (over 500 characters, a list, a commit sha) is dropped with a note. A change nobody outside the code would notice is answered `<changelog>none</changelog>` (`n/a` too, any case): it is no line, a pass that gives only that leaves the earlier lines standing, and the ticket is recorded as needing no entry |
-| `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config` |
+| `lean.keep` | `[]` | Items sandboxes keep: `skill:<name>`, `agent:<name>`, `command:<name>`, `mcp:<server>`, `codex-skill:<name>`, `codex-config`, `tool:<Name>` (a built-in Claude Code tool for the passes, checked against `src/claude-tools.ts`) |
 | `lean.dropHooks` | `[]` | Substrings of hook commands to drop - host-only conveniences only |
 | `hookTests` | `[]` | `[{ name, tool, input, expect: "block" \| "allow" }]` - proof that the kept PreToolUse guards fire (see [Hook tests](#hook-tests)) |
 | `protectedPaths` | `[]` | Extra paths a branch may not change and still merge automatically |
@@ -1427,7 +1427,10 @@ tools (`--tools`): Bash, Read, Edit, Write and TaskStop, plus Skill when `lean.k
 command and ToolSearch when it keeps an MCP server (MCP tools load through it). Every tool's schema is
 paid on every turn, and passes were never seen to need the others; together with auto memory, which is off
 in sandboxes (a sandbox's memory directory dies with its container), it about halves the fixed prompt
-prefix of a pass.
+prefix of a pass. A project whose tickets need another built-in tool keeps it with `tool:<Name>` in
+`lean.keep` (`tool:WebSearch` for research tickets): the name is checked against the known tools in
+`src/claude-tools.ts` and the managed deny list when the config loads, since Claude Code ignores an
+unknown name in `--tools` without a word.
 
 **Hooks are the opposite: kept.** They cost no context and are how a repo enforces its rules -
 guards, linters, test gates, audit logs. `lean.dropHooks` removes host-only conveniences (a token

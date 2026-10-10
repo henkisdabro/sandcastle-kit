@@ -8,6 +8,7 @@
 // Kept items are named in `.sandcastle/config.ts` -> `lean.keep`:
 //   "skill:verify"  "agent:x"  "command:y"  "mcp:server-name"
 //   "codex-skill:x" (Codex reads .agents/skills)  "codex-config" (.codex/config.toml)
+//   "tool:WebSearch" (a built-in Claude Code tool for the passes; it names no repo file, config.ts checks it)
 // Plugins are never kept: the container cannot install them, and an
 // enabledPlugins entry only costs a failed install attempt.
 //
@@ -274,7 +275,7 @@ export const hiddenReferences = (root: string, p: Plan, dropHooks: string[] = []
  * hook: a typo there kept or dropped nothing, without a word - a skill a gate reads stayed hidden.
  */
 export const unmatched = (project: Project, p: Plan) => ({
-  keep: (project.lean.keep ?? []).filter((k) => !p.items.some((i) => i.kind !== "hook" && (`${i.kind}:${i.id}` === k || (i.kind === "codex-config" && k === "codex-config")))),
+  keep: (project.lean.keep ?? []).filter((k) => !k.startsWith("tool:") && !p.items.some((i) => i.kind !== "hook" && (`${i.kind}:${i.id}` === k || (i.kind === "codex-config" && k === "codex-config")))),
   dropHooks: (project.lean.dropHooks ?? []).filter((d) => !p.items.some((i) => i.kind === "hook" && !i.kept && i.id.includes(d))),
 });
 
