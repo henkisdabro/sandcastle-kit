@@ -17,7 +17,9 @@ import { mergedByHand, mergedPartly } from "./run.ts";
 import { USER_CONFIG } from "./sandbox.ts";
 import { DEFAULT_DONE, refOf, slug, statusOf, type Tracker } from "./tracker.ts";
 
-export type Ref = { kind: "github" | "linear" | "file" | "ticket"; id: string };
+// `remote`: an issue of another GitHub repository (a native blocker across repositories), id `owner/repo#N`.
+// It is none of this run's tickets, so it is never queued and no landing here releases it.
+export type Ref = { kind: "github" | "remote" | "linear" | "file" | "ticket"; id: string };
 // `closed-unmerged`: closed as not planned, so the work it stood for will never land.
 export type Blocker = Ref & { state: "open" | "closed" | "closed-unmerged" | "unreadable" };
 
@@ -125,9 +127,9 @@ const fileState = (project: Project, path: string): Blocker["state"] => {
 
 // The issues API also answers for a pull request (`closed` once merged),
 // where `gh issue view` does not. An issue closed as not planned is not done: nobody did the work.
-const githubState = (id: string): Blocker["state"] => {
+const githubState = (id: string, repo = "{owner}/{repo}"): Blocker["state"] => {
   try {
-    const out = execFileSync("gh", ["api", `repos/{owner}/{repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const out = execFileSync("gh", ["api", `repos/${repo}/issues/${id}`, "--jq", '.state + " " + (.state_reason // "")'], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     const [state, reason] = out.split(/\s+/);
     return state !== "closed" ? "open" : reason === "not_planned" ? "closed-unmerged" : "closed";
   } catch {
@@ -148,6 +150,7 @@ export const blockerResolver = (project: Project, tracker: Tracker, known = new 
           state:
             (ref.kind === "github" || ref.kind === "ticket") && known.has(ref.id) ? "open"
             : ref.kind === "github" ? githubState(ref.id)
+            : ref.kind === "remote" ? githubState(ref.id.slice(ref.id.lastIndexOf("#") + 1), ref.id.slice(0, ref.id.lastIndexOf("#")))
             : ref.kind === "linear" ? await linearState(project, ref.id)
             : ref.kind === "ticket" ? (tracker.isClosed(ref.id) === undefined ? "unreadable" : tracker.isClosed(ref.id) ? "closed" : "open")
             : fileState(project, ref.id),
@@ -200,8 +203,11 @@ export const refsOf = (project: Project, tracker: Tracker, t: Blocked): Ref[] =>
   const refs = parseRefs(project, t.body ?? "");
   // On GitHub a declared blocker is a native "blocked by" edge: an issue gh reads the state of, closed
   // as not planned included. One the body names too is one blocker.
-  const kind = tracker.kind === "github" ? "github" : "ticket";
-  for (const id of tracker.declaredBlockers(t.id)) if (!refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind, id });
+  // One from another repository is `owner/repo#N`: read from that repository, never taken for this one's #N.
+  for (const id of tracker.declaredBlockers(t.id)) {
+    const kind = tracker.kind !== "github" ? "ticket" : id.includes("#") ? "remote" : "github";
+    if (!refs.some((r) => r.kind === kind && r.id === id)) refs.push({ kind, id });
+  }
   return refs;
 };
 
@@ -312,7 +318,9 @@ export const blockerProblems = async (project: Project, tracker: Tracker, queued
           ? `${who} waits for ${name}, which does not exist - it will never start. Fix the "Blocked by" line, or remove it.`
           : b.kind === "linear"
             ? `${who} waits for ${name}, which could not be read from Linear${linearKey() ? "" : " (no LINEAR_API_KEY in ~/.config/sandcastle-kit/.env)"} - a blocker that cannot be read counts as open, so it waits.`
-            : `${who} waits for ${name}, which gh could not read (no such GitHub issue, or no access) - it counts as open, so it waits.`,
+            : b.kind === "remote"
+              ? `${who} waits for ${name}, which gh could not read (no such issue, or no access to that repository) - it counts as open, so it waits.`
+              : `${who} waits for ${name}, which gh could not read (no such GitHub issue, or no access) - it counts as open, so it waits.`,
       );
     }
     // Stripped on purpose, so a run starts the ticket without waiting: say so, as the author thinks it waits.

@@ -57,7 +57,7 @@ export interface Tracker {
   snapshot(ids: string[]): Map<string, string>;
   /** Whether the ticket was reopened / requeued by someone after `at` (ms). */
   reopenedSince(id: string, at: number): boolean;
-  /** Blockers a ticket declares besides "Blocked by ..." in its body. */
+  /** Blockers a ticket declares besides "Blocked by ..." in its body. On GitHub one from another repository is `owner/repo#N`. */
   declaredBlockers(id: string): string[];
   /** Whether a ticket id is closed, for a blocker on this same tracker. */
   isClosed(id: string): boolean | undefined;
@@ -117,11 +117,19 @@ export const ensureTriageLabel = (label: string, gh = (args: string[]) => sh("gh
 let nativeBlockers = true;
 const NATIVE_REFUSED = "this gh, or the GitHub server it asks, cannot read native issue dependencies - update gh, or write \"Blocked by #N\" in the body";
 
-// The numbers of the blocking issues in a `blockedBy` value: gh prints an array of issues, and
-// `nodes` is the GraphQL connection's spelling of the same list.
-const nativeNumbers = (blockedBy: unknown): string[] => {
+// The blockers in a `blockedBy` value: gh prints an array of issues, and `nodes` is the GraphQL
+// connection's spelling of the same list. GitHub's issue dependencies cross repositories, so a node
+// from another repository is named `owner/repo#N` and never by its bare number, which would be this
+// repository's issue. A node with no repository (an older gh) is this repository's.
+const nativeIds = (blockedBy: unknown, here: () => string | undefined): string[] => {
   const nodes = Array.isArray(blockedBy) ? blockedBy : (blockedBy as { nodes?: unknown } | undefined)?.nodes;
-  return (Array.isArray(nodes) ? nodes : []).map((n: { number?: unknown }) => n?.number).filter((n): n is number => typeof n === "number").map(String);
+  return (Array.isArray(nodes) ? nodes : []).flatMap((n: { number?: unknown; repository?: { nameWithOwner?: unknown } }) => {
+    if (typeof n?.number !== "number") return [];
+    const repo = n.repository?.nameWithOwner;
+    if (typeof repo !== "string" || !repo) return [String(n.number)];
+    const mine = here();
+    return mine !== undefined && mine.toLowerCase() === repo.toLowerCase() ? [String(n.number)] : [`${repo}#${n.number}`];
+  });
 };
 
 const github = (project: Project): Tracker => {
@@ -146,7 +154,21 @@ const github = (project: Project): Tracker => {
       throw new OperatorError(`gh ${args.slice(0, 2).join(" ")} failed: ${why}${fix}`);
     }
   };
-  // Each ticket's native blocker numbers, as the list and view calls read them.
+  // This repository's name, asked of gh once and only when a native blocker names a repository. A
+  // failed ask leaves every such blocker foreign: it is read from its own repository, so it still
+  // waits for the right issue.
+  let here: string | undefined | null = null;
+  const thisRepo = () => {
+    if (here === null) {
+      try {
+        here = gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim() || undefined;
+      } catch {
+        here = undefined;
+      }
+    }
+    return here;
+  };
+  // Each ticket's native blockers (`12`, or `owner/repo#12` from another repository), as the list and view calls read them.
   const native = new Map<string, string[]>();
   // `fields` with `blockedBy` while gh knows it; the refusal of an old gh, or of a GitHub Enterprise Server
   // without issue dependencies (GraphQL's "Field 'blockedBy' doesn't exist on type 'Issue'"), is told once, on stderr
@@ -164,7 +186,7 @@ const github = (project: Project): Tracker => {
   };
   const list = (extra: string[], withComments: boolean): Ticket[] => {
     const listed = JSON.parse(withNative(`number,title,body,updatedAt,labels${withComments ? ",comments" : ""}`, (fields) => gh(["issue", "list", "--state", "open", ...extra, "--limit", String(LIST_LIMIT), "--json", fields]))) as any[];
-    if (nativeBlockers) for (const i of listed) native.set(String(i.number), nativeNumbers(i.blockedBy));
+    if (nativeBlockers) for (const i of listed) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
     // Counted before the hold-label filter below: a full page is full whatever
     // is dropped from it. stderr, because `queue --json` is parsed from stdout.
     if (listed.length === LIST_LIMIT) {
@@ -195,7 +217,7 @@ const github = (project: Project): Tracker => {
     open: (withComments = true) => list([], withComments),
     get: (id) => {
       const i = JSON.parse(withNative("number,title,state,body,comments,labels", (fields) => gh(["issue", "view", id, "--json", fields])));
-      if (nativeBlockers) native.set(String(i.number), nativeNumbers(i.blockedBy));
+      if (nativeBlockers) native.set(String(i.number), nativeIds(i.blockedBy, thisRepo));
       return {
         id: String(i.number),
         title: i.title,
@@ -306,7 +328,7 @@ const github = (project: Project): Tracker => {
           return [];
         }
         if (!nativeBlockers) return [];
-        native.set(id, nativeNumbers(read.blockedBy));
+        native.set(id, nativeIds(read.blockedBy, thisRepo));
       }
       return native.get(id)!;
     },
