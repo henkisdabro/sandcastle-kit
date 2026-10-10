@@ -476,7 +476,7 @@ children, so unqueue the spec.
 | Named | Waits until | Enable |
 |---|---|---|
 | `Blocked by #12`, `Depends on #12` | issue or pull request #12 is closed or merged | always on |
-| a native "blocked by" edge to issue #12 (GitHub only) | issue #12 is closed; one closed as not planned never lets the ticket start | always on; needs a gh that knows `blockedBy`, else one warning line and the body is read alone |
+| a native "blocked by" edge to issue #12 (GitHub only; `owner/repo#12` when the issue is in another repository) | issue #12 is closed (in its own repository); one closed as not planned never lets the ticket start; one gh cannot read counts as open | always on; needs a gh that knows `blockedBy`, else one warning line and the body is read alone |
 | `Blocked by ENG-42` | the Linear issue is in a *completed* or *canceled* state | `blockers.linear: ["ENG"]` and `LINEAR_API_KEY` |
 | `Blocked by .scratch/checkout/issues/03-pay.md` | that file on the base branch has `Status: done` | the files tracker, or `blockers.files: { dir }` |
 | `Blocked by: 01, 02` (a header line in a ticket file) | those tickets of the same feature are done | the files tracker |
