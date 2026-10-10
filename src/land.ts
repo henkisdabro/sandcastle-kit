@@ -10,7 +10,7 @@ import type { Project } from "./config.ts";
 import { OperatorError } from "./errors.ts";
 import { clip, type GateRun, gateResultLines, runGates } from "./gates.ts";
 import { type Exec, type Generated, covers, hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
-import { assertGitUnchanged, checkBeforeClose, dropBackup, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, dropBackup, type Exclusive, openOrAbandon, type Fingerprint, gitFingerprint, largeFiles, largeFilesNote, protectedChanges, recordGitConfigEnd } from "./guard.ts";
 import { remainderNote } from "./autonomy.ts";
 import { recordHandLanding } from "./ledger.ts";
 import { mergeSubject } from "./landing.ts";
@@ -238,9 +238,9 @@ export const landInSandbox = async (
 
 // Set up as gateBase's sandbox is: the same image, lean plan and worktree lock.
 export const sandboxOpener =
-  (project: Project, image: string, planFile: string): Opener =>
+  (project: Project, image: string, planFile: string, exclusive?: Exclusive): Opener =>
   async (branch) => {
-    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }));
+    const s = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
     lockWorktree(s.worktreePath);
     return {
       worktreePath: s.worktreePath,

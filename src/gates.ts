@@ -14,7 +14,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "
 import { dirname, isAbsolute, join, posix, relative } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { HookTest, Project } from "./config.ts";
-import { assertGitUnchanged, checkBeforeClose, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
+import { assertGitUnchanged, checkBeforeClose, type Exclusive, gitFingerprint, GuardStop, openOrAbandon, protectedAmong } from "./guard.ts";
 import { type Hook, hooksPathLines, hooksPathOutside } from "./lean.ts";
 import { type Pressure, peakOf, pressureFields, pressureOf, recordPeak, samplePeak, sampling } from "./peaks.ts";
 import { withExtraSlot, withSlot } from "./pool.ts";
@@ -336,7 +336,8 @@ export const gitHooksLine = (g: GitHooks) =>
 // with a pool of one slot, or with every slot of the run's cap held by tickets red on one test.
 // `check` is the `.git` check of the run around it (`HostGit.check`), made before the sandbox opens and before it closes.
 // `beforeOpen` is the one made before it opens, when that is another (the base gates at a run's start, below).
-export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown, beforeOpen = check) => {
+// `exclusive` is the run's host git mutex (`HostGit.exclusive`), which the sandbox's worktree add and its clean-up run in (`openOrAbandon`).
+export const gateBase = (project: Project, image: string, planFile: string, label: string, hookTests = false, runId?: string, ownSlot = true, withGates = true, check?: (when: string) => unknown, beforeOpen = check, exclusive?: Exclusive) => {
   // The wait for a machine-wide sandbox slot is `waitMs` too, as a ticket's and a landing's is: a run that verified
   // while another held the machine's sandboxes would otherwise put that wait into the estimate's verify step.
   const asked = Date.now();
@@ -348,7 +349,7 @@ export const gateBase = (project: Project, image: string, planFile: string, labe
     // planted since the last check would run on the host. Checked last thing before it, after the wait for a slot; a
     // failure throws with nothing opened.
     await beforeOpen?.(`before opening the ${label} sandbox`);
-    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }));
+    const sandbox = await openOrAbandon(project, branch, () => createSandbox({ branch, baseBranch: project.baseBranch, ...sandboxConfig(project, image, planFile) }), exclusive);
     // With no run's check (the base gates at a run's start, when none of its sandboxes ran yet), a reading of its own,
     // taken once the sandbox is open, for the check before it closes: git may write the repo's config as it adds a
     // worktree (`worktree.useRelativePaths`), so the reading `beforeOpen` compared with would read that as a change.
@@ -812,8 +813,8 @@ export const verifyPlan = (project: Project, image: string, planFile: string, me
  * commit they ran on is the base's record, as the base check's own result is: green is the next
  * turn's skip, red removes a record that would skip a base known to be red.
  */
-export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown) => {
-  const gated = await gateBase(project, image, planFile, "verify", false, runId, true, true, check);
+export const verifyBase = async (project: Project, image: string, planFile: string, runId?: string, check?: (when: string) => unknown, exclusive?: Exclusive) => {
+  const gated = await gateBase(project, image, planFile, "verify", false, runId, true, true, check, undefined, exclusive);
   const green = !gated.failures.length && gated.gates.every((g) => g.pass);
   // The commit the sandbox was cut from, not the base's name: a landing since would be a commit nobody gated.
   if (green && gated.head) noteGreenCommit(project, image, planFile, gated.head, "verify", "verify");

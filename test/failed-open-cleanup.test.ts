@@ -78,10 +78,11 @@ const withPath = async <T>(bin: string, fn: () => T | Promise<T>): Promise<T> =>
   }
 };
 
-/** What Sandcastle's `createSandbox` leaves when the container start runs out of time: worktree (locked), branch, container. */
+/** What Sandcastle's `createSandbox` leaves when the container start runs out of time: worktree (locked; the kit's own add, or the one it makes here), branch, container. */
 const failingOpen = (root: string, git: (...a: string[]) => string, docker: ReturnType<typeof fakeDocker>, branch: string, dir: string) => async () => {
   const path = join(root, ".sandcastle/worktrees", dir);
-  git("worktree", "add", "-q", "-b", branch, path);
+  // The kit adds the worktree itself, under the host-git mutex, before this runs; Sandcastle then reuses it.
+  if (!existsSync(path)) git("worktree", "add", "-q", "-b", branch, path);
   lockWorktree(path, root);
   docker.start("c-stuck", path);
   throw new Error("container start timed out after 120 s");
