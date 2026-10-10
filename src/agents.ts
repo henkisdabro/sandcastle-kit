@@ -76,6 +76,41 @@ export const configureModels = (config: Pick<ProjectConfig, "implement" | "revie
 };
 configureModels();
 
+// The built-in tools a sandbox pass loads. Every tool's schema sits in the prompt prefix and is paid
+// again on every turn; across hundreds of recorded passes only these were ever used. Glob and Grep are
+// left out on purpose: Linux native builds of Claude Code drop them and give Bash embedded `bfs` and `ugrep`.
+export const BASE_TOOLS = ["Bash", "Read", "Edit", "Write", "TaskStop"];
+
+/** The tools a pass loads: the base set, Skill for a kept skill or command, ToolSearch for a kept MCP server (its tools are deferred). */
+export const toolsFor = (keep: readonly string[]): string[] => {
+  const tools = [...BASE_TOOLS];
+  if (keep.some((id) => id.startsWith("skill:") || id.startsWith("command:"))) tools.push("Skill");
+  if (keep.some((id) => id.startsWith("mcp:"))) tools.push("ToolSearch");
+  return tools;
+};
+
+let TOOLS: string[];
+// loadProject() calls this with the project's `lean.keep`; like the models, read it after the project has loaded.
+export const configureTools = (keep: readonly string[] = []) => {
+  TOOLS = toolsFor(keep);
+};
+configureTools();
+
+/**
+ * Sandcastle's claude command with `--tools '<list>'` before its closing ` -p -`. Refuses a command of
+ * another shape: an unknown tool name in `--tools` is ignored silently by Claude Code, and a Sandcastle
+ * update that moved the end of the command must never run passes without the cut.
+ */
+export const withTools = (command: string, tools: readonly string[]): string => {
+  const tail = " -p -";
+  if (!command.startsWith("claude ") || !command.endsWith(tail)) {
+    throw new Error(
+      `Sandcastle's claude command no longer has the shape the --tools allow-list needs (starts with "claude ", ends with "${tail}"): update withTools in src/agents.ts. Command: ${command}`,
+    );
+  }
+  return `${command.slice(0, -tail.length)} --tools '${tools.join(",")}'${tail}`;
+};
+
 // Session capture is off: Sandcastle would otherwise copy every sandbox
 // transcript into the host's ~/.claude/projects/, where it shows up in
 // `claude --resume`. The .sandcastle/logs stream is the record.
@@ -85,10 +120,17 @@ configureModels();
 // context size, not the spend). Every pass would go unmeasured. The stream's
 // closing `result` line carries what the whole `claude -p` process spent,
 // per model in `modelUsage` (subagents included), so it is read from there.
+//
+// Auto memory is off and the tools are cut to TOOLS: both are fixed prompt prefix paid on every turn,
+// and a sandbox's memory directory dies with its container, so nothing it wrote would be read again.
 const claude = (model: string, effort: Effort) => {
-  const provider = claudeCode(model, { effort, captureSessions: false });
+  const provider = claudeCode(model, { effort, captureSessions: false, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } });
   return {
     ...provider,
+    buildPrintCommand(options: Parameters<typeof provider.buildPrintCommand>[0]) {
+      const printed = provider.buildPrintCommand(options);
+      return { ...printed, command: withTools(printed.command, TOOLS) };
+    },
     parseStreamLine(line: string) {
       const events = provider.parseStreamLine(line);
       const usage = line.includes('"type":"result"') ? resultUsage(line) : undefined;

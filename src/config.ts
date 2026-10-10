@@ -8,7 +8,7 @@ import { registerHooks } from "node:module";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { configureModels, type Effort } from "./agents.ts";
+import { configureModels, configureTools, type Effort } from "./agents.ts";
 import { detectFromDocs, resolveTracker, type Resolved, type TrackerConfig } from "./tracker.ts";
 import { nearest, OperatorError } from "./errors.ts";
 import { isClaudeSetting } from "./versions.ts";
@@ -367,6 +367,7 @@ export const loadProject = async (root = process.cwd()): Promise<Project> => {
     );
   }
   configureModels(config);
+  configureTools(config.lean?.keep ?? []);
   // Resolved here, on the host, so the committed config holds no path that exists on one machine
   // only. A literal mount of the same sandbox path (a config from before the key) wins: Docker
   // refuses two mounts at one path.
