@@ -59,7 +59,7 @@ test("a ticket's record entry gains the cache-read count when its tokens are rec
 
 test("burndown writes a ticket's tokens through ticketTokens, in the pass and when its pipeline ends", () => {
   const src = readFileSync(new URL("../src/burndown.ts", import.meta.url), "utf8");
-  assert.match(src, /if \(issue\) run\.ticket\(issue, ticketTokens\(spent\.get\(issue\)!\)\);/);
+  assert.match(src, /if \(issue\) run\.ticket\(issue, \{ \.\.\.ticketTokens\(spent\.get\(issue\)!\) \}\);/);
   assert.match(src, /\.\.\.\(tokens \? ticketTokens\(tokens\) : \{\}\),/);
   assert.doesNotMatch(src, /tokens: tokenBrief\(spent\.get\(issue\)!\)|\{ tokens: tokenBrief\(tokens\) \}/);
 });

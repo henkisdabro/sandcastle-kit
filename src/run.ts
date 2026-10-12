@@ -1514,7 +1514,7 @@ export const ticketTokens = (t: Tokens) => ({ tokens: tokenBrief(t), cacheRead: 
  */
 export const liveTokenWriter = (run: { finished: boolean; ticket(id: string, fields: ReturnType<typeof ticketTokens>): void }, spent: Map<string, Tokens>) =>
   (issue: string, live: Tokens) => {
-    if (!run.finished) run.ticket(issue, ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)));
+    if (!run.finished) run.ticket(issue, { ...ticketTokens(addTokens(spent.get(issue) ?? NO_TOKENS, live)) });
   };
 
 // ---------------------------------------------------------------------------

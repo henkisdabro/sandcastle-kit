@@ -2815,7 +2815,7 @@ export const burndown = async (
       if (tokens) {
         spent.set(issue, addTokens(spent.get(issue) ?? NO_TOKENS, tokens));
         run.update({ tokens: tokenBrief([...spent.values()].reduce(addTokens, NO_TOKENS)) });
-        if (issue) run.ticket(issue, ticketTokens(spent.get(issue)!));
+        if (issue) run.ticket(issue, { ...ticketTokens(spent.get(issue)!) });
       }
       return result;
     } finally {
