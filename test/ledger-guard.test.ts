@@ -25,6 +25,11 @@ const ENDING = new Set<string>(TICKET_STATES.filter((s) => !PROGRESS.has(s)));
 // the phase it is given, and the scan below holds every phase passed to it.
 const VARIABLE_STATES: Record<string, string[]> = { "src/burndown.ts": ["phase"] };
 
+// A file that reads outcomes.json and cannot import `readOutcomes` (src/run.ts): the status view's snapshot, which
+// ADR 0003 keeps from importing the tracker that src/run.ts loads. It may name the file only while it writes none.
+const OUTCOME_READERS = ["src/status-snapshot.ts"];
+const WRITES_A_FILE = /\b(writeFile|appendFile|rename|copyFile|createWriteStream|open)(Sync)?\b/;
+
 /** The source without its comment lines, so a comment that quotes a write is not one. */
 const code = (src: string) =>
   src
@@ -66,7 +71,7 @@ const strays = (file: string, src: string): string[] => {
   // outcomes.json: written by `recordOutcomes` (src/run.ts), which the ledger alone calls.
   if (file !== "src/run.ts" && /\brecordOutcomes\b/.test(body)) out.push(`${file}: recordOutcomes`);
   if (file === "src/run.ts" && (body.match(/\brecordOutcomes\b/g) ?? []).length > 1) out.push(`${file}: recordOutcomes used beside its definition`);
-  if (file !== "src/run.ts" && /outcomes\.json/.test(body)) out.push(`${file}: names outcomes.json`);
+  if (file !== "src/run.ts" && /outcomes\.json/.test(body) && !(OUTCOME_READERS.includes(file) && !WRITES_A_FILE.test(body))) out.push(`${file}: names outcomes.json`);
   return out;
 };
 
@@ -95,6 +100,9 @@ test("the scan finds a verdict written outside the ledger, so its silence below 
   assert.equal(found(`await timed(issue.id, step, () => 0);`).length, 1);
   assert.deepEqual(found(`const ledger = createLedger({ outcomes: (o) => recordOutcomes(project, runId, o) });`), ["src/landing.ts: recordOutcomes"]);
   assert.equal(found(`writeFileSync(join(root, ".sandcastle/logs/outcomes.json"), "{}");`).length, 1);
+  // The status view's snapshot may read the file, and is caught the moment it writes one.
+  assert.deepEqual(strays("src/status-snapshot.ts", `readJson(join(logsDir, "outcomes.json"));`), []);
+  assert.equal(strays("src/status-snapshot.ts", `readJson(join(logsDir, "outcomes.json"));\nwriteFileSync(file, "{}");`).length, 1);
   // Progress, and a comment quoting a write, pass.
   assert.deepEqual(found(`run.ticket(o.issue, { state: "landing" });\nrun.ticket(id, { state: "queued", note: null });\n  // run.ticket(id, { state: "merged" })`), []);
   assert.deepEqual(found(`await timed(\n  issue.id,\n  "review",\n  () => 0,\n);\nawait timed("", "base gates", () => 0);`), []);

@@ -45,6 +45,8 @@ export const SCRUBBED = [
   "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "LINEAR_API_KEY", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SESSION_ID",
   // The terminal the click hint senses (src/click-hint.ts), and the colour switch.
   "TERM_PROGRAM", "LC_TERMINAL", "VTE_VERSION", "KITTY_WINDOW_ID", "WEZTERM_EXECUTABLE", "NO_COLOR",
+  // The status view's pane size and colour depth (src/status-view.ts): a test of a frame gives its own.
+  "TERM_COLS", "TERM_ROWS", "COLUMNS", "COLORTERM",
 ];
 
 /** Whether the preload removes this name from a test's environment. */
