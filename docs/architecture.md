@@ -68,7 +68,12 @@ state.
   The ticket is told before it is pushed back; a second collision is final. A red one is not gated in full again when the requeue's merge joins the base tip and branch head
   that gate ran on (`repairFromRed`, `src/landing.ts`): the red gate is re-run once, from that gate on
   (`PipelineContext.regate`, below), and a repair starts from the landing gate's output only if it is red again; on a moved base
-  the gates run first. A conflicted ticket's
+  the gates run first. A landing gate's own red is run once more before it is called red, as a ticket's is (`landInSandbox`,
+  `src/land.ts`: the gate port's `rerunOnRed`, inside the same gates slot, and a second call with `from` for a port that ignores it; not after a
+  timeout or a setup failure; `test/landing-red-rerun.test.ts`). A red landing is named with the landed tickets that touch
+  its files or its failing tests, unless every failing test is one the branch's own ticket gates failed in this run
+  (`LandContext.failedBefore`, kept by `rememberFailed` from `runGates`' ticket gates in `src/burndown.ts`, a flake that
+  went green on a re-run included): then `Landed.seen` is set, `with` is empty and the line says "as seen on the branch before". A conflicted ticket's
   second attempt does not begin at once: it waits until no green branch that shares a file with it
   is queued to land and no ticket still in its pipeline has touched the files it conflicted on
   (the tickets ahead of it when the wait begins, and only those: one that starts later is not

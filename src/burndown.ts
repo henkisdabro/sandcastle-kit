@@ -60,7 +60,7 @@ import { OperatorError, reportedError, SlowStartError } from "./errors.ts";
 import { hostIdentity, regensFor, resolveGenerated, shq } from "./generated.ts";
 import { sandboxOpener } from "./land.ts";
 import {
-  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
+  carriedBranch, carriedMergeLine, conflictLine, createHostGit, rebuiltLine, landingOfTree, firstAttemptIdleRepairs, firstAttemptRepairs, firstAttemptReviewCommits, greenCarriedLine, type HostGit, didMerge, isAncestor, type LandContext, landingSlotNote, landingWork, pipelineWorkers, type RedLanding, rememberFailed, repairFromRed, reviewedCarriedLine, slotTurn, trackerMade,
 } from "./landing.ts";
 import { accountLanding, causeWords, type Context, createLedger, outcomesFile, repairWords, stoppedLine } from "./ledger.ts";
 import { type Attempted, type Change, type Conflict, createFixBoard, createSchedule, fileShareLine, fileShareSummary, fileWaitNote, type FileShare, type FixBoard, type HoldChange, type Park, type Start, StoppedWhileParked, type StopCause, stoppedWaitNote, type TicketFiles } from "./schedule.ts";
@@ -3069,7 +3069,7 @@ export const burndown = async (
   // `from`: a red gate's re-run, which starts at that gate (`gatesIn`'s own).
   // `rerunOnRed`: a ticket gate's red gate is run again once inside the same gates slot (`gatesIn`'s own).
   const runGates = async (sandbox: Parameters<typeof gatesIn>[1], id: string, what?: string, priority = false, from?: string, rerunOnRed = false) => {
-    const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before any repair pass\n`;
+    const rerunNote = (name: string) => `# run again from ${name}: the first red gate's re-run, before ${priority ? "the landing is called red" : "any repair pass"}\n`;
     markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
     // Said under the header: the section starts past the first gate, which a reader of the log would otherwise take for a lost line.
     if (from !== undefined) appendFileSync(gatesLog(project, id), rerunNote(from));
@@ -3095,11 +3095,13 @@ export const burndown = async (
       },
       // The re-run inside the slot gets the section header and note a separate run would have had.
       again: (name) => {
-        markLog(gatesLog(project, id), runId, "ticket gates");
+        markLog(gatesLog(project, id), runId, priority ? "landing gates on the merged tree" : "ticket gates");
         appendFileSync(gatesLog(project, id), rerunNote(name));
       },
       log: gatesLog(project, id),
     }, priority, from, rerunOnRed);
+    // A ticket's gates only (the landing's own red is judged against these): the first run's failures and a re-run's alike.
+    if (!priority) rememberFailed(failedBefore, id, gated);
     for (const path of gated.rewrote ?? []) {
       if (gateRewrites.has(path)) continue;
       gateRewrites.add(path);
@@ -3185,6 +3187,8 @@ export const burndown = async (
 
   // Each ticket's red landing gate, for its requeue (`ctx.reds`).
   const reds = new Map<string, RedLanding>();
+  // The test ids each ticket's own gates failed in this run: a red landing gate that fails only these is not a landed ticket's doing (`ctx.failedBefore`).
+  const failedBefore = new Map<string, Set<string>>();
 
   const gateNames = project.gates.map((g) => g.name).join(", ");
 
@@ -3206,8 +3210,8 @@ export const burndown = async (
     withdrawal,
     host,
     // Named apart: a green ticket's wait read as if its branch gates had started again.
-    gate: async (box, id) => {
-      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true));
+    gate: async (box, id, how) => {
+      const result = await timedLandingGate(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, () => runGates(box, id, "landing gate", true, how?.from, how?.rerunOnRed));
       const times = gateMs(result);
       if (times) landingGateMs.set(id, times);
       return result;
@@ -3225,6 +3229,7 @@ export const burndown = async (
       }
     },
     reds,
+    failedBefore,
     timed: (id, took, landed) => writeLandingLine(timings, { run: runId, project: project.name, issue: id, carried: carriedAtStart.has(id) }, took, { ok: didMerge(landed), kind: landed.kind }),
   };
 

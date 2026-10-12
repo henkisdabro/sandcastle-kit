@@ -105,6 +105,13 @@ export const squashBody = (root: string, base: string, head: string) =>
     .join("\n");
 
 /**
+ * Gates a merged tree in a landing sandbox. `rerunOnRed`: run a red gate again once, from it on, inside the same gates slot
+ * (the result's `rerunOf` says it did). `from`: start at that gate, as a re-run does. A port that ignores both is followed
+ * by a second call with `from` (`landInSandbox`).
+ */
+export type LandingGate = (box: Box, how?: { rerunOnRed?: boolean; from?: string }) => Promise<GateRun>;
+
+/**
  * Merge `t.head` into the base branch in a sandbox and, when the conflict is confined to
  * generated paths, resolve it there. `merged` means the host base is already fast-forwarded
  * to `commit`; the others leave the host untouched. A landing commit that is not a merge of
@@ -123,7 +130,7 @@ export const landInSandbox = async (
   project: Project,
   t: { branch: string; head: string; message: string; squash?: boolean; run?: string },
   open: Opener,
-  gate?: (box: Box) => Promise<GateRun>,
+  gate?: LandingGate,
   expected?: Fingerprint,
 ): Promise<LandResult> => {
   // A run's base must still be the one it expects: a person's commit made while this waited for a
@@ -173,7 +180,20 @@ export const landInSandbox = async (
             break;
           }
         }
-        red ??= await gate(box);
+        if (!red) {
+          red = await gate(box, { rerunOnRed: true });
+          // A red gate is run once more before the landing is called red, as a ticket's gates are: a flake would otherwise
+          // cost the whole requeue. A port that ran the re-run inside its own gates slot says so (`rerunOf`). Not after a
+          // timeout (never repaired) or a gate no port can start at.
+          const first = red.failure;
+          const redAt = first ? red.gates.findIndex((g) => g.name === first.name) : -1;
+          if (first && !red.rerunOf && first.exitCode !== 124 && redAt >= 0) {
+            const rerun = await gate(box, { from: first.name });
+            // The passes before the red gate, then the re-run's: still a prefix of the configured gates (`gateResultLines`).
+            red = { ...rerun, gates: [...red.gates.slice(0, redAt), ...rerun.gates], rerunOf: red };
+          }
+          if (red.rerunOf && !red.failure && red.rerunOf.failure) console.log(`${t.branch}: ${red.rerunOf.failure.name} red at landing, then green on a re-run - a flake`);
+        }
         if (red.failures.length || red.gates.some((g) => !g.pass)) {
           // The merge's own first parent, not the host's read before the sandbox opened: it is the tip this
           // tree was gated on. Read from `made`, not HEAD: the gates ran the branch's code, which can move HEAD.
@@ -322,7 +342,7 @@ export const landTicket = async (
       project,
       { branch, head, message: mergeSubject(branch, ref, !!unmet), squash: project.land === "squash" },
       open,
-      (box) => runGates(project, box, `${ref} land gates`, false, { log }, true),
+      (box, how) => runGates(project, box, `${ref} land gates`, false, { log }, true, how?.from, how?.rerunOnRed),
       expected,
     ),
   );
