@@ -133,10 +133,14 @@ export type TicketFacts = {
 export type Facts = {
   /** The header's name, base branch, clock and unpushed count (`↑2 unpushed`). */
   project: { name?: string; base?: string; clock?: string; unpushed?: string };
-  /** The labelled cells of the header (`state`, `ends`, `tokens`, `sandboxes`, `gates`, `this run`, `waiting`, `models`), their values with the gauge bars out. */
+  /**
+   * The header's run facts, from its labelled cells or its lanes, the gauge bars out: `state`, `started` (a live
+   * run's "since"), `ends`, `turn`, `finishing`, `resumes`, `tokens`, `api`, `sandboxes`, `gates`, `this run`,
+   * `waiting`, `models` (each item `implement` or `review` and its model, without `claude-`) and `repair`.
+   */
   run: Record<string, string>;
-  /** The settings row's items; the autonomy scale is reduced to the level chosen. */
-  settings: string[];
+  /** The settings' items, the autonomy scale reduced to the level chosen; unknown when a cut summary line hid them. The turn, repair and an API key's spend are `run` facts wherever a layout puts them. */
+  settings?: string[];
   usage?: string;
   tickets: TicketFacts[];
   /** The footer's count of each group. */
@@ -145,9 +149,17 @@ export type Facts = {
   hint: boolean;
 };
 
-const HEADER_LABELS = ["state", "since", "ends", "started", "finished", "tokens", "sandboxes", "gates", "this run", "waiting", "models", "settings", "usage"];
+const HEADER_LABELS = ["state", "since", "ends", "started", "finished", "finishing", "resumes", "tokens", "sandboxes", "gates", "this run", "waiting", "models", "settings", "usage"];
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 const noBars = (s: string) => squash(s.replace(/[░▒▓█▌▏▎▍▋▊▉]+/g, " "));
+
+/** A header's lanes (GLOSSARY.md), by name: each lane's name in the rule above its cells, or in a summary line. */
+const LANE = /[┌├┬┼]─ (RUN|MACHINE|MODELS|SETTINGS|PLAN) ─/g;
+const SUMMARY = /^(run|machine|models|settings|plan) {2}(.*)$/;
+const MACHINE_LABEL = /^(sandboxes|gates|this run|waiting) (.*)$/;
+// A run's facts that are items of one line: what a lane's row or a labelled cell says after its label.
+const RUN_ITEM = /^(since|started|ends|turn|finishing|resumes|tokens) (.+)$/;
+const RUN_MARK = / \((last|next) run\)$/;
 
 /** A line's cells between `│`, each with the column it starts at. */
 const cellsOf = (line: string): { x: number; text: string }[] => {
@@ -173,20 +185,41 @@ export const readFacts = (raw: string, root: string): Facts => {
   const header = lines.findIndex((l) => /TICKET/.test(l) && /ACTIVITY/.test(l));
   if (header < 0) throw new Error(`no ticket table in the frame:\n${lines.join("\n")}`);
 
-  // The header: the logo's lines, then labelled cells. A cell with a label starts a field; an unlabelled one under it (same column) continues it.
+  // The header: the logo's lines, then labelled cells or lanes. A cell with a label starts a field; an unlabelled one
+  // under it (same column) continues it. A cell under a lane's name is a row of that lane; a summary line holds
+  // the lanes that did not fit, `name  row · row`, apart by `│`.
   let current = new Map<number, string>();
+  let lanesAt = new Map<number, string>();
   const fields = new Map<string, string>();
+  const lanes = new Map<string, string[]>();
+  let cut = false;
+  const laneRow = (lane: string, row: string) => lanes.set(lane, [...(lanes.get(lane) ?? []), row]);
   for (const line of lines.slice(0, header)) {
     if (!line.startsWith("│")) {
       current = new Map();
+      lanesAt = new Map([...line.matchAll(LANE)].map((m) => [m.index + 1, m[1]!]));
       continue;
     }
     const name = line.match(/█████\s+(\S+)/);
     if (name) facts.project.name = name[1];
     const base = line.match(/base (\S+)(?: ↑(\d+) unpushed)?\s+·\s+(\d\d:\d\d:\d\d)/);
     if (base) Object.assign(facts.project, { base: base[1], clock: base[3], ...(base[2] ? { unpushed: `↑${base[2]} unpushed` } : {}) });
+    const inner = line.slice(1, -1).trim();
+    const summary = inner.match(SUMMARY);
+    if (summary && inner.endsWith("…")) cut = true;
+    if (summary && (inner.includes(" │ ") || ["run", "machine", "plan"].includes(summary[1]!))) {
+      for (const part of inner.split(" │ ")) {
+        const m = part.match(SUMMARY);
+        if (m) laneRow(m[1]!.toUpperCase(), m[2]!);
+      }
+      continue;
+    }
     for (const { x, text } of cellsOf(line)) {
       const body = text.trim();
+      if (lanesAt.has(x)) {
+        if (body) laneRow(lanesAt.get(x)!, body);
+        continue;
+      }
       if (!body || body.startsWith("base ") || (/[▄█]/.test(body) && !HEADER_LABELS.some((l) => body.startsWith(l)))) continue;
       const label = HEADER_LABELS.find((l) => new RegExp(`^${l}(\\s|$)`).test(body));
       if (label) {
@@ -194,7 +227,8 @@ export const readFacts = (raw: string, root: string): Facts => {
         fields.set(label, body.slice(label.length));
       } else if (current.has(x)) {
         const key = current.get(x)!;
-        fields.set(key, `${fields.get(key)} ${body}`);
+        // The wide layout's models cell has an item a row.
+        fields.set(key, `${fields.get(key)}${key === "models" ? " · " : " "}${body}`);
       } else {
         // A wide layout drops the label of the models cell: the one unlabelled cell with text is the models.
         current.set(x, "models");
@@ -202,20 +236,90 @@ export const readFacts = (raw: string, root: string): Facts => {
       }
     }
   }
+
+  // The run's facts are items: the labelled cells' values, or the RUN lane's rows, split at ` · `.
+  const runItems: string[] = [];
+  for (const label of ["state", "since", "ends", "started", "finishing", "resumes", "tokens"]) {
+    const value = fields.get(label);
+    if (value === undefined) continue;
+    const [first, ...rest] = squash(value).split(" · ");
+    runItems.push(label === "state" ? first! : `${label} ${first}`, ...rest);
+  }
+  for (const row of lanes.get("RUN") ?? []) runItems.push(...squash(row).split(" · "));
+  for (const row of lanes.get("MACHINE") ?? []) {
+    // A summary line's machine items are apart by ` · `, which a value can hold too: an item starts at a label. A
+    // summary cut inside a label leaves the item before it whole or not, so that one is cut too.
+    let last = "";
+    const parts = squash(row).split(" · ");
+    parts.forEach((part, i) => {
+      const m = part.match(MACHINE_LABEL);
+      if (m) fields.set((last = m[1]!), m[2]!);
+      else if (!last) return;
+      else if (i === parts.length - 1 && part.endsWith("…")) fields.set(last, `${fields.get(last)}…`);
+      else fields.set(last, `${fields.get(last)} · ${part}`);
+    });
+  }
+  if (lanes.has("MODELS")) fields.set("models", lanes.get("MODELS")!.join(" · "));
+  if (lanes.has("SETTINGS")) fields.set("settings", lanes.get("SETTINGS")!.join(" · "));
+  if (lanes.has("PLAN")) fields.set("usage", lanes.get("PLAN")!.join(" "));
+
+  let settings: string[] = [];
   for (const [label, value] of fields) {
     if (label === "settings") {
-      facts.settings = noBars(value)
+      settings = noBars(value)
         .replace(/autonomy [\d ]*\[(\w+)\][\w ]*?(?= ·|$)/, "autonomy $1")
+        .replace(/autonomy \[(\w*)…$/, "autonomy $1…")
         // A narrow pane wraps the row where an item starts, with no separator: the bullet marks the item.
         .split(/\s+·\s+|\s+(?=[●○] )/)
         .map(squash);
-    } else if (label === "usage") facts.usage = noBars(value);
-    else if (label === "models") {
+    } else if (label === "usage") {
+      // One line or a row for each window, apart by spaces or ` · `: the words in order.
+      facts.usage = squash(noBars(value).replace(/\s*·\s*/g, " "));
+    } else if (label === "models") {
       // An ended run's models are the last run's, said as a prefix in a narrow pane and as a suffix in a wide one.
-      const models = noBars(value).replace(/^last run: /, "").replace(/ \(last run\)$/, "");
-      facts.run.models = models;
-      if (models !== noBars(value)) facts.run["models from"] = "last run";
-    } else facts.run[label] = noBars(value);
+      let models = noBars(value);
+      const from = models.match(/^(last|next) run: /) ?? models.match(/ \((last|next) run\)/);
+      if (from) {
+        models = models.replace(/^(last|next) run: /, "").replace(/ \((last|next) run\)/, "");
+        facts.run["models from"] = `${from[1]} run`;
+      }
+      // The repair attempts are the models lane's last row; an `impl` label is `implement`, and an id loses `claude-` there.
+      const items: string[] = [];
+      for (const item of models.split(" · ")) {
+        if (/^(○ )?repair\b/.test(item)) facts.run.repair = item.replace(/^repair /, "");
+        else items.push(item.replace(/^impl /, "implement ").replace(/(^|[\s,])claude-/g, "$1"));
+      }
+      facts.run.models = items.join(" · ");
+    } else if (!["state", "since", "ends", "started", "finishing", "resumes", "tokens"].includes(label)) facts.run[label] = noBars(value);
+  }
+  // A summary line cut before the settings hides them: they are unknown, not none.
+  if (cut && !fields.has("settings")) facts.settings = undefined;
+  // The turn and the repair attempts are run facts wherever a layout puts them, and so is an API key's spend.
+  for (const item of settings) {
+    const bare = item.replace(RUN_MARK, "");
+    if (bare.startsWith("turn ")) runItems.push(bare);
+    else if (/^(○ )?repair\b/.test(bare)) facts.run.repair = bare.replace(/^repair /, "");
+    else if (/API credits/.test(item)) runItems.push(item);
+    else facts.settings?.push(item);
+  }
+  const state: string[] = [];
+  for (const raw of runItems) {
+    const item = squash(raw).replace(/^[●○] /, "");
+    const m = item.match(RUN_ITEM);
+    // The run's start time, "since" while it is live and "started" once it ended.
+    if (m) facts.run[m[1] === "since" ? "started" : m[1]!] = noBars(m[2]!);
+    else if (/API credits/.test(item)) facts.run.api = "API credits";
+    // A summary line cut inside an item leaves a part that says nothing for certain.
+    else if (item && !item.endsWith("…")) state.push(item);
+  }
+  if (state.length) {
+    // A paused run's state can carry what it finishes and when it resumes, which another layout puts apart.
+    let value = state.join(" · ");
+    const finishing = value.match(/ - finishing (.+)$/);
+    if (finishing) [value, facts.run.finishing] = [value.slice(0, finishing.index), finishing[1]!];
+    const resumes = value.match(/, resumes (.+)$/);
+    if (resumes) [value, facts.run.resumes] = [value.slice(0, resumes.index), resumes[1]!];
+    facts.run.state = value;
   }
 
   // The table.
@@ -266,7 +370,7 @@ export const compareFacts = (a: Facts, b: Facts): string[] => {
   const check = (what: string, x: string | undefined, y: string | undefined) => agree(x, y) || diffs.push(`${what}: ${JSON.stringify(x)} against ${JSON.stringify(y)}`);
   for (const key of ["name", "base", "clock", "unpushed"] as const) check(`project ${key}`, a.project[key], b.project[key]);
   for (const key of new Set([...Object.keys(a.run), ...Object.keys(b.run)])) check(`run ${key}`, a.run[key], b.run[key]);
-  check("settings", a.settings.join(" · "), b.settings.join(" · "));
+  check("settings", a.settings?.join(" · "), b.settings?.join(" · "));
   check("usage", a.usage, b.usage);
   check("hint", String(a.hint), String(b.hint));
   for (const group of new Set([...Object.keys(a.counts), ...Object.keys(b.counts)])) check(`count ${group}`, String(a.counts[group]), String(b.counts[group]));
