@@ -44,8 +44,9 @@ export const CLOCK = red("FAIL  test/clock.test.ts > rolls over at midnight\n1 f
  * `baseRun` is what the base's gate run returns, or a function of the repo's root that gives it (and may land
  * a commit on the base first, as another ticket's landing would); the run says the base commit it gated.
  * `recordedGreen` is the green-base record's answer for the base's tip; without it the pipeline is given no record.
+ * `repairAttempts` is `repair.attempts`: one unless a test needs more.
  */
-export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((root: string) => GateRun) = CLOCK, recordedGreen?: () => boolean) => {
+export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((root: string) => GateRun) = CLOCK, recordedGreen?: () => boolean, repairAttempts = 1) => {
   const root = join(TMP, `repo${n++}`);
   mkdirSync(root);
   git(root, "init", "-q", "-b", "main");
@@ -105,7 +106,7 @@ export const harness = (gateOf: (id: string) => GateRun[], baseRun: GateRun | ((
     tracker: { ref: (id: string) => `#${id}`, agentsWrite: true, promptArgs: () => ({}), reopenedSince: () => false } as unknown as Ctx["tracker"],
     runId: "2026-10-05T00:00:00.000Z",
     dryRun: false,
-    repair: 1,
+    repair: repairAttempts,
     testRedGate: false,
     prompts,
     overrides: new Map(),
